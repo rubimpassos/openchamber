@@ -53,6 +53,7 @@ import { CommitSection } from './git/CommitSection';
 import { GitEmptyState } from './git/GitEmptyState';
 import { HistorySection } from './git/HistorySection';
 import { PullRequestSection } from './git/PullRequestSection';
+import { CiLoopSection } from './git/CiLoopSection';
 import { ConflictDialog } from './git/ConflictDialog';
 import { StashDialog } from './git/StashDialog';
 import { InProgressOperationBanner } from './git/InProgressOperationBanner';
@@ -2538,6 +2539,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
                       </div>
                     </div>
                   )}
+                  <CiLoopSection />
                 </div>
               ) : null}
             </ScrollableOverlay>
