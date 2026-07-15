@@ -15,6 +15,7 @@ import { useI18n } from '@/lib/i18n';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { PullRequestSection } from './git/PullRequestSection';
+import { CiLoopSection } from './git/CiLoopSection';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from './git/NestedRepoPicker';
 import { deriveBaseBranch } from './git/baseBranch';
@@ -313,14 +314,17 @@ export const PullRequestView: React.FC = () => {
         disableHorizontal
         preventOverscroll
       >
-        <PullRequestSection
-          directory={gitDirectory ?? currentDirectory}
-          branch={currentBranch}
-          baseBranch={baseBranch}
-          trackingBranch={status?.tracking ?? undefined}
-          remotes={remotes}
-          remoteBranches={remoteBranches}
-        />
+        <div className="space-y-4">
+          <PullRequestSection
+            directory={gitDirectory ?? currentDirectory}
+            branch={currentBranch}
+            baseBranch={baseBranch}
+            trackingBranch={status?.tracking ?? undefined}
+            remotes={remotes}
+            remoteBranches={remoteBranches}
+          />
+          <CiLoopSection />
+        </div>
       </ScrollableOverlay>
     </div>
   );

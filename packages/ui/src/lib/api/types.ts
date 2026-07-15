@@ -1385,6 +1385,58 @@ export interface GitHubAPI {
   repoBranches(owner: string, repo: string): Promise<string[]>;
 }
 
+export type CiLoopWorkflowRun = {
+  id: number;
+  name: string;
+  workflowName: string;
+  status: 'queued' | 'in_progress' | 'completed';
+  conclusion: string | null;
+  url: string;
+  branch: string;
+};
+
+type CiLoopFailedRunLog = {
+  runId: number;
+  runName: string;
+  logTail: string;
+};
+
+type CiLoopReport = {
+  sha: string;
+  branch: string;
+  runs: CiLoopWorkflowRun[];
+  failedLogs: CiLoopFailedRunLog[];
+};
+
+export type CiLoopWatchPhase =
+  | { kind: 'waiting' }
+  | { kind: 'running'; runs: CiLoopWorkflowRun[] }
+  | { kind: 'done'; report: CiLoopReport }
+  | { kind: 'timed-out'; runs: CiLoopWorkflowRun[] }
+  | { kind: 'error'; message: string };
+
+export type CiLoopWatch = {
+  sha: string;
+  branch: string;
+  startedAt: number;
+  phase: CiLoopWatchPhase;
+};
+
+export type CiLoopSessionState = {
+  sessionID: string;
+  enabled: boolean;
+  watch: CiLoopWatch | null;
+};
+
+export type CiLoopSessionResult =
+  | { available: true; session: CiLoopSessionState }
+  | { available: false };
+
+export interface CiLoopAPI {
+  getSession(sessionId: string): Promise<CiLoopSessionResult>;
+  setEnabled(sessionId: string, enabled: boolean): Promise<CiLoopSessionState>;
+}
+
 export interface RemoteClientRecord {
   id: string;
   label: string;
@@ -1485,6 +1537,7 @@ export interface RuntimeAPIs {
   notifications: NotificationsAPI;
   github?: GitHubAPI;
   linear?: LinearAPI;
+  ciLoop?: CiLoopAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
