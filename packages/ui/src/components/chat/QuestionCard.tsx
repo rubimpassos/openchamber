@@ -12,6 +12,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
+import { isOrphanedQuestionId, markOrphanedQuestionDismissed } from '@/lib/questions/orphanedQuestions';
 import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
 import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
@@ -19,6 +20,18 @@ import { QuestionMarkdown } from './QuestionMarkdown';
 
 interface QuestionCardProps {
   question: QuestionRequest;
+  /**
+   * The question's pending request was destroyed by an OpenCode server
+   * restart. Confirming routes through `answerOrphanedQuestion` (reply if the
+   * server still knows the question, otherwise answer-as-message); dismissing
+   * only hides the card locally.
+   *
+   * Defaults to the id prefix `collectOrphanedQuestionRequests` stamps on, so
+   * the card stays correct wherever it renders: it sits inside the virtualized
+   * timeline, and threading a prop down to it would have to cross every list
+   * row.
+   */
+  orphaned?: boolean;
 }
 
 type TabKey = string;
@@ -88,7 +101,7 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
   );
 });
 
-export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
+export const QuestionCard: React.FC<QuestionCardProps> = ({ question, orphaned = isOrphanedQuestionId(question.id) }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
   const rejectQuestion = sessionActions.rejectQuestion;
@@ -248,10 +261,14 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     setIsResponding(true);
     try {
       const answers = buildAnswersPayload();
-      await respondToQuestion(question.sessionID, question.id, answers);
+      if (orphaned) {
+        await sessionActions.answerOrphanedQuestion(question, answers);
+      } else {
+        await respondToQuestion(question.sessionID, question.id, answers);
+      }
       setHasResponded(true);
     } catch (error) {
-      if (sessionActions.isQuestionRequestNotFoundError(error)) {
+      if (!orphaned && sessionActions.isQuestionRequestNotFoundError(error)) {
         toast.info(t('chat.questionCard.noLongerPending'));
         setHasResponded(true);
       } else {
@@ -262,7 +279,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     } finally {
       setIsResponding(false);
     }
-  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion, t]);
+  }, [buildAnswersPayload, orphaned, question, requiredSatisfied, respondToQuestion, t]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -281,6 +298,13 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
   );
 
   const handleDismiss = React.useCallback(async () => {
+    if (orphaned) {
+      if (question.tool?.callID) {
+        markOrphanedQuestionDismissed(question.tool.callID);
+      }
+      setHasResponded(true);
+      return;
+    }
     setIsResponding(true);
     try {
       await rejectQuestion(question.sessionID, question.id);
@@ -297,7 +321,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     } finally {
       setIsResponding(false);
     }
-  }, [question.id, question.sessionID, rejectQuestion, t]);
+  }, [orphaned, question.id, question.sessionID, question.tool?.callID, rejectQuestion, t]);
 
   const handleCopyMarkdown = React.useCallback(async () => {
     const text = serializeQuestionAsMarkdown(question);
@@ -332,6 +356,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
             <div className="flex items-center gap-2">
               <Icon name="question" className="h-3.5 w-3.5 text-primary" />
               <span className="typography-meta font-medium text-muted-foreground">{t('chat.questionCard.inputNeeded')}</span>
+              {orphaned ? (
+                <span className="typography-micro px-1.5 py-0.5 rounded bg-[var(--status-warning-background)] text-[var(--status-warning)]">
+                  {t('chat.questionCard.orphanedBadge')}
+                </span>
+              ) : null}
               {isFromSubagent ? (
                 <span className="typography-micro text-muted-foreground px-1.5 py-0.5 rounded bg-foreground/5">
                   {t('chat.questionCard.fromSubagent')}
@@ -366,6 +395,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
           </div>
 
           <div className="px-2 py-2">
+            {orphaned ? (
+              <div className="typography-micro text-muted-foreground mb-2">
+                {t('chat.questionCard.orphanedNotice')}
+              </div>
+            ) : null}
             {/* Minimal inline tabs for multiple questions */}
             {tabs.length > 1 ? (
               <div className="flex items-center gap-1 mb-2 flex-wrap">
