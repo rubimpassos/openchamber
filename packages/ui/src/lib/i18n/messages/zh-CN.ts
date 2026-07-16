@@ -1844,6 +1844,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': '发送回答失败',
   'chat.questionCard.dismissFailed': '忽略问题失败',
   'chat.questionCard.noLongerPending': '此问题不再等待回答。',
+  'chat.questionCard.orphanedBadge': '已中断',
+  'chat.questionCard.orphanedNotice': '会话在此问题得到回答前已重启。你的回答将作为新消息发送给智能体。',
   'chat.questionCard.tryAgain': '请稍后重试。',
   'chat.textSelection.toast.noProject': '未找到此会话对应的项目',
   'chat.textSelection.toast.addToNotesFailed': '添加到笔记失败',

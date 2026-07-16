@@ -14,6 +14,8 @@ import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
+import { buildOrphanedAnswerMessage } from "@/lib/questions/orphanedQuestions"
+import type { QuestionRequest } from "@/types/question"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { retry } from "./retry"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -970,6 +972,72 @@ export async function rejectQuestion(
     }
     throw error
   }
+}
+
+function findAssistantMessageInfo(sessionId: string, messageId: string | undefined): Message | null {
+  const stores = _childStores
+  if (!stores) return null
+
+  for (const [, store] of stores.children) {
+    const messages = store.getState().message[sessionId]
+    if (!messages?.length) continue
+    if (messageId) {
+      const exact = messages.find((message) => message.id === messageId && message.role === "assistant")
+      if (exact) return exact
+    }
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "assistant") return messages[index]
+    }
+  }
+
+  return null
+}
+
+/**
+ * Answer a question whose pending request was destroyed by an OpenCode server
+ * restart (see `@/lib/questions/orphanedQuestions`). The server is re-checked
+ * authoritatively first: if the question is actually still pending (the client
+ * merely lost it), it is answered through the normal `question.reply` path so
+ * the waiting tool call resumes. Otherwise the answers are delivered as a new
+ * user message using the model/agent of the assistant message that asked,
+ * re-entering the session loop.
+ *
+ * The pending re-check failing is a hard error (never assume "not pending"
+ * from a failed fetch — sending a duplicate message while the question is
+ * still live would be destructive).
+ */
+export async function answerOrphanedQuestion(
+  question: QuestionRequest,
+  answers: string[][],
+): Promise<void> {
+  await waitForConnectionOrThrow()
+  const sessionId = question.sessionID
+  const directory = getSessionDirectory(sessionId) || dir()
+
+  const pending = await opencodeClient.listPendingQuestions({ directories: [directory] })
+  const match = pending.find((candidate) =>
+    candidate.sessionID === sessionId
+    && Boolean(candidate.tool?.callID)
+    && candidate.tool?.callID === question.tool?.callID)
+  if (match) {
+    await respondToQuestion(sessionId, match.id, answers)
+    return
+  }
+
+  const askingMessage = findAssistantMessageInfo(sessionId, question.tool?.messageID)
+  if (!askingMessage || askingMessage.role !== "assistant") {
+    throw new Error("Cannot answer interrupted question: originating assistant message not found")
+  }
+
+  await opencodeClient.sendMessage({
+    id: sessionId,
+    providerID: askingMessage.providerID,
+    modelID: askingMessage.modelID,
+    agent: askingMessage.agent || undefined,
+    variant: askingMessage.variant || undefined,
+    text: buildOrphanedAnswerMessage(question, answers),
+    directory,
+  })
 }
 
 /**

@@ -13,6 +13,7 @@ import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
+import { collectOrphanedQuestionRequests, isOrphanedQuestionId } from '@/lib/questions/orphanedQuestions';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
@@ -56,6 +57,7 @@ import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { findShellCommandForMessage, isUserShellMarkerMessage } from './lib/shellBridge';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
+const EMPTY_QUESTION_REQUESTS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
@@ -357,7 +359,7 @@ const ChatViewport = React.memo(({
                         {(sessionQuestions.length > 0 || sessionPermissions.length > 0) && (
                             <div>
                                 {sessionQuestions.map((question) => (
-                                    <QuestionCard key={question.id} question={question} />
+                                    <QuestionCard key={question.id} question={question} orphaned={isOrphanedQuestionId(question.id)} />
                                 ))}
                                 {sessionPermissions.map((permission) => (
                                     <PermissionCard key={permission.id} permission={permission} />
@@ -580,6 +582,22 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // the directory.
     const sessionPermissions = useScopedBlockingPermissions(currentSessionId, effectiveSessionDirectory);
     const sessionQuestions = useScopedBlockingQuestions(currentSessionId, effectiveSessionDirectory);
+
+    // Questions destroyed by an OpenCode server restart: the question tool
+    // part is stuck pending/running in the last message while the session is
+    // idle and no live question exists. Rendered as answerable cards whose
+    // submission falls back to answer-as-message (see orphanedQuestions.ts).
+    const orphanedQuestions = React.useMemo(() => {
+        if (!currentSessionId || sessionStatusForCurrent.type !== 'idle') {
+            return EMPTY_QUESTION_REQUESTS;
+        }
+        const orphaned = collectOrphanedQuestionRequests(currentSessionId, sessionMessages, sessionQuestions);
+        return orphaned.length > 0 ? orphaned : EMPTY_QUESTION_REQUESTS;
+    }, [currentSessionId, sessionMessages, sessionQuestions, sessionStatusForCurrent.type]);
+    const renderableQuestions = React.useMemo(() => {
+        if (orphanedQuestions.length === 0) return sessionQuestions;
+        return [...sessionQuestions, ...orphanedQuestions];
+    }, [orphanedQuestions, sessionQuestions]);
 
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
@@ -808,11 +826,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [timelineController.handleActiveTurnChange]);
 
     React.useEffect(() => {
-        if (sessionPermissions.length === 0 && sessionQuestions.length === 0) {
+        if (sessionPermissions.length === 0 && renderableQuestions.length === 0) {
             return;
         }
         handleMessageContentChange('permission');
-    }, [handleMessageContentChange, sessionPermissions, sessionQuestions]);
+    }, [handleMessageContentChange, sessionPermissions, renderableQuestions]);
 
     const navigation = useChatTurnNavigation({
         sessionId: currentSessionId,
@@ -1138,7 +1156,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 getAnimationHandlers={getAnimationHandlers}
                 handleHistoryScroll={timelineController.handleHistoryScroll}
                 scrollToBottom={resumeToLatestInstant}
-                sessionQuestions={sessionQuestions}
+                sessionQuestions={renderableQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 showLoadOlderButton={showLoadOlderButton}

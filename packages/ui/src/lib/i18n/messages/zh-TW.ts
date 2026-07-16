@@ -1848,6 +1848,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': '傳送回答失敗',
   'chat.questionCard.dismissFailed': '忽略問題失敗',
   'chat.questionCard.noLongerPending': '此問題不再等待回答。',
+  'chat.questionCard.orphanedBadge': '已中斷',
+  'chat.questionCard.orphanedNotice': '工作階段在此問題獲得回覆前已重新啟動。您的回答將以新訊息傳送給 Agent。',
   'chat.questionCard.tryAgain': '請稍後再試。',
   'chat.textSelection.toast.noProject': '找不到此會話對應的專案',
   'chat.textSelection.toast.addToNotesFailed': '加入筆記失敗',

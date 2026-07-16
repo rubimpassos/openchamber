@@ -1878,6 +1878,8 @@ export const dict = {
   'chat.questionCard.submitFailed': 'Failed to send response',
   'chat.questionCard.dismissFailed': 'Failed to dismiss question',
   'chat.questionCard.noLongerPending': 'This question is no longer waiting for a response.',
+  'chat.questionCard.orphanedBadge': 'Interrupted',
+  'chat.questionCard.orphanedNotice': 'The session restarted before this question was answered. Your answer will be sent to the agent as a new message.',
   'chat.questionCard.tryAgain': 'Please try again in a moment.',
   'chat.textSelection.toast.noProject': 'No project found for this session',
   'chat.textSelection.toast.addToNotesFailed': 'Failed to add to notes',

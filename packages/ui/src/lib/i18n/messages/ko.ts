@@ -1880,6 +1880,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': '응답 전송에 실패했습니다',
   'chat.questionCard.dismissFailed': '질문 닫기에 실패했습니다',
   'chat.questionCard.noLongerPending': '이 질문은 더 이상 응답을 기다리지 않습니다.',
+  'chat.questionCard.orphanedBadge': '중단됨',
+  'chat.questionCard.orphanedNotice': '이 질문에 답하기 전에 세션이 다시 시작되었습니다. 답변은 새 메시지로 에이전트에게 전송됩니다.',
   'chat.questionCard.tryAgain': '잠시 후 다시 시도하세요.',
   'chat.textSelection.toast.noProject': '이 세션의 프로젝트를 찾을 수 없음',
   'chat.textSelection.toast.addToNotesFailed': '메모 추가 실패',

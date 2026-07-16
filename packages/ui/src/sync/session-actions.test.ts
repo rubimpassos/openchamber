@@ -13,6 +13,10 @@ let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?:
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 const globalUpsertedSessions: unknown[] = []
+let pendingQuestionsResult: QuestionRequest[] = []
+let pendingQuestionsError: unknown | null = null
+const sendMessageCalls: Array<Record<string, unknown>> = []
+const scopedQuestionReplyCalls: Array<Record<string, unknown>> = []
 
 const mockScopedClient = {
   permission: {
@@ -24,6 +28,7 @@ const mockScopedClient = {
   question: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reply", params })
+      scopedQuestionReplyCalls.push(params)
       if (questionReplyError) {
         return Promise.resolve({ error: questionReplyError, response: { status: 404 } })
       }
@@ -102,6 +107,18 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
+    listPendingQuestions: mock((options?: { directories?: Array<string | null | undefined> }) => {
+      replyCalls.push({ method: "question.pending", params: { directories: options?.directories } })
+      if (pendingQuestionsError) {
+        return Promise.reject(pendingQuestionsError)
+      }
+      return Promise.resolve(pendingQuestionsResult)
+    }),
+    sendMessage: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.sendMessage", params })
+      sendMessageCalls.push(params)
+      return Promise.resolve("msg_sent")
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -198,6 +215,7 @@ mock.module("./sync-refs", () => ({
 }))
 
 import { create, type StoreApi } from "zustand"
+import { buildOrphanedAnswerMessage } from "@/lib/questions/orphanedQuestions"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
@@ -890,5 +908,168 @@ describe("dismissOpenQuestionsForSession", () => {
     expect(rejectCalls[0].params.requestID).toBe("q-stale")
     // The stale entry is cleared from the store even though the server reported not-found.
     expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+})
+
+function buildOrphanedQuestion(sessionId: string): QuestionRequest {
+  return {
+    id: "orphaned:call_1",
+    sessionID: sessionId,
+    questions: [
+      {
+        question: "Which mode?",
+        header: "Mode",
+        options: [
+          { label: "safe", description: "Safe mode" },
+          { label: "fast", description: "Fast mode" },
+        ],
+      },
+    ],
+    tool: { messageID: "msg_assistant", callID: "call_1" },
+  }
+}
+
+describe("answerOrphanedQuestion", () => {
+  const askingAssistantMessage = {
+    id: "msg_assistant",
+    role: "assistant",
+    sessionID: "session-a",
+    providerID: "anthropic",
+    modelID: "claude-sonnet",
+    agent: "build",
+    variant: "high",
+    time: { created: 1 },
+  } as Message
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    questionReplyError = null
+    pendingQuestionsResult = []
+    pendingQuestionsError = null
+    sendMessageCalls.length = 0
+    scopedQuestionReplyCalls.length = 0
+  })
+
+  test("answers via question.reply with the real server request id when the question is still pending", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    const question = buildOrphanedQuestion("session-a")
+    pendingQuestionsResult = [
+      {
+        id: "q-real-server",
+        sessionID: "session-a",
+        questions: question.questions,
+        tool: { messageID: "msg_assistant", callID: "call_1" },
+      },
+    ]
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await answerOrphanedQuestion(question, [["safe"]])
+
+    // The re-check queried the session's directory.
+    expect(replyCalls.find((call) => call.method === "question.pending")?.params.directories).toEqual(["/test/project"])
+    // Answered through the SCOPED client with the REAL pending request id, never the orphaned id.
+    expect(scopedClientDirectories).toEqual(["/test/project"])
+    expect(scopedQuestionReplyCalls).toHaveLength(1)
+    expect(scopedQuestionReplyCalls[0].requestID).toBe("q-real-server")
+    expect(scopedQuestionReplyCalls[0].requestID).not.toBe("orphaned:call_1")
+    expect(scopedQuestionReplyCalls[0].answers).toEqual([["safe"]])
+    expect(scopedQuestionReplyCalls[0].directory).toBe("/test/project")
+    // No chat-message fallback while the question is genuinely still pending.
+    expect(sendMessageCalls).toHaveLength(0)
+  })
+
+  test("sends the answers as a chat message from the asking assistant message when no longer pending", async () => {
+    const userMessage = { id: "msg_user", role: "user", sessionID: "session-a", time: { created: 0 } } as Message
+    const store = createStore({}, { message: { "session-a": [userMessage, askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    const question = buildOrphanedQuestion("session-a")
+    pendingQuestionsResult = []
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await answerOrphanedQuestion(question, [["safe"]])
+
+    expect(sendMessageCalls).toHaveLength(1)
+    const sent = sendMessageCalls[0]
+    expect(sent.id).toBe("session-a")
+    expect(sent.providerID).toBe("anthropic")
+    expect(sent.modelID).toBe("claude-sonnet")
+    expect(sent.agent).toBe("build")
+    expect(sent.variant).toBe("high")
+    expect(sent.directory).toBe("/test/project")
+    expect(sent.text).toBe(buildOrphanedAnswerMessage(question, [["safe"]]))
+    expect(sent.text).toContain('"Which mode?"="safe"')
+    expect(scopedQuestionReplyCalls).toHaveLength(0)
+    expect(replyCalls.filter((call) => call.method === "question.reply")).toHaveLength(0)
+  })
+
+  test("treats a pending question for a different tool call as orphaned", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    const question = buildOrphanedQuestion("session-a")
+    pendingQuestionsResult = [
+      {
+        id: "q-other",
+        sessionID: "session-a",
+        questions: question.questions,
+        tool: { messageID: "msg_other", callID: "call_other" },
+      },
+    ]
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await answerOrphanedQuestion(question, [["safe"]])
+
+    expect(scopedQuestionReplyCalls).toHaveLength(0)
+    expect(sendMessageCalls).toHaveLength(1)
+    expect(sendMessageCalls[0].text).toContain('"Which mode?"="safe"')
+  })
+
+  test("rethrows when the pending re-check fails and never falls back to a chat message", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    pendingQuestionsError = new Error("question.list failed: fetch failed")
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    let thrown: unknown
+    try {
+      await answerOrphanedQuestion(buildOrphanedQuestion("session-a"), [["safe"]])
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain("question.list failed")
+    expect(sendMessageCalls).toHaveLength(0)
+    expect(scopedQuestionReplyCalls).toHaveLength(0)
+  })
+
+  test("throws when the originating assistant message cannot be found and does not send", async () => {
+    const userMessage = { id: "msg_user", role: "user", sessionID: "session-a", time: { created: 0 } } as Message
+    const store = createStore({}, { message: { "session-a": [userMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    pendingQuestionsResult = []
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    let thrown: unknown
+    try {
+      await answerOrphanedQuestion(buildOrphanedQuestion("session-a"), [["safe"]])
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain("originating assistant message not found")
+    expect(sendMessageCalls).toHaveLength(0)
   })
 })

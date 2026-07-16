@@ -1874,6 +1874,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': '応答の送信に失敗しました',
   'chat.questionCard.dismissFailed': '質問の閉じるのに失敗しました',
   'chat.questionCard.noLongerPending': 'この質問は応答待ちではなくなりました。',
+  'chat.questionCard.orphanedBadge': '中断',
+  'chat.questionCard.orphanedNotice': 'この質問に回答する前にセッションが再起動されました。回答は新しいメッセージとしてエージェントに送信されます。',
   'chat.questionCard.tryAgain': 'しばらくしてからもう一度お試しください。',
   'chat.textSelection.toast.noProject': 'このセッションのプロジェクトが見つかりません',
   'chat.textSelection.toast.addToNotesFailed': 'メモへの追加に失敗しました',
