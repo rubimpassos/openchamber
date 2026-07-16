@@ -1864,6 +1864,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.questionCard.submitFailed": "Falha ao enviar a resposta",
   "chat.questionCard.dismissFailed": "Falha ao descartar a pergunta",
   "chat.questionCard.noLongerPending": "Esta pergunta não está mais aguardando uma resposta.",
+  "chat.questionCard.orphanedBadge": "Interrompida",
+  "chat.questionCard.orphanedNotice": "A sessão foi reiniciada antes desta pergunta ser respondida. Sua resposta será enviada ao agente como uma nova mensagem.",
   "chat.questionCard.tryAgain": "Tente novamente em instantes.",
   "chat.textSelection.toast.noProject": "Não foi encontrado projeto para esta sessão",
   "chat.textSelection.toast.addToNotesFailed": "Não foi possível adicionar às notas",

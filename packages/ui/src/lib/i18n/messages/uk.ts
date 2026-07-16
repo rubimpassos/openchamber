@@ -1864,6 +1864,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.questionCard.submitFailed": "Не вдалося надіслати відповідь",
   "chat.questionCard.dismissFailed": "Не вдалося відхилити питання",
   "chat.questionCard.noLongerPending": "Це питання більше не очікує відповіді.",
+  "chat.questionCard.orphanedBadge": "Перервано",
+  "chat.questionCard.orphanedNotice": "Сесію було перезапущено до того, як на це питання відповіли. Вашу відповідь буде надіслано агенту як нове повідомлення.",
   "chat.questionCard.tryAgain": "Спробуйте ще раз за мить.",
   "chat.textSelection.toast.noProject": "Для цієї сесії не знайдено жодного проєкту",
   "chat.textSelection.toast.addToNotesFailed": "Не вдалося додати до нотаток",

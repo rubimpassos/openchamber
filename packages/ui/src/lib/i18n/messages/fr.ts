@@ -2763,6 +2763,8 @@ export const dict = {
   'chat.questionCard.submitFailed': 'Impossible d’envoyer la réponse',
   'chat.questionCard.dismissFailed': 'Impossible d’ignorer la question',
   'chat.questionCard.noLongerPending': 'Cette question n’attend plus de réponse.',
+  'chat.questionCard.orphanedBadge': 'Interrompue',
+  'chat.questionCard.orphanedNotice': 'La session a redémarré avant que cette question ne reçoive une réponse. Votre réponse sera envoyée à l’agent sous forme de nouveau message.',
   'chat.questionCard.tryAgain': 'Veuillez réessayer dans un instant.',
   'chat.messageBody.forkDialog.instructions.label': 'Instructions',
   'chat.messageBody.forkDialog.instructions.placeholder': 'Ajouter des instructions pour la nouvelle session…',
