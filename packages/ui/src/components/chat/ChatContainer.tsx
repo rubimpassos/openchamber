@@ -37,6 +37,7 @@ const TIMELINE_SETTLE_CAP_MS = 300;
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
+import { collectOrphanedQuestionRequests } from '@/lib/questions/orphanedQuestions';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
@@ -89,6 +90,7 @@ import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
+const EMPTY_QUESTION_REQUESTS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
@@ -873,6 +875,24 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         };
     }, [active, currentSessionId, effectiveSessionDirectory, hasUnreconciledQuestionTool, sync]);
 
+    // Questions destroyed by an OpenCode server restart: the question tool
+    // part is stuck pending/running in the last message while the session is
+    // idle and no live question exists. The retry above recovers a question the
+    // server still holds; this covers the one it no longer has. Rendered as
+    // answerable cards whose submission falls back to answer-as-message (see
+    // orphanedQuestions.ts).
+    const orphanedQuestions = React.useMemo(() => {
+        if (!currentSessionId || sessionStatusForCurrent.type !== 'idle') {
+            return EMPTY_QUESTION_REQUESTS;
+        }
+        const orphaned = collectOrphanedQuestionRequests(currentSessionId, sessionMessages, sessionQuestions);
+        return orphaned.length > 0 ? orphaned : EMPTY_QUESTION_REQUESTS;
+    }, [currentSessionId, sessionMessages, sessionQuestions, sessionStatusForCurrent.type]);
+    const renderableQuestions = React.useMemo(() => {
+        if (orphanedQuestions.length === 0) return sessionQuestions;
+        return [...sessionQuestions, ...orphanedQuestions];
+    }, [orphanedQuestions, sessionQuestions]);
+
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
             return false;
@@ -1608,7 +1628,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 endPinningReleased={userOwnsScroll}
                 revealWaited={revealWaited}
                 revealGate={revealGate}
-                sessionQuestions={sessionQuestions}
+                sessionQuestions={renderableQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 showLoadOlderButton={showLoadOlderButton}
