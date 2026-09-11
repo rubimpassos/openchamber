@@ -653,7 +653,7 @@ const DraftWelcome: React.FC<{ exiting?: boolean; showWelcome?: boolean }> = ({ 
                 showWelcome ? 'flex-1' : 'shrink-0 pt-[6vh] pb-6',
                 exiting && 'pointer-events-none opacity-0',
             )}>
-                <div className="w-full max-w-md whitespace-pre-wrap break-words rounded-lg bg-muted px-4 py-3 text-left text-sm text-foreground">
+                <div className="max-h-[40vh] w-full max-w-md overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-muted px-4 py-3 text-left text-sm text-foreground">
                     {submissionInFlight}
                 </div>
                 <div className="mt-4 flex gap-1.5" aria-hidden="true">
