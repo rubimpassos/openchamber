@@ -651,7 +651,7 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
     );
 };
 
-const DraftWelcome: React.FC<{ exiting?: boolean; showWelcome?: boolean }> = ({ exiting = false, showWelcome = true }) => {
+const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
     const { t } = useI18n();
     const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
     const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
@@ -663,36 +663,6 @@ const DraftWelcome: React.FC<{ exiting?: boolean; showWelcome?: boolean }> = ({ 
             : null) ?? state.projects[0] ?? null;
         return project ? getProjectDisplayLabel(project) : null;
     }, [draftTarget, selectedProjectId]));
-    const submissionInFlight = useInputStore((state) => state.draftSubmissionInFlight);
-
-    React.useEffect(() => () => {
-        useInputStore.getState().setDraftSubmissionInFlight(null);
-    }, []);
-
-    // The desktop draft centres the composer and renders no surface, so it
-    // passes showWelcome={false} and mounts this only to carry the sent prompt.
-    if (!submissionInFlight) {
-        if (!showWelcome) return null;
-    } else {
-        return (
-            <div className={cn(
-                'oc-draft-center flex min-h-0 flex-col items-center justify-center px-6 transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
-                // Filling the column is right only when replacing the welcome
-                // panel: on desktop the composer slot already claims flex-1.
-                showWelcome ? 'flex-1' : 'shrink-0 pt-[6vh] pb-6',
-                exiting && 'pointer-events-none opacity-0',
-            )}>
-                <div className="max-h-[40vh] w-full max-w-md overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-muted px-4 py-3 text-left text-sm text-foreground">
-                    {submissionInFlight}
-                </div>
-                <div className="mt-4 flex gap-1.5" aria-hidden="true">
-                    <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
-                    <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
-                    <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className={cn(
@@ -1527,8 +1497,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     const sessionSurface = (() => {
         if (draftOpen || draftPresentationExiting) {
-            const compactDraft = useCompactDraftLayout && !isDesktopExpandedInput;
-            return <DraftWelcome exiting={draftPresentationExiting} showWelcome={compactDraft} />;
+            if (!useCompactDraftLayout || isDesktopExpandedInput) {
+                return null;
+            }
+            return <DraftWelcome exiting={draftPresentationExiting} />;
         }
 
         const showHydrationSkeleton = isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking;

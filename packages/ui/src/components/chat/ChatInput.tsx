@@ -1811,9 +1811,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Clear input (the queue was taken above)
         if (!queuedOnly) {
             setMessage('');
-            if (capturedDraftSnapshot) {
-                useInputStore.getState().setDraftSubmissionInFlight(inputSnapshot.message);
-            }
             messageRef.current = '';
             confirmedMentionsRef.current.clear();
             // Clear per-session draft on submit
@@ -2034,7 +2031,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
             restoreComposerText();
-            useInputStore.getState().setDraftSubmissionInFlight(null);
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
