@@ -152,6 +152,12 @@ export type InputState = {
   pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
   /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
+  /**
+   * Text submitted from a new-session draft, held only while the server creates
+   * the session, so the draft screen can show it before the create round-trip
+   * returns. Display only — the send still targets the server-assigned id.
+   */
+  draftSubmissionInFlight: string | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
   attachmentDraftKey: string | null
@@ -160,6 +166,7 @@ export type InputState = {
   restoreAttachedFiles: (files: AttachedFile[], target: ChatDraftIdentity | null) => void
   activeEditorFile: VSCodeActiveEditorFile | null
 
+  setDraftSubmissionInFlight: (text: string | null) => void
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
   requestPresetSubmit: (text: string, type: "command" | "skill") => void
@@ -194,6 +201,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pendingSyntheticParts: null,
   pendingPresetSubmit: null,
   pendingGuestIssue: null,
+  draftSubmissionInFlight: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
   attachmentDraftKey: null,
@@ -222,6 +230,8 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (missing.length) state.setAttachedFiles([...existing, ...missing], target)
   },
   activeEditorFile: null,
+
+  setDraftSubmissionInFlight: (text) => set({ draftSubmissionInFlight: text }),
 
   setPendingInputText: (text, mode = "replace") =>
     set({ pendingInputText: text, pendingInputMode: mode }),
