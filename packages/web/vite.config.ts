@@ -99,7 +99,14 @@ export default defineConfig({
   define: {
     'process.env': {},
     global: 'globalThis',
-    __APP_VERSION__: JSON.stringify(packageJson.version),
+    // Opt-in: a fork sets OPENCHAMBER_BUILD_TAG to stamp its commit into the
+    // version the About diagnostics prints, telling two installs of the same
+    // upstream version apart. Unset upstream, where the version is unchanged.
+    __APP_VERSION__: JSON.stringify(
+      process.env.OPENCHAMBER_BUILD_TAG
+        ? `${packageJson.version}+${process.env.OPENCHAMBER_BUILD_TAG}`
+        : packageJson.version,
+    ),
   },
   optimizeDeps: {
     include: ['@opencode-ai/sdk/v2'],
