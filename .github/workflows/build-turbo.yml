@@ -86,6 +86,8 @@ jobs:
 
       - name: Build web assets
         working-directory: packages/electron
+        env:
+          OPENCHAMBER_BUILD_TAG: turbo.${{ needs.check.outputs.short_sha }}
         run: bun run build:web-assets
 
       - name: Prepare bundled OpenCode CLI
