@@ -205,7 +205,7 @@ export const useChatTimelineScroll = ({
     ), []);
 
     // ── snapshot persistence ────────────────────────────────────────────────
-    const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
+    const pendingSaveRef = React.useRef<{ sessionId: string } | null>(null);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const flushSave = React.useCallback(() => {
@@ -220,27 +220,27 @@ export const useChatTimelineScroll = ({
             pendingSaveRef.current = null;
             return;
         }
-        updateViewportAnchor(pending.sessionId, pending.anchor, {
-            scrollTop: container.scrollTop,
-            scrollHeight: container.scrollHeight,
-            clientHeight: container.clientHeight,
-        });
-        pendingSaveRef.current = null;
-    }, [updateViewportAnchor]);
-
-    const queueSave = React.useCallback(() => {
-        const sessionId = currentSessionIdRef.current;
-        if (!sessionId) return;
-        const container = scrollRef.current;
-        if (!container) return;
-
         const { scrollTop, scrollHeight, clientHeight } = container;
         const anchorRatio = scrollHeight > 0
             ? (scrollTop + clientHeight / 2) / scrollHeight
             : 0;
-        const anchor = Math.floor(anchorRatio * sessionMessageCountRef.current);
+        updateViewportAnchor(
+            pending.sessionId,
+            Math.floor(anchorRatio * sessionMessageCountRef.current),
+            { scrollTop, scrollHeight, clientHeight },
+        );
+        pendingSaveRef.current = null;
+    }, [updateViewportAnchor]);
 
-        pendingSaveRef.current = { sessionId, anchor };
+    // Perf: never read layout here. A scroll event that reads scrollTop/
+    // scrollHeight/clientHeight forces a synchronous recalc, and the virtualized
+    // list mutates rows between events. flushSave reads them once, when it runs.
+    const queueSave = React.useCallback(() => {
+        const sessionId = currentSessionIdRef.current;
+        if (!sessionId) return;
+        if (!scrollRef.current) return;
+
+        pendingSaveRef.current = { sessionId };
         if (saveTimerRef.current !== null) return;
         saveTimerRef.current = setTimeout(() => {
             saveTimerRef.current = null;
