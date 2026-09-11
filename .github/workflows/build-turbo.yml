@@ -1,0 +1,156 @@
+# Builda o .exe Windows x64 do OpenChamber Turbo a partir da branch `turbo` e
+# publica numa prerelease rolante `turbo-latest`.
+#
+# O Turbo instala lado a lado com o OpenChamber oficial (appId, productName,
+# user-data, protocolo de deep link e lock de instancia unica proprios) e tem o
+# auto-update desligado, entao este workflow nao publica manifesto de update
+# (`latest.yml`) — so o instalador.
+#
+# Nao exige secrets: o .exe sai sem assinatura e o job nao usa o environment
+# `signing`.
+name: build-turbo
+
+on:
+  push:
+    branches: [turbo]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-turbo
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: turbo-latest
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      short_sha: ${{ steps.resolve.outputs.short_sha }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: turbo
+
+      - name: Resolve version
+        id: resolve
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          version=$(node -p "require('./package.json').version")
+
+          {
+            echo "sha=$sha"
+            echo "short_sha=${sha:0:8}"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: check
+    # windows-latest resolve pra runner com Visual Studio 18, que o stack
+    # electron/node-gyp nao detecta (mesmo motivo do upstream)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-x64-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-x64-
+
+      - name: Build web assets
+        working-directory: packages/electron
+        run: bun run build:web-assets
+
+      - name: Prepare bundled OpenCode CLI
+        working-directory: packages/electron
+        shell: bash
+        run: |
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+
+      - name: Bundle main process
+        working-directory: packages/electron
+        run: bun run bundle:main
+
+      - name: Rebuild native modules
+        working-directory: packages/electron
+        shell: bash
+        run: node ./scripts/rebuild-native.mjs
+
+      - name: Build Windows app (unsigned)
+        working-directory: packages/electron
+        shell: bash
+        run: |
+          node ./scripts/package.mjs --win --x64 --publish=never
+          bun run verify:opencode-cli:packaged
+
+      # artifactName rende "OpenChamber Turbo-<version>-win-x64.exe", com espaco
+      # no nome; renomear aqui evita word splitting no publish e deixa o asset
+      # com o mesmo padrao de nome dos outros builds do fork.
+      - name: Stage Windows installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          installer=$(ls packages/electron/dist/*.exe | head -n 1)
+          cp "$installer" \
+            "release-assets/OpenChamber-Turbo-${{ needs.check.outputs.version }}-turbo.${{ needs.check.outputs.short_sha }}-win-x64.exe"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-exe
+          path: release-assets/*.exe
+          if-no-files-found: error
+
+  publish:
+    needs: [check, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Recreate rolling prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
+          gh release create "$RELEASE_TAG" \
+            --prerelease \
+            --title "turbo ${{ needs.check.outputs.version }}-turbo.${{ needs.check.outputs.short_sha }}" \
+            --notes "$(printf 'Build automático da branch turbo.\n\nsha:%s\n\n- .exe sem assinatura (SmartScreen: "Mais informações" > "Executar assim mesmo")\n- Instala ao lado do OpenChamber oficial, sem substituí-lo: atalho, pasta de instalação e configuração são próprios\n- FECHE o OpenChamber oficial antes de abrir o Turbo pela primeira vez: a primeira execução copia a configuração dele, e com o app aberto a cópia falha e o Turbo inicia com perfil limpo\n- Auto-update desligado: para atualizar, baixe o .exe novo desta prerelease' "${{ needs.check.outputs.sha }}")" \
+            --target turbo \
+            release-assets/*.exe
