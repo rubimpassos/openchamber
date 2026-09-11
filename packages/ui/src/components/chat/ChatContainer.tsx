@@ -663,6 +663,29 @@ const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
             : null) ?? state.projects[0] ?? null;
         return project ? getProjectDisplayLabel(project) : null;
     }, [draftTarget, selectedProjectId]));
+    const submissionInFlight = useInputStore((state) => state.draftSubmissionInFlight);
+
+    React.useEffect(() => () => {
+        useInputStore.getState().setDraftSubmissionInFlight(null);
+    }, []);
+
+    if (submissionInFlight) {
+        return (
+            <div className={cn(
+                'oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+                exiting && 'pointer-events-none opacity-0',
+            )}>
+                <div className="w-full max-w-md whitespace-pre-wrap break-words rounded-lg bg-muted px-4 py-3 text-left text-sm text-foreground">
+                    {submissionInFlight}
+                </div>
+                <div className="mt-4 flex gap-1.5" aria-hidden="true">
+                    <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
+                    <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
+                    <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={cn(
