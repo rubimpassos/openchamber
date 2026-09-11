@@ -53,8 +53,8 @@
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
-    "appId": "dev.openchamber.desktop",
-    "productName": "OpenChamber",
+    "appId": "dev.openchamber.turbo",
+    "productName": "OpenChamber Turbo",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/built-in-extensions/**/*"
     ],
@@ -136,6 +136,7 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
+      "shortcutName": "OpenChamber Turbo",
       "installerIcon": "resources/icons/icon.ico",
       "uninstallerIcon": "resources/icons/icon.ico",
       "installerHeaderIcon": "resources/icons/icon.ico"
@@ -166,7 +167,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "openchamber",
+      "owner": "rubimpassos",
       "repo": "openchamber"
     }
   }
