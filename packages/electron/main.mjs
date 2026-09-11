@@ -48,10 +48,17 @@ const __dirname = path.dirname(__filename);
 const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
 const electronStartupStartedAt = performance.now();
 
-const DEEP_LINK_PROTOCOL = 'openchamber';
+// This fork ships as "OpenChamber Turbo", installed side by side with the
+// official OpenChamber. Every system-wide identity below must differ from the
+// official build or the two installs fight over the same Start Menu entry,
+// install directory, user-data directory, deep-link protocol, and
+// single-instance lock. `UI_PROTOCOL` is the exception: it is registered per
+// Electron session and never leaves the process, so it stays unchanged.
+const TURBO_BUILD = true;
+const DEEP_LINK_PROTOCOL = 'octurbo';
 const UI_PROTOCOL = 'openchamber-ui';
-const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.desktop';
-const DEV_APP_USER_MODEL_ID = 'dev.openchamber.desktop.dev';
+const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.turbo';
+const DEV_APP_USER_MODEL_ID = 'dev.openchamber.turbo.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
 
@@ -86,14 +93,81 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
   );
 };
 
+const OFFICIAL_USER_DATA_DIR_NAME = 'OpenChamber';
+// Chromium regenerates all of these on demand, and copying them carries caches
+// and crash state keyed to the other install. `Partitions` also covers the
+// browser panel's own session.
+const VOLATILE_USER_DATA_ENTRIES = new Set([
+  'Cache',
+  'Code Cache',
+  'GPUCache',
+  'DawnCache',
+  'DawnGraphiteCache',
+  'DawnWebGPUCache',
+  'Crashpad',
+  'logs',
+  'Partitions',
+  'Service Worker',
+  'blob_storage',
+  'Network',
+]);
+
+/**
+ * Seed this install's user data from the official OpenChamber install so an
+ * existing server connection keeps working without re-pairing.
+ *
+ * Chromium keeps Local Storage, Session Storage, and IndexedDB in LevelDB
+ * stores that it holds open under an exclusive lock, so copying a live profile
+ * corrupts it. That makes this safe only on the very first run, before Electron
+ * opens its own profile, and only while the official app is closed. A locked
+ * source aborts the copy mid-way, so the partial target is removed and the app
+ * starts on a clean profile instead of a half-written one. The copy is
+ * synchronous because Chromium must not touch the directory while it runs; it
+ * happens once, and it never propagates a failure into startup.
+ */
+const importOfficialUserDataOnFirstRun = () => {
+  const target = app.getPath('userData');
+  let copyStarted = false;
+  try {
+    if (fs.existsSync(target)) return;
+    const source = path.join(path.dirname(target), OFFICIAL_USER_DATA_DIR_NAME);
+    if (!fs.existsSync(source)) return;
+    copyStarted = true;
+    fs.cpSync(source, target, {
+      recursive: true,
+      filter: (entry) => !(
+        path.dirname(entry) === source && VOLATILE_USER_DATA_ENTRIES.has(path.basename(entry))
+      ),
+    });
+    log.info('[electron] imported official OpenChamber user data on first run', { source, target });
+  } catch (error) {
+    if (copyStarted) {
+      try {
+        fs.rmSync(target, { recursive: true, force: true });
+      } catch {
+      }
+    }
+    log.warn('[electron] could not import official OpenChamber user data; starting on a clean profile', error);
+  }
+};
+
 // Set the product name early so electron-log derives its log directory as
-// ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
-app.setName('OpenChamber');
+// ~/Library/Logs/OpenChamber Turbo/ (not ~/Library/Logs/@openchamber/electron/).
+// The name also decides the user-data directory, which is what keeps this
+// install's state and its single-instance lock separate from the official app.
+app.setName('OpenChamber Turbo');
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
 }
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
+}
+// Runs before electron-log and before Electron opens its own profile, because
+// both create the user-data directory and would defeat the first-run guard.
+// Dev builds are excluded: they intentionally run on their own
+// `OpenChamber Dev` profile (see packages/electron/README.md).
+if (!isDev) {
+  importOfficialUserDataOnFirstRun();
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
@@ -3060,6 +3134,13 @@ const setupAutoUpdater = () => {
   }
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  // Turbo has no release feed of its own. Pointing it at the shared GitHub feed
+  // would let it download the official OpenChamber release and install it over
+  // itself, so the feed is never configured and no check ever runs.
+  if (TURBO_BUILD) {
+    log.info('[electron] auto-update disabled for the Turbo build');
+    return;
+  }
   autoUpdater.allowPrerelease = false;
   autoUpdater.fullChangelog = true;
   autoUpdater.disableWebInstaller = false;
@@ -4459,8 +4540,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
-      assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
+      // Never reaches a release feed, so nothing can ever be staged for install.
+      // Everything downstream — download, restart-to-apply — is gated on a
+      // pending update that this build never produces.
+      if (TURBO_BUILD) {
+        return { available: false, currentVersion, version: null, body: null, date: null };
+      }
+      assertUpdaterCapability({ packaged: app.isPackaged });
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
@@ -4800,10 +4887,12 @@ const buildMacMenu = () => {
       label: app.name,
       submenu: [
         { label: 'About OpenChamber', click: () => dispatchAction('about') },
-        {
+        // Omitted on Turbo: the check always reports "up to date", so offering
+        // it would only suggest this build receives updates.
+        ...(TURBO_BUILD ? [] : [{
           label: 'Check for Updates',
           click: () => dispatchCheckForUpdates(),
-        },
+        }]),
         { type: 'separator' },
         { label: 'Settings', accelerator: 'Cmd+,', click: () => dispatchAction('settings') },
         { label: 'Reload Webview', click: () => reloadMenuTargetWindow() },
@@ -4910,10 +4999,12 @@ const buildAutoHiddenMenu = () => {
       label: 'OpenChamber',
       submenu: [
         { label: 'About OpenChamber', click: () => dispatchAction('about') },
-        {
+        // Omitted on Turbo: the check always reports "up to date", so offering
+        // it would only suggest this build receives updates.
+        ...(TURBO_BUILD ? [] : [{
           label: 'Check for Updates',
           click: () => dispatchCheckForUpdates(),
-        },
+        }]),
         { type: 'separator' },
         { label: 'Settings', accelerator: 'Ctrl+,', click: () => dispatchAction('settings') },
         { label: 'Reload Webview', click: () => reloadMenuTargetWindow() },
