@@ -1728,8 +1728,10 @@ export async function optimisticSend(input: {
     }
   }
 
+  // Perf invariant: never await between here and `optimisticAdd` below, or the
+  // message stops appearing within one frame. The connection wait moved into
+  // the try block so a saturated server cannot delay or drop it.
   assertRuntimeUnchanged()
-  await waitForConnectionOrThrow()
   input.beforeOptimisticInsert?.()
   assertRuntimeUnchanged()
   input.appendSubmissions?.()
@@ -1815,6 +1817,8 @@ export async function optimisticSend(input: {
   })
 
   try {
+    assertRuntimeUnchanged()
+    await waitForConnectionOrThrow()
     assertRuntimeUnchanged()
     await input.send(messageID)
   } catch (error) {
