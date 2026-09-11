@@ -676,7 +676,10 @@ const DraftWelcome: React.FC<{ exiting?: boolean; showWelcome?: boolean }> = ({ 
     } else {
         return (
             <div className={cn(
-                'oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+                'oc-draft-center flex min-h-0 flex-col items-center justify-center px-6 transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+                // Filling the column is right only when replacing the welcome
+                // panel: on desktop the composer slot already claims flex-1.
+                showWelcome ? 'flex-1' : 'shrink-0 pt-[6vh] pb-6',
                 exiting && 'pointer-events-none opacity-0',
             )}>
                 <div className="w-full max-w-md whitespace-pre-wrap break-words rounded-lg bg-muted px-4 py-3 text-left text-sm text-foreground">
