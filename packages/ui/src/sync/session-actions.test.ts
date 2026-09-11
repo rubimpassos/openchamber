@@ -229,11 +229,17 @@ mock.module("@/lib/opencode/client", () => ({
 }))
 
 // Mock useConfigStore
+let mockIsConnected = true
+const connectionProbes: string[] = []
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
-      isConnected: true,
+      isConnected: mockIsConnected,
       hasEverConnected: true,
+      probeConnection: async () => {
+        connectionProbes.push("probe")
+        return mockIsConnected
+      },
     }),
   },
 }))
@@ -1483,6 +1489,47 @@ describe("optimisticSend target directory", () => {
     expect(optimisticRemove).toBe(null)
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
+  })
+
+  test("inserts the optimistic message before waiting for a lost connection", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let removed: OptimisticRemoveCall | null = null
+    let sendAttempts = 0
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {
+        connectionProbes.push("optimistic-add")
+      },
+      (input) => {
+        removed = input
+      },
+    )
+
+    connectionProbes.length = 0
+    mockIsConnected = false
+    try {
+      await expect(optimisticSend({
+        sessionId: "session-offline",
+        directory: "/target/project",
+        content: "hello",
+        providerID: "provider",
+        modelID: "model",
+        send: async () => {
+          sendAttempts += 1
+        },
+      })).rejects.toThrow(/Connection lost/)
+    } finally {
+      mockIsConnected = true
+    }
+
+    expect(connectionProbes[0]).toBe("optimistic-add")
+    expect(connectionProbes).toContain("probe")
+    expect(sendAttempts).toBe(0)
+    expect(removed).not.toBeNull()
+    expect(targetStore.getState().session_status["session-offline"]?.type).toBe("idle")
   })
 
   test("commits the new branch locally and discards its optimistic shadow when sending after a revert", async () => {
