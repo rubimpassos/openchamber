@@ -622,7 +622,7 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
     );
 };
 
-const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
+const DraftWelcome: React.FC<{ exiting?: boolean; showWelcome?: boolean }> = ({ exiting = false, showWelcome = true }) => {
     const { t } = useI18n();
     const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
     const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
@@ -640,7 +640,11 @@ const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
         useInputStore.getState().setDraftSubmissionInFlight(null);
     }, []);
 
-    if (submissionInFlight) {
+    // The desktop draft centres the composer and renders no surface, so it
+    // passes showWelcome={false} and mounts this only to carry the sent prompt.
+    if (!submissionInFlight) {
+        if (!showWelcome) return null;
+    } else {
         return (
             <div className={cn(
                 'oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
@@ -1459,10 +1463,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     const sessionSurface = (() => {
         if (draftOpen || draftPresentationExiting) {
-            if (!useCompactDraftLayout || isDesktopExpandedInput) {
-                return null;
-            }
-            return <DraftWelcome exiting={draftPresentationExiting} />;
+            const compactDraft = useCompactDraftLayout && !isDesktopExpandedInput;
+            return <DraftWelcome exiting={draftPresentationExiting} showWelcome={compactDraft} />;
         }
 
         const showHydrationSkeleton = isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking;
