@@ -213,48 +213,67 @@ export const useChatTimelineScroll = ({
     ), []);
 
     // ── snapshot persistence ────────────────────────────────────────────────
-    const pendingSaveRef = React.useRef<{ sessionId: string } | null>(null);
+    type MeasuredViewport = { anchor: number; scrollTop: number; scrollHeight: number; clientHeight: number };
+    const pendingSaveRef = React.useRef<{ sessionId: string; viewport: MeasuredViewport } | null>(null);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const measureFrameRef = React.useRef<number | null>(null);
+
+    const measureViewport = React.useCallback((): MeasuredViewport | null => {
+        const container = scrollRef.current;
+        if (!container) return null;
+        const { scrollTop, scrollHeight, clientHeight } = container;
+        const anchorRatio = scrollHeight > 0
+            ? (scrollTop + clientHeight / 2) / scrollHeight
+            : 0;
+        return {
+            anchor: Math.floor(anchorRatio * sessionMessageCountRef.current),
+            scrollTop,
+            scrollHeight,
+            clientHeight,
+        };
+    }, []);
 
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
             clearTimeout(saveTimerRef.current);
             saveTimerRef.current = null;
         }
+        if (measureFrameRef.current !== null) {
+            cancelAnimationFrame(measureFrameRef.current);
+            measureFrameRef.current = null;
+        }
         const pending = pendingSaveRef.current;
         if (!pending) return;
-        const container = scrollRef.current;
-        if (!container) {
-            pendingSaveRef.current = null;
-            return;
-        }
-        const { scrollTop, scrollHeight, clientHeight } = container;
-        const anchorRatio = scrollHeight > 0
-            ? (scrollTop + clientHeight / 2) / scrollHeight
-            : 0;
-        updateViewportAnchor(
-            pending.sessionId,
-            Math.floor(anchorRatio * sessionMessageCountRef.current),
-            { scrollTop, scrollHeight, clientHeight },
-        );
         pendingSaveRef.current = null;
+        updateViewportAnchor(pending.sessionId, pending.viewport.anchor, {
+            scrollTop: pending.viewport.scrollTop,
+            scrollHeight: pending.viewport.scrollHeight,
+            clientHeight: pending.viewport.clientHeight,
+        });
     }, [updateViewportAnchor]);
 
-    // Perf: never read layout here. A scroll event that reads scrollTop/
-    // scrollHeight/clientHeight forces a synchronous recalc, and the virtualized
-    // list mutates rows between events. flushSave reads them once, when it runs.
+    // Perf: a scroll event must not read layout — a per-event read forces a
+    // synchronous recalc that the virtualized list's row recycling immediately
+    // invalidates. The frame both coalesces the reads and binds the geometry to
+    // the session it was measured on, which the session-change flush relies on.
     const queueSave = React.useCallback(() => {
         const sessionId = currentSessionIdRef.current;
         if (!sessionId) return;
         if (!scrollRef.current) return;
+        if (measureFrameRef.current !== null) return;
 
-        pendingSaveRef.current = { sessionId };
-        if (saveTimerRef.current !== null) return;
-        saveTimerRef.current = setTimeout(() => {
-            saveTimerRef.current = null;
-            flushSave();
-        }, SAVE_DEBOUNCE_MS);
-    }, [flushSave]);
+        measureFrameRef.current = requestAnimationFrame(() => {
+            measureFrameRef.current = null;
+            const viewport = measureViewport();
+            if (!viewport) return;
+            pendingSaveRef.current = { sessionId, viewport };
+            if (saveTimerRef.current !== null) return;
+            saveTimerRef.current = setTimeout(() => {
+                saveTimerRef.current = null;
+                flushSave();
+            }, SAVE_DEBOUNCE_MS);
+        });
+    }, [flushSave, measureViewport]);
 
     const saveSnapshotNow = React.useCallback(() => {
         flushSave();
@@ -749,6 +768,7 @@ export const useChatTimelineScroll = ({
     React.useEffect(() => () => {
         cancelShowButtonTimer();
         if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+        if (measureFrameRef.current !== null) cancelAnimationFrame(measureFrameRef.current);
     }, [cancelShowButtonTimer]);
 
     // ── active-turn spy ─────────────────────────────────────────────────────
