@@ -1,0 +1,102 @@
+# Sincroniza o fork com o upstream diariamente:
+#   1. `main`  = espelho exato de openchamber/openchamber@main (reset --hard)
+#   2. `turbo` = pilha de patches do OpenChamber Turbo, rebaseada sobre o novo main
+# Em conflito de rebase: aborta, abre issue e mantém `turbo` intacta.
+#
+# IMPORTANTE: `turbo` é a branch default do fork — workflows `schedule` só
+# disparam a partir da branch default, então este arquivo precisa viver nela.
+name: sync-upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  # `gh workflow run` no passo de build precisa disso.
+  actions: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: https://github.com/openchamber/openchamber.git
+  UPSTREAM_BRANCH: main
+  MIRROR_BRANCH: main
+  PATCH_BRANCH: turbo
+  BUILD_WORKFLOW: build-turbo.yml
+  # Num fork, `gh` resolve o repo pro parent (openchamber/openchamber) e devolve
+  # 403; fixar no próprio fork é o que faz issue e dispatch funcionarem.
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: turbo
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "fork-sync-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream "$UPSTREAM_BRANCH"
+
+      - name: Mirror main
+        run: |
+          git checkout -B "$MIRROR_BRANCH" "upstream/$UPSTREAM_BRANCH"
+          git push --force origin "$MIRROR_BRANCH"
+
+      - name: Rebase patch branch
+        id: rebase
+        run: |
+          git checkout "$PATCH_BRANCH"
+
+          if git merge-base --is-ancestor "upstream/$UPSTREAM_BRANCH" HEAD; then
+            echo "$PATCH_BRANCH já contém o upstream mais recente; nada a fazer."
+            echo "status=up-to-date" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git rebase "upstream/$UPSTREAM_BRANCH"; then
+            git push --force-with-lease origin "$PATCH_BRANCH"
+            echo "status=rebased" >> "$GITHUB_OUTPUT"
+          else
+            git rebase --abort
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      # O push acima sai com o GITHUB_TOKEN, e push feito com esse token não
+      # dispara workflow nenhum. Sem este dispatch a `turbo` sobe atualizada mas
+      # o instalador publicado continua o antigo — que é exatamente o sintoma que
+      # este workflow existe pra evitar. `workflow_dispatch` é uma das duas
+      # exceções que o GITHUB_TOKEN tem permissão de disparar.
+      - name: Build updated installer
+        if: steps.rebase.outputs.status == 'rebased'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run "$BUILD_WORKFLOW" --ref "$PATCH_BRANCH"
+
+      - name: Open conflict issue
+        if: steps.rebase.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          existing=$(gh issue list --state open --label sync-conflict --json number --jq 'length')
+          if [ "$existing" -eq 0 ]; then
+            gh label create sync-conflict --color D93F0B --force
+            gh issue create \
+              --title "Conflito no sync com upstream ($(date +%F))" \
+              --label sync-conflict \
+              --body "$(printf 'O rebase automático de `%s` sobre `upstream/%s` falhou.\n\nResolver localmente:\n```bash\ngit fetch upstream\ngit checkout %s\ngit tag %s-backup-%s\ngit rebase upstream/%s   # resolver conflitos\ngit push --force-with-lease origin %s\n```' "$PATCH_BRANCH" "$UPSTREAM_BRANCH" "$PATCH_BRANCH" "$PATCH_BRANCH" "$(date +%F)" "$UPSTREAM_BRANCH" "$PATCH_BRANCH")"
+          fi
+          exit 1
