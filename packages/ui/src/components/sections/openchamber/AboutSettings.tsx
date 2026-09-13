@@ -51,7 +51,11 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
   // Only a fork build carries semver build metadata (`1.23.1+turbo.5518dc22`);
   // /api/system/info reports the bare upstream version of the connected instance.
-  const forkBuildVersion = __APP_VERSION__?.includes('+') ? __APP_VERSION__ : null;
+  // Needs `typeof`, not optional chaining: only the web Vite build defines
+  // __APP_VERSION__, so a bare read throws ReferenceError in bundles that do not.
+  const forkBuildVersion = typeof __APP_VERSION__ === 'string' && __APP_VERSION__.includes('+')
+    ? __APP_VERSION__
+    : null;
   const currentVersion = forkBuildVersion || openChamberVersion || updateStore.info?.currentVersion || 'unknown';
 
   React.useEffect(() => {
