@@ -17,6 +17,8 @@ export type UpdateInfo = {
   // Web-specific fields
   packageManager?: string;
   updateCommand?: string;
+  // Distinguishes a failed check from an authoritative "up to date".
+  error?: string;
 };
 
 export type UpdateProgress = {
