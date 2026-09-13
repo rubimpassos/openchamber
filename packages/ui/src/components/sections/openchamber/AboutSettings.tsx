@@ -16,6 +16,8 @@ import {
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
+declare const __APP_VERSION__: string | undefined;
+
 const GITHUB_URL = 'https://github.com/openchamber/openchamber';
 const DISCORD_URL = 'https://discord.gg/ZYRSdnwwKA';
 const X_URL = 'https://x.com/openchamber_dev';
@@ -47,7 +49,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   })));
   const { isMobile } = useDeviceInfo();
 
-  const currentVersion = openChamberVersion || updateStore.info?.currentVersion || 'unknown';
+  // Only a fork build carries semver build metadata (`1.23.1+turbo.5518dc22`);
+  // /api/system/info reports the bare upstream version of the connected instance.
+  const forkBuildVersion = __APP_VERSION__?.includes('+') ? __APP_VERSION__ : null;
+  const currentVersion = forkBuildVersion || openChamberVersion || updateStore.info?.currentVersion || 'unknown';
 
   React.useEffect(() => {
     let cancelled = false;
