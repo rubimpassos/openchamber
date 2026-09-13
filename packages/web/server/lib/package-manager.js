@@ -20,6 +20,84 @@ function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
 }
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
+const GITHUB_API_URL = 'https://api.github.com';
+
+/**
+ * A fork that ships its own desktop build publishes one rolling prerelease
+ * instead of tagged semver releases, and `api.openchamber.dev` only knows
+ * official versions — asking it would report the upstream version as if it were
+ * the fork's. When both variables are set, the update check reads that release
+ * from the fork instead. Unset, every path below is the upstream one.
+ *
+ * Read at call time, not at module load: Electron sets these before starting the
+ * in-process server, and ESM imports run before that.
+ */
+function getForkReleaseSource() {
+  const repo = (process.env.OPENCHAMBER_UPDATE_REPO || '').trim();
+  const tag = (process.env.OPENCHAMBER_UPDATE_RELEASE_TAG || '').trim();
+  // Also keeps a malformed value out of the request URL.
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !tag) return null;
+  return { repo, tag };
+}
+
+/**
+ * The build marker a fork stamps into its version, e.g. `turbo.5518dc22` in
+ * `1.23.1+turbo.5518dc22`. A rolling release reuses one tag and keeps the
+ * upstream semver, so this marker — not semver — is what tells two builds apart.
+ */
+function extractBuildId(value) {
+  if (typeof value !== 'string') return null;
+  return value.match(/[A-Za-z][\w-]*\.[0-9a-f]{7,40}\b/)?.[0] ?? null;
+}
+
+function extractVersion(value) {
+  if (typeof value !== 'string') return null;
+  return value.match(/\d+\.\d+\.\d+[\w.+-]*/)?.[0] ?? null;
+}
+
+/**
+ * Resolve the fork's rolling release. Throws on transport/HTTP failure so the
+ * caller reports a failed check: a fork build has no second source, and
+ * answering "no update" here would make an unreachable GitHub look up to date.
+ */
+async function checkForkRelease(currentVersion, source) {
+  const response = await fetch(
+    `${GITHUB_API_URL}/repos/${source.repo}/releases/tags/${encodeURIComponent(source.tag)}`,
+    {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'openchamber-update-check',
+      },
+      signal: AbortSignal.timeout(10000),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`GitHub returned ${response.status} for ${source.repo} release "${source.tag}"`);
+  }
+
+  const release = await response.json();
+  const assetNames = Array.isArray(release?.assets)
+    ? release.assets.map((asset) => (typeof asset?.name === 'string' ? asset.name : '')).join(' ')
+    : '';
+  const searchableReleaseText = [release?.name, release?.tag_name, assetNames]
+    .filter((value) => typeof value === 'string' && value)
+    .join(' ');
+  const remoteBuildId = extractBuildId(searchableReleaseText);
+  const installedBuildId = extractBuildId(currentVersion);
+  const remoteVersion = extractVersion(release?.name) || extractVersion(assetNames) || remoteBuildId;
+
+  return {
+    // Comparing build markers, because both builds keep the same upstream
+    // semver. Without a marker on either side there is nothing to compare, so
+    // report no update rather than offering the build already installed.
+    available: Boolean(remoteBuildId && installedBuildId && remoteBuildId !== installedBuildId),
+    version: remoteVersion || undefined,
+    currentVersion,
+    body: typeof release?.body === 'string' && release.body.trim() ? release.body : undefined,
+    releaseUrl: typeof release?.html_url === 'string' ? release.html_url : undefined,
+  };
+}
 
 function getOpenChamberConfigDir() {
   if (process.platform === 'win32') {
@@ -747,6 +825,19 @@ export async function checkForUpdates(options = {}) {
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
   const platform = normalizePlatform(options.platform);
+
+  const forkSource = getForkReleaseSource();
+  if (forkSource) {
+    try {
+      return { ...await checkForkRelease(currentVersion, forkSource), packageManager: pm };
+    } catch (error) {
+      return {
+        available: false,
+        currentVersion,
+        error: error instanceof Error ? error.message : 'Failed to check the fork release',
+      };
+    }
+  }
 
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);

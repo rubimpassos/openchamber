@@ -62,6 +62,14 @@ const DEV_APP_USER_MODEL_ID = 'dev.openchamber.turbo.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
 
+// Turbo has no electron-updater feed, so the in-process web server answers the
+// update check instead. Point it at the fork's rolling prerelease; the official
+// update service only knows upstream versions and would report one of those.
+if (TURBO_BUILD) {
+  process.env.OPENCHAMBER_UPDATE_REPO = 'rubimpassos/openchamber';
+  process.env.OPENCHAMBER_UPDATE_RELEASE_TAG = 'turbo-latest';
+}
+
 const getLoginItemOptions = () => {
   if (process.platform === 'win32') {
     return {
@@ -4544,8 +4552,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Never reaches a release feed, so nothing can ever be staged for install.
       // Everything downstream — download, restart-to-apply — is gated on a
       // pending update that this build never produces.
+      // Answering null rather than a false "up to date" lets the renderer fall
+      // back to the server check, which reads this fork's own rolling release.
       if (TURBO_BUILD) {
-        return { available: false, currentVersion, version: null, body: null, date: null };
+        return null;
       }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
