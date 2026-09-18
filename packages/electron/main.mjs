@@ -3115,13 +3115,6 @@ const setupAutoUpdater = () => {
   }
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
-  // Turbo has no release feed of its own. Pointing it at the shared GitHub feed
-  // would let it download the official OpenChamber release and install it over
-  // itself, so the feed is never configured and no check ever runs.
-  if (TURBO_BUILD) {
-    log.info('[electron] auto-update disabled for the Turbo build');
-    return;
-  }
   autoUpdater.allowPrerelease = false;
   autoUpdater.fullChangelog = true;
   autoUpdater.disableWebInstaller = false;
@@ -4560,14 +4553,6 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_check_for_updates': {
       const currentVersion = APP_VERSION;
-      // Never reaches a release feed, so nothing can ever be staged for install.
-      // Everything downstream — download, restart-to-apply — is gated on a
-      // pending update that this build never produces.
-      // Answering null rather than a false "up to date" lets the renderer fall
-      // back to the server check, which reads this fork's own rolling release.
-      if (TURBO_BUILD) {
-        return null;
-      }
       assertUpdaterCapability({ packaged: app.isPackaged });
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
@@ -4900,12 +4885,10 @@ const buildMacMenu = () => {
       label: app.name,
       submenu: [
         { label: 'About OpenChamber', click: () => dispatchAction('about') },
-        // Omitted on Turbo: the check always reports "up to date", so offering
-        // it would only suggest this build receives updates.
-        ...(TURBO_BUILD ? [] : [{
+        {
           label: 'Check for Updates',
           click: () => dispatchCheckForUpdates(),
-        }]),
+        },
         { type: 'separator' },
         { label: 'Settings', accelerator: 'Cmd+,', click: () => dispatchAction('settings') },
         { label: 'Reload Webview', click: () => reloadMenuTargetWindow() },
@@ -5012,12 +4995,10 @@ const buildAutoHiddenMenu = () => {
       label: 'OpenChamber',
       submenu: [
         { label: 'About OpenChamber', click: () => dispatchAction('about') },
-        // Omitted on Turbo: the check always reports "up to date", so offering
-        // it would only suggest this build receives updates.
-        ...(TURBO_BUILD ? [] : [{
+        {
           label: 'Check for Updates',
           click: () => dispatchCheckForUpdates(),
-        }]),
+        },
         { type: 'separator' },
         { label: 'Settings', accelerator: 'Ctrl+,', click: () => dispatchAction('settings') },
         { label: 'Reload Webview', click: () => reloadMenuTargetWindow() },
