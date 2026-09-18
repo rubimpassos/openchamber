@@ -1,8 +1,13 @@
 import fs from 'node:fs';
 
+// This fork publishes its own releases and installs beside the official app
+// (appId dev.openchamber.turbo). Pointing the feed at `openchamber/openchamber`
+// would download the official release and install it over this build, so the
+// owner must stay this fork's. Keep it in step with `build.publish` in
+// package.json, and re-check it after every upstream sync.
 export const PRODUCTION_UPDATER_FEED = Object.freeze({
   provider: 'github',
-  owner: 'openchamber',
+  owner: 'rubimpassos',
   repo: 'openchamber',
 });
 
