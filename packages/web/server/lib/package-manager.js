@@ -23,21 +23,28 @@ const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.
 const GITHUB_API_URL = 'https://api.github.com';
 
 /**
- * A fork that ships its own desktop build publishes one rolling prerelease
- * instead of tagged semver releases, and `api.openchamber.dev` only knows
- * official versions — asking it would report the upstream version as if it were
- * the fork's. When both variables are set, the update check reads that release
- * from the fork instead. Unset, every path below is the upstream one.
+ * This is a fork. It publishes its own releases, is absent from npm, and
+ * `api.openchamber.dev` only knows official versions — asking either would
+ * report an upstream build as if it were this one. So the update check reads
+ * this fork's GitHub releases, for every surface: the desktop window, a browser
+ * attached to it, and the CLI. Electron also exports the same value so a server
+ * it starts agrees with it.
+ *
+ * `OPENCHAMBER_UPDATE_RELEASE_TAG` picks between the two release models. Set, it
+ * names one rolling release rewritten in place and builds are told apart by
+ * their build marker; unset, releases are versioned and semver decides.
  *
  * Read at call time, not at module load: Electron sets these before starting the
  * in-process server, and ESM imports run before that.
  */
+const DEFAULT_UPDATE_REPO = 'rubimpassos/openchamber';
+
 function getForkReleaseSource() {
-  const repo = (process.env.OPENCHAMBER_UPDATE_REPO || '').trim();
+  const repo = (process.env.OPENCHAMBER_UPDATE_REPO || DEFAULT_UPDATE_REPO).trim();
   const tag = (process.env.OPENCHAMBER_UPDATE_RELEASE_TAG || '').trim();
   // Also keeps a malformed value out of the request URL.
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !tag) return null;
-  return { repo, tag };
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return null;
+  return { repo, tag: tag || null };
 }
 
 /**
@@ -56,30 +63,59 @@ function extractVersion(value) {
 }
 
 /**
- * Resolve the fork's rolling release. Throws on transport/HTTP failure so the
- * caller reports a failed check: a fork build has no second source, and
- * answering "no update" here would make an unreachable GitHub look up to date.
+ * Throws on transport/HTTP failure so the caller reports a failed check: a fork
+ * build has no second source, and answering "no update" here would make an
+ * unreachable GitHub look up to date.
  */
-async function checkForkRelease(currentVersion, source) {
-  const response = await fetch(
-    `${GITHUB_API_URL}/repos/${source.repo}/releases/tags/${encodeURIComponent(source.tag)}`,
-    {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'openchamber-update-check',
-      },
-      signal: AbortSignal.timeout(10000),
+async function fetchForkRelease(source) {
+  const endpoint = source.tag
+    ? `releases/tags/${encodeURIComponent(source.tag)}`
+    : 'releases/latest';
+  const response = await fetch(`${GITHUB_API_URL}/repos/${source.repo}/${endpoint}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'openchamber-update-check',
     },
-  );
+    signal: AbortSignal.timeout(10000),
+  });
+
+  // A fork that has not published a versioned release yet answers 404 here, and
+  // so does one whose releases are all prereleases. That is "nothing to update
+  // to", not a failed check. A rolling tag is different: it is supposed to
+  // exist, so its 404 stays an error.
+  if (response.status === 404 && !source.tag) return null;
 
   if (!response.ok) {
-    throw new Error(`GitHub returned ${response.status} for ${source.repo} release "${source.tag}"`);
+    const target = source.tag ? `release "${source.tag}"` : 'the latest release';
+    throw new Error(`GitHub returned ${response.status} for ${source.repo} ${target}`);
   }
 
-  const release = await response.json();
+  return response.json();
+}
+
+async function checkForkRelease(currentVersion, source) {
+  const release = await fetchForkRelease(source);
+  if (!release) return { available: false, currentVersion };
+
+  const body = typeof release?.body === 'string' && release.body.trim() ? release.body : undefined;
+  const releaseUrl = typeof release?.html_url === 'string' ? release.html_url : undefined;
   const assetNames = Array.isArray(release?.assets)
     ? release.assets.map((asset) => (typeof asset?.name === 'string' ? asset.name : '')).join(' ')
     : '';
+
+  if (!source.tag) {
+    // Versioned releases carry the version in the tag, so semver decides, and a
+    // republished or rolled-back release cannot offer a build already installed.
+    const remoteVersion = extractVersion(release?.tag_name) || extractVersion(release?.name);
+    return {
+      available: Boolean(remoteVersion) && compareVersions(remoteVersion, currentVersion) > 0,
+      version: remoteVersion || undefined,
+      currentVersion,
+      body,
+      releaseUrl,
+    };
+  }
+
   const searchableReleaseText = [release?.name, release?.tag_name, assetNames]
     .filter((value) => typeof value === 'string' && value)
     .join(' ');
@@ -88,14 +124,15 @@ async function checkForkRelease(currentVersion, source) {
   const remoteVersion = extractVersion(release?.name) || extractVersion(assetNames) || remoteBuildId;
 
   return {
-    // Comparing build markers, because both builds keep the same upstream
-    // semver. Without a marker on either side there is nothing to compare, so
-    // report no update rather than offering the build already installed.
+    // A rolling release keeps one tag and the upstream semver, so build markers
+    // are what tell two builds apart. Without a marker on either side there is
+    // nothing to compare, so report no update rather than offering the build
+    // already installed.
     available: Boolean(remoteBuildId && installedBuildId && remoteBuildId !== installedBuildId),
     version: remoteVersion || undefined,
     currentVersion,
-    body: typeof release?.body === 'string' && release.body.trim() ? release.body : undefined,
-    releaseUrl: typeof release?.html_url === 'string' ? release.html_url : undefined,
+    body,
+    releaseUrl,
   };
 }
 

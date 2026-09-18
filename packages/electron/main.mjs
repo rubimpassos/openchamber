@@ -64,12 +64,13 @@ const DEV_APP_USER_MODEL_ID = 'dev.openchamber.turbo.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
 
-// Turbo has no electron-updater feed, so the in-process web server answers the
-// update check instead. Point it at the fork's rolling prerelease; the official
-// update service only knows upstream versions and would report one of those.
+// electron-updater serves the desktop window, but the in-process web server
+// answers the same question for browsers attached to this host. Point it at the
+// fork; the official update service only knows upstream versions and would
+// report one of those. No release tag: this fork publishes versioned releases,
+// so the check reads whichever is latest and compares semver.
 if (TURBO_BUILD) {
   process.env.OPENCHAMBER_UPDATE_REPO = 'rubimpassos/openchamber';
-  process.env.OPENCHAMBER_UPDATE_RELEASE_TAG = 'turbo-latest';
 }
 
 const getLoginItemOptions = () => {
