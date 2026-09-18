@@ -145,6 +145,39 @@ async function checkForkRelease(currentVersion, source) {
   };
 }
 
+/**
+ * What `openchamber update` should install.
+ *
+ * Upstream installs the npm package. A fork is absent from npm, so it installs
+ * the tarball its release carries; falling back to `@latest` there would replace
+ * the fork with the official build, which is the one thing this must never do.
+ * So a configured fork with no usable tarball is an error, not a fallback.
+ */
+export async function resolveUpdateTarget() {
+  const source = getForkReleaseSource();
+  if (!source) return { target: `${PACKAGE_NAME}@latest`, origin: 'npm' };
+
+  const release = await fetchForkRelease(source);
+  if (!release) {
+    throw new Error(`${source.repo} has published no release to update from yet.`);
+  }
+
+  const tarball = (Array.isArray(release.assets) ? release.assets : []).find((asset) => (
+    typeof asset?.name === 'string'
+    && asset.name.endsWith('.tgz')
+    && typeof asset.browser_download_url === 'string'
+  ));
+
+  if (!tarball) {
+    throw new Error(
+      `The ${source.repo} release carries no .tgz asset to install. `
+      + `This build is not published to npm, so there is nothing else to update from.`,
+    );
+  }
+
+  return { target: tarball.browser_download_url, origin: 'fork' };
+}
+
 function getOpenChamberConfigDir() {
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA;
@@ -776,19 +809,26 @@ function isPackageInstalledWith(pm) {
 }
 
 /**
- * Get the update command for the detected package manager
+ * Get the update command for the detected package manager.
+ *
+ * `target` is whatever the package manager should install. It defaults to the
+ * npm package; a fork passes the tarball URL from its own release instead,
+ * because it publishes no npm package and `@latest` would fetch the official
+ * build over it. Every supported package manager installs a URL with the same
+ * subcommand it uses for a package name.
  */
-export function getUpdateCommand(pm = detectPackageManager()) {
+export function getUpdateCommand(pm = detectPackageManager(), target = `${PACKAGE_NAME}@latest`) {
   const pmCommand = quoteCommand(resolvePackageManagerCommand(pm));
+  const quotedTarget = quoteCommand(target);
   switch (pm) {
     case 'pnpm':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g ${quotedTarget}`;
     case 'yarn':
-      return `${pmCommand} global add ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} global add ${quotedTarget}`;
     case 'bun':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g ${quotedTarget}`;
     default:
-      return `${pmCommand} install -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} install -g ${quotedTarget}`;
   }
 }
 
@@ -939,7 +979,7 @@ export async function checkForUpdates(options = {}) {
  * Execute the update (used by CLI)
  */
 export function executeUpdate(pm = detectPackageManager(), options = {}) {
-  const command = getUpdateCommand(pm);
+  const command = options?.target ? getUpdateCommand(pm, options.target) : getUpdateCommand(pm);
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
     console.log(`Running: ${command}`);
