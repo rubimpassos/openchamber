@@ -126,9 +126,11 @@ import { createOpenChamberControlService } from './lib/openchamber-control/servi
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import webPush from 'web-push';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
+import { applyForkReleaseSource } from './lib/fork-identity.js';
 
 // Background CLI launches enter here in a fresh process, without CLI defaults.
 applyConnectAttemptTimeout();
+applyForkReleaseSource();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
