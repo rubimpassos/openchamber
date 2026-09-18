@@ -1,10 +1,16 @@
-# Sincroniza o fork com o upstream diariamente:
-#   1. `main`  = espelho exato de openchamber/openchamber@main (reset --hard)
-#   2. `turbo` = pilha de patches do OpenChamber Turbo, rebaseada sobre o novo main
-# Em conflito de rebase: aborta, abre issue e mantém `turbo` intacta.
+# Keeps this fork current with upstream, daily.
 #
-# IMPORTANTE: `turbo` é a branch default do fork — workflows `schedule` só
-# disparam a partir da branch default, então este arquivo precisa viver nela.
+# `main` is the only branch: upstream's history with this fork's patches rebased
+# on top. A clean rebase bumps the patch version, tags it, and releases, so an
+# upstream release reaches users as an ordinary update in the app. A conflict
+# aborts and opens an issue, leaving `main` untouched.
+#
+# Versioning: the fork keeps its own plain-semver line rather than upstream's
+# number with a suffix. A `-fork.N` prerelease would be skipped by
+# electron-updater (autoUpdater.allowPrerelease is false) and would compare equal
+# between two fork builds in compareVersions, which strips everything after `-`.
+# Colliding with an upstream version number is harmless: this fork only ever
+# reads its own releases.
 name: sync-upstream
 
 on:
@@ -15,7 +21,7 @@ on:
 permissions:
   contents: write
   issues: write
-  # `gh workflow run` no passo de build precisa disso.
+  # `gh workflow run` in the release step needs this.
   actions: write
 
 concurrency:
@@ -25,11 +31,10 @@ concurrency:
 env:
   UPSTREAM_REPO: https://github.com/openchamber/openchamber.git
   UPSTREAM_BRANCH: main
-  MIRROR_BRANCH: main
-  PATCH_BRANCH: turbo
-  BUILD_WORKFLOW: build-turbo.yml
-  # Num fork, `gh` resolve o repo pro parent (openchamber/openchamber) e devolve
-  # 403; fixar no próprio fork é o que faz issue e dispatch funcionarem.
+  BRANCH: main
+  RELEASE_WORKFLOW: release.yml
+  # In a fork `gh` resolves the repo to the parent and returns 403; pinning it to
+  # this fork is what makes issue creation and workflow dispatch work.
   GH_REPO: ${{ github.repository }}
 
 jobs:
@@ -38,8 +43,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: turbo
+          ref: main
           fetch-depth: 0
+
+      # bump-version.mjs refreshes the Bun lockfile, so the runner needs Bun.
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
       - name: Configure git identity
         run: |
@@ -51,40 +60,64 @@ jobs:
           git remote add upstream "$UPSTREAM_REPO"
           git fetch upstream "$UPSTREAM_BRANCH"
 
-      - name: Mirror main
-        run: |
-          git checkout -B "$MIRROR_BRANCH" "upstream/$UPSTREAM_BRANCH"
-          git push --force origin "$MIRROR_BRANCH"
-
-      - name: Rebase patch branch
+      - name: Rebase onto upstream
         id: rebase
         run: |
-          git checkout "$PATCH_BRANCH"
+          set -euo pipefail
 
           if git merge-base --is-ancestor "upstream/$UPSTREAM_BRANCH" HEAD; then
-            echo "$PATCH_BRANCH já contém o upstream mais recente; nada a fazer."
+            echo "$BRANCH already contains the latest upstream; nothing to do."
             echo "status=up-to-date" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # Keep a restore point before rewriting the only branch this fork has.
+          git tag "sync-backup-$(date +%F-%H%M)"
+          git push --tags origin
+
           if git rebase "upstream/$UPSTREAM_BRANCH"; then
-            git push --force-with-lease origin "$PATCH_BRANCH"
             echo "status=rebased" >> "$GITHUB_OUTPUT"
           else
             git rebase --abort
             echo "status=conflict" >> "$GITHUB_OUTPUT"
           fi
 
-      # O push acima sai com o GITHUB_TOKEN, e push feito com esse token não
-      # dispara workflow nenhum. Sem este dispatch a `turbo` sobe atualizada mas
-      # o instalador publicado continua o antigo — que é exatamente o sintoma que
-      # este workflow existe pra evitar. `workflow_dispatch` é uma das duas
-      # exceções que o GITHUB_TOKEN tem permissão de disparar.
-      - name: Build updated installer
+      - name: Bump the fork version
+        id: version
+        if: steps.rebase.outputs.status == 'rebased'
+        run: |
+          set -euo pipefail
+          current=$(node -p "require('./package.json').version")
+          next=$(node -p "const [a,b,c]=require('./package.json').version.split('.').map(Number); \`\${a}.\${b}.\${c+1}\`")
+          node scripts/bump-version.mjs "$next"
+          git add -A
+          git commit -m "release v$next
+
+          Upstream sync: rebased this fork's patches onto upstream/$UPSTREAM_BRANCH.
+          Previous fork version was $current."
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Push branch and tag
+        if: steps.rebase.outputs.status == 'rebased'
+        run: |
+          set -euo pipefail
+          git push --force-with-lease origin "$BRANCH"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      # A push made with GITHUB_TOKEN triggers no workflow, so the tag above will
+      # not start the release on its own. Without this dispatch the branch moves
+      # but the published installer stays old — the exact symptom this workflow
+      # exists to prevent. `workflow_dispatch` is one of the two events
+      # GITHUB_TOKEN is allowed to trigger.
+      - name: Release the updated build
         if: steps.rebase.outputs.status == 'rebased'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run "$BUILD_WORKFLOW" --ref "$PATCH_BRANCH"
+        run: |
+          gh workflow run "$RELEASE_WORKFLOW" \
+            --ref "$BRANCH" \
+            -f version="${{ steps.version.outputs.version }}"
 
       - name: Open conflict issue
         if: steps.rebase.outputs.status == 'conflict'
@@ -95,8 +128,8 @@ jobs:
           if [ "$existing" -eq 0 ]; then
             gh label create sync-conflict --color D93F0B --force
             gh issue create \
-              --title "Conflito no sync com upstream ($(date +%F))" \
+              --title "Upstream sync conflict ($(date +%F))" \
               --label sync-conflict \
-              --body "$(printf 'O rebase automático de `%s` sobre `upstream/%s` falhou.\n\nResolver localmente:\n```bash\ngit fetch upstream\ngit checkout %s\ngit tag %s-backup-%s\ngit rebase upstream/%s   # resolver conflitos\ngit push --force-with-lease origin %s\n```' "$PATCH_BRANCH" "$UPSTREAM_BRANCH" "$PATCH_BRANCH" "$PATCH_BRANCH" "$(date +%F)" "$UPSTREAM_BRANCH" "$PATCH_BRANCH")"
+              --body "$(printf 'Rebasing `%s` onto `upstream/%s` failed. The branch was left untouched.\n\nResolve it locally:\n```bash\ngit fetch upstream\ngit checkout %s\ngit rebase upstream/%s   # resolve the conflicts\ngit push --force-with-lease origin %s\n```' "$BRANCH" "$UPSTREAM_BRANCH" "$BRANCH" "$UPSTREAM_BRANCH" "$BRANCH")"
           fi
           exit 1
