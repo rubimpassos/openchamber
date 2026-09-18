@@ -73,6 +73,9 @@ import {
   logStatus,
 } from './cli-output.js';
 import { applyConnectAttemptTimeout } from '../server/lib/network-defaults.js';
+import { applyForkReleaseSource } from '../server/lib/fork-identity.js';
+
+applyForkReleaseSource();
 
 // The CLI process performs provider fetches (quota/usage, update notes) under
 // Node/undici, whose happy-eyeballs default aborts each connect attempt after

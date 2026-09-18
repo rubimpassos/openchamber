@@ -12,8 +12,18 @@ const __dirname = path.dirname(__filename);
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
-const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
-const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
+const UPSTREAM_REPO = 'openchamber/openchamber';
+
+// Release links follow the repo the update check reads, so a fork build never
+// sends the user to the official releases for the build it is offering, and the
+// Android APK it advertises is its own.
+function releasesApiUrl() {
+  return `${GITHUB_API_URL}/repos/${getForkReleaseSource()?.repo ?? UPSTREAM_REPO}/releases`;
+}
+
+function releasesWebUrl() {
+  return `https://github.com/${getForkReleaseSource()?.repo ?? UPSTREAM_REPO}/releases`;
+}
 let cachedDetectedPm = null;
 
 function getSpawnSyncBaseOptions() {
@@ -23,12 +33,13 @@ const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.
 const GITHUB_API_URL = 'https://api.github.com';
 
 /**
- * This is a fork. It publishes its own releases, is absent from npm, and
+ * A fork publishes its own releases and is absent from npm, and
  * `api.openchamber.dev` only knows official versions — asking either would
- * report an upstream build as if it were this one. So the update check reads
- * this fork's GitHub releases, for every surface: the desktop window, a browser
- * attached to it, and the CLI. Electron also exports the same value so a server
- * it starts agrees with it.
+ * report an upstream build as if it were the fork's. With
+ * `OPENCHAMBER_UPDATE_REPO` set, the check reads that repo's releases instead of
+ * the npm and update-service paths below. Every fork entry point sets it, so the
+ * desktop window, a browser attached to it, and the CLI agree. Unset, this is
+ * upstream and nothing here changes.
  *
  * `OPENCHAMBER_UPDATE_RELEASE_TAG` picks between the two release models. Set, it
  * names one rolling release rewritten in place and builds are told apart by
@@ -37,10 +48,8 @@ const GITHUB_API_URL = 'https://api.github.com';
  * Read at call time, not at module load: Electron sets these before starting the
  * in-process server, and ESM imports run before that.
  */
-const DEFAULT_UPDATE_REPO = 'rubimpassos/openchamber';
-
 function getForkReleaseSource() {
-  const repo = (process.env.OPENCHAMBER_UPDATE_REPO || DEFAULT_UPDATE_REPO).trim();
+  const repo = (process.env.OPENCHAMBER_UPDATE_REPO || '').trim();
   const tag = (process.env.OPENCHAMBER_UPDATE_RELEASE_TAG || '').trim();
   // Also keeps a malformed value out of the request URL.
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return null;
@@ -211,7 +220,7 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
   }
 
   try {
-    const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/v${version}`, {
+    const response = await fetch(`${releasesApiUrl()}/tags/v${version}`, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': 'openchamber-update-check',
@@ -273,7 +282,7 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
     if (versionComparison < 0) return null;
 
-    const releaseUrl = `${GITHUB_RELEASES_URL}/tag/v${data.latestVersion}`;
+    const releaseUrl = `${releasesWebUrl()}/tag/v${data.latestVersion}`;
     const downloadUrl = typeof data.downloadUrl === 'string'
       ? data.downloadUrl
       : typeof data.download?.url === 'string'
@@ -918,7 +927,7 @@ export async function checkForUpdates(options = {}) {
     version: latestVersion,
     currentVersion,
     body: changelog,
-    releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${latestVersion}`,
+    releaseUrl: `${releasesWebUrl()}/tag/v${latestVersion}`,
     downloadUrl,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
