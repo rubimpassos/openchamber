@@ -113,6 +113,11 @@ jobs:
     if: inputs.build_android
     runs-on: ubuntu-latest
     needs: resolve-version
+    # The keystore secrets live in this environment, not at repository level, so
+    # without this the signing step reads empty values and fails its own guard.
+    # The environment also requires a manual review, which is deliberate: it
+    # keeps unreviewed upstream code from being signed with this fork's key.
+    environment: signing
     permissions:
       contents: write
     steps:
