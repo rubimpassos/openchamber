@@ -10,7 +10,14 @@
 // Any failure (network, 404, unexpected shape) yields null: the update is
 // still offered, only without notes.
 
-export const CHANGELOG_INDEX_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/changelog/index.json';
+// A fork build must not describe its update with the official project's notes,
+// so the index follows the same repository the update check reads. Read at call
+// time: Electron sets the variable before starting the in-process server.
+const changelogIndexUrl = () => {
+  const repo = (process.env.OPENCHAMBER_UPDATE_REPO || '').trim();
+  const source = /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : 'openchamber/openchamber';
+  return `https://raw.githubusercontent.com/${source}/main/changelog/index.json`;
+};
 
 const GROUPS = [
   ['new', 'New'],
@@ -74,7 +81,7 @@ export function renderUpdateNotes(index, fromVersion, toVersion, compareVersions
 export async function fetchUpdateNotes(fromVersion, toVersion, compareVersions, options = {}) {
   const fetchImpl = options.fetch ?? fetch;
   try {
-    const response = await fetchImpl(CHANGELOG_INDEX_URL, { signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
+    const response = await fetchImpl(changelogIndexUrl(), { signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
     if (!response.ok) return null;
     return renderUpdateNotes(await response.json(), fromVersion, toVersion, compareVersions);
   } catch {

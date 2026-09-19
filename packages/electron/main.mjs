@@ -23,7 +23,7 @@ import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
-import { resolveUpdaterFeed } from './updater-feed.mjs';
+import { PRODUCTION_UPDATER_FEED, resolveUpdaterFeed } from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
@@ -3254,6 +3254,33 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
 
 const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareSemver);
 
+/**
+ * Release notes straight from the offered release.
+ *
+ * `autoUpdater.fullChangelog` makes electron-updater hand back an array of
+ * `{ version, note }`, not a string, and the note is the atom feed's HTML. The
+ * update dialog renders Markdown and passes no raw HTML through, so neither
+ * shape is usable. Upstream never notices: it ships `changelog/<version>.md`
+ * and the reader below always answers first. This fork generates its notes at
+ * release time, so that reader finds nothing and the dialog came up blank.
+ *
+ * The releases API returns the body as the Markdown it was written in.
+ */
+const fetchReleaseNotesFromFeed = async (version) => {
+  if (!version) return null;
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${PRODUCTION_UPDATER_FEED.owner}/${PRODUCTION_UPDATER_FEED.repo}/releases/tags/v${encodeURIComponent(version)}`,
+      { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'openchamber-update-check' }, signal: AbortSignal.timeout(10000) },
+    );
+    if (!response.ok) return null;
+    const release = await response.json();
+    return typeof release?.body === 'string' && release.body.trim() ? release.body : null;
+  } catch {
+    return null;
+  }
+};
+
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
 
 // Async variants. sips + mdfind via spawnSync blocked the Electron main event
@@ -4563,7 +4590,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
-        await parseRelevantChangelogNotes(currentVersion, nextVersion);
+        await parseRelevantChangelogNotes(currentVersion, nextVersion) ||
+        await fetchReleaseNotesFromFeed(nextVersion);
       state.pendingUpdate = pendingUpdate;
       return {
         available,
