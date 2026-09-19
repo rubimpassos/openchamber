@@ -31,7 +31,11 @@ jobs:
       release_upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
+      # Full history: the notes fall back to the commit range since the previous
+      # tag when no changelog entry exists.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
 
       - name: Get version
         id: get_version
@@ -47,13 +51,41 @@ jobs:
             echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Extract changelog for release
+      # Upstream hand-writes changelog/<version>.md before tagging. This fork
+      # releases automatically on every upstream sync, so most releases have no
+      # entry; requiring one would fail every automated release. Use the entry
+      # when it exists, otherwise summarise the commits since the previous tag.
+      - name: Build release notes
         id: release_notes
         env:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          title=$(node scripts/changelog/release-notes.mjs "$VERSION" artifacts/release-notes.md)
-          echo "name=OpenChamber v$VERSION: $title" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          mkdir -p artifacts
+
+          if [[ -f "changelog/$VERSION.md" ]]; then
+            title=$(node scripts/changelog/release-notes.mjs "$VERSION" artifacts/release-notes.md)
+            echo "name=OpenChamber Turbo v$VERSION: $title" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          previous=$(git tag --list 'v*' --sort=-version:refname | grep -v "^v$VERSION$" | head -n 1 || true)
+          {
+            echo "Automated build of the OpenChamber Turbo fork."
+            echo
+            echo "Installs beside the official OpenChamber and updates from this repository."
+            echo
+            if [[ -n "$previous" ]]; then
+              echo "### Changes since $previous"
+              echo
+              git log --no-merges --pretty='- %s' "$previous..HEAD"
+            else
+              echo "### Commits on top of upstream"
+              echo
+              git log --no-merges --pretty='- %s' -20
+            fi
+          } > artifacts/release-notes.md
+          echo "name=OpenChamber Turbo v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         id: create_release
