@@ -16,6 +16,12 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, auth-state bootstrap, and HMR sync helpers.
 - `packages/web/server/lib/opencode/bootstrap-runtime.js`: base app bootstrap runtime for status/auth/tts/notification/OpenChamber route wiring.
+  It registers `integration-control/routes.js` before status routes, common body
+  parsers, agent-tool routes, and UI/client auth. The dedicated integration POST
+  consumes only its own bearer credential; its namespace guard rejects integration
+  credentials on other HTTP routes and closes WebSocket upgrades before connection.
+  `server/index.js` supplies the same Control Service used by the ordinary control
+  adapter, plus the existing project registry and directory validator.
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration with deferred-apply semantics (`restartDeferred` payloads; explicit apply via `POST /api/config/reload`).

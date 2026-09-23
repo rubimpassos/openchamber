@@ -1798,6 +1798,9 @@ async function main(options = {}) {
   let tunnelRuntimeContextHolder = null;
 
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
+    openChamberControlService,
+    sanitizeProjects,
+    validateDirectoryPath,
     process,
     openchamberVersion: OPENCHAMBER_VERSION,
     runtimeName: process.env.OPENCHAMBER_RUNTIME || 'web',
