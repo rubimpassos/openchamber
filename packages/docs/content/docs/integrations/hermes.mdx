@@ -1,0 +1,201 @@
+---
+title: Hermes integration contract
+description: Version 1 of the closed request and response contract shared by Hermes and OpenChamber.
+---
+
+## Scope
+
+This page defines the wire contract for `/api/openchamber/integration/control`.
+The integration adapter authenticates and authorizes requests before calling
+the native control service. The pure `contract.js` module validates shapes
+without making network calls or establishing authorization.
+
+Every request has exactly these fields:
+
+```json
+{"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000001","action":"projects.list","input":{}}
+```
+
+Every authenticated response has `schemaVersion`, the matching UUID `requestId`, the server's
+`domainId`, the matching `action`, and `ok`. Success requires `data` and forbids
+`error`. Failure requires `error` and forbids `data`. Clients must check the
+request ID, action, and expected domain against their request context.
+Schema validation alone cannot establish that correlation.
+
+## Actions
+
+An unmarked field is required. A question mark marks an optional field.
+Unknown fields are rejected at every object level, never silently removed.
+
+| Action | Admitted input |
+| --- | --- |
+| `projects.list` | Empty object |
+| `session.list` | `projectId`, `limit` integer 1–100, default 10; `all` boolean, default false |
+| `session.create` | `projectId`, `title?`, `prompt?`, `model?`, `agent?`, `variant?`, `worktree?` |
+| `session.send` | `projectId`, `sessionId`, `prompt`, `model?`, `agent?`, `variant?` |
+| `session.fork` | `projectId`, `sessionId`, `messageId?`, `prompt`, `model?`, `agent?`, `variant?` |
+| `session.status` | `projectId`, `sessionId` |
+| `session.messages` | `projectId`, `sessionId`, `limit` integer 1–100, default 10; `lastAssistant?` boolean |
+
+### Native fork compatibility
+
+The planning table marked the fork prompt optional. At the pinned OpenChamber
+revision `50484e7b0f73c6729a10c67adb76825f976da2e1`, the native
+`openchamber-sessions/routes.js` function `runExisting` rejects a missing prompt
+before forking. Version 1 therefore requires `prompt` for fork. `messageId`
+remains optional and maps to the native SDK's `messageID` boundary. There is
+no synthetic prompt or alternate fork operation.
+
+The future adapter must resolve `projectId` to an authorized native scope.
+For `session.messages` with `lastAssistant: true`, it must omit the native
+`limit` parameter because the native service rejects that combination and
+selects the last assistant message itself. The wire default remains 10.
+These translations do not run in the contract module.
+
+## Limits and values
+
+- The complete JSON body is at most 131,072 UTF-8 bytes, including whitespace.
+  Apply this limit to incoming raw bytes before decoding or parsing at the HTTP
+  boundary. The pure parser accepts JSON text and measures its UTF-8 encoding.
+- Prompts contain 1–16,000 JavaScript UTF-16 code units and cannot be all whitespace.
+  Parsing preserves their text. Supplementary Unicode characters use two units.
+- IDs contain 1–200 ASCII letters, digits, underscores, or hyphens. Only
+  `requestId` uses UUID syntax. IDs are references, never filesystem paths.
+- Titles and labels contain 1–200 code units and cannot be all whitespace.
+- `model` is a provider/model string, up to 401 code units. The provider uses
+  ASCII letters, digits, dots, underscores, or hyphens; the model additionally
+  permits slashes and colons. Agent and variant names use letters, digits,
+  dots, underscores, or hyphens, with a maximum of 80 code units.
+- `worktree` is a new name, 1–80 ASCII letters, digits, underscores, or hyphens,
+  starting with a letter or digit. It is never an options object or path.
+  The native service determines the branch and base.
+- Each response contains at most 100 messages. Project and session lists are
+  also capped at 100 entries. Each message text is capped at 131,072 code units;
+  the full response byte limit still applies and can be more restrictive.
+
+The wire never accepts `contextDirectory`, `directory`, URL fields, `headers`,
+`token`, `goal`, `wait`, `cancel`, or permission options. It also rejects
+`branch`, `startRef`, `setUpstream`, timeout controls, and actions outside the
+seven listed above. Text inside prompts or messages is content, not transport
+configuration. There is no generic HTTP passthrough.
+
+## Response data
+
+The adapter must construct these projections explicitly. Never forward native
+objects wholesale, since native results include paths and other private fields.
+
+| Action | Exact data fields |
+| --- | --- |
+| `projects.list` | `projects`: array of objects with `id` and optional `label` |
+| `session.list` | `sessions`: array of objects with `id` and optional `title` |
+| `session.create`, `session.send` | `sessionId`, `promptDispatched` boolean |
+| `session.fork` | `sessionId`, `sourceSessionId`, `promptDispatched` boolean |
+| `session.status` | `sessionId`, `sessionStatus` |
+| `session.messages` | `sessionId`, `sessionStatus`, `messages` |
+
+`sessionStatus` has only `type`, one of `idle`, `busy`, `retry`, or `unknown`.
+Each message has `id`, `role` of `user` or `assistant`, and `text`.
+The adapter must retain native text-part ordering. `promptDispatched` reports
+observed dispatch, not mere request acceptance or completed work.
+
+## Errors
+
+Error objects have `code` and the exact public `message` below. HTTP status is
+adapter metadata, not an additional field in the wire error object.
+
+| HTTP status | Code | Sanitized message |
+| --- | --- | --- |
+| 401 | `UNAUTHORIZED` | Authentication required. |
+| 403 | `PROJECT_DENIED` | Project access denied. |
+| 403 | `ACTION_DENIED` | Action access denied. |
+| 404 | `SESSION_NOT_FOUND` | Session not found. |
+| 400 for invalid input, 500 for native execution/serialization failure | `INVALID_REQUEST` | Invalid integration request. |
+| 503 | `POLICY_UNAVAILABLE` | Integration policy unavailable. |
+
+A partial effect adds both `partial: true` and an authorized `sessionId` to
+`error`. Neither field can appear alone. Authorization must happen in the
+adapter before it includes that ID; a pure schema cannot prove ownership.
+Do not include upstream exceptions, rejected values, credentials, or paths.
+
+Before authentication, refusals contain only `{"error":{"code":"UNAUTHORIZED","message":"Authentication required."}}`
+or the corresponding fixed `POLICY_UNAVAILABLE` error. They do not disclose a
+domain or session ID. HP accepts this separate, closed shape only on HTTP
+401, 403 or 503 with a matching error code and message. It rejects unknown
+fields at both levels, including `partial`, `sessionId` and `data`. Full
+envelopes still require version, request, action and domain correlation.
+The tool adds its own request context when presenting a validated refusal;
+that context is not an identity claim from the unauthenticated receiver.
+
+If session creation succeeds but prompt dispatch throws, the session remains
+available. The lifecycle error carries `partial: true` and its `sessionId`;
+the authorized adapter preserves them in the HTTP 500 error. HP must retain
+both fields instead of converting that response to `INVALID_RESPONSE`.
+Reconcile with status or list before deciding whether to create again.
+
+HP applies a 5-second connect timeout and a 30-second total request deadline,
+including response-body consumption. HTTPX phase timeouts remain in place,
+but incremental chunks do not extend the total deadline. A timed-out mutation
+reports `OUTCOME_UNKNOWN` with its local request ID. There are no automatic
+retries, and cancellation of the HTTP wait does not prove the native operation
+was cancelled.
+
+The receiver emits one JSON `integration_control_request` event when an
+integration HTTP response finishes or the connection closes. The fields are
+`requestId`, `domainId`, `action`, `ok`, `statusCode` and `durationMs`.
+Unknown metadata is null; domain is set only after authentication. A connection
+closed before completion uses audit status 499. No prompt, conversation,
+exception, URL, token or header is logged by this event.
+
+## Operations (dev-server deployment)
+
+This section covers the operational side of running this contract against a
+real dev-server domain: token lifecycle, single ownership, and why
+cancellation is out of scope. It intentionally does not restate the wire
+shapes, limits, or error codes documented above. The full runbook —
+inventory, activation, cutover, rollback, and known environment limitations —
+lives in `DOMAINS.md` in the `dev-server` repository; the Hermes-side install
+and test instructions live in `README.md` in the `hermes-openchamber`
+repository.
+
+**Token prefix.** A credential authenticating a Hermes client against
+`/api/openchamber/integration/control` always starts with `oc_integration_`,
+issued by `packages/web/scripts/integration-credentials.mjs`. It is never the
+`oc_client_...` prefix used by human device pairing — that is a different
+mechanism serving a different actor. Seeing `oc_client_` anywhere in this
+flow (Hermes config, domain env file, logs) indicates misconfiguration, not a
+valid integration token.
+
+**Single ownership, never duplicated.** A domain's integration token is
+issued to exactly one `destinations` entry in exactly one Hermes process at a
+time. Revoking one credential and issuing a fresh one for the same domain
+invalidates the old value immediately, because `loadIntegrationPolicy()`
+reads the full policy file on every request with no cache — there is no
+window where both the old and new token validate simultaneously by design.
+
+**No cancellation, by decision.** The action set above is closed at seven
+entries and none of them cancels an in-flight mutation. This is not an
+oversight: the native Control Service this adapter dispatches into does not
+propagate `AbortSignal` into `create`/`send`/`fork` lifecycle calls today.
+Adding a wire-level `session.cancel` without that propagation would produce
+an action that appears to cancel work while doing nothing — worse than no
+action at all. A future `session.cancel` requires native Control Service
+changes first; it is not a gap this adapter can close on its own.
+
+`parseRequest` and `parseResponse` accept raw JSON text. `serializeRequest` and
+`serializeResponse` accept objects and validate before producing JSON text.
+All four return either `success: true` with `data`, or `success: false` with
+the structured `INVALID_REQUEST` error above. This local validation result is
+not another wire envelope. No response ID is invented for malformed requests.
+Exported Zod schemas validate shape; use the parse/serialize functions at the
+boundary to enforce total body size as well.
+
+## Shared fixtures
+
+`server/lib/integration-control/fixtures/` contains synthetic protocol examples
+and error cases. Hermes stores independent copies under
+`tests/fixtures/protocol/`. `manifest.json` records `fixtureSetVersion: 1.0.0`,
+schema version 1, and the SHA-256 of the exact bytes of each corpus file.
+The manifest does not hash itself. Update both copies and bump the fixture set
+version when the corpus changes. The contract test checks hashes, roundtrips,
+invalid cases, size boundaries, and byte-for-byte equality with the adjacent
+Hermes checkout. Tests use local files only.
