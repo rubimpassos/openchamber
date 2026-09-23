@@ -308,7 +308,7 @@ const parseArchiveRequest = (payload) => {
   return { ok: true, ids, archivedAt: archivedAt ?? Date.now() };
 };
 
-const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
+export const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
     const settings = await readSettingsFromDiskMigrated();
@@ -760,19 +760,27 @@ export const createOpenChamberSessionService = (dependencies) => {
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
-      dispatch = await dispatchPrompt({
-        client,
-        baseUrl,
-        authHeaders,
-        sessionID,
-        directory: sessionDirectory,
-        projectId: resolvedDirectory.projectId,
-        prompt,
-        goalInput,
-        requestedModel: model,
-        requestedAgent: agent,
-        requestedVariant: variant,
-      });
+      try {
+        dispatch = await dispatchPrompt({
+          client,
+          baseUrl,
+          authHeaders,
+          sessionID,
+          directory: sessionDirectory,
+          projectId: resolvedDirectory.projectId,
+          prompt,
+          goalInput,
+          requestedModel: model,
+          requestedAgent: agent,
+          requestedVariant: variant,
+        });
+      } catch (error) {
+        throw new OpenChamberControlError(
+          error instanceof Error ? error.message : 'Failed to dispatch created session',
+          Number(error?.statusCode) || 500,
+          { partial: true, partialAction: 'create', sessionId: sessionID, directory: sessionDirectory },
+        );
+      }
     }
 
     const result = {

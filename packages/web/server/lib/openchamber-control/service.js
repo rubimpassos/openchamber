@@ -567,5 +567,5 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
-  return { execute };
+  return { execute, resolveSessionDirectory };
 };
