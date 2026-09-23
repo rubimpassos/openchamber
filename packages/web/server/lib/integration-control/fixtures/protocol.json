@@ -1,0 +1,38 @@
+{
+  "valid": [
+    {
+      "request": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000001","action":"projects.list","input":{}},
+      "response": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000001","domainId":"domain_demo","action":"projects.list","ok":true,"data":{"projects":[{"id":"project_demo","label":"Synthetic project"}]}}
+    },
+    {
+      "request": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000002","action":"session.list","input":{"projectId":"project_demo"}},
+      "response": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000002","domainId":"domain_demo","action":"session.list","ok":true,"data":{"sessions":[{"id":"ses_demo","title":"Synthetic session"}]}}
+    },
+    {
+      "request": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000003","action":"session.create","input":{"projectId":"project_demo","title":"Synthetic session","prompt":"Describe the synthetic fixture.","model":"demo/model","agent":"build","variant":"low","worktree":"demo-worktree"}},
+      "response": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000003","domainId":"domain_demo","action":"session.create","ok":true,"data":{"sessionId":"ses_demo","promptDispatched":true}}
+    },
+    {
+      "request": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000004","action":"session.send","input":{"projectId":"project_demo","sessionId":"ses_demo","prompt":"Summarize the synthetic fixture."}},
+      "response": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000004","domainId":"domain_demo","action":"session.send","ok":true,"data":{"sessionId":"ses_demo","promptDispatched":true}}
+    },
+    {
+      "request": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000005","action":"session.fork","input":{"projectId":"project_demo","sessionId":"ses_demo","messageId":"msg_demo","prompt":"Continue this synthetic example."}},
+      "response": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000005","domainId":"domain_demo","action":"session.fork","ok":true,"data":{"sessionId":"ses_fork","sourceSessionId":"ses_demo","promptDispatched":true}}
+    },
+    {
+      "request": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000006","action":"session.status","input":{"projectId":"project_demo","sessionId":"ses_demo"}},
+      "response": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000006","domainId":"domain_demo","action":"session.status","ok":true,"data":{"sessionId":"ses_demo","sessionStatus":{"type":"idle"}}}
+    },
+    {
+      "request": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000007","action":"session.messages","input":{"projectId":"project_demo","sessionId":"ses_demo","limit":10,"lastAssistant":true}},
+      "response": {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000007","domainId":"domain_demo","action":"session.messages","ok":true,"data":{"sessionId":"ses_demo","sessionStatus":{"type":"idle"},"messages":[{"id":"msg_demo","role":"assistant","text":"Synthetic response."}]}}
+    }
+  ],
+  "invalid": [
+    {"name":"unknown-version","request":{"schemaVersion":2,"requestId":"00000000-0000-4000-8000-000000000001","action":"projects.list","input":{}}},
+    {"name":"forbidden-directory","request":{"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000002","action":"session.list","input":{"projectId":"project_demo","directory":"/synthetic"}}},
+    {"name":"excessive-limit","request":{"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000007","action":"session.messages","input":{"projectId":"project_demo","sessionId":"ses_demo","limit":101}}},
+    {"name":"fork-needs-prompt","request":{"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000005","action":"session.fork","input":{"projectId":"project_demo","sessionId":"ses_demo"}}}
+  ]
+}

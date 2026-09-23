@@ -1,0 +1,9 @@
+{
+  "valid": [
+    {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000005","domainId":"domain_demo","action":"session.fork","ok":false,"error":{"code":"INVALID_REQUEST","message":"Invalid integration request.","partial":true,"sessionId":"ses_fork"}}
+  ],
+  "invalid": [
+    {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000005","domainId":"domain_demo","action":"session.fork","ok":false,"error":{"code":"INVALID_REQUEST","message":"Invalid integration request.","partial":true}},
+    {"schemaVersion":1,"requestId":"00000000-0000-4000-8000-000000000005","domainId":"domain_demo","action":"session.fork","ok":false,"error":{"code":"INVALID_REQUEST","message":"Synthetic upstream detail must not escape."}}
+  ]
+}
