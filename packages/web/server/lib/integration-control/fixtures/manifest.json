@@ -1,0 +1,9 @@
+{
+  "fixtureSetVersion": "1.0.0",
+  "schemaVersion": 1,
+  "hashAlgorithm": "sha256",
+  "files": {
+    "errors.json": "75a0a67c13db0e268fba6efd695b9f68a96e7aebecec45a8140a87cd0584f40d",
+    "protocol.json": "0b4a8c7a8a9c71a4fdfdfe6686f1916dc70f6dae021a2b8eb395eae6650d1a07"
+  }
+}
