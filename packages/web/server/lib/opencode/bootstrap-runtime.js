@@ -1,4 +1,5 @@
 import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
+import { registerIntegrationControlRoutes } from '../integration-control/routes.js';
 
 export const createBootstrapRuntime = (dependencies) => {
   const {
@@ -69,6 +70,9 @@ export const createBootstrapRuntime = (dependencies) => {
       pluginNotificationEmitter,
       desktopUpdater,
       skipBodyParsing,
+      openChamberControlService,
+      sanitizeProjects,
+      validateDirectoryPath,
     } = options;
 
     const uiAuthController = createUiAuth({
@@ -80,6 +84,15 @@ export const createBootstrapRuntime = (dependencies) => {
     if (uiAuthController.enabled) {
       console.log('UI password protection enabled for browser sessions');
     }
+
+    // Dedicated credentials must never reach common parsers or auth fallbacks.
+    registerIntegrationControlRoutes(app, {
+      controlService: openChamberControlService,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+      server,
+    });
 
     registerServerStatusRoutes(app, {
       express,
