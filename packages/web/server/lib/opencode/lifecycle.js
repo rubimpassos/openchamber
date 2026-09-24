@@ -5,6 +5,17 @@ import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
 
+// OpenChamber's own UI credentials and session-signing secret must never reach
+// the managed OpenCode process (or anything it spawns).
+const OPENCHAMBER_PRIVATE_ENV_KEYS = ['OPENCHAMBER_UI_PASSWORD', 'OPENCHAMBER_UI_PASSWORD_HASH', 'OPENCODE_JWT_SECRET'];
+
+export const stripOpenChamberPrivateEnv = (env) => {
+  for (const key of OPENCHAMBER_PRIVATE_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
+};
+
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -714,13 +725,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: managedStartupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: stripAppImageArgv0Leak(applyProviderEnvAliases({
+        env: stripOpenChamberPrivateEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
           ...shellEnv,
           ...process.env,
           ...managedOpenCodeEnv,
           PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
-        })),
+        }))),
       });
 
       if (!serverInstance || !serverInstance.url) {
