@@ -23,6 +23,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getTunnelUrl,
       verboseRequestLogs,
       uiPassword,
+      uiPasswordHash,
       tunnelAuthController,
       remoteClientAuthRuntime,
       clientPairingRuntime,
@@ -68,6 +69,7 @@ export const createBootstrapRuntime = (dependencies) => {
 
     const uiAuthController = createUiAuth({
       password: uiPassword,
+      passwordHash: uiPasswordHash,
       readSettingsFromDiskMigrated,
       clientAuthController: remoteClientAuthRuntime,
     });

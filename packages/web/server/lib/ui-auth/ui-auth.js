@@ -5,6 +5,12 @@ import path from 'path';
 import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { sessionCookieNameForRequest } from './session-cookie.js';
+import {
+  deriveUiPasswordKey,
+  isUiPasswordHashSet,
+  normalizeUiPassword,
+  parseUiPasswordHash,
+} from './ui-password-hash.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -379,12 +385,7 @@ const buildCookie = ({
   return attributes.join('; ');
 };
 
-const normalizePassword = (candidate) => {
-  if (typeof candidate !== 'string') {
-    return '';
-  }
-  return candidate.normalize().trim();
-};
+const normalizePassword = normalizeUiPassword;
 
 const isTrustedDeviceRequest = (value) => value === true;
 
@@ -433,13 +434,20 @@ function persistJwtSecret(secret) {
 
 export const createUiAuth = ({
   password,
+  passwordHash,
   cookieName = SESSION_COOKIE_NAME,
   sessionTtlMs = SESSION_TTL_MS,
   readSettingsFromDiskMigrated,
   clientAuthController = null,
   requireClientAuth = false,
 } = {}) => {
-  const normalizedPassword = normalizePassword(password);
+  // A configured hash wins over a plaintext password; a malformed hash fails
+  // closed instead of silently disabling authentication.
+  const parsedPasswordHash = isUiPasswordHashSet(passwordHash) ? parseUiPasswordHash(passwordHash) : null;
+  if (isUiPasswordHashSet(passwordHash) && !parsedPasswordHash) {
+    throw new Error('OPENCHAMBER_UI_PASSWORD_HASH is malformed; expected scrypt$<salt_base64>$<hash_base64>');
+  }
+  const normalizedPassword = parsedPasswordHash ? '' : normalizePassword(password);
   const urlAuthTokens = new Map();
 
   const sweepUrlAuthTokens = () => {
@@ -513,7 +521,7 @@ export const createUiAuth = ({
     client: clientAuth?.client || null,
   });
 
-  if (!normalizedPassword) {
+  if (!normalizedPassword && !parsedPasswordHash) {
     const setSessionCookie = (req, res, token, ttlMs = sessionTtlMs) => {
       const secure = isSecureRequest(req);
       const maxAgeSeconds = Math.floor(ttlMs / 1000);
@@ -648,10 +656,13 @@ export const createUiAuth = ({
     };
   }
 
-  const salt = crypto.randomBytes(16);
-  const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
+  const salt = parsedPasswordHash ? parsedPasswordHash.salt : crypto.randomBytes(16);
+  const expectedHash = parsedPasswordHash ? parsedPasswordHash.key : deriveUiPasswordKey(normalizedPassword, salt);
+  // Passkeys are bound to the configured credential; in hash mode the hash
+  // string itself is the stable credential material.
+  const passwordBindingInput = parsedPasswordHash ? passwordHash.trim() : normalizedPassword;
   let jwtSecret = getOrCreateJwtSecret();
-  let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
+  let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(passwordBindingInput).digest('hex');
   const resolveSessionTtlMs = (trustDevice) => (trustDevice ? TRUSTED_DEVICE_SESSION_TTL_MS : sessionTtlMs);
   let passkeyController = createUiPasskeys({
     passwordBinding,
@@ -660,7 +671,7 @@ export const createUiAuth = ({
 
   const rebuildPasskeyController = () => {
     passkeyController.dispose();
-    passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
+    passwordBinding = crypto.createHmac('sha256', jwtSecret).update(passwordBindingInput).digest('hex');
     passkeyController = createUiPasskeys({
       passwordBinding,
       readSettingsFromDiskMigrated,
@@ -715,7 +726,7 @@ export const createUiAuth = ({
       return false;
     }
     try {
-      const candidateHash = crypto.scryptSync(normalizedCandidate, salt, 64);
+      const candidateHash = deriveUiPasswordKey(normalizedCandidate, salt);
       return crypto.timingSafeEqual(candidateHash, expectedHash);
     } catch {
       return false;

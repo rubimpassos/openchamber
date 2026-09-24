@@ -20,6 +20,7 @@ import { createRequestSecurityRuntime } from './lib/security/request-security.js
 import {
   getUnauthenticatedLanErrorMessage,
   isNetworkExposedBindHost,
+  isUiAuthConfigured,
   isUnsafeUnauthenticatedLanAllowed,
 } from './lib/security/bind-host.js';
 import {
@@ -1678,9 +1679,12 @@ async function main(options = {}) {
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
     : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
+  const uiPasswordHash = options.uiPasswordHash !== undefined
+    ? options.uiPasswordHash
+    : (typeof process.env.OPENCHAMBER_UI_PASSWORD_HASH === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD_HASH : null);
   if (
     isNetworkExposedBindHost(effectiveBindHost)
-    && !(typeof uiPassword === 'string' && uiPassword.trim().length > 0)
+    && !isUiAuthConfigured({ password: uiPassword, passwordHash: uiPasswordHash })
     && !isUnsafeUnauthenticatedLanAllowed(process.env)
   ) {
     throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
@@ -1847,6 +1851,7 @@ async function main(options = {}) {
     getTunnelUrl: () => tunnelRuntimeContextHolder?.tunnelService?.getPublicUrl?.() ?? null,
     verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
+    uiPasswordHash,
     tunnelAuthController,
     remoteClientAuthRuntime,
     clientPairingRuntime,
