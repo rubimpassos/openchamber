@@ -59,6 +59,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     port: DEFAULT_PORT,
     host: undefined,
     uiPassword: process.env.OPENCHAMBER_UI_PASSWORD || undefined,
+    uiPasswordHash: process.env.OPENCHAMBER_UI_PASSWORD_HASH || undefined,
     json: false,
     all: false,
     follow: true,
@@ -585,6 +586,7 @@ COMMANDS:
   logs           Tail OpenChamber logs
   connect-url    Generate URL/QR for connecting another client
   update         Check for and install updates
+  hash-password  Read a UI password from stdin and print OPENCHAMBER_UI_PASSWORD_HASH
 
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
@@ -603,6 +605,7 @@ OPTIONS:
 ENVIRONMENT:
   OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
+  OPENCHAMBER_UI_PASSWORD_HASH Pre-hashed UI password (scrypt$<salt>$<hash>, see hash-password); wins over OPENCHAMBER_UI_PASSWORD
   OPENCHAMBER_API_ONLY         Set to true/1 to start API routes only
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096

@@ -5,8 +5,10 @@ import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import {
   getUnauthenticatedLanErrorMessage,
   isNetworkExposedBindHost,
+  isUiAuthConfigured,
   isUnsafeUnauthenticatedLanAllowed,
 } from '../../server/lib/security/bind-host.js';
+import { isUiPasswordHashSet, parseUiPasswordHash } from '../../server/lib/ui-auth/ui-password-hash.js';
 
 // Browser-unsafe ports (Fetch/Chromium restricted ports).
 const UNSAFE_BROWSER_PORTS = new Set([
@@ -153,9 +155,24 @@ function resolveServeUiPassword({ uiPassword, explicitUiPassword }) {
   return { password: undefined, generated: false };
 }
 
-function assertAuthenticatedNetworkExposure({ host, uiPassword }) {
+// OPENCHAMBER_UI_PASSWORD_HASH wins over a plaintext password unless the user
+// passed --ui-password explicitly. A malformed hash fails closed.
+function resolveServeUiPasswordHash({ uiPasswordHash, explicitUiPassword }) {
+  if (explicitUiPassword === true || !isUiPasswordHashSet(uiPasswordHash)) {
+    return null;
+  }
+  if (!parseUiPasswordHash(uiPasswordHash)) {
+    throw new TunnelCliError(
+      'OPENCHAMBER_UI_PASSWORD_HASH is malformed; expected scrypt$<salt_base64>$<hash_base64>',
+      EXIT_CODE.AUTH_CONFIG_ERROR,
+    );
+  }
+  return uiPasswordHash.trim();
+}
+
+function assertAuthenticatedNetworkExposure({ host, uiPassword, uiPasswordHash }) {
   const bindHost = resolveConfiguredBindHost(host);
-  if (hasUiPasswordConfigured(uiPassword)) {
+  if (isUiAuthConfigured({ password: uiPassword, passwordHash: uiPasswordHash })) {
     return;
   }
   if (!isNetworkExposedBindHost(bindHost)) {
@@ -180,5 +197,6 @@ export {
   hasUiPasswordConfigured,
   generateUiPassword,
   resolveServeUiPassword,
+  resolveServeUiPasswordHash,
   assertAuthenticatedNetworkExposure,
 };

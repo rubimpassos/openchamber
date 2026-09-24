@@ -6,6 +6,7 @@ import { DEFAULT_PORT } from './cli-args.js';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { getDataDir } from './cli-paths.js';
 import { hasUiPasswordConfigured } from './cli-network.js';
+import { hashUiPassword, isUiPasswordHashSet } from '../../server/lib/ui-auth/ui-password-hash.js';
 import { searchPathFor } from './cli-executables.js';
 
 const STARTUP_SERVICE_ID = 'dev.openchamber.web';
@@ -91,9 +92,15 @@ function collectStartupEnv(options = {}) {
       env.OPENCODE_BINARY = opencodeBinary.trim();
     }
   }
-  const uiPassword = hasUiPasswordConfigured(options.uiPassword) ? options.uiPassword : undefined;
-  if (uiPassword) {
-    env.OPENCHAMBER_UI_PASSWORD = uiPassword;
+  // Persist only the hash: an inherited hash as-is, a plaintext password hashed
+  // here. The plaintext never reaches the startup env file or service unit.
+  delete env.OPENCHAMBER_UI_PASSWORD;
+  delete env.OPENCHAMBER_UI_PASSWORD_HASH;
+  const uiPasswordHash = options.explicitUiPassword !== true && isUiPasswordHashSet(options.uiPasswordHash)
+    ? options.uiPasswordHash.trim()
+    : (hasUiPasswordConfigured(options.uiPassword) ? hashUiPassword(options.uiPassword) : undefined);
+  if (uiPasswordHash) {
+    env.OPENCHAMBER_UI_PASSWORD_HASH = uiPasswordHash;
   }
   if (options.apiOnly === true) {
     env.OPENCHAMBER_API_ONLY = 'true';
@@ -432,6 +439,7 @@ function disableStartupService() {
 
 
 export {
+  collectStartupEnv,
   getStartupStatus,
   enableStartupService,
   disableStartupService,
