@@ -44,6 +44,7 @@ import { createUpdateCommand } from './lib/commands-update.js';
 import { createConnectUrlCommand } from './lib/commands-connect-url.js';
 import { createLifecycleCommands } from './lib/commands-lifecycle.js';
 import { createServeCommand } from './lib/commands-serve.js';
+import { hashPasswordCommand } from './lib/commands-hash-password.js';
 import { createTunnelCommand, isValidTunnelDoctorResponse, shouldDisplayTunnelQr } from './lib/commands-tunnel.js';
 import {
   resolveDoctorPortStatuses,
@@ -208,6 +209,8 @@ const commands = {
 
   startup: startupCommand,
 
+  'hash-password': hashPasswordCommand,
+
   update: null,
 };
 
@@ -337,7 +340,7 @@ async function main() {
   }
 
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs', 'update', 'hash-password'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {
