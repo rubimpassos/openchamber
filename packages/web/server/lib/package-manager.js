@@ -164,6 +164,7 @@ export async function resolveUpdateTarget() {
 
   const tarball = (Array.isArray(release.assets) ? release.assets : []).find((asset) => (
     typeof asset?.name === 'string'
+    && asset.name.startsWith('openchamber-web-')
     && asset.name.endsWith('.tgz')
     && typeof asset.browser_download_url === 'string'
   ));

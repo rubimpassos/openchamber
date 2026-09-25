@@ -125,6 +125,20 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      # @openchamber/sdk nao vai para o npm: o tarball dele sai no mesmo release e o
+      # @openchamber/web passa a depender da URL desse asset.
+      - name: Create sdk tarball
+        working-directory: packages/sdk
+        run: bun pm pack
+
+      - name: Point web at the released sdk tarball
+        working-directory: packages/web
+        env:
+          SDK_URL: https://github.com/${{ github.repository }}/releases/download/v${{ needs.create-release.outputs.version }}/openchamber-sdk-${{ needs.create-release.outputs.version }}.tgz
+        run: |
+          test -f "../sdk/openchamber-sdk-${{ needs.create-release.outputs.version }}.tgz"
+          node -e 'const f="package.json",p=require("./"+f);p.dependencies["@openchamber/sdk"]=process.env.SDK_URL;require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\n")'
+
       - name: Create npm tarball
         working-directory: packages/web
         run: bun pm pack
@@ -134,7 +148,9 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
-          files: packages/web/*.tgz
+          files: |
+            packages/web/*.tgz
+            packages/sdk/*.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
