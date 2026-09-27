@@ -1,6 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
-import type { QuestionRequest } from '@/types/question';
+import type { AssistantMessage, Message, Part, QuestionRequest } from '@/lib/opencode/model';
 import {
   ORPHANED_QUESTION_ID_PREFIX,
   buildOrphanedAnswerMessage,
@@ -9,6 +8,7 @@ import {
   isOrphanedQuestionId,
   markOrphanedQuestionDismissed,
 } from './orphanedQuestions';
+import { projectQuestionForm, questionToForm } from '@/lib/opencode/projection';
 
 let createdLocalStorage = false;
 
@@ -62,22 +62,18 @@ const questionInput = {
   ],
 };
 
-function makeAssistantInfo(overrides?: Partial<Message>): Message {
+function makeAssistantInfo(overrides?: Partial<AssistantMessage>): Message {
   return {
     id: 'msg_assistant',
     sessionID: SESSION_ID,
     role: 'assistant',
     time: { created: 1 },
-    parentID: 'msg_user',
     modelID: 'model-x',
     providerID: 'provider-x',
-    mode: 'build',
     agent: 'build',
-    path: { cwd: '/w', root: '/w' },
     cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     ...overrides,
-  } as Message;
+  };
 }
 
 function makeQuestionToolPart(options?: {
@@ -119,6 +115,28 @@ function makeLiveQuestion(callID: string): QuestionRequest {
 }
 
 describe('collectOrphanedQuestionRequests', () => {
+  test('ignores a v2 idle marker after the interrupted assistant tool', () => {
+    const records = makeRecords([makeQuestionToolPart()]);
+    records.push({
+      info: { id: 'idle', sessionID: SESSION_ID, role: 'idle', time: { created: 2 }, outcome: 'interrupted' },
+      parts: [],
+    });
+    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [])).toHaveLength(1);
+  });
+
+  test('projects v2 form metadata to the original tool call identity', () => {
+    const question = makeLiveQuestion('call_1');
+    const form = {
+      ...questionToForm(question),
+      metadata: { kind: 'question', tool: { id: 'call_1', messageID: 'msg_assistant' } },
+    };
+    const projected = projectQuestionForm(form);
+    expect(projected?.tool).toEqual(question.tool);
+    expect(form.fields[0].key).toBe('q0');
+    expect(form.fields[0].type).toBe('string');
+    expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), projected ? [projected] : [])).toHaveLength(0);
+  });
+
   test('synthesizes a request from a stale running question tool part', () => {
     const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), []);
     expect(orphaned).toHaveLength(1);
@@ -170,7 +188,7 @@ describe('collectOrphanedQuestionRequests', () => {
 
   test('only considers the last message', () => {
     const records = [
-      { info: makeAssistantInfo({ id: 'msg_old' } as Partial<Message>), parts: [makeQuestionToolPart()] },
+      { info: makeAssistantInfo({ id: 'msg_old' }), parts: [makeQuestionToolPart()] },
       {
         info: { id: 'msg_user2', sessionID: SESSION_ID, role: 'user', time: { created: 2 } } as Message,
         parts: [],
@@ -186,7 +204,7 @@ describe('collectOrphanedQuestionRequests', () => {
     );
     expect(collectOrphanedQuestionRequests(SESSION_ID, userRecord, [])).toHaveLength(0);
 
-    const otherSession = makeRecords([makeQuestionToolPart()], makeAssistantInfo({ sessionID: 'ses_other' } as Partial<Message>));
+    const otherSession = makeRecords([makeQuestionToolPart()], makeAssistantInfo({ sessionID: 'ses_other' }));
     expect(collectOrphanedQuestionRequests(SESSION_ID, otherSession, [])).toHaveLength(0);
   });
 

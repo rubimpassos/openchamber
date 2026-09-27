@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { togglePermissionAutoAccept } from "../../components/chat/permissionAutoAccept"
 
 const storage = new Map<string, string>()
-const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
+const createSessionCalls: Array<{ title?: string; directory: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
 const savedVariantCalls: Array<string | undefined> = []
 const savedAgentModelCalls: Array<[string, string, string, string]> = []
@@ -12,6 +12,7 @@ const applyDefaultModelAgentSelectionCalls: Array<{
   projectDefaultVariant?: string | null
 }> = []
 const activateDirectoryCalls: Array<string | null | undefined> = []
+const activationOptions: Array<{ preserveManualModel?: boolean } | undefined> = []
 let configVariantOverride: string | null | undefined
 let activationPending: Promise<void> | undefined
 let selectionSource: 'auto' | 'manual' = 'auto'
@@ -135,8 +136,9 @@ mock.module("@/stores/useConfigStore", () => ({
       currentVariantSelection: { override: configVariantOverride, inherited: "high" },
       selectionSource,
       agents: [],
-      activateDirectory: mock(async (directory: string | null | undefined) => {
+      activateDirectory: mock(async (directory: string | null | undefined, options?: { preserveManualModel?: boolean }) => {
         activateDirectoryCalls.push(directory)
+        activationOptions.push(options)
         await activationPending
       }),
       applyDefaultModelAgentSelection: mock((selection: {
@@ -320,11 +322,10 @@ mock.module("../session-actions", () => ({
   createSession: mock(async (
     title: string | undefined,
     directory: string | null,
-    parentID: string | null,
     metadata?: unknown,
     selectionTransition?: "submitted-draft",
   ) => {
-    createSessionCalls.push({ title, directory, parentID, metadata })
+    createSessionCalls.push({ title, directory, metadata })
     const session = { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
     const sessionDirectory = session.directory ?? null
     if (sessionDirectory) {
@@ -335,6 +336,7 @@ mock.module("../session-actions", () => ({
     store.getState().markSessionAsOpenChamberCreated(session.id)
     return session
   }),
+  forkAfterMessage: mock(async () => undefined),
   deleteSession: mock(async () => true),
   deleteSessions: mock(async () => ({ deletedIds: [], failedIds: [] })),
   archiveSession: mock(async () => true),
@@ -555,6 +557,7 @@ describe("issue 2039 draft auto-accept", () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     applyDefaultModelAgentSelectionCalls.length = 0
     activateDirectoryCalls.length = 0
+    activationOptions.length = 0
 
     useSessionUIStore.getState().setNewSessionDraftTarget({
       projectId: project.id,
@@ -564,6 +567,29 @@ describe("issue 2039 draft auto-accept", () => {
 
     expect(activateDirectoryCalls).toEqual([])
     expect(applyDefaultModelAgentSelectionCalls).toEqual([])
+  })
+
+  test("loads the selected worktree's config when a project draft changes directories", async () => {
+    const project = { id: "project-1", path: "/repo" }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    activateDirectoryCalls.length = 0
+    activationOptions.length = 0
+
+    useSessionUIStore.getState().setNewSessionDraftTarget({
+      projectId: project.id,
+      directoryOverride: "/repo-worktree",
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual(["/repo-worktree"])
+    expect(activationOptions).toEqual([{ preserveManualModel: true }])
   })
 
   test("reapplies project defaults when a project draft target is overridden", async () => {
@@ -804,11 +830,11 @@ describe("assistant answer worktree routing", () => {
         createdDirectory = directory
         return {
           id: "created-session",
-          slug: "created-session",
           projectID: "project",
           directory: directory ?? "",
           title: "Created session",
-          version: "1",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           time: { created: 1, updated: 1 },
         }
       },

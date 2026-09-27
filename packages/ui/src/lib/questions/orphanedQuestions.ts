@@ -1,5 +1,4 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
-import type { QuestionInfo, QuestionOption, QuestionRequest } from '@/types/question';
+import type { Message, Part, QuestionInfo, QuestionOption, QuestionRequest } from '@/lib/opencode/model';
 
 /**
  * Orphaned question detection.
@@ -8,8 +7,8 @@ import type { QuestionInfo, QuestionOption, QuestionRequest } from '@/types/ques
  * tool call is waiting for the user, the pending question only ever lived in
  * server memory and is destroyed (upstream anomalyco/opencode#36347). The
  * message history still contains the question tool part stuck in
- * pending/running state, but `question.list()` no longer returns it, so the
- * regular QuestionCard never renders and the session appears stuck.
+ * pending/running state, but `form.list()` no longer returns it, so the
+ * regular form dock never renders and the session appears stuck.
  *
  * This module synthesizes an answerable `QuestionRequest` from that stale
  * tool part so the user can still answer. Submission goes through
@@ -17,7 +16,7 @@ import type { QuestionInfo, QuestionOption, QuestionRequest } from '@/types/ques
  * the server authoritatively and falls back to sending the answers as a new
  * user message.
  *
- * Scope: only the current session's last message is considered (a stale
+ * Scope: only the current session's last non-idle message is considered (a stale
  * question from an older turn the user already moved past must not
  * resurrect), and only while the session is idle — callers gate on session
  * status because a live waiting question keeps the session busy.
@@ -76,7 +75,7 @@ const parseQuestionsFromToolInput = (input: unknown): QuestionInfo[] => {
  * the session subtree).
  *
  * Callers must additionally gate on the session being idle: while a question
- * is genuinely waiting, the session run is active and the live QuestionCard
+ * is genuinely waiting, the session run is active and the live form dock
  * renders through the sync store instead.
  */
 export function collectOrphanedQuestionRequests(
@@ -86,8 +85,10 @@ export function collectOrphanedQuestionRequests(
 ): QuestionRequest[] {
   if (!sessionId || records.length === 0) return [];
 
-  const lastRecord = records[records.length - 1];
-  if (lastRecord.info.role !== 'assistant' || lastRecord.info.sessionID !== sessionId) return [];
+  let lastIndex = records.length - 1;
+  while (lastIndex >= 0 && records[lastIndex].info.role === 'idle') lastIndex -= 1;
+  const lastRecord = records[lastIndex];
+  if (!lastRecord || lastRecord.info.role !== 'assistant' || lastRecord.info.sessionID !== sessionId) return [];
 
   const liveCallIds = new Set<string>();
   for (const question of liveQuestions) {

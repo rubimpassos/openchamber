@@ -17,21 +17,67 @@ animation. Do not restore separate draft and session composer branches:
 remounting the editor loses focus and interrupts the transition. Keep the
 existing mobile fixed-position rules unchanged.
 
-`ComposerFloatingPanel` is the shared frame for `BtwPanel` and
-`QueuedMessageChips`. They mount inside the composer form, outside both the
+`ComposerFloatingPanel` is the shared frame for `BtwPanel`, `PermissionDock`,
+`FormDock` and `QueuedMessageChips`. They mount inside the composer form, outside both the
 full editor and collapsed mobile pill, with one absolute `bottom-full`
 anchor, input-column width, gap, and glass surface. Appearing, disappearing,
 or collapsing a panel does not resize the transcript or composer.
 The frame also owns the header row through its `header` and `compact` props;
 callers supply controls and content, not their own header padding.
 
+`FormDock` is the agent's question (a v2 form request) for the composer's
+session, one field per step with a segment row, Back / Next, and Submit in
+place of Next on the last step; `when`-gated fields join or leave the steps
+as answers change, an `external` field is an information step, Enter in a
+text box moves to the next step and Cmd/Ctrl+Enter submits. Submit is
+enabled only once every question is answered; a submit with a required
+question still open jumps to it. It shows the
+oldest pending form and counts the rest in its header. The BTW sheet keeps
+the inline `FormCard` for its child session's forms; both render a field
+through `FormFieldControl`.
+
+The fork also recovers interrupted question tools in this dock. Once the session
+status snapshot confirms idle, `useOrphanedQuestions` inspects the last assistant
+message, ignoring v2 idle markers, and excludes live or dismissed questions.
+`projection.ts` maps the question tool's input and form metadata. Submission
+rechecks `form.list`: a live match gets a normal form reply; otherwise
+`answerOrphanedQuestion` sends a continuation with the originating model and
+agent. A failed recheck or runtime switch never triggers that fallback. Recovery
+owns the dock ahead of the queue and suggestion, just like a live form.
+
+`formCardState.ts` decides what both surfaces show and send, mirroring
+OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,
+a `when` clause reads only the answers of active earlier fields (an
+unanswered target is false for `eq` and `neq` alike, so hiding a field hides
+its whole chain of dependents), and the reply carries only active fields.
+An `external` field must be answered `true` or the server refuses the whole
+reply: the dock acknowledges it when its step opens, the card (all fields on
+screen) from the start, and an unacknowledged link counts as missing.
+
+An MCP elicitation is a form OpenCode files under the session id `global`
+(`LOCATION_SCOPED_FORM_SESSION_ID` in `sync-context.tsx`): it belongs to the
+directory, not to a turn. `useScopedBlockingForms` appends the directory's
+`global` forms after the session subtree's own, so the dock (and the BTW
+sheet's inline card) offer it from every session of that directory, and the
+reply resolves its directory from the store that holds the form.
+
+`PermissionDock` is the agent's permission requests for the composer's
+session, its subagents' included, in the same frame: one dot per pending
+request with the current one solid, the request's tool in the header, and
+Deny / Always allow / Allow once through the shared response hook, so
+Alt+Enter, Alt+Shift+Enter and Alt+Backspace answer the current request. A
+pending permission hides the form dock, the queue chips and the suggestion.
+The BTW sheet keeps the inline `PermissionCard` for its child session's
+requests; both render the request through `PermissionRequestContent` and
+`PermissionActions`.
+
 `SessionSuggestionChip` is not a frame: it renders as the composer's own top
 row, inside the box and inside the mobile pill, so the surface stays one
-shape. Visibility priority is BTW, then a nonempty queue, then suggestion.
-Every BTW frame, including its collapsed strip, creation state, and pending
-draft, hides the other two. Composer content also hides suggestion;
-new-session drafts hide both queue and suggestion. Hiding the queue does not
-pause its delivery.
+shape. Visibility priority is BTW, then a pending form, then a nonempty
+queue, then suggestion. Every BTW frame, including its collapsed strip,
+creation state, and pending draft, hides the other three. Composer content
+also hides suggestion; new-session drafts hide form, queue and suggestion.
+Hiding the queue does not pause its delivery.
 
 The queue header toggles an `aria-expanded` disclosure with the current count.
 Its open/closed state is one persisted preference in `useUIStore`
@@ -70,6 +116,10 @@ wrapper outside the box, and the dictation overlay (`.oc-dictation-overlay`)
 never stacks glass on glass: a CSS rule in `design-system.css` hides the
 composer's own contents while it is up, leaving the box as the single glass
 surface on desktop and the overlay itself on mobile.
+
+The context-chip preview stays above its chip. Its scrollable content is capped
+by the space between the chip and the chat column's top edge, so a long preview
+does not hide its entry actions behind the chat header.
 
 ## Layers
 
@@ -227,6 +277,29 @@ and the send path reading the same grammar.
   mention, file mentions, and skill instruction were resolved when it was
   queued, never at delivery — and its context follows it before the next
   queued message.
+- **Skills named inline (`/name`) are attached to the prompt, not hinted at.**
+  `buildOutgoingMessage` reports the composer text's skill names (deduped, in
+  order) as `skillNames`; `ChatInput` hands them to the send as
+  `SkillMentions`, and `opencodeClient.sendMessage` maps each name to its
+  OpenCode skill id (`GET /api/skill`; the id is the skill's folder and can
+  differ from its frontmatter name) and sends them in the prompt's `skills`
+  field. OpenCode then loads each skill's content into that user message. It
+  rides the prompt's delivery, so a new-session draft (after the session is
+  created), a steer while the agent works and a `/btw` fork all activate the
+  skill with their own message, never mid-turn. The separate
+  `session.skill` route is deliberately not used: it appends a skill message
+  immediately, outside the inbox, so while a turn runs it would land inside
+  that turn ahead of the message that asked for it. The skill message it
+  creates is hidden in the timeline anyway (`timelineRoles.ts`).
+  Fallback to the old hidden instruction ("The user explicitly mentioned
+  these skills…") is per skill and never blocks the send: a name OpenCode
+  does not list, a failed skill list, or a prompt rejected with
+  `Skill not found` (resent once with the same message id, since preparation
+  fails before admission). Queued messages keep the instruction captured at
+  queue time, because the server and the VS Code auto-send deliver them
+  without the composer's registry. A leading `/skill` that routes to
+  `session.command` keeps the instruction too: that route takes no skill
+  attachments.
 - Extension slash commands are routed first (`submit/guestCommands.ts`,
   entries from `useGuestCommands` minus every name the composer already
   knows, so an extension can never shadow a built-in, an OpenCode command, or
@@ -241,13 +314,16 @@ and the send path reading the same grammar.
   name as their badge, and the language highlights them as known `/tokens`.
 - Local slash commands are planned by `submit/slashCommands.ts` before any
   attached context is consumed. Commands that act on session or UI state
-  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
-  their command text and leave comments, files, and linked context attached;
+  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`, `/fork`) take
+  only their command text and leave comments, files, and linked context attached;
    magic prompt commands send that
   context with the prompt they produce. Session actions are planned only when
   a session exists, so typing one into a new-session draft stays on the normal
   send path. A local command is never queued as text: queueing runs it
-  instead. A failed prompt command restores everything it consumed: text,
+  instead. `/fork [text]` (`submit/forkCommand.ts`) forks after the last
+  finished turn (a running turn and its completed steps are skipped and left
+  running), opens the fork, and sends the text there; a failed fork restores
+  the command, a failed send puts the text into the fork's composer. A failed prompt command restores everything it consumed: text,
   confirmed mentions, files, comment drafts, and pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
@@ -283,7 +359,11 @@ and the send path reading the same grammar.
   through the existing project-change flow only on explicit activation.
   Filtering changes the result area below the anchored input without moving
   the search field. The worktree picker remains a Select; mobile keeps its
-  bottom sheets. The selectors only consume their shared prefix while the
+  bottom sheets. `ProjectPickerSheet` shares the mobile project list and
+  transient search state with the Settings selector. Settings passes its own
+  directory selection callback, so choosing a project there leaves chat in
+  place. Both callers use the same ranked label/path search and project icons.
+  The selectors only consume their shared prefix while the
   draft target UI is mounted.
   Keyboard selection returns focus to the current form's composer, including
   when the selected value is unchanged.
@@ -355,6 +435,15 @@ refusing programmatic focus outside a gesture, WebKit leaving the layout
 viewport panned after the keyboard hides, overlay chains handing off through a
 frame where nothing is open.
 
+Typed text and salvage text shown after a failed dictation use the same measured
+line and screen-height limits. Once the viewport reports usable space, content
+scrolls inside the composer so the failed-dictation action row stays inside the
+chat screen. A transient non-positive viewport measurement keeps the existing
+line cap until the next resize instead of collapsing the editor to zero height.
+The salvage reader follows the end only while already there; rewrapping text
+keeps a reader who scrolled up in place. Expanding the composer releases this
+height floor and uses the existing fullscreen layout.
+
 **Every timeout and `flushSync` in them has a reason recorded next to it, and
 none of them is verifiable outside a real device.** Change them only against
 hardware.
@@ -386,6 +475,27 @@ morph announces `oc:composer-morph` (`hold` with the slot's height delta,
 automatic end write while a transition runs, lets the geometry land in one
 step, and drives scrollTop on the same curve. Mobile browsers, Android and
 reduced motion keep the instant swap.
+
+## Chat quote highlights
+
+A `chat-quote` draft carries an anchor (`lib/chatQuoteAnchor.ts`): the quoted
+text in its message's rendered text stream plus the characters around it. It
+is captured at selection time, persisted with the draft and sent in the
+context part's metadata. `message/ChatQuoteHighlightLayer.tsx` (one per
+`ChatContainer`, fed by the column's `hooks/chatQuoteHighlightStore.ts`) uses it
+to paint with the CSS Custom Highlight API. The store lives outside React state
+and the layer holds all hover and popover state, so none of it re-renders the
+chat column. The
+markdown DOM is never modified. While quotes wait as context chips they stay
+marked in their messages; the one hovered in the chip preview is drawn
+stronger. Resting the mouse on a mark, or tapping it on touch, opens
+`message/ChatQuoteMarkPopover.tsx` with the comment, edit (the selection
+menu's input) and remove; the publisher's callbacks write the draft. Clicking
+a quote in the preview, or the arrow on a sent quote card, scrolls to it
+through the timeline controller and flashes it. Ranges are
+re-resolved by text and context whenever the marked message re-renders or
+remounts. Offsets only break ties. Quotes sent before anchors existed are
+found only when their text appears once in the message.
 
 ## Mobile comment mode
 

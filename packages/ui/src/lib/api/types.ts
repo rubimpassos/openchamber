@@ -92,6 +92,8 @@ export interface ResizeTerminalPayload {
   sessionId: string;
   cols: number;
   rows: number;
+  /** The terminal's working directory; one inside an isolated space addresses that space. */
+  directory?: string | null;
 }
 
 export interface TerminalHandlers {
@@ -117,14 +119,19 @@ export interface TerminalAPI {
   listShells?(): Promise<TerminalShellOption[]>;
   /** Server-side sessions for a working directory, or all directories when cwd is empty; absent on runtimes without a server terminal list. */
   listSessions?(cwd: string): Promise<TerminalServerSession[]>;
-  /** Marks the sessions as active so the server's idle sweep does not reap terminals an open client still shows. */
-  touchSessions?(sessionIds: string[]): Promise<void>;
+  /**
+   * Marks the sessions as active so the server's idle sweep does not reap terminals an open
+   * client still shows. `directory` is the sessions' working directory: one inside an isolated
+   * space addresses that space, so a batch spans one directory.
+   */
+  touchSessions?(sessionIds: string[], directory?: string | null): Promise<void>;
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
-  connect(sessionId: string, handlers: TerminalHandlers): Subscription;
-  sendInput(sessionId: string, input: string): Promise<void>;
+  /** `directory` is the terminal's working directory; one inside an isolated space addresses that space's terminal socket. */
+  connect(sessionId: string, handlers: TerminalHandlers, directory?: string | null): Subscription;
+  sendInput(sessionId: string, input: string, directory?: string | null): Promise<void>;
   resize(payload: ResizeTerminalPayload): Promise<void>;
-  updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void>;
-  close(sessionId: string): Promise<void>;
+  updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>, directory?: string | null): Promise<void>;
+  close(sessionId: string, directory?: string | null): Promise<void>;
   restartSession?(currentSessionId: string, options: RestartTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
@@ -801,11 +808,6 @@ export interface NotificationsAPI {
 
 interface DiagnosticsAPI {
   downloadLogs(): Promise<{ fileName: string; content: string }>;
-}
-
-export interface ToolsAPI {
-
-  getAvailableTools(): Promise<string[]>;
 }
 
 export interface EditorAPI {
@@ -1541,7 +1543,6 @@ export interface RuntimeAPIs {
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
-  tools: ToolsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;
   worktrees?: WorktreeMetadata[];
@@ -1647,8 +1648,6 @@ export interface SkillsInstallResponse {
   skipped?: Array<{ skillName: string; reason: string }>;
   error?: SkillsInstallError;
   requiresReload?: boolean;
-  requiresRestart?: boolean;
-  restartDeferred?: boolean;
   requiresManualRestart?: boolean;
   reloadFailed?: boolean;
   warning?: string;

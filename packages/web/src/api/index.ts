@@ -13,7 +13,6 @@ import { createWebFilesAPI } from './files';
 import { createWebSettingsAPI } from './settings';
 import { createWebPermissionsAPI } from './permissions';
 import { createWebNotificationsAPI } from './notifications';
-import { createWebToolsAPI } from './tools';
 import { createWebPushAPI } from './push';
 import { createWebGitHubAPI } from './github';
 import { createWebLinearAPI } from './linear';
@@ -54,6 +53,5 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   ciLoop: createWebCiLoopAPI(),
   push: createWebPushAPI(),
   clientAuth: createWebClientAuthAPI(),
-  tools: createWebToolsAPI(),
   };
 };
