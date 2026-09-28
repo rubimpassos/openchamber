@@ -18,3 +18,15 @@ describe('parseRoute session', () => {
     expect(route.sessionId).toBeNull();
   });
 });
+
+describe('parseRoute panel', () => {
+  test('reads the guest id a browser-help deep link names', () => {
+    const route = parseRoute(new URLSearchParams('session=ses_1&panel=server-chrome'));
+    expect(route.guestPanelId).toBe('server-chrome');
+  });
+
+  test('ignores a missing or blank panel param', () => {
+    expect(parseRoute(new URLSearchParams('session=ses_1')).guestPanelId).toBeNull();
+    expect(parseRoute(new URLSearchParams('panel=')).guestPanelId).toBeNull();
+  });
+});
