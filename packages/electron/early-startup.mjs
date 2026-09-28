@@ -30,10 +30,10 @@ import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/in
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
 
-export const DEEP_LINK_PROTOCOL = 'octurbo';
+export const DEEP_LINK_PROTOCOL = 'octurbo2';
 export const UI_PROTOCOL = 'openchamber-ui';
-const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.turbo';
-const DEV_APP_USER_MODEL_ID = 'dev.openchamber.turbo.dev';
+const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.turbo2';
+const DEV_APP_USER_MODEL_ID = 'dev.openchamber.turbo2.dev';
 export const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 export const BACKGROUND_START_ARG = '--background';
 

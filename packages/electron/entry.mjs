@@ -8,6 +8,9 @@
  * module evaluation runs on the thread Chromium needs to finish initialising.
  */
 
+// Keep first: it sets OPENCHAMBER_DATA_DIR before anything reads the data
+// directory (early-startup only resolves it lazily, main.mjs loads after ready).
+import './turbo2-data-dir-apply.mjs';
 import { app, protocol } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -28,7 +31,7 @@ recordEarlyStartupMark('electron.entry');
 
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
-app.setName('OpenChamber Turbo');
+app.setName('OpenChamber Turbo 2');
 process.env.OPENCHAMBER_UPDATE_REPO = 'rubimpassos/openchamber';
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
@@ -48,7 +51,7 @@ if (userDataOverride) {
 // into an explicitly isolated profile (including startup profiling runs).
 if (!isDev && !userDataOverride) {
   const target = app.getPath('userData');
-  const source = path.join(path.dirname(target), 'OpenChamber');
+  const source = path.join(path.dirname(target), 'OpenChamber Turbo');
   const volatileEntries = new Set([
     'Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'DawnGraphiteCache',
     'DawnWebGPUCache', 'Crashpad', 'logs', 'Partitions', 'Service Worker',

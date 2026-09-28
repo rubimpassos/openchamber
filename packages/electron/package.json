@@ -56,8 +56,8 @@
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
-    "appId": "dev.openchamber.turbo",
-    "productName": "OpenChamber Turbo",
+    "appId": "dev.openchamber.turbo2",
+    "productName": "OpenChamber Turbo 2",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/built-in-extensions/**/*"
     ],
@@ -94,7 +94,7 @@
       "buildResources": "resources/icons",
       "output": "dist"
     },
-    "artifactName": "OpenChamber-${version}-${arch}.${ext}",
+    "artifactName": "OpenChamber-Turbo2-${version}-${arch}.${ext}",
     "npmRebuild": false,
     "mac": {
       "category": "public.app-category.developer-tools",
@@ -141,7 +141,7 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "shortcutName": "OpenChamber Turbo",
+      "shortcutName": "OpenChamber Turbo 2",
       "installerIcon": "resources/icons/icon.ico",
       "uninstallerIcon": "resources/icons/icon.ico",
       "installerHeaderIcon": "resources/icons/icon.ico"
@@ -174,6 +174,9 @@
       "provider": "github",
       "owner": "rubimpassos",
       "repo": "openchamber"
+    },
+    "extraMetadata": {
+      "name": "openchamber-turbo2"
     }
   }
 }
