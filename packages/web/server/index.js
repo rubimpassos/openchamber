@@ -1545,6 +1545,7 @@ const emitBrowserProviderResetEvent = ({ guestId, guestName }) => {
   }
 };
 const BROWSER_HELP_NOTIFICATION_TITLE = 'The agent needs your help in the browser';
+const BROWSER_HELP_LOGIN_NOTIFICATION_TITLE = 'The agent needs you to sign in';
 const BROWSER_HELP_REASON_MAX = 500;
 
 /**
@@ -1556,25 +1557,31 @@ const BROWSER_HELP_REASON_MAX = 500;
  * declared above this point specifically so it can be captured here.
  * `reason` arrives already validated (1-300 chars) by the control service
  * that built these `parameters`; only its length here is this function's own
- * concern, since a push notification body has a smaller budget.
+ * concern, since a push notification body has a smaller budget. `kind` is
+ * the agent's `browser.requestHelp` parameter (`'login'`/`'page'`), read
+ * only to pick the title — the provider decides what to actually do with it.
  */
-const notifyBrowserHelp = async ({ guestId, reason, context }) => {
+const notifyBrowserHelp = async ({ guestId, reason, kind, context }) => {
   const settings = await readSettingsFromDiskMigrated();
   if (settings.nativeNotificationsEnabled === false) {
     return;
   }
   const sessionId = context?.sessionId || null;
   const directory = context?.directory || null;
+  const title = kind === 'login' ? BROWSER_HELP_LOGIN_NOTIFICATION_TITLE : BROWSER_HELP_NOTIFICATION_TITLE;
   const body = reason.trim().slice(0, BROWSER_HELP_REASON_MAX);
   const tag = `browser-help-${sessionId || guestId}`;
   const notificationPayload = {
-    title: BROWSER_HELP_NOTIFICATION_TITLE,
+    title,
     body,
     tag,
     kind: 'plugin',
     sessionId,
     directory,
     requireHidden: false,
+    // Read by the Electron click handler (maybeShowNativeNotification) to
+    // open this guest's panel alongside the session; ignored elsewhere.
+    guestId,
   };
   const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
   broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
@@ -1587,7 +1594,7 @@ const notifyBrowserHelp = async ({ guestId, reason, context }) => {
   await notificationTriggerRuntime.sendBrowserHelpPush({
     sessionId,
     guestId,
-    title: BROWSER_HELP_NOTIFICATION_TITLE,
+    title,
     body,
   });
 };

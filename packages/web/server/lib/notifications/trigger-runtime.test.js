@@ -230,10 +230,10 @@ describe('sendBrowserHelpPush', () => {
 
     expect(sendApnsToAllUiSessions).toHaveBeenCalledTimes(1);
     expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({
-      title: 'Agent update',
+      title: 'Agent needs you in the browser',
       body: 'Session',
       tag: 'browser-help-ses_help',
-      data: { sessionId: 'ses_help' },
+      data: { sessionId: 'ses_help', url: '/?session=ses_help&panel=server-chrome' },
     });
   });
 
