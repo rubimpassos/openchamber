@@ -48,6 +48,7 @@ export const OPENCHAMBER_WEB_ACTION_DEFINITIONS = Object.freeze([
   { action: 'browser.inspect', title: 'Read how an element renders', description: 'Read the computed styles of the element matched by selector — colours, fonts, spacing, borders — as the page actually renders them' },
   { action: 'browser.capture', title: 'Save a screenshot of the page', description: 'Save what is currently visible in the browser panel as an image file in the project and return its path, so a change can be shown rather than described. Pass label to name it (for example before-fix); the result reports the page, layout and path to reference in your answer' },
   { action: 'browser.resize', title: 'Change the page viewport', description: 'Lay the open page out at a different size; viewport is mobile, tablet, desktop, or fill to use the whole panel' },
+  { action: 'browser.requestHelp', title: 'Ask the user for help in the browser', description: 'Use when a login, CAPTCHA, one-time code, 2FA, or anything else only the person can do is blocking you. Pass reason stating exactly what they need to do; the call waits until they hand control back or timeoutSeconds passes (30-900, default 300). Never ask for a password or code in chat — this hands them the page instead' },
 ]);
 
 export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
