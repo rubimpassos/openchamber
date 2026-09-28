@@ -43,6 +43,9 @@ const BUILTIN_BROWSER_PROVIDER = 'builtin';
  */
 const BROWSER_REQUEST_HELP_NO_SURFACE_ERROR = 'Asking for help needs a browser provider extension with a shared surface (Settings → OpenChamber Tools → Browser provider).';
 
+/** The in-app browser has one shared, un-copied session; there is no saved profile to write. */
+const BROWSER_SAVE_PROFILE_NO_PROVIDER_ERROR = 'Saving a browser profile needs the Server Browser extension (Settings → OpenChamber Tools → Browser provider).';
+
 /**
  * Whether this catalog row can answer browser actions right now. Mirrors what
  * the Settings dropdown offers: enabled, fully approved, and declaring the
@@ -72,7 +75,7 @@ export const isBrowserProviderGuest = (guest) => (
  *   createId: () => string,
  *   proxyServiceRequest?: typeof proxyGuestServiceRequest,
  *   surfaceControl?: { userControls: (guestId: string) => boolean, noteAgentActivity: (guestId: string) => void },
- *   notifyBrowserHelp?: (event: { guestId: string, guestName: string, reason: string, context: { directory: string | null, sessionId: string | null } }) => Promise<unknown>,
+ *   notifyBrowserHelp?: (event: { guestId: string, guestName: string, reason: string, kind: 'login' | 'page' | undefined, context: { directory: string | null, sessionId: string | null } }) => Promise<unknown>,
  * }} deps `surfaceControl` is the shared-surface lease: an action is refused
  * while the user is driving the extension's surface, and every action the
  * provider runs counts as agent activity there. `notifyBrowserHelp` tells the
@@ -127,7 +130,13 @@ export const createBrowserControlRouter = ({
       // Best-effort: the person seeing the notification matters, but a
       // notification failure must not also fail the help request itself.
       try {
-        await notifyBrowserHelp({ guestId: guest.id, guestName: guest.name, reason: parameters?.reason, context: context ?? UNKNOWN_CONTEXT });
+        await notifyBrowserHelp({
+          guestId: guest.id,
+          guestName: guest.name,
+          reason: parameters?.reason,
+          kind: parameters?.kind,
+          context: context ?? UNKNOWN_CONTEXT,
+        });
       } catch (error) {
         console.warn('[browser-provider] could not notify the user about a help request:', error instanceof Error ? error.message : error);
       }
@@ -197,6 +206,9 @@ export const createBrowserControlRouter = ({
         if (action === 'browser.requestHelp') {
           throw new BrowserControlError(BROWSER_REQUEST_HELP_NO_SURFACE_ERROR, 400);
         }
+        if (action === 'browser.saveProfile') {
+          throw new BrowserControlError(BROWSER_SAVE_PROFILE_NO_PROVIDER_ERROR, 400);
+        }
         return broker.request(action, parameters, options);
       }
       let guest;
@@ -214,6 +226,9 @@ export const createBrowserControlRouter = ({
         await resetToBuiltin({ guestId: providerId, guestName: guest?.name ?? providerId });
         if (action === 'browser.requestHelp') {
           throw new BrowserControlError(BROWSER_REQUEST_HELP_NO_SURFACE_ERROR, 400);
+        }
+        if (action === 'browser.saveProfile') {
+          throw new BrowserControlError(BROWSER_SAVE_PROFILE_NO_PROVIDER_ERROR, 400);
         }
         return broker.request(action, parameters, options);
       }

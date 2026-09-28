@@ -4,6 +4,7 @@ import {
   BROWSER_PROVIDER_HELP_TIMEOUT_DEFAULT_S,
   BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S,
   BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S,
+  BROWSER_REQUEST_HELP_KINDS,
 } from '@openchamber/sdk';
 import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS } from './actions.js';
@@ -487,6 +488,11 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       parameters.reason = reason;
       parameters.timeoutSeconds = helpTimeoutSeconds;
+      const kind = asNonEmptyString(input.kind);
+      if (kind !== null && !BROWSER_REQUEST_HELP_KINDS.includes(kind)) {
+        throw new OpenChamberControlError(`kind must be ${BROWSER_REQUEST_HELP_KINDS.join(' or ')}`, 400);
+      }
+      parameters.kind = kind ?? 'page';
     }
 
     // Opening a page waits for the navigation to settle, so its budget has to
@@ -494,7 +500,10 @@ export const createOpenChamberControlService = (dependencies) => {
     // made a slow page indistinguishable from an unreachable browser.
     // browser.requestHelp waits on a person, not a page: its budget is their
     // own timeoutSeconds plus BROWSER_REQUEST_HELP_HOST_SLACK_MS.
-    const timeoutMs = action === 'browser.open'
+    // browser.saveProfile briefly restarts the chat's browser and reopens its
+    // tabs, so it shares browser.open's slower budget rather than the quick
+    // actions' 20s.
+    const timeoutMs = action === 'browser.open' || action === 'browser.saveProfile'
       ? 45_000
       : action === 'browser.requestHelp'
         ? helpTimeoutSeconds * 1000 + BROWSER_REQUEST_HELP_HOST_SLACK_MS

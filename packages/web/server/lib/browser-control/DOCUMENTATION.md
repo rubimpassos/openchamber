@@ -49,10 +49,13 @@ itself; it can only ask and wait.
   both answer 400 with the same message, before the request ever leaves the
   host. On the surviving path, right after the 409 user-control check and
   before the action is proxied, the router calls the injected
-  `notifyBrowserHelp({ guestId, guestName, reason, context })` so the person
-  hears about it even away from the app; its failure is logged and never
-  fails the action, since a lost notification must not also lose the help
-  request. `notifyBrowserHelp` (wired in `../../index.js`) sends both the
+  `notifyBrowserHelp({ guestId, guestName, reason, kind, context })` so the
+  person hears about it even away from the app; its failure is logged and
+  never fails the action, since a lost notification must not also lose the
+  help request. `kind` (`'login'` or `'page'`, from the agent's parameters)
+  only changes the notification's title (`../notifications/DOCUMENTATION.md`)
+  — the router passes it through untouched, the provider decides what to do
+  with it. `notifyBrowserHelp` (wired in `../../index.js`) sends both the
   live in-app notification and, unlike every other agent-facing notification
   path, a web-push/APNs fanout through the notification trigger runtime — see
   `../notifications/DOCUMENTATION.md` for why it is not gated by the notify
@@ -63,6 +66,16 @@ itself; it can only ask and wait.
   keeps the guest service up because `openGuestServiceRequest` never discards
   a runtime while a request against it is still in flight (see
   `../guests/service.js`).
+- `browser.saveProfile` writes the chat's disposable browser copy back into
+  the extension's saved profile. Unlike `requestHelp` it needs no shared
+  surface — saving is not something the person watches — so only the builtin
+  (no provider selected, or a selected extension that cannot serve) path
+  refuses it, with "Saving a browser profile needs the Server Browser
+  extension"; a surfaced or surfaceless provider both run it. No
+  `notifyBrowserHelp` call; the agent already knows it asked to save. It
+  shares `browser.open`'s 45s timeout (`../openchamber-control/service.js`)
+  because a real provider restarts the chat's browser onto the freshly saved
+  copy before answering.
 - `../openchamber-control/service.js` is the only caller. It maps the
   `browser.*` actions of the `openchamber_web` tool onto the router's
   `request()` (same signature as the broker) and owns their parameter

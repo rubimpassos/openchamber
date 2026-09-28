@@ -291,9 +291,19 @@ describe('browser control router', () => {
       guestId: 'server-chrome',
       guestName: 'Server Chrome',
       reason: 'Sign in with Google',
+      kind: undefined,
       context: { directory: '/repo', sessionId: 'ses_1' },
     }]);
     expect(proxied).toHaveLength(1);
+  });
+
+  test('browser.requestHelp passes kind through to notifyBrowserHelp', async () => {
+    const { router, helpNotifications } = createRouter({
+      guest: surfaceProviderGuest(),
+      serviceAnswer: { status: 200, body: JSON.stringify({ ok: true, data: { outcome: 'signed-in', url: 'http://a/', title: 'A', waitedSeconds: 10 } }) },
+    });
+    await router.request('browser.requestHelp', { reason: 'Sign in to your account', timeoutSeconds: 300, kind: 'login' });
+    expect(helpNotifications[0]).toMatchObject({ kind: 'login' });
   });
 
   test('browser.requestHelp is refused with 409 while the user drives the surface, and nobody is notified', async () => {
@@ -334,5 +344,43 @@ describe('browser control router', () => {
       console.warn = warn;
     }
     expect(persisted).toHaveLength(0);
+  });
+
+  test('browser.saveProfile refuses with a clear 400 when the in-app browser would answer', async () => {
+    const { router, brokerCalls, proxied } = createRouter({ settings: {} });
+    await expect(router.request('browser.saveProfile', {}))
+      .rejects.toMatchObject({
+        status: 400,
+        message: 'Saving a browser profile needs the Server Browser extension (Settings → OpenChamber Tools → Browser provider).',
+      });
+    expect(brokerCalls).toHaveLength(0);
+    expect(proxied).toHaveLength(0);
+  });
+
+  test('browser.saveProfile refuses with the same 400 when a selected extension cannot serve', async () => {
+    const { router, brokerCalls, resets } = createRouter({ guest: providerGuest({ enabled: false }) });
+    await expect(router.request('browser.saveProfile', {}))
+      .rejects.toMatchObject({ status: 400 });
+    expect(brokerCalls).toHaveLength(0);
+    expect(resets).toEqual([{ guestId: 'server-chrome', guestName: 'Server Chrome' }]);
+  });
+
+  test('browser.saveProfile needs no shared surface, unlike requestHelp', async () => {
+    const { router, proxied } = createRouter({
+      guest: providerGuest(),
+      serviceAnswer: { status: 200, body: JSON.stringify({ ok: true, data: { saved: true, profile: 'default', version: 2, reopenedTabs: 1 } }) },
+    });
+    const result = await router.request('browser.saveProfile', {});
+    expect(result).toEqual({ saved: true, profile: 'default', version: 2, reopenedTabs: 1 });
+    expect(proxied).toHaveLength(1);
+  });
+
+  test('browser.saveProfile does not notify the user', async () => {
+    const { router, helpNotifications } = createRouter({
+      guest: providerGuest(),
+      serviceAnswer: { status: 200, body: JSON.stringify({ ok: true, data: { saved: true, profile: 'default', version: 2, reopenedTabs: 0 } }) },
+    });
+    await router.request('browser.saveProfile', {});
+    expect(helpNotifications).toHaveLength(0);
   });
 });
