@@ -87,9 +87,24 @@ const navigate = (url: string): void => {
 // with one browser per project or chat would key its targets on this.
 let lastCaller: BrowserProviderRequest['context'] = { directory: null, sessionId: null };
 
+// ---- Profile: the one saved store every chat's disposable copy comes from -
+//
+// This stub keeps one page, so there is nothing to actually copy, but the
+// version bookkeeping is real: each chat's first action records the version
+// its copy started at, and browser.saveProfile only succeeds when nobody
+// else saved since — the same conflict a provider with real per-chat
+// profiles would hit.
+const PROFILE_NAME = 'default';
+let profileVersion = 1;
+const copyTakenAtVersion = new Map<string, number>();
+
+const callerKey = (context: BrowserProviderRequest['context']): string => context.sessionId ?? 'unscoped';
+
 const handle = async (request: BrowserProviderRequest): Promise<BrowserProviderResult> => {
   markAgentActive();
   lastCaller = request.context;
+  const caller = callerKey(request.context);
+  if (!copyTakenAtVersion.has(caller)) copyTakenAtVersion.set(caller, profileVersion);
   // One page, no tabs: an id this stub never issued is refused, never
   // answered from the one page it has.
   if (request.parameters.tabId !== undefined) {
@@ -164,7 +179,20 @@ const handle = async (request: BrowserProviderRequest): Promise<BrowserProviderR
       return { ok: true, data: { viewport: viewport() } };
     case 'browser.requestHelp': {
       const { outcome, waitedSeconds } = await waitForHandBack(request.parameters.timeoutSeconds);
+      if (outcome === 'handed-back' && request.parameters.kind === 'login') {
+        profileVersion += 1;
+        copyTakenAtVersion.set(caller, profileVersion);
+        return { ok: true, data: { outcome: 'signed-in', url: page.url, title: page.title, waitedSeconds } };
+      }
       return { ok: true, data: { outcome, url: page.url, title: page.title, waitedSeconds } };
+    }
+    case 'browser.saveProfile': {
+      if (copyTakenAtVersion.get(caller) !== profileVersion) {
+        return { ok: false, error: 'Another chat saved this profile first; take a fresh copy and redo your change.' };
+      }
+      profileVersion += 1;
+      copyTakenAtVersion.set(caller, profileVersion);
+      return { ok: true, data: { saved: true, profile: PROFILE_NAME, version: profileVersion, reopenedTabs: 0 } };
     }
   }
 };

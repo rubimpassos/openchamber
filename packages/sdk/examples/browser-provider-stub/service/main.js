@@ -111,7 +111,8 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.inspect",
   "browser.capture",
   "browser.resize",
-  "browser.requestHelp"
+  "browser.requestHelp",
+  "browser.saveProfile"
 ];
 var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
 var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
@@ -293,9 +294,16 @@ var navigate = (url) => {
   page.scrollY = 0;
 };
 var lastCaller = { directory: null, sessionId: null };
+var PROFILE_NAME = "default";
+var profileVersion = 1;
+var copyTakenAtVersion = new Map;
+var callerKey = (context) => context.sessionId ?? "unscoped";
 var handle = async (request) => {
   markAgentActive();
   lastCaller = request.context;
+  const caller = callerKey(request.context);
+  if (!copyTakenAtVersion.has(caller))
+    copyTakenAtVersion.set(caller, profileVersion);
   if (request.parameters.tabId !== undefined) {
     return { ok: false, error: "This browser has a single page and no tabs; omit tabId." };
   }
@@ -378,7 +386,20 @@ Name: ${page.fields.get("#name") ?? ""}`,
       return { ok: true, data: { viewport: viewport() } };
     case "browser.requestHelp": {
       const { outcome, waitedSeconds } = await waitForHandBack(request.parameters.timeoutSeconds);
+      if (outcome === "handed-back" && request.parameters.kind === "login") {
+        profileVersion += 1;
+        copyTakenAtVersion.set(caller, profileVersion);
+        return { ok: true, data: { outcome: "signed-in", url: page.url, title: page.title, waitedSeconds } };
+      }
       return { ok: true, data: { outcome, url: page.url, title: page.title, waitedSeconds } };
+    }
+    case "browser.saveProfile": {
+      if (copyTakenAtVersion.get(caller) !== profileVersion) {
+        return { ok: false, error: "Another chat saved this profile first; take a fresh copy and redo your change." };
+      }
+      profileVersion += 1;
+      copyTakenAtVersion.set(caller, profileVersion);
+      return { ok: true, data: { saved: true, profile: PROFILE_NAME, version: profileVersion, reopenedTabs: 0 } };
     }
   }
 };

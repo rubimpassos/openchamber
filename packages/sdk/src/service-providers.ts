@@ -24,6 +24,7 @@ export const BROWSER_CONTROL_ACTIONS = [
   'browser.capture',
   'browser.resize',
   'browser.requestHelp',
+  'browser.saveProfile',
 ] as const;
 export type BrowserControlAction = (typeof BROWSER_CONTROL_ACTIONS)[number];
 
@@ -33,7 +34,11 @@ export type BrowserViewportMode = (typeof BROWSER_VIEWPORT_MODES)[number];
 export const BROWSER_SCROLL_DIRECTIONS = ['up', 'down', 'top', 'bottom'] as const;
 export type BrowserScrollDirection = (typeof BROWSER_SCROLL_DIRECTIONS)[number];
 
-/** `browser.open` may wait for a slow page; every other action is quick. */
+/**
+ * `browser.open` may wait for a slow page; every other action is quick,
+ * except `browser.saveProfile` (see below), which shares this budget: it
+ * briefly restarts the chat's browser and reopens its tabs.
+ */
 export const BROWSER_PROVIDER_OPEN_TIMEOUT_MS = 45_000;
 export const BROWSER_PROVIDER_ACTION_TIMEOUT_MS = 20_000;
 /**
@@ -70,7 +75,18 @@ export type BrowserScrollParameters = BrowserTabTarget & { selector?: string; di
 export type BrowserInspectParameters = BrowserTabTarget & { selector: string };
 export type BrowserCaptureParameters = BrowserTabTarget & { label?: string };
 export type BrowserResizeParameters = BrowserTabTarget & { viewport: BrowserViewportMode };
-export type BrowserRequestHelpParameters = BrowserTabTarget & { reason: string; timeoutSeconds: number };
+export const BROWSER_REQUEST_HELP_KINDS = ['login', 'page'] as const;
+export type BrowserRequestHelpKind = (typeof BROWSER_REQUEST_HELP_KINDS)[number];
+/**
+ * `kind` tells the provider what the surface is for, so it can save the
+ * profile itself when the person is done: `'login'` is a site account (the
+ * person signs into the chat's disposable profile copy and the provider
+ * saves it, so other chats get the fresh login); `'page'` (default) is a
+ * CAPTCHA, one-time code, or confirmation scoped to this page only, saved
+ * nowhere.
+ */
+export type BrowserRequestHelpParameters = BrowserTabTarget & { reason: string; timeoutSeconds: number; kind?: BrowserRequestHelpKind };
+export type BrowserSaveProfileParameters = BrowserTabTarget;
 
 /**
  * Where an action came from: the project the agent works in and the chat it
@@ -97,6 +113,7 @@ export type BrowserProviderRequest = ProviderRequestEnvelope & (
   | { action: 'browser.capture'; parameters: BrowserCaptureParameters }
   | { action: 'browser.resize'; parameters: BrowserResizeParameters }
   | { action: 'browser.requestHelp'; parameters: BrowserRequestHelpParameters }
+  | { action: 'browser.saveProfile'; parameters: BrowserSaveProfileParameters }
 );
 
 export type BrowserViewportSummary = {
@@ -190,18 +207,33 @@ export type BrowserCaptureData = {
 export type BrowserResizeData = { viewport: BrowserViewportSummary };
 /**
  * `handed-back` is the person releasing control after doing what the agent
- * asked; `timeout` is `timeoutSeconds` elapsing with nobody taking control,
- * or nobody handing it back. Either way `url`/`title` are the page as it
- * stands when the provider answers, so the agent can read the result of
- * whatever the person did (or the page unchanged, on a timeout).
+ * asked, `kind` unset or `'page'`; `signed-in` is the same release for
+ * `kind: 'login'`, where the provider also saved the profile — the agent's
+ * `browser.saveProfile` is unnecessary, the save already happened, and the
+ * chat is now driving a fresh copy of the saved profile. `timeout` is
+ * `timeoutSeconds` elapsing with nobody taking control, or nobody handing
+ * it back. Either way `url`/`title` are the page as it stands when the
+ * provider answers, so the agent can read the result of whatever the
+ * person did (or the page unchanged, on a timeout).
  */
 export type BrowserRequestHelpData = {
-  outcome: 'handed-back' | 'timeout';
+  outcome: 'handed-back' | 'signed-in' | 'timeout';
   tabId?: string;
   url: string;
   title: string;
   waitedSeconds: number;
 };
+
+/**
+ * The chat's browser runs on a disposable copy of the saved profile; this
+ * writes that copy back so other chats get it too (a renewed login, for
+ * instance). `version` is the profile's write counter: the provider answers
+ * `ok: false` when it does not match the copy this chat took (another chat
+ * saved first), so the agent knows to take a fresh copy and redo its change
+ * rather than silently losing it. `reopenedTabs` is how many of this chat's
+ * tabs the brief restart reopened.
+ */
+export type BrowserSaveProfileData = { saved: true; profile: string; version: number; reopenedTabs: number };
 
 export type BrowserProviderData =
   | BrowserOpenData
@@ -213,7 +245,8 @@ export type BrowserProviderData =
   | BrowserInspectData
   | BrowserCaptureData
   | BrowserResizeData
-  | BrowserRequestHelpData;
+  | BrowserRequestHelpData
+  | BrowserSaveProfileData;
 
 /**
  * What the service answers. `error` is read by the agent, so it should say
