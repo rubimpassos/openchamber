@@ -833,6 +833,26 @@ export const createNotificationTriggerRuntime = (deps) => {
     );
   };
 
+  // browser.requestHelp push: same fanout every other trigger uses, so it
+  // reaches web-push and APNs the same way a "ready" or goal-settle push
+  // does. `panel` opens the guest's shared surface alongside the session on
+  // the client that handles the deep link (see packages/ui/src/lib/router).
+  const sendBrowserHelpPush = async ({ sessionId, guestId, title, body }) => {
+    await fanoutPush(
+      {
+        title,
+        body,
+        tag: `browser-help-${sessionId}`,
+        data: {
+          url: `${buildSessionDeepLinkUrl(sessionId)}&panel=${encodeURIComponent(guestId)}`,
+          sessionId,
+          type: 'browser-help',
+        },
+      },
+      { requireNoSse: true },
+    );
+  };
+
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
@@ -840,5 +860,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     setGetIsSessionAutoAccepting,
     clearPendingPushBadge,
     sendGoalSettlePush,
+    sendBrowserHelpPush,
   };
 };
