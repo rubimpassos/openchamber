@@ -42,6 +42,27 @@ itself; it can only ask and wait.
   an action is refused with 409 while the user holds the surface, and every
   action that runs is reported as agent activity so the panel says "Agent is
   working".
+- `browser.requestHelp` asks a person to step in for a login, CAPTCHA, OTP,
+  or 2FA the agent cannot do itself. It only reaches a provider with a shared
+  surface (`service.surface === true`) — there is nobody to hand a page to
+  otherwise — so the in-app browser view and a selected provider without one
+  both answer 400 with the same message, before the request ever leaves the
+  host. On the surviving path, right after the 409 user-control check and
+  before the action is proxied, the router calls the injected
+  `notifyBrowserHelp({ guestId, guestName, reason, context })` so the person
+  hears about it even away from the app; its failure is logged and never
+  fails the action, since a lost notification must not also lose the help
+  request. `notifyBrowserHelp` (wired in `../../index.js`) sends both the
+  live in-app notification and, unlike every other agent-facing notification
+  path, a web-push/APNs fanout through the notification trigger runtime — see
+  `../notifications/DOCUMENTATION.md` for why it is not gated by the notify
+  tool's own toggle. `timeoutMs` for this action is the caller's own
+  `timeoutSeconds * 1000 + 15_000` (`../openchamber-control/service.js`),
+  not the fixed open/action timeouts, and `idleStopMs` still applies: a
+  `browser.requestHelp` in flight for longer than `BROWSER_PROVIDER_IDLE_MS`
+  keeps the guest service up because `openGuestServiceRequest` never discards
+  a runtime while a request against it is still in flight (see
+  `../guests/service.js`).
 - `../openchamber-control/service.js` is the only caller. It maps the
   `browser.*` actions of the `openchamber_web` tool onto the router's
   `request()` (same signature as the broker) and owns their parameter
