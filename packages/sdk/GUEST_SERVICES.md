@@ -170,7 +170,7 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 
 ## Browser provider (`provides: ["browser"]`)
 
-The host's `openchamber_web` tool gives agents ten `browser.*` actions. By default a connected desktop app answers them with its browser panel; on a server with no desktop client the agent gets nothing. A service that declares `provides: ["browser"]` can answer instead, from a browser it runs itself (headless Chrome over CDP, for instance). The agent sees one tool either way.
+The host's `openchamber_web` tool gives agents eleven `browser.*` actions. By default a connected desktop app answers them with its browser panel; on a server with no desktop client the agent gets nothing. A service that declares `provides: ["browser"]` can answer instead, from a browser it runs itself (headless Chrome over CDP, for instance). The agent sees one tool either way.
 
 The user picks the provider in Settings → General → OpenChamber Tools → Browser provider. The dropdown lists installed, enabled, fully approved extensions with the role; with none it shows only "OpenChamber Web", disabled. The choice is `browserProvider` in the instance's `settings.json` (`builtin` or the extension id) and is read on every action, so it applies to the next action without a restart. Pausing, removing, or withdrawing approval from the selected extension puts `builtin` back and every open client shows a toast saying so; the same happens on the next action if the extension became unusable any other way.
 
@@ -217,8 +217,19 @@ Parameters the host sends and `data` the service answers; types are exported fro
 | `browser.inspect` | `selector` | `selector`, `tag`, `label`, `bounds`, `inViewport`, `styles` (computed, as strings) |
 | `browser.capture` | `label?` | `base64`, `mime`, `width`, `height`, `url`, `title`, `viewport`; the host writes the file into the project and returns its path |
 | `browser.resize` | `viewport` (`mobile`/`tablet`/`desktop`/`fill`) | `viewport` |
+| `browser.requestHelp` | `reason` (1-300 chars, what the person must do), `timeoutSeconds` (30-900, host default 300) | `outcome` (`handed-back`/`timeout`), `url`, `title`, `waitedSeconds` |
 
 Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your snapshot listed (`[{ id, title, url, active }]`, `active` being the tab the user sees), passed through from the agent untouched. Without it, act on the tab the user sees, except `browser.open`: without `tabId` it opens a new background tab and answers its id as `tabId` (`BrowserOpenData`), so the agent never replaces the user's page. Refuse an id you did not issue with `ok: false`; never act on another tab instead. A provider with one page lists no tabs and refuses every id.
+
+### `browser.requestHelp`
+
+The agent hit a login, a CAPTCHA, an OTP, or anything else only a person can do, and is asking one to step in. The host already notified the person (a live notification, plus web-push/APNs so it reaches them away from the app) before this request reaches you; your part is showing them the page and giving control back once they act.
+
+On arrival, select the chat's browser scope and the named tab (or the tab the user sees, absent `tabId`) as the picture your shared surface (`surface: true`) draws, so the person opening the notification sees the right page immediately. Then wait: `handed-back` once the person releases control after acting (an explicit hand-back, same as any other shared-surface release), `timeout` once `timeoutSeconds` elapses with nobody taking control, or with control taken but never released. Answer `{ outcome, tabId?, url, title, waitedSeconds }` either way — `url`/`title` are the page as it stands when you answer, so the agent can read what the person did (or the unchanged page, on a timeout).
+
+Answer your own `timeout` at `timeoutSeconds`; do not rely on the host giving up first. The host waits `timeoutSeconds * 1000 + 15_000` ms before it gives up on you, and that slack exists only to let your own bookkeeping land — an agent that gets the host's generic cutoff instead of your `outcome: 'timeout'` learns nothing about what the person did or didn't do.
+
+`browser.requestHelp` needs a shared surface (`surface: true`): a provider without one has no picture to show the person, so the host refuses the action before it ever reaches your service — same 400 it answers when no provider is selected at all, since the in-app browser view has nobody to hand a page to either.
 
 `viewport` in answers is `{ mode, width, height }` (`mode` may be `custom`; `fill` has `null` sizes). Snapshot `elements` carry `selector`, `tag`, `bounds`, and only the fields that apply (`inViewport`, `type`, `role`, `label`, `disabled`, `missingAccessibleName`). Keep `text` and `elements` bounded yourself; report what was dropped with the truncation fields.
 

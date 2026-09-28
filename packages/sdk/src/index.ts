@@ -276,6 +276,9 @@ export {
 export {
   BROWSER_CONTROL_ACTIONS,
   BROWSER_PROVIDER_ACTION_TIMEOUT_MS,
+  BROWSER_PROVIDER_HELP_TIMEOUT_DEFAULT_S,
+  BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S,
+  BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S,
   BROWSER_PROVIDER_IDLE_MS,
   BROWSER_PROVIDER_OPEN_TIMEOUT_MS,
   BROWSER_PROVIDER_PATH,
@@ -302,6 +305,8 @@ export type {
   BrowserProviderData,
   BrowserProviderRequest,
   BrowserProviderResult,
+  BrowserRequestHelpData,
+  BrowserRequestHelpParameters,
   BrowserResizeData,
   BrowserResizeParameters,
   BrowserScrollData,

@@ -110,7 +110,8 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.forward",
   "browser.inspect",
   "browser.capture",
-  "browser.resize"
+  "browser.resize",
+  "browser.requestHelp"
 ];
 var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
 var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
@@ -292,7 +293,7 @@ var navigate = (url) => {
   page.scrollY = 0;
 };
 var lastCaller = { directory: null, sessionId: null };
-var handle = (request) => {
+var handle = async (request) => {
   markAgentActive();
   lastCaller = request.context;
   if (request.parameters.tabId !== undefined) {
@@ -375,6 +376,10 @@ Name: ${page.fields.get("#name") ?? ""}`,
     case "browser.resize":
       page.viewport = request.parameters.viewport;
       return { ok: true, data: { viewport: viewport() } };
+    case "browser.requestHelp": {
+      const { outcome, waitedSeconds } = await waitForHandBack(request.parameters.timeoutSeconds);
+      return { ok: true, data: { outcome, url: page.url, title: page.title, waitedSeconds } };
+    }
   }
 };
 var surface = {
@@ -399,6 +404,33 @@ var markAgentActive = () => {
   surface.agentActiveUntil = Date.now() + 3000;
   touch();
 };
+var heldByUser = false;
+var handBackWaiters = new Set;
+var noteControllerChanged = (controller) => {
+  if (controller === "user") {
+    heldByUser = true;
+    return;
+  }
+  if (!heldByUser)
+    return;
+  heldByUser = false;
+  for (const resolve of handBackWaiters)
+    resolve();
+  handBackWaiters.clear();
+};
+var waitForHandBack = (timeoutSeconds) => new Promise((resolve) => {
+  const startedAt = Date.now();
+  const onHandBack = () => {
+    clearTimeout(timer);
+    handBackWaiters.delete(onHandBack);
+    resolve({ outcome: "handed-back", waitedSeconds: Math.round((Date.now() - startedAt) / 1000) });
+  };
+  const timer = setTimeout(() => {
+    handBackWaiters.delete(onHandBack);
+    resolve({ outcome: "timeout", waitedSeconds: timeoutSeconds });
+  }, timeoutSeconds * 1000);
+  handBackWaiters.add(onHandBack);
+});
 var crc32Table = (() => {
   const table = new Uint32Array(256);
   for (let n = 0;n < 256; n += 1) {
@@ -555,6 +587,7 @@ var handleSurface = async (req, res, url) => {
       return true;
     }
     surface.controller = notice.controller;
+    noteControllerChanged(notice.controller);
     touch();
     res.writeHead(204);
     res.end();
@@ -635,7 +668,7 @@ http.createServer((req, res) => {
         json(res, 400, { ok: false, error: "Not a browser action" });
         return;
       }
-      json(res, 200, handle(request));
+      handle(request).then((result) => json(res, 200, result));
     });
     return;
   }
