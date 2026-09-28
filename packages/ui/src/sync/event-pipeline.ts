@@ -133,6 +133,7 @@ const openchamberNotificationSchema = z.object({
       requireHidden: z.boolean(),
       desktopNotificationDelivered: z.boolean(),
       desktopStdoutActive: z.boolean(),
+      guestId: z.string(),
     })
     .partial(),
 })

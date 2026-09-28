@@ -199,6 +199,7 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
         sessionId: payload?.sessionId,
         directory: payload?.directory,
         requireHidden: payload?.requireHidden,
+        guestId: payload?.guestId,
       },
     });
     return true;

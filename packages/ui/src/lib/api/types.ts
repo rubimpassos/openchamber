@@ -799,6 +799,8 @@ export interface NotificationPayload {
   sessionId?: string;
   directory?: string;
   requireHidden?: boolean;
+  /** Guest id to reveal alongside the session (a `browser.requestHelp` deep link); desktop-only. */
+  guestId?: string;
 }
 
 export interface NotificationsAPI {

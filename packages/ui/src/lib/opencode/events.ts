@@ -153,6 +153,8 @@ export type OpenchamberNotification = {
   requireHidden?: boolean
   desktopNotificationDelivered?: boolean
   desktopStdoutActive?: boolean
+  /** Guest id to reveal alongside the session (a `browser.requestHelp` deep link); desktop-only. */
+  guestId?: string
 }
 
 export type SyncEventType = SyncEvent["type"]
