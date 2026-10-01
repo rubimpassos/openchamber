@@ -12,9 +12,8 @@ import type { ServerBrowserChromeStatus, ServerBrowserHelp } from '@/lib/browser
 /**
  * The bars stacked above the page picture: who holds control right now, a
  * help request aimed at this chat, and the service's Chrome install status.
- * Each is independent and only one of the first two shows at a time — a help
- * request implies the agent handed control back already, which the control
- * bar's own state will reflect a moment later.
+ * A help request replaces the control bar, except while this viewer holds
+ * control: then both show, since "Hand back" is what answers the request.
  */
 
 const ControlBar: React.FC<{
@@ -151,7 +150,14 @@ export const ServerBrowserBanners: React.FC<{
   <>
     {chrome ? <ChromeStatusBanner chrome={chrome} /> : null}
     {help && helpTargetsThisScope ? (
-      <HelpBanner help={help} onSaveSignIn={onSaveSignIn} saving={savingSignIn} />
+      <>
+        <HelpBanner help={help} onSaveSignIn={onSaveSignIn} saving={savingSignIn} />
+        {/* Handing back is how the user answers the request, so the bar with
+            that button has to stay while they hold control. */}
+        {control.controller === 'user' && control.mine ? (
+          <ControlBar control={control} connection={connection} focused={focused} onHandBack={onHandBack} />
+        ) : null}
+      </>
     ) : (
       <ControlBar control={control} connection={connection} focused={focused} onHandBack={onHandBack} />
     )}
