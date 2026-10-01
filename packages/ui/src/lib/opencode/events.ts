@@ -31,7 +31,7 @@ import {
   type StructuredError,
   type TokenUsageInfo,
 } from "./model"
-import { projectUserParts, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
+import { projectUserParts, sessionParentID, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
 
 // ---------------------------------------------------------------------------
 // Event vocabulary
@@ -220,7 +220,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "session.created": {
       const info: Session = compact({
         id: event.data.sessionID,
-        parentID: event.data.parentID,
+        parentID: sessionParentID(event.data.parentID, event.data.metadata),
         projectID: event.data.projectID,
         directory: event.data.location.directory,
         subpath: event.data.subpath,

@@ -90,10 +90,22 @@ export type AssistantToolItem = Extract<AssistantContentItem, { type: "tool" }>
 // Sessions
 // ---------------------------------------------------------------------------
 
+/**
+ * OpenCode 2.x's public session create has no parent, so oh-my-openagent
+ * records the parent of the sessions it starts (delegated tasks, look_at) as
+ * `metadata.omoParentID`. Reading it here nests those sessions under their
+ * parent like native subagents; a native parent always wins.
+ */
+export function sessionParentID(parentID: string | undefined, metadata: SessionInfo["metadata"]): string | undefined {
+  if (parentID) return parentID
+  const omoParentID = metadata?.omoParentID
+  return typeof omoParentID === "string" && omoParentID.length > 0 ? omoParentID : undefined
+}
+
 export function projectSession(info: SessionInfo): Session {
   return compact({
     id: info.id,
-    parentID: info.parentID,
+    parentID: sessionParentID(info.parentID, info.metadata),
     projectID: info.projectID,
     directory: info.location.directory,
     subpath: info.subpath,
