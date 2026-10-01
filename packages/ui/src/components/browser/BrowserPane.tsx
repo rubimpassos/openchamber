@@ -46,6 +46,8 @@ import {
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
+import { ServerBrowserView } from './ServerBrowserView';
+import { BUILTIN_BROWSER_PROVIDER } from '@/lib/guests/browser-providers';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -966,7 +968,18 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
   );
 };
 
+/**
+ * The context panel's choice of engine: Chrome on the OpenChamber server
+ * (`browserProvider` set to an extension id) beats the in-app view on every
+ * runtime, since it is also what the agent's own browser.* actions use once
+ * selected — the person and the agent should see the same page. `builtin`
+ * (the default) keeps today's Electron webview / web iframe split.
+ */
 export const BrowserPane: React.FC<BrowserPaneProps> = (props) => {
   const [chromium] = React.useState(isChromiumHost);
+  const browserProvider = useUIStore((state) => state.browserProvider);
+  if (browserProvider && browserProvider !== BUILTIN_BROWSER_PROVIDER) {
+    return <ServerBrowserView guestId={browserProvider} directory={props.directory} />;
+  }
   return chromium ? <WebviewBrowser {...props} /> : <IframeBrowser {...props} />;
 };
