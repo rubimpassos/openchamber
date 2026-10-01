@@ -87,12 +87,23 @@ describe('isBrowserProviderGuest', () => {
 });
 
 describe('browser control router', () => {
-  test('sends the action to the in-app broker when no provider is selected', async () => {
-    const { router, brokerCalls, proxied } = createRouter({ settings: {} });
+  test('an unset setting resolves to the built-in Server Browser extension, not the in-app broker', async () => {
+    const builtinGuest = providerGuest({ id: 'openchamber-builtin-server-browser', name: 'Server Browser' });
+    const { router, brokerCalls, proxied } = createRouter({ settings: {}, guest: builtinGuest });
+    const result = await router.request('browser.snapshot', {}, { timeoutMs: 20_000 });
+    expect(result).toEqual({ url: 'http://localhost:3000/', title: 'App' });
+    expect(brokerCalls).toHaveLength(0);
+    expect(proxied).toHaveLength(1);
+    expect(proxied[0].guestId).toBe('openchamber-builtin-server-browser');
+  });
+
+  test('an unset setting with no built-in guest registered runs in-app, the same as an unusable selection', async () => {
+    const { router, brokerCalls, proxied, resets } = createRouter({ settings: {}, guest: providerGuest({ id: 'something-else' }) });
     const result = await router.request('browser.snapshot', {}, { timeoutMs: 20_000 });
     expect(result).toEqual({ from: 'broker' });
     expect(brokerCalls).toHaveLength(1);
     expect(proxied).toHaveLength(0);
+    expect(resets).toEqual([{ guestId: 'openchamber-builtin-server-browser', guestName: 'openchamber-builtin-server-browser' }]);
   });
 
   test('"builtin" is the in-app broker as well', async () => {

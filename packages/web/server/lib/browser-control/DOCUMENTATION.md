@@ -21,7 +21,10 @@ itself; it can only ask and wait.
   an extension id goes to that extension's service (`contributes.service.provides`
   includes `browser`) as `POST /browser-control` on its loopback through
   `../guests/service.js`, with the open/action timeouts, the response cap, and
-  the idle stop from `@openchamber/sdk`. The body also carries `context`
+  the idle stop from `@openchamber/sdk`. Unset resolves to the built-in
+  Server Browser extension (`openchamber-builtin-server-browser`,
+  `packages/extensions/server-browser/`), not `builtin`: a fresh instance
+  can browse with no client open. The body also carries `context`
   (`directory`, `sessionId`, each `null` when unknown): the project and chat the
   tool call came from, threaded from the plugin (`contextDirectory`,
   `contextSessionId`) through the control service; the model never types it.

@@ -4,14 +4,17 @@
  * (`contributes.service.provides: ["browser"]`).
  *
  * The choice is the `browserProvider` setting: `builtin`, or the id of an
- * installed extension. It is read for every action, so a change in Settings
- * applies to the next action without a restart. A selected extension that can
- * no longer serve — paused, removed, approval withdrawn, or a newer version
- * without the role — is not silently kept: the setting goes back to `builtin`,
- * every client is told so it can say so, and the action runs in-app. Doing
- * that at the moment the extension is deactivated (`handleGuestDeactivated`)
- * gives the user the notice right away; doing it again on the next action
- * covers everything else, such as a folder install that went missing.
+ * installed extension. Unset resolves to the built-in Server Browser
+ * extension (`openchamber-builtin-server-browser`), so a fresh instance can
+ * browse with no client open; `builtin` keeps meaning the in-app webview.
+ * It is read for every action, so a change in Settings applies to the next
+ * action without a restart. A selected extension that can no longer serve —
+ * paused, removed, approval withdrawn, or a newer version without the role —
+ * is not silently kept: the setting goes back to `builtin`, every client is
+ * told so it can say so, and the action runs in-app. Doing that at the
+ * moment the extension is deactivated (`handleGuestDeactivated`) gives the
+ * user the notice right away; doing it again on the next action covers
+ * everything else, such as a folder install that went missing.
  *
  * The service is a host-spawned loopback process, so the proxy that panels
  * use serves here too. It starts the process on the first action, which is
@@ -35,6 +38,13 @@ import { GuestServiceError, proxyGuestServiceRequest } from '../guests/service.j
 import { BrowserControlError } from './broker.js';
 
 const BUILTIN_BROWSER_PROVIDER = 'builtin';
+/**
+ * Unset `browserProvider` resolves to the built-in Server Browser extension,
+ * not the in-app webview/iframe: a fresh instance can browse from no client
+ * at all. `builtin` keeps its own meaning and is still what a broken or
+ * disabled provider resets to.
+ */
+const DEFAULT_BROWSER_PROVIDER = 'openchamber-builtin-server-browser';
 
 /**
  * `browser.requestHelp` hands a person a picture of the page, so it needs a
@@ -108,7 +118,7 @@ export const createBrowserControlRouter = ({
         503,
       );
     }
-    const value = settings?.browserProvider ?? BUILTIN_BROWSER_PROVIDER;
+    const value = settings?.browserProvider ?? DEFAULT_BROWSER_PROVIDER;
     return value === BUILTIN_BROWSER_PROVIDER ? null : String(value);
   };
 
