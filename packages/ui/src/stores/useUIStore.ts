@@ -1376,7 +1376,10 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
         agentWebToolEnabled: true,
-        browserProvider: 'builtin',
+        // Unset on the server resolves to the server browser (contract:
+        // native-server-browser-contract.md); a value the user actually saved
+        // ('builtin' or an extension id) overrides this on load.
+        browserProvider: 'openchamber-builtin-server-browser',
         agentMemoryToolEnabled: false,
         agentNotifyToolEnabled: false,
         isolatedSpacesEnabled: false,
