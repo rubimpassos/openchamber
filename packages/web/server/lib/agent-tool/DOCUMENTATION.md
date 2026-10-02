@@ -10,7 +10,12 @@ the user can want independently:
   a file to the user (`file.open`). Enabled while the persisted
   `agentControlToolEnabled` setting is not `false`.
 - `openchamber_web` — looking at and interacting with the page in OpenChamber's
-  browser panel. Enabled while `agentWebToolEnabled` is not `false`.
+  browser panel. Enabled while `agentWebToolEnabled` is not `false`. Its
+  description is the whole browsing guide (workflow, saved profiles,
+  `browser.saveProfile` and its stale-copy refusal, `browser.requestHelp`
+  outcomes), because agents get no separate skill for it; agent plugins with
+  their own browser skills can step aside (Oh-My-OpenAgent:
+  `browser_automation_engine.provider: "external"`).
 - `openchamber_notify` — `notify.send`, a notification to the user through
   `lib/notifications/emit-route.js` (same limits and rate window as
   `POST /api/notifications/emit`). Off by default: enabled only while

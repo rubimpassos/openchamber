@@ -150,6 +150,18 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).not.toContain('path');
   });
 
+  it('carries the browsing guide in the web tool description', async () => {
+    // Agents get no separate browser skill: the description is the guide.
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime);
+    const tool = await loadTools(dataDir, 'guide');
+    const description = tool.openchamber_web.description;
+    for (const phrase of ['tabId', 'browser.snapshot', 'browser.capture', 'browser.saveProfile', 'browser.requestHelp', 'refused', 'Settings → Browser', 'Never ask for a password']) {
+      expect(description).toContain(phrase);
+    }
+    expect(description.length).toBeLessThan(2400);
+  });
+
   it('keeps the action schema to one validator keyword', async () => {
     // A node carrying both `enum` and `oneOf` is valid JSON Schema, but some
     // OpenAI-compatible gateways reject it and answer with an empty completion
