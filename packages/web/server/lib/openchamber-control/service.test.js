@@ -678,3 +678,101 @@ describe('returning a dispatched session result', () => {
     expect(sessionService.create).not.toHaveBeenCalled();
   });
 });
+
+describe('browser requestHelp validation', () => {
+  const createBrowserService = (answer = { outcome: 'handed-back', url: 'http://a/', title: 'A', waitedSeconds: 12 }) => {
+    const request = vi.fn(async () => answer);
+    const { service } = createService({ browserControl: { request } });
+    return { service, request };
+  };
+
+  it('requires a reason', async () => {
+    const { service } = createBrowserService();
+    await expect(service.execute('browser.requestHelp', {}, '/repo'))
+      .rejects.toThrow(/reason is required/);
+  });
+
+  it('rejects a reason over 300 characters', async () => {
+    const { service } = createBrowserService();
+    await expect(service.execute('browser.requestHelp', { reason: 'x'.repeat(301) }, '/repo'))
+      .rejects.toThrow(/300 characters/);
+  });
+
+  it('defaults timeoutSeconds to 300 and kind to page, sets timeoutMs to timeoutSeconds*1000+15000', async () => {
+    const { service, request } = createBrowserService();
+    await service.execute('browser.requestHelp', { reason: 'Sign in to continue' }, '/repo');
+    expect(request).toHaveBeenCalledWith(
+      'browser.requestHelp',
+      { reason: 'Sign in to continue', timeoutSeconds: 300, kind: 'page' },
+      expect.objectContaining({ timeoutMs: 315_000 }),
+    );
+  });
+
+  it('accepts an explicit timeoutSeconds within 30-900', async () => {
+    const { service, request } = createBrowserService();
+    await service.execute('browser.requestHelp', { reason: 'Solve the CAPTCHA', timeoutSeconds: 60 }, '/repo');
+    expect(request).toHaveBeenCalledWith(
+      'browser.requestHelp',
+      { reason: 'Solve the CAPTCHA', timeoutSeconds: 60, kind: 'page' },
+      expect.objectContaining({ timeoutMs: 75_000 }),
+    );
+  });
+
+  it('accepts kind login and passes it through', async () => {
+    const { service, request } = createBrowserService();
+    await service.execute('browser.requestHelp', { reason: 'Sign in to your account', kind: 'login' }, '/repo');
+    expect(request).toHaveBeenCalledWith(
+      'browser.requestHelp',
+      { reason: 'Sign in to your account', timeoutSeconds: 300, kind: 'login' },
+      expect.anything(),
+    );
+  });
+
+  it('rejects a kind that is not login or page', async () => {
+    const { service } = createBrowserService();
+    await expect(service.execute('browser.requestHelp', { reason: 'Sign in', kind: 'admin' }, '/repo'))
+      .rejects.toThrow(/kind must be login or page/);
+  });
+
+  it('rejects a timeoutSeconds outside 30-900', async () => {
+    const { service } = createBrowserService();
+    await expect(service.execute('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 29 }, '/repo'))
+      .rejects.toThrow(/30 to 900/);
+    await expect(service.execute('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 901 }, '/repo'))
+      .rejects.toThrow(/30 to 900/);
+    await expect(service.execute('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 60.5 }, '/repo'))
+      .rejects.toThrow(/30 to 900/);
+  });
+
+  it('returns the provider outcome to the caller', async () => {
+    const { service } = createBrowserService({ outcome: 'timeout', url: 'http://a/', title: 'A', waitedSeconds: 300 });
+    await expect(service.execute('browser.requestHelp', { reason: 'Sign in' }, '/repo'))
+      .resolves.toEqual({ outcome: 'timeout', url: 'http://a/', title: 'A', waitedSeconds: 300 });
+  });
+});
+
+describe('browser saveProfile', () => {
+  const createBrowserService = (answer = { saved: true, profile: 'default', version: 2, reopenedTabs: 1 }) => {
+    const request = vi.fn(async () => answer);
+    const { service } = createService({ browserControl: { request } });
+    return { service, request };
+  };
+
+  it('takes no parameters beyond tabId and uses the open-length timeout', async () => {
+    const { service, request } = createBrowserService();
+    await service.execute('browser.saveProfile', {}, '/repo');
+    expect(request).toHaveBeenCalledWith('browser.saveProfile', {}, expect.objectContaining({ timeoutMs: 45_000 }));
+  });
+
+  it('passes the tab the agent named, like every other action', async () => {
+    const { service, request } = createBrowserService();
+    await service.execute('browser.saveProfile', { tabId: ' tab-2 ' }, '/repo');
+    expect(request).toHaveBeenCalledWith('browser.saveProfile', { tabId: 'tab-2' }, expect.anything());
+  });
+
+  it('returns the provider outcome to the caller', async () => {
+    const { service } = createBrowserService();
+    await expect(service.execute('browser.saveProfile', {}, '/repo'))
+      .resolves.toEqual({ saved: true, profile: 'default', version: 2, reopenedTabs: 1 });
+  });
+});

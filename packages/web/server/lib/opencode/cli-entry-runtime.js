@@ -36,6 +36,7 @@ export const runCliEntryIfMain = (dependencies) => {
     attachSignals: true,
     exitOnShutdown: true,
     uiPassword: cliOptions.uiPassword,
+    uiPasswordHash: cliOptions.uiPasswordHash,
     apiOnly: cliOptions.apiOnly,
   }).catch((error) => {
     console.error('Failed to start server:', error);

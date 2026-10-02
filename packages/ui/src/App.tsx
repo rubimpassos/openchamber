@@ -17,6 +17,7 @@ import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { useRouter } from '@/hooks/useRouter';
+import { openGuestPanelFromRoute } from '@/lib/router/openGuestPanelFromRoute';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
@@ -527,7 +528,7 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; guestId?: string; messageId?: string; runtimeKey?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
@@ -548,6 +549,12 @@ function App({ apis }: AppProps) {
         return;
       }
       void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
+      // A browser.requestHelp notification click: reveal the extension's
+      // panel alongside the session, same as the ?panel= deep link.
+      const guestId = String(detail?.guestId) === detail?.guestId ? detail.guestId.trim() : '';
+      if (guestId && directory) {
+        void openGuestPanelFromRoute(directory, guestId);
+      }
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);

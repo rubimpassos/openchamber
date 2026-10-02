@@ -1,4 +1,5 @@
 import { settingsDict } from './nl.settings';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -127,6 +128,7 @@ export const dict = {
   ...referencePickerI18n.nl,
   ...sessionMenuHintsI18n.nl,
   ...linearPanelI18n.nl,
+  ...browserServerPanelI18n.nl,
   ...routingI18n.nl,
   ...pluginPanelI18n.nl,
   ...surfacePanelI18n.nl,
@@ -3778,4 +3780,19 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Deze taak heeft al een run bezig',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Deze taak staat al in de wachtrij en draait zodra er plek vrijkomt',
   'chat.modelControls.agentFavoriteAdd': 'Toevoegen aan favorieten. Met favorieten wisselt Tab alleen daartussen',
+  // English until translated: keys this fork adds.
+  'sessions.sidebar.session.status.subagentsRunning': '{count} subagents running',
+  'gitView.ciLoop.description': 'Watches GitHub Actions after each push and reports results to the agent.',
+  'gitView.ciLoop.phase.doneClean': 'CI green',
+  'gitView.ciLoop.phase.doneFailed': 'CI failed',
+  'gitView.ciLoop.phase.error': 'CI watch failed: {message}',
+  'gitView.ciLoop.phase.running': 'CI running · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': 'Timed out waiting for CI',
+  'gitView.ciLoop.phase.waiting': 'Waiting for CI to start…',
+  'gitView.ciLoop.title': 'CI Monitor',
+  'gitView.ciLoop.toast.toggleFailed': 'Failed to update CI monitoring',
+  'gitView.ciLoop.toggleLabel': 'Monitor CI for this session',
+  'chat.goal.driver.title': 'Run by {name}',
+  'chat.questionCard.orphanedBadge': 'Interrupted',
+  'chat.questionCard.orphanedNotice': 'The session restarted before this question was answered. Your answer will be sent to the agent as a new message.',
 } as const;

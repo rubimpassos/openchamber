@@ -1,6 +1,13 @@
 import React from 'react';
 
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
@@ -41,6 +48,10 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, dis
   </Tooltip>
 );
 
+export type BrowserToolbarMenuItem =
+  | { kind: 'item'; id: string; icon: IconName; label: string; onSelect: () => void; destructive?: boolean; disabled?: boolean }
+  | { kind: 'separator'; id: string };
+
 type BrowserToolbarProps = {
   address: string;
   /** A mark before the address, with its meaning: the page is inside an isolated space. */
@@ -61,6 +72,9 @@ type BrowserToolbarProps = {
   /** These need a real Chromium host; hidden without one. */
   onAnnotate?: () => void;
   onOpenDevTools?: () => void;
+  /** The server browser's console/network drawer, shown instead of `onOpenDevTools`. */
+  onToggleInspector?: () => void;
+  isInspectorOpen?: boolean;
   isAnnotating?: boolean;
   onHardReload?: () => void;
   onZoomIn?: () => void;
@@ -72,6 +86,11 @@ type BrowserToolbarProps = {
   onClearCache?: () => void;
   onToggleDeviceBar?: () => void;
   isDeviceBarOpen?: boolean;
+  /**
+   * Rarely used actions behind a ⋯ button at the end of the bar. When given,
+   * "open in external browser" lives here instead of as its own button.
+   */
+  menuItems?: readonly BrowserToolbarMenuItem[];
 };
 
 export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
@@ -91,6 +110,8 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   isLoading,
   onAnnotate,
   onOpenDevTools,
+  onToggleInspector,
+  isInspectorOpen,
   isAnnotating,
   onHardReload,
   onZoomIn,
@@ -99,6 +120,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   zoomPercent = 100,
   onClearCookies,
   onClearCache,
+  menuItems,
   onToggleDeviceBar,
   isDeviceBarOpen,
 }) => {
@@ -251,12 +273,56 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       {onOpenDevTools ? (
         <ToolbarButton icon="terminal-box" label={t('contextPanel.browser.devTools')} onClick={onOpenDevTools} />
       ) : null}
-      <ToolbarButton
-        icon="external-link"
-        label={t('contextPanel.browser.openExternal')}
-        onClick={onOpenExternal}
-        disabled={!canOpenExternal}
-      />
+      {onToggleInspector ? (
+        <ToolbarButton
+          icon="terminal-box"
+          label={t('contextPanel.browser.server.inspector.toggle')}
+          onClick={onToggleInspector}
+          pressed={isInspectorOpen}
+        />
+      ) : null}
+      {menuItems ? (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="w-6 shrink-0 rounded-full px-0 text-muted-foreground hover:text-foreground"
+                  aria-label={t('contextPanel.browser.moreActions')}
+                >
+                  <Icon name="more-fill" className="size-3.5" aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('contextPanel.browser.moreActions')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="min-w-[14rem]">
+            {menuItems.map((item) => (item.kind === 'separator' ? (
+              <DropdownMenuSeparator key={item.id} />
+            ) : (
+              <DropdownMenuItem
+                key={item.id}
+                onSelect={item.onSelect}
+                disabled={item.disabled}
+                className={cn(item.destructive && 'text-destructive focus:text-destructive')}
+              >
+                <Icon name={item.icon} className="size-3.5" aria-hidden="true" />
+                {item.label}
+              </DropdownMenuItem>
+            )))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <ToolbarButton
+          icon="external-link"
+          label={t('contextPanel.browser.openExternal')}
+          onClick={onOpenExternal}
+          disabled={!canOpenExternal}
+        />
+      )}
     </div>
   );
 };

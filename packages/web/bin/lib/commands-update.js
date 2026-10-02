@@ -26,6 +26,7 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
       executeUpdate,
       detectPackageManager,
       getCurrentVersion,
+      resolveUpdateTarget,
     } = await importFromFilePath(packageManagerPath);
 
     const runningInstances = await discoverRunningInstances();
@@ -92,9 +93,13 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
     }
 
     const pm = detectPackageManager();
+    // A fork installs the tarball from its own release; the npm package stays
+    // pinned to the version the check reported.
+    const { target, origin } = await resolveUpdateTarget();
     const result = executeUpdate(pm, {
       targetVersion: updateInfo.version,
       silent: isJsonMode(options) || isQuietMode(options),
+      ...(origin === 'fork' ? { target } : {}),
     });
     if (!result.success) {
       updateSpin?.error(result.error || 'Update failed');

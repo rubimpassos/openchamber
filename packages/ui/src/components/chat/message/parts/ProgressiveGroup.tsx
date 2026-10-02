@@ -471,8 +471,10 @@ const StaticToolRowInner: React.FC<{
 
             const skill = skillByName.get(name);
             const rawPath = skill?.path || getToolSkillDirectory(activity);
+            // Plugin skill tools (oh-my-openagent's `skill`) load skills the app's
+            // skill list does not know and report no directory; still name them.
             const path = rawPath ? resolveSkillFilePath(rawPath) : '';
-            if (!path || entries.some((entry) => entry.name === name && entry.path === path)) continue;
+            if (entries.some((entry) => entry.name === name && entry.path === path)) continue;
             entries.push({ name, path });
         }
 
@@ -624,7 +626,7 @@ const StaticToolRowInner: React.FC<{
                 ))
                 : null}
             {isSkillGroup && skillEntries.length > 0
-                ? skillEntries.map((entry, index) => (
+                ? skillEntries.map((entry, index) => (entry.path ? (
                     <button
                         key={`${entry.name}-${entry.path}-${index}`}
                         type="button"
@@ -639,7 +641,15 @@ const StaticToolRowInner: React.FC<{
                     >
                         {entry.name}
                     </button>
-                ))
+                ) : (
+                    <span
+                        key={`${entry.name}-${index}`}
+                        className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
+                        style={{ color: 'var(--tools-description)' }}
+                    >
+                        {entry.name}
+                    </span>
+                )))
                 : null}
             {!isReadGroup && !isSearchGroup && !isFetchGroup && !isSkillGroup && descriptions.length > 0 ? (
                 <Text

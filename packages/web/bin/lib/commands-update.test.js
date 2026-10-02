@@ -35,6 +35,10 @@ describe('update command', () => {
           detectPackageManager: vi.fn(() => 'npm'),
           executeUpdate,
           getCurrentVersion: vi.fn(() => '1.0.0'),
+          resolveUpdateTarget: vi.fn(async () => ({
+            target: '@openchamber/web@latest',
+            origin: 'npm',
+          })),
         })),
       });
 
@@ -65,6 +69,10 @@ describe('update command', () => {
           detectPackageManager: vi.fn(() => 'npm'),
           executeUpdate,
           getCurrentVersion: vi.fn(() => '1.0.0'),
+          resolveUpdateTarget: vi.fn(async () => ({
+            target: '@openchamber/web@latest',
+            origin: 'npm',
+          })),
         })),
       });
 

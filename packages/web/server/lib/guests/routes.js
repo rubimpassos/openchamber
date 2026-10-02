@@ -28,6 +28,7 @@ import {
   toPublicGuest,
 } from './catalog.js';
 import { runGuestFileOperation } from './files.js';
+import { createGuestFileWatchRegistry, GUEST_FILE_WATCH_LEASE_MS, GUEST_FILE_WATCH_PATHS_MAX, resolveWatchPaths } from './file-watch.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
 import { injectGuestDocumentStyles } from './html-styles.js';
 import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
@@ -214,7 +215,10 @@ export const registerGuestRoutes = (app, {
   getSmallModelService,
   onGuestDeactivated = async () => false,
   surfaceViewerHeaders = () => null,
+  // Delivers `openchamber:guest-files-changed` to connected clients.
+  emitGuestFilesChanged = () => undefined,
 }) => {
+  const fileWatches = createGuestFileWatchRegistry({ emit: emitGuestFilesChanged });
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
   const versionOptions = { openchamberVersion };
@@ -644,6 +648,45 @@ export const registerGuestRoutes = (app, {
       console.error('Failed to run guest file operation:', error?.code ?? error?.name ?? 'error');
       res.status(500).json({ error: 'Failed to run guest file operation' });
     }
+  });
+
+  // Push for `host.watchFiles`: the client holds a lease on a set of project
+  // files (renewing it with the same watchId) and gets
+  // `openchamber:guest-files-changed` when one of them is written. Only the
+  // paths the guest named go out, never contents.
+  const watchBodySchema = z.object({
+    paths: z.array(z.string().min(1).max(1024)).min(1).max(GUEST_FILE_WATCH_PATHS_MAX),
+    watchId: z.string().min(1).max(128).optional(),
+  });
+  app.post('/api/guests/:id/files/watch', json16, async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest) return res.status(404).json({ error: 'not-found' });
+      const store = await readExtensionStore(persistPath);
+      if (store.disabledGuests?.[guest.id]) {
+        return res.status(400).json({ error: 'DISABLED', message: `${guest.name} is disabled in Settings → Extensions.` });
+      }
+      if (!(guest.capabilityGrants ?? []).includes('files')) {
+        return res.status(400).json({ error: 'NOT_GRANTED', message: 'This extension has not been allowed to read and write project files.' });
+      }
+      const parsed = watchBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: 'invalid-request' });
+      const { directory } = await resolveOptionalProjectDirectory(req);
+      if (!directory) return res.status(400).json({ error: 'NO_DIRECTORY', message: 'No project is open.' });
+      const files = resolveWatchPaths(directory, parsed.data.paths);
+      if (!files) return res.status(400).json({ error: 'HOST_REJECTED', message: 'Only project-relative paths can be watched.' });
+      const watchId = fileWatches.watch({ guestId: guest.id, files, watchId: parsed.data.watchId });
+      if (!watchId) return res.status(429).json({ error: 'HOST_REJECTED', message: 'Too many file watches for this extension.' });
+      res.json({ watchId, leaseMs: GUEST_FILE_WATCH_LEASE_MS });
+    } catch (error) {
+      console.error('Failed to watch guest files:', error?.code ?? error?.name ?? 'error');
+      res.status(500).json({ error: 'Failed to watch guest files' });
+    }
+  });
+
+  app.delete('/api/guests/:id/files/watch/:watchId', (req, res) => {
+    fileWatches.unwatch({ guestId: req.params.id, watchId: req.params.watchId });
+    res.json({ ok: true });
   });
 
   // One-off text generation with the user's Small Model. The model is

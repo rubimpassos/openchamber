@@ -7,6 +7,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -131,6 +132,7 @@ export const dict: Record<I18nKey, string> = {
   ...routingI18n.ko,
   ...pluginPanelI18n.ko,
   ...surfacePanelI18n.ko,
+  ...browserServerPanelI18n.ko,
   ...fileArtifactsI18n.ko,
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
@@ -723,6 +725,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': '서브 에이전트 작업 포함',
   'sessions.sidebar.session.export.dialog.confirm': '내보내기',
   'sessions.sidebar.session.status.active': '활성 세션',
+  'sessions.sidebar.session.status.subagentsRunning': '하위 에이전트 {count}개 실행 중',
   'sessions.sidebar.session.status.unread': '읽지 않은 업데이트',
   'sessions.sidebar.session.status.backgroundSubagent': '하위 에이전트가 백그라운드에서 실행 중',
   'sessions.sidebar.session.status.backgroundCommand': '명령이 백그라운드에서 실행 중',
@@ -945,6 +948,16 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.unstageAllAria': '모든 변경사항 스테이징 해제',
   'gitView.changes.unstageDirectoryAria': '{path}의 모든 변경사항 스테이징 해제',
   'gitView.changes.unstageFileAria': '{path} 스테이징 해제',
+  'gitView.ciLoop.description': '푸시할 때마다 GitHub Actions를 감시하고 결과를 에이전트에 보고합니다.',
+  'gitView.ciLoop.phase.doneClean': 'CI 통과',
+  'gitView.ciLoop.phase.doneFailed': 'CI 실패',
+  'gitView.ciLoop.phase.error': 'CI 감시 실패: {message}',
+  'gitView.ciLoop.phase.running': 'CI 실행 중 · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': 'CI 대기 시간 초과',
+  'gitView.ciLoop.phase.waiting': 'CI 시작 대기 중…',
+  'gitView.ciLoop.title': 'CI 모니터',
+  'gitView.ciLoop.toast.toggleFailed': 'CI 모니터링을 변경하지 못했습니다',
+  'gitView.ciLoop.toggleLabel': '이 세션에서 CI 모니터링',
   'gitView.commit.addGitmoji': 'gitmoji 추가',
   'gitView.commit.aiHighlights.insertAria': '커밋 메시지에 삽입',
   'gitView.commit.aiHighlights.insertTooltip': '커밋 메시지에 삽입',
@@ -2021,6 +2034,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.dialog.evaluationModelLabel': '평가 모델',
   'chat.goal.status.active': '진행 중',
   'chat.goal.status.evaluating': '평가 중…',
+  'chat.goal.driver.title': '{name}이(가) 실행',
   'chat.goal.status.paused': '일시 중지됨',
   'chat.goal.status.blocked': '차단됨',
   'chat.goal.status.budgetLimited': '예산 도달',
@@ -2456,6 +2470,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': '응답 전송에 실패했습니다',
   'chat.questionCard.dismissFailed': '질문 닫기에 실패했습니다',
   'chat.questionCard.noLongerPending': '이 질문은 더 이상 응답을 기다리지 않습니다.',
+  'chat.questionCard.orphanedBadge': '중단됨',
+  'chat.questionCard.orphanedNotice': '이 질문에 답하기 전에 세션이 다시 시작되었습니다. 답변은 새 메시지로 에이전트에게 전송됩니다.',
   'chat.questionCard.tryAgain': '잠시 후 다시 시도하세요.',
   'chat.textSelection.toast.noProject': '이 세션의 프로젝트를 찾을 수 없음',
   'chat.textSelection.toast.addToNotesFailed': '메모 추가 실패',

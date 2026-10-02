@@ -7,6 +7,18 @@ import type { InputState } from "./input-store"
 // `opencodeClient` only: OpenCode's own SDK never reaches this layer.
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
+let pendingQuestionsResult: QuestionRequest[] = []
+let pendingQuestionsError: unknown | null = null
+let beforePendingFormsResolve: (() => void) | null = null
+type SentMessageParams = {
+  id: string
+  providerID?: string
+  model?: { id: string; providerID: string; variant?: string }
+  agent?: string
+  variant?: string
+  text: string
+  directory?: string | null
+}
 let formReplyError: unknown | null = null
 let formCancelError: unknown | null = null
 let permissionReplyError: unknown | null = null
@@ -71,6 +83,19 @@ mock.module("@/lib/opencode/client", () => ({
     ) => {
       replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory, limit: options?.limit } })
       return { items: sessionMessageRecords.get(sessionId) ?? [], cursor: {} }
+    }),
+    listPendingForms: mock((options?: { directories?: Array<string | null | undefined> }) => {
+      beforePendingFormsResolve?.()
+      replyCalls.push({ method: "question.pending", params: { directories: options?.directories } })
+      if (pendingQuestionsError) return Promise.reject(pendingQuestionsError)
+      return Promise.resolve(pendingQuestionsResult.map((question) => ({
+        ...questionToForm(question),
+        metadata: { kind: "question", tool: { id: question.tool?.callID, messageID: question.tool?.messageID } },
+      })))
+    }),
+    sendMessage: mock((params: SentMessageParams) => {
+      replyCalls.push({ method: "session.sendMessage", params })
+      return Promise.resolve("msg_sent")
     }),
     createSession: mock(async (params: Record<string, unknown>, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.create", params: { ...params, directory } })
@@ -157,11 +182,17 @@ mock.module("@/lib/opencode/client", () => ({
 let idCounter = 0
 
 // Mock useConfigStore
+let mockIsConnected = true
+const connectionProbes: string[] = []
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
-      isConnected: true,
+      isConnected: mockIsConnected,
       hasEverConnected: true,
+      probeConnection: async () => {
+        connectionProbes.push("probe")
+        return mockIsConnected
+      },
     }),
   },
 }))
@@ -373,7 +404,9 @@ mock.module("./sync-refs", () => ({
 
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import { buildOrphanedAnswerMessage } from "@/lib/questions/orphanedQuestions"
+import { questionToForm } from "@/lib/opencode/projection"
+import type { Message, Part, Session, SessionStatus, QuestionRequest } from "@/lib/opencode/model"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveCall = { sessionID: string; directory?: string | null; messageID: string }
@@ -1408,6 +1441,45 @@ describe("optimisticSend target directory", () => {
     expect(optimisticRemove).toBe(null)
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
+  })
+
+  test("inserts the optimistic message before waiting for a lost connection", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let removed: OptimisticRemoveCall | null = null
+    let sendAttempts = 0
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {
+        connectionProbes.push("optimistic-add")
+      },
+      (input) => {
+        removed = input
+      },
+    )
+
+    connectionProbes.length = 0
+    mockIsConnected = false
+    try {
+      await expect(optimisticSend({
+        sessionId: "session-offline",
+        directory: "/target/project",
+        content: "hello",
+        send: async () => {
+          sendAttempts += 1
+        },
+      })).rejects.toThrow(/Connection lost/)
+    } finally {
+      mockIsConnected = true
+    }
+
+    expect(connectionProbes[0]).toBe("optimistic-add")
+    expect(connectionProbes).toContain("probe")
+    expect(sendAttempts).toBe(0)
+    expect(removed).not.toBeNull()
+    expect(targetStore.getState().session_status["session-offline"]?.type).toBe("idle")
   })
 
   test("commits the new branch locally and discards its optimistic shadow when sending after a revert", async () => {
@@ -3294,6 +3366,177 @@ describe("dismissOpenPermissionsForSession", () => {
     expect(store.getState().permission["session-child"]).toBe(undefined)
     expect(worktreeStore.getState().permission["session-child"]).toEqual([childPermission])
     expect(worktreeStore.getState().permission["session-a"]).toBe(undefined)
+  })
+})
+
+function buildOrphanedQuestion(sessionId: string): QuestionRequest {
+  return {
+    id: "orphaned:call_1",
+    sessionID: sessionId,
+    questions: [
+      {
+        question: "Which mode?",
+        header: "Mode",
+        options: [
+          { label: "safe", description: "Safe mode" },
+          { label: "fast", description: "Fast mode" },
+        ],
+      },
+    ],
+    tool: { messageID: "msg_assistant", callID: "call_1" },
+  }
+}
+
+describe("answerOrphanedQuestion", () => {
+  // SAFETY: answerOrphanedQuestion reads only the identity, role, provider, model
+  // and agent fields set below.
+  const askingAssistantMessage = {
+    id: "msg_assistant",
+    role: "assistant",
+    sessionID: "session-a",
+    providerID: "anthropic",
+    modelID: "claude-sonnet",
+    agent: "build",
+    variant: "high",
+    time: { created: 1 },
+  } as Message
+
+  const questionReplies = () => replyCalls.filter((call) => call.method === "form.reply")
+  const sentMessages = () => replyCalls.filter((call) => call.method === "session.sendMessage")
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    formReplyError = null
+    pendingQuestionsResult = []
+    pendingQuestionsError = null
+    beforePendingFormsResolve = null
+    runtimeKey = "default-runtime"
+  })
+
+  test("does not send to another runtime after the pending-form recheck", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    beforePendingFormsResolve = () => { runtimeKey = "another-runtime" }
+    await expect(answerOrphanedQuestion(buildOrphanedQuestion("session-a"), [["safe"]])).rejects.toThrow("runtime changed")
+    expect(sentMessages()).toHaveLength(0)
+    expect(questionReplies()).toHaveLength(0)
+  })
+
+  test("answers via question.reply with the real server request id when the question is still pending", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    const question = buildOrphanedQuestion("session-a")
+    pendingQuestionsResult = [
+      {
+        id: "q-real-server",
+        sessionID: "session-a",
+        questions: question.questions,
+        tool: { messageID: "msg_assistant", callID: "call_1" },
+      },
+    ]
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await answerOrphanedQuestion(question, [["safe"]])
+
+    expect(replyCalls.find((call) => call.method === "question.pending")?.params.directories).toEqual(["/test/project"])
+    expect(questionReplies()).toHaveLength(1)
+    expect(questionReplies()[0].params.formID).toBe("q-real-server")
+    expect(questionReplies()[0].params.formID).not.toBe("orphaned:call_1")
+    expect(questionReplies()[0].params.answer).toEqual({ q0: "safe" })
+    expect(sentMessages()).toHaveLength(0)
+  })
+
+  test("sends the answers as a chat message from the asking assistant message when no longer pending", async () => {
+    // SAFETY: answerOrphanedQuestion reads only id, role and sessionID off this record.
+    const userMessage = { id: "msg_user", role: "user", sessionID: "session-a", time: { created: 0 } } as Message
+    const store = createStore({}, { message: { "session-a": [userMessage, askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    const question = buildOrphanedQuestion("session-a")
+    pendingQuestionsResult = []
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await answerOrphanedQuestion(question, [["safe"]])
+
+    expect(sentMessages()).toHaveLength(1)
+    const sent = sentMessages()[0].params
+    expect(sent.id).toBe("session-a")
+    expect(sent.providerID).toBe("anthropic")
+    expect(sent.model).toEqual({ id: "claude-sonnet", providerID: "anthropic", variant: "high" })
+    expect(sent.agent).toBe("build")
+    expect(sent.text).toBe(buildOrphanedAnswerMessage(question, [["safe"]]))
+    expect(sent.text).toContain('"Which mode?"="safe"')
+    expect(questionReplies()).toHaveLength(0)
+  })
+
+  test("treats a pending question for a different tool call as orphaned", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    const question = buildOrphanedQuestion("session-a")
+    pendingQuestionsResult = [
+      {
+        id: "q-other",
+        sessionID: "session-a",
+        questions: question.questions,
+        tool: { messageID: "msg_other", callID: "call_other" },
+      },
+    ]
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await answerOrphanedQuestion(question, [["safe"]])
+
+    expect(questionReplies()).toHaveLength(0)
+    expect(sentMessages()).toHaveLength(1)
+    expect(sentMessages()[0].params.text).toContain('"Which mode?"="safe"')
+  })
+
+  test("rethrows when the pending re-check fails and never falls back to a chat message", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    pendingQuestionsError = new Error("question.list failed: fetch failed")
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    let thrown: unknown
+    try {
+      await answerOrphanedQuestion(buildOrphanedQuestion("session-a"), [["safe"]])
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect(String(thrown)).toContain("question.list failed")
+    expect(sentMessages()).toHaveLength(0)
+    expect(questionReplies()).toHaveLength(0)
+  })
+
+  test("throws when the originating assistant message cannot be found and does not send", async () => {
+    // SAFETY: answerOrphanedQuestion reads only id, role and sessionID off this record.
+    const userMessage = { id: "msg_user", role: "user", sessionID: "session-a", time: { created: 0 } } as Message
+    const store = createStore({}, { message: { "session-a": [userMessage] } })
+    const childStores = createChildStores([["/test/project", store]])
+    pendingQuestionsResult = []
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    let thrown: unknown
+    try {
+      await answerOrphanedQuestion(buildOrphanedQuestion("session-a"), [["safe"]])
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect(String(thrown)).toContain("originating assistant message not found")
+    expect(sentMessages()).toHaveLength(0)
   })
 })
 

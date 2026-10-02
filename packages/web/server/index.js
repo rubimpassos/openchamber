@@ -23,6 +23,7 @@ import {
   getUnauthenticatedLanErrorMessage,
   isLoopbackBindHost,
   isNetworkExposedBindHost,
+  isUiAuthConfigured,
   isUnsafeUnauthenticatedLanAllowed,
   readAdvertisedLanUrl,
 } from './lib/security/bind-host.js';
@@ -113,7 +114,7 @@ import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
-import { findInstalledGuest } from './lib/guests/catalog.js';
+import { findInstalledGuest, listInstalledGuests } from './lib/guests/catalog.js';
 import { extensionsPersistPath } from './lib/guests/persist.js';
 import { createGuestSurfaceRuntime } from './lib/guests/surface.js';
 import { BROWSER_PROVIDER_IDLE_MS } from '@openchamber/sdk';
@@ -159,10 +160,12 @@ import { createSessionLinker } from './lib/openchamber-sessions/session-link.js'
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
+import { applyForkReleaseSource } from './lib/fork-identity.js';
 
 // Background CLI launches enter here in a fresh process, without CLI defaults.
 applyConnectAttemptTimeout();
 applyOutboundProxyFromEnv();
+applyForkReleaseSource();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -968,6 +971,10 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
+  isGoalDriverActive: async (driver) => {
+    const guests = await listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) });
+    return guests.some((guest) => guest.enabled && guest.goal?.driver === driver);
+  },
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
     // The goal settle notification replaces the per-turn ready notifications
     // (suppressed while the goal is active) — so it obeys the same toggle.
@@ -1725,6 +1732,61 @@ const emitBrowserProviderResetEvent = ({ guestId, guestName }) => {
     }
   }
 };
+const BROWSER_HELP_NOTIFICATION_TITLE = 'The agent needs your help in the browser';
+const BROWSER_HELP_LOGIN_NOTIFICATION_TITLE = 'The agent needs you to sign in';
+const BROWSER_HELP_REASON_MAX = 500;
+
+/**
+ * Tells the person a `browser.requestHelp` needs them: the live in-app
+ * notification (desktop + SSE, same as `notify.send`) and, unlike that tool,
+ * a web-push/APNs fanout too — see notifications/DOCUMENTATION.md for why
+ * this one is not gated by the notify tool's own toggle. Skips both when the
+ * user turned native notifications off; `notificationTriggerRuntime` is
+ * declared above this point specifically so it can be captured here.
+ * `reason` arrives already validated (1-300 chars) by the control service
+ * that built these `parameters`; only its length here is this function's own
+ * concern, since a push notification body has a smaller budget. `kind` is
+ * the agent's `browser.requestHelp` parameter (`'login'`/`'page'`), read
+ * only to pick the title — the provider decides what to actually do with it.
+ */
+const notifyBrowserHelp = async ({ guestId, reason, kind, context }) => {
+  const settings = await readSettingsFromDiskMigrated();
+  if (settings.nativeNotificationsEnabled === false) {
+    return;
+  }
+  const sessionId = context?.sessionId || null;
+  const directory = context?.directory || null;
+  const title = kind === 'login' ? BROWSER_HELP_LOGIN_NOTIFICATION_TITLE : BROWSER_HELP_NOTIFICATION_TITLE;
+  const body = reason.trim().slice(0, BROWSER_HELP_REASON_MAX);
+  const tag = `browser-help-${sessionId || guestId}`;
+  const notificationPayload = {
+    title,
+    body,
+    tag,
+    kind: 'plugin',
+    sessionId,
+    directory,
+    requireHidden: false,
+    // Read by the Electron click handler (maybeShowNativeNotification) to
+    // open this guest's panel alongside the session; ignored elsewhere.
+    guestId,
+  };
+  const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+  broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+
+  // The push deep link needs a session to reopen; a help request with none
+  // (a CLI-invoked action, for instance) still gets the in-app notice above.
+  if (!sessionId) {
+    return;
+  }
+  await notificationTriggerRuntime.sendBrowserHelpPush({
+    sessionId,
+    guestId,
+    title,
+    body,
+  });
+};
+
 // Every browser action passes through here: the in-app view by default, or an
 // extension service chosen in Settings → OpenChamber Tools.
 const browserControlRouter = createBrowserControlRouter({
@@ -1739,6 +1801,7 @@ const browserControlRouter = createBrowserControlRouter({
     userControls: (guestId) => guestSurfaceRuntime?.userControls(guestId) ?? false,
     noteAgentActivity: (guestId) => guestSurfaceRuntime?.noteAgentActivity(guestId),
   },
+  notifyBrowserHelp,
 });
 
 // "Show this file" reaches every connected client; the ones showing that
@@ -2014,9 +2077,12 @@ async function main(options = {}) {
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
     : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
+  const uiPasswordHash = options.uiPasswordHash !== undefined
+    ? options.uiPasswordHash
+    : (typeof process.env.OPENCHAMBER_UI_PASSWORD_HASH === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD_HASH : null);
   if (
     isNetworkExposedBindHost(effectiveBindHost)
-    && !(typeof uiPassword === 'string' && uiPassword.trim().length > 0)
+    && !isUiAuthConfigured({ password: uiPassword, passwordHash: uiPasswordHash })
     && !isUnsafeUnauthenticatedLanAllowed(process.env)
   ) {
     throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
@@ -2257,6 +2323,7 @@ async function main(options = {}) {
     getTunnelUrl: () => tunnelRuntimeContextHolder?.tunnelService?.getPublicUrl?.() ?? null,
     verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
+    uiPasswordHash,
     tunnelAuthController,
     remoteClientAuthRuntime,
     clientPairingRuntime,

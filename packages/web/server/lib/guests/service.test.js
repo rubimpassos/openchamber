@@ -39,6 +39,14 @@ http.createServer((req, res) => {
     res.end(JSON.stringify({ pong: true }));
     return;
   }
+  if (req.url.startsWith('/slow')) {
+    const ms = Number(new URL(req.url, 'http://x').searchParams.get('ms')) || 0;
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ slow: true }));
+    }, ms);
+    return;
+  }
   res.writeHead(404);
   res.end('missing');
 }).listen(port, '127.0.0.1');
@@ -245,6 +253,41 @@ describe('host-driven services', () => {
       await stopGuestService('docker');
       await proxyGuestServiceRequest(request({ packageRoot, persistPath }));
       await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(getServiceStatus('docker')).toBe('ready');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a request outliving the idle window is not discarded mid-flight', async () => {
+    // browser.requestHelp can run for minutes past BROWSER_PROVIDER_IDLE_MS;
+    // the idle timer must not fire the guest service out from under it.
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      // Warm the service up first so spawn time cannot be mistaken for the
+      // idle timer discarding it.
+      const warmup = await proxyGuestServiceRequest(request({ packageRoot, persistPath, idleStopMs: 100 }));
+      expect(warmup.status).toBe(200);
+      const pid = readServicePid('docker');
+      expect(pid).not.toBeNull();
+
+      const slow = proxyGuestServiceRequest(request({
+        packageRoot,
+        persistPath,
+        path: '/slow?ms=300',
+        idleStopMs: 100,
+        timeoutMs: 5_000,
+      }));
+      // Well past idleStopMs, while the request above is still in flight.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(getServiceStatus('docker')).toBe('ready');
+      expect(readServicePid('docker')).toBe(pid);
+
+      const result = await slow;
+      expect(result).toEqual({ status: 200, body: JSON.stringify({ slow: true }) });
+      // The idle window re-arms from the end of the request, so the service
+      // is still up right after it finishes.
       expect(getServiceStatus('docker')).toBe('ready');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });

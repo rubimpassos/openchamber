@@ -20,6 +20,7 @@ import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalizatio
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
 import { isHiddenUserMessage } from './message/hiddenUserMessage';
+import { useGuestMessagePresentation, userMessageText } from '@/lib/guests/message-presentation';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { streamPerfCount, streamPerfMark, streamPerfMeasure } from '@/stores/utils/streamDebug';
@@ -292,6 +293,10 @@ const TurnBlock = React.memo(({
         () => !isHiddenUserMessage(turn.userMessage) && !isTurnOpeningNotice(turn.userMessage.info),
         [turn.userMessage]
     );
+    // A plugin message drawn as agent activity is not a prompt to pin above the turn.
+    const userMessageActivity = useGuestMessagePresentation(
+        React.useMemo(() => userMessageText(turn.userMessage.parts), [turn.userMessage.parts]),
+    ) !== null;
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
         onToggleTurnGroup(turn.turnId);
@@ -571,7 +576,7 @@ const TurnBlock = React.memo(({
     return (
         <TurnItem
             turn={renderableTurn}
-            stickyUserHeader={stickyUserHeader && turnHeaderCanStick}
+            stickyUserHeader={stickyUserHeader && turnHeaderCanStick && !userMessageActivity}
             renderMessage={renderMessage}
             assistantContent={chatRenderMode === 'live' && !defaultActivityExpanded && hasLiveActivity(turn, showReasoningTraces) ? (
                 <LiveTurnActivity

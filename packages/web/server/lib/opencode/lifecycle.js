@@ -10,6 +10,17 @@ import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
 
+// OpenChamber's own UI credentials and session-signing secret must never reach
+// the managed OpenCode process (or anything it spawns).
+const OPENCHAMBER_PRIVATE_ENV_KEYS = ['OPENCHAMBER_UI_PASSWORD', 'OPENCHAMBER_UI_PASSWORD_HASH', 'OPENCODE_JWT_SECRET'];
+
+export const stripOpenChamberPrivateEnv = (env) => {
+  for (const key of OPENCHAMBER_PRIVATE_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
+};
+
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -780,7 +791,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
     // What OpenChamber sets for OpenCode is recorded as injected, so a shell
     // the agent opens can tell it from the user's own variables.
-    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
+    const processEnv = stripOpenChamberPrivateEnv(stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
       { ...inheritedEnv },
       {
         ...managedOpenCodeEnv,
@@ -791,7 +802,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         OPENCODE_PASSWORD: openCodePassword,
         OPENCODE_SERVER_PASSWORD: openCodePassword,
       },
-    ))));
+    )))));
     managedProcessEnv = processEnv;
 
     let serverInstance;

@@ -22,6 +22,7 @@ export type SettingsPageSlug =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'browser'
   | 'routing'
   | 'magic-prompts'
   | 'snippets'
@@ -201,6 +202,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
   },
   {
+    slug: 'browser',
+    title: 'Browser',
+    group: 'general',
+    kind: 'single',
+    description: 'Chrome on the OpenChamber server that agents browse with, and the profiles they sign in with.',
+    keywords: ['browser', 'chrome', 'server', 'profile', 'profiles', 'sign in', 'sites', 'cookies'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     slug: 'routing',
     title: 'Routing',
     group: 'general',
@@ -310,6 +320,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'command';
     case 'sessions':
       return 'chat-history';
+    case 'browser':
+      return 'window';
     case 'routing':
       return 'signpost';
 

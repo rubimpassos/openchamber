@@ -3,7 +3,9 @@ import {
   isLoopbackBindHost,
   isNetworkExposedBindHost,
   readAdvertisedLanUrl,
+  isUiAuthConfigured,
 } from './bind-host.js';
+import { hashUiPassword } from '../ui-auth/ui-password-hash.js';
 
 describe('bind host exposure classification', () => {
   it('allows only proven loopback bind hosts without authentication', () => {
@@ -54,5 +56,22 @@ describe('readAdvertisedLanUrl', () => {
       expect(readAdvertisedLanUrl({ OPENCHAMBER_LAN_URL: value }, logger), value).toBeNull();
       expect(logger.warn).toHaveBeenCalledOnce();
     }
+  });
+});
+
+describe('UI auth configuration for network exposure', () => {
+  it('accepts a well-formed password hash without a plaintext password', () => {
+    expect(isUiAuthConfigured({ passwordHash: hashUiPassword('correct horse') })).toBe(true);
+  });
+
+  it('still accepts a plaintext password', () => {
+    expect(isUiAuthConfigured({ password: 'correct horse' })).toBe(true);
+  });
+
+  it('rejects blank, missing and malformed credentials', () => {
+    expect(isUiAuthConfigured({})).toBe(false);
+    expect(isUiAuthConfigured({ password: '   ' })).toBe(false);
+    expect(isUiAuthConfigured({ passwordHash: 'scrypt$not-base64!$x' })).toBe(false);
+    expect(isUiAuthConfigured({ passwordHash: 'bcrypt$c2FsdA==$aGFzaA==' })).toBe(false);
   });
 });

@@ -203,7 +203,7 @@ describe('parseGuestCatalogJson', () => {
     ]);
   });
 
-  test('keeps a service\'s provider role and surface, so the dropdown and the rail see them', () => {
+  test('keeps a service\'s provider role and surface, so the dropdown and the Browser panel see them', () => {
     const [guest] = readGuests(JSON.stringify({
       guests: [{
         id: 'server-chrome',
@@ -215,7 +215,15 @@ describe('parseGuestCatalogJson', () => {
     })) ?? [];
     expect(guest?.service).toEqual({ runtime: 'host', granted: true, provides: ['browser'], surface: true });
     expect(browserProviderGuests(guest ? [guest] : [])).toHaveLength(1);
-    expect(enabledGuestSurfaces(guest ? [guest] : [], (path) => path)).toHaveLength(1);
+    // The Browser panel draws a provider's surface, so it gets no rail entry of its own.
+    expect(enabledGuestSurfaces(guest ? [guest] : [], (path) => path)).toHaveLength(0);
+    const [other] = parseGuestCatalogJson(JSON.stringify({
+      guests: [{
+        id: 'whiteboard', name: 'Whiteboard', icon: 'window', capabilities: { requested: ['service'], granted: ['service'] },
+        service: { runtime: 'host', granted: true, surface: true },
+      }],
+    })) ?? [];
+    expect(enabledGuestSurfaces(other ? [other] : [], (path) => path)).toHaveLength(1);
 
     // An unknown role is a newer server; the row still parses, minus that field.
     const [newer] = readGuests(JSON.stringify({

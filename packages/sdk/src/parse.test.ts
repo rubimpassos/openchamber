@@ -907,6 +907,60 @@ describe('contributes.tools', () => {
   });
 });
 
+describe('contributes.messages', () => {
+  const withMessages = (messages: unknown) => parseManifest({
+    apiVersion: 1,
+    contributes: { panel: { id: 'msgs', name: 'Msgs', icon: 'robot-2' }, messages },
+  });
+
+  test('reads message presentations as declared, on a package without a panel page', () => {
+    const messages = [
+      { match: '^\\[BACKGROUND TASK (?<status>[A-Z ]+)\\]', name: 'Background task', icon: 'robot-2', title: 'Task {match.status}', subtitle: '{match.1}', tone: 'success', body: 'markdown' },
+      { match: '<!-- PLUGIN -->', name: 'Plugin notice', body: 'none' },
+    ];
+    const result = withMessages(messages);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.contributes.messages).toEqual(messages);
+  });
+
+  test('rejects malformed messages as invalid-messages', () => {
+    const cases: unknown[] = [
+      [],
+      [{ match: 'x' }],
+      [{ match: '', name: 'n' }],
+      [{ match: '([unclosed', name: 'n' }],
+      [{ match: 'x'.repeat(301), name: 'n' }],
+      [{ match: 'x', name: 'n'.repeat(41) }],
+      [{ match: 'x', name: 'n', tone: 'loud' }],
+      [{ match: 'x', name: 'n', body: 'html' }],
+      [{ match: 'x', name: 'n', icon: '../icon.svg' }],
+      new Array(33).fill(null).map(() => ({ match: 'x', name: 'n' })),
+    ];
+    for (const messages of cases) {
+      expect(withMessages(messages)).toMatchObject({ ok: false, code: 'invalid-messages' });
+    }
+  });
+});
+
+describe('contributes.goal', () => {
+  const withGoal = (goal: unknown) => parseManifest({
+    apiVersion: 1,
+    contributes: { panel: { id: 'drv', name: 'Driver', icon: 'robot-2' }, goal },
+  });
+
+  test('reads a goal driver, also on a package without a panel page', () => {
+    const result = withGoal({ driver: 'omo' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.contributes.goal).toEqual({ driver: 'omo' });
+  });
+
+  test('rejects a malformed goal driver as invalid-goal', () => {
+    for (const goal of [{}, { driver: '' }, { driver: 'OMO' }, { driver: 'a'.repeat(33) }, { driver: 'omo', extra: 1 }]) {
+      expect(withGoal(goal)).toMatchObject({ ok: false, code: 'invalid-goal' });
+    }
+  });
+});
+
 describe('page-less extensions', () => {
   const pageless = { id: 'tools-only', name: 'Tools Only', icon: 'tools' };
   const withContributes = (extra: Partial<Omit<OpenChamberContributes, 'panel'>>) => parseManifest({

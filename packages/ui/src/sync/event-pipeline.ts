@@ -148,6 +148,7 @@ const openchamberNotificationSchema = z.object({
       showWhenFocused: z.boolean(),
       desktopNotificationDelivered: z.boolean(),
       desktopStdoutActive: z.boolean(),
+      guestId: z.string(),
     })
     .partial(),
 })

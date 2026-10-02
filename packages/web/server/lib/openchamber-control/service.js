@@ -1,6 +1,12 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import path from 'node:path';
 import { OpenCode } from '@opencode/client';
+import {
+  BROWSER_PROVIDER_HELP_TIMEOUT_DEFAULT_S,
+  BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S,
+  BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S,
+  BROWSER_REQUEST_HELP_KINDS,
+} from '@openchamber/sdk';
 import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
@@ -8,6 +14,11 @@ import { writeScreenshot } from './screenshots.js';
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
 const WAIT_POLL_INTERVAL_MS = 500;
+const BROWSER_REQUEST_HELP_REASON_MAX = 300;
+// The provider owns its own `timeoutSeconds` deadline and must answer
+// `{ outcome: 'timeout' }` before this; the extra 15s only covers its own
+// bookkeeping around that deadline, never more time to wait for the person.
+const BROWSER_REQUEST_HELP_HOST_SLACK_MS = 15_000;
 // One service, both capabilities: which tool asked is the caller's concern.
 const CONTROL_ACTIONS = new Set(OPENCHAMBER_ALL_ACTIONS);
 const SCHEDULE_TASK_ID_ACTIONS = new Set([
@@ -626,10 +637,49 @@ export const createOpenChamberControlService = (dependencies) => {
       if (direction) parameters.direction = direction;
     }
 
+    let helpTimeoutSeconds = BROWSER_PROVIDER_HELP_TIMEOUT_DEFAULT_S;
+    if (action === 'browser.requestHelp') {
+      const reason = asNonEmptyString(input.reason);
+      if (!reason) throw new OpenChamberControlError('reason is required for browser.requestHelp', 400);
+      if (reason.length > BROWSER_REQUEST_HELP_REASON_MAX) {
+        throw new OpenChamberControlError(`reason must be at most ${BROWSER_REQUEST_HELP_REASON_MAX} characters`, 400);
+      }
+      if (input.timeoutSeconds !== undefined && input.timeoutSeconds !== null) {
+        const timeoutSeconds = Number(input.timeoutSeconds);
+        if (
+          !Number.isInteger(timeoutSeconds)
+          || timeoutSeconds < BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S
+          || timeoutSeconds > BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S
+        ) {
+          throw new OpenChamberControlError(
+            `timeoutSeconds must be an integer from ${BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S} to ${BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S}`,
+            400,
+          );
+        }
+        helpTimeoutSeconds = timeoutSeconds;
+      }
+      parameters.reason = reason;
+      parameters.timeoutSeconds = helpTimeoutSeconds;
+      const kind = asNonEmptyString(input.kind);
+      if (kind !== null && !BROWSER_REQUEST_HELP_KINDS.includes(kind)) {
+        throw new OpenChamberControlError(`kind must be ${BROWSER_REQUEST_HELP_KINDS.join(' or ')}`, 400);
+      }
+      parameters.kind = kind ?? 'page';
+    }
+
     // Opening a page waits for the navigation to settle, so its budget has to
     // exceed the client's own wait; sharing one timeout with the quick actions
     // made a slow page indistinguishable from an unreachable browser.
-    const timeoutMs = action === 'browser.open' ? 45_000 : 20_000;
+    // browser.requestHelp waits on a person, not a page: its budget is their
+    // own timeoutSeconds plus BROWSER_REQUEST_HELP_HOST_SLACK_MS.
+    // browser.saveProfile briefly restarts the chat's browser and reopens its
+    // tabs, so it shares browser.open's slower budget rather than the quick
+    // actions' 20s.
+    const timeoutMs = action === 'browser.open' || action === 'browser.saveProfile'
+      ? 45_000
+      : action === 'browser.requestHelp'
+        ? helpTimeoutSeconds * 1000 + BROWSER_REQUEST_HELP_HOST_SLACK_MS
+        : 20_000;
     // Where the call came from, for a provider that keeps one browser per
     // project or chat. Filled by the tool plugin, never by the model.
     const context = {

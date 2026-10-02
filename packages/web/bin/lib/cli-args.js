@@ -89,6 +89,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     uiPassword: injectedEnvKeys(process.env).has('OPENCHAMBER_UI_PASSWORD')
       ? undefined
       : process.env.OPENCHAMBER_UI_PASSWORD || undefined,
+    uiPasswordHash: injectedEnvKeys(process.env).has('OPENCHAMBER_UI_PASSWORD_HASH')
+      ? undefined
+      : process.env.OPENCHAMBER_UI_PASSWORD_HASH || undefined,
     json: false,
     all: false,
     follow: true,
@@ -623,6 +626,7 @@ COMMANDS:
   logs           Tail OpenChamber logs
   connect-url    Generate URL/QR for connecting another client
   update         Check for and install updates
+  hash-password  Read a UI password from stdin and print OPENCHAMBER_UI_PASSWORD_HASH
 
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
@@ -644,6 +648,7 @@ ENVIRONMENT:
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
   OPENCHAMBER_UI_SESSION_TTL_HOURS        Browser sign-in lifetime in hours (default: 12)
   OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS Sign-in lifetime on a trusted device in days (default: 7)
+  OPENCHAMBER_UI_PASSWORD_HASH            Pre-hashed UI password (scrypt$<salt>$<hash>, see hash-password); wins over OPENCHAMBER_UI_PASSWORD
   OPENCHAMBER_API_ONLY         Set to true/1 to start API routes only
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096

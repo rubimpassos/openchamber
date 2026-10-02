@@ -28,6 +28,8 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   shellsUnsubscribe: overrides.shellsUnsubscribe ?? (() => {}),
   shellOutput: overrides.shellOutput ?? (async () => ({ output: '', cursor: 0, skipped: false })),
   shellStop: overrides.shellStop ?? (async () => ({ stopped: true })),
+  filesWatch: overrides.filesWatch ?? (async () => {}),
+  filesUnwatch: overrides.filesUnwatch ?? (() => {}),
   storage: overrides.storage ?? (async () => ({ storage: true, op: 'keys', keys: [] })),
   setStatusControls: overrides.setStatusControls ?? (() => {}),
   openSession: overrides.openSession ?? (() => {}),
@@ -79,6 +81,22 @@ describe('answerGuestMessage', () => {
     }));
     expect(seen).toEqual([request]);
     expect(reply).toMatchObject({ type: 'result', ok: true });
+  });
+
+  test('starts and stops a file watch, and a refused watch answers an error', async () => {
+    const watched: Array<{ subscriptionId: string; paths: string[] }> = [];
+    const stopped: string[] = [];
+    const bridge = effects({
+      filesWatch: async (request) => { watched.push(request); },
+      filesUnwatch: (id) => { stopped.push(id); },
+    });
+    const watch: GuestMessage = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'files-watch', id: 'oc-2', payload: { subscriptionId: 'w1', paths: ['.omo/v2-state/todos.json'] } };
+    expect(await answerGuestMessage(watch, bridge)).toMatchObject({ ok: true });
+    expect(watched).toEqual([{ subscriptionId: 'w1', paths: ['.omo/v2-state/todos.json'] }]);
+    await answerGuestMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'files-unwatch', id: 'oc-3', payload: { subscriptionId: 'w1' } }, bridge);
+    expect(stopped).toEqual(['w1']);
+    const refused = effects({ filesWatch: async () => { throw new HostRequestError('HOST_REJECTED', 'no watch'); } });
+    expect(await answerGuestMessage(watch, refused)).toMatchObject({ ok: false });
   });
 
   test('toasts and answers ok', async () => {

@@ -6,6 +6,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -130,6 +131,7 @@ export const dict = {
   ...routingI18n.de,
   ...pluginPanelI18n.de,
   ...surfacePanelI18n.de,
+  ...browserServerPanelI18n.de,
   ...fileArtifactsI18n.de,
   ...usageStatsI18n.de,
   ...webSearchI18n.de,
@@ -629,6 +631,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Unteraufgaben des Sub-Agents einbeziehen',
   'sessions.sidebar.session.export.dialog.confirm': 'Exportieren',
   'sessions.sidebar.session.status.active': 'Sitzung aktiv',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} Subagenten laufen',
   'sessions.sidebar.session.status.unread': 'Ungelesene Updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent läuft im Hintergrund',
   'sessions.sidebar.session.status.backgroundCommand': 'Befehl läuft im Hintergrund',
@@ -850,6 +853,16 @@ export const dict = {
   'gitView.changes.unstageAllAria': 'Alle Änderungen nicht mehr bereitstellen',
   'gitView.changes.unstageDirectoryAria': 'Alle Änderungen in {path} nicht mehr bereitstellen',
   'gitView.changes.unstageFileAria': '{path} nicht mehr bereitstellen',
+  'gitView.ciLoop.description': 'Überwacht GitHub Actions nach jedem Push und meldet die Ergebnisse an den Agenten.',
+  'gitView.ciLoop.phase.doneClean': 'CI erfolgreich',
+  'gitView.ciLoop.phase.doneFailed': 'CI fehlgeschlagen',
+  'gitView.ciLoop.phase.error': 'CI-Überwachung fehlgeschlagen: {message}',
+  'gitView.ciLoop.phase.running': 'CI läuft · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': 'Zeitüberschreitung beim Warten auf CI',
+  'gitView.ciLoop.phase.waiting': 'Warten auf den CI-Start…',
+  'gitView.ciLoop.title': 'CI-Überwachung',
+  'gitView.ciLoop.toast.toggleFailed': 'CI-Überwachung konnte nicht aktualisiert werden',
+  'gitView.ciLoop.toggleLabel': 'CI für diese Sitzung überwachen',
   'gitView.commit.addGitmoji': 'Gitmoji hinzufügen',
   'gitView.commit.aiHighlights.insertAria': 'Einfügen aria-Label',
   'gitView.commit.aiHighlights.insertTooltip': 'Einfügen tooltip',
@@ -1777,6 +1790,7 @@ export const dict = {
   'chat.goal.dialog.budgetLabel': 'Token-Budget',
   'chat.goal.status.active': 'Aktiv',
   'chat.goal.status.evaluating': 'Wird bewertet…',
+  'chat.goal.driver.title': 'Ausgeführt von {name}',
   'chat.goal.status.paused': 'Pausiert',
   'chat.goal.status.blocked': 'Gesperrt',
   'chat.goal.status.budgetLimited': 'Budget erreicht',
@@ -2194,6 +2208,8 @@ export const dict = {
   'chat.questionCard.submitFailed': 'Fehler beim Senden der Antwort',
   'chat.questionCard.dismissFailed': 'Fehler beim Verwerfen der Frage',
   'chat.questionCard.noLongerPending': 'Diese Frage wartet nicht mehr auf eine Antwort.',
+  'chat.questionCard.orphanedBadge': 'Unterbrochen',
+  'chat.questionCard.orphanedNotice': 'Die Sitzung wurde neu gestartet, bevor diese Frage beantwortet wurde. Deine Antwort wird als neue Nachricht an den Agenten gesendet.',
   'chat.questionCard.tryAgain': 'Bitte versuchen Sie es in einem Moment erneut.',
   'chat.textSelection.toast.noProject': 'Kein Projekt für diese Sitzung gefunden',
   'chat.textSelection.toast.addToNotesFailed': 'Fehler beim Hinzufügen zu Notizen',

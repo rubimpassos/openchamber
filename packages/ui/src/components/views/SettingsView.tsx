@@ -42,6 +42,7 @@ import { GitPage } from '@/components/sections/git-identities/GitPage';
 import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
 import { RoutingPage } from '@/components/sections/routing/RoutingPage';
 import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage';
+import { BrowserPage } from '@/components/sections/browser/BrowserPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
@@ -110,6 +111,7 @@ const pageOrder: SettingsPageSlug[] = [
   'chat',
   'notifications',
   'sessions',
+  'browser',
   'routing',
   'shortcuts',
   'voice',
@@ -368,6 +370,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.shortcuts.title');
       case 'sessions':
         return t('settings.page.sessions.title');
+      case 'browser':
+        return t('settings.page.browser.title');
       case 'routing':
         return t('settings.page.routing.title');
       case 'magic-prompts':
@@ -701,6 +705,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <RoutingPage />;
       case 'extensions':
         return <ExtensionsPage />;
+      case 'browser':
+        return <BrowserPage />;
       case 'general':
       case 'appearance':
       case 'chat':

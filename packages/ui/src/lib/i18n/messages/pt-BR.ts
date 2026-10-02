@@ -7,6 +7,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -141,6 +142,7 @@ export const dict: Record<I18nKey, string> = {
   ...routingI18n['pt-BR'],
   ...pluginPanelI18n['pt-BR'],
   ...surfacePanelI18n['pt-BR'],
+  ...browserServerPanelI18n['pt-BR'],
   ...fileArtifactsI18n['pt-BR'],
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],
@@ -724,6 +726,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Incluir tarefas de subagente",
   "sessions.sidebar.session.export.dialog.confirm": "Exportar",
   "sessions.sidebar.session.status.active": "Sessão ativa",
+  "sessions.sidebar.session.status.subagentsRunning": "{count} subagentes rodando",
   "sessions.sidebar.session.status.unread": "Atualizações não lidas",
   "sessions.sidebar.session.status.backgroundSubagent": "Subagente em execução em segundo plano",
   "sessions.sidebar.session.status.backgroundCommand": "Comando em execução em segundo plano",
@@ -946,6 +949,16 @@ export const dict: Record<I18nKey, string> = {
   "gitView.changes.unstageAllAria": "Remover todas as alterações do stage",
   "gitView.changes.unstageDirectoryAria": "Remover todas as alterações em {path} do stage",
   "gitView.changes.unstageFileAria": "Remover {path} do stage",
+  "gitView.ciLoop.description": "Vigia o GitHub Actions após cada push e informa os resultados ao agente.",
+  "gitView.ciLoop.phase.doneClean": "CI verde",
+  "gitView.ciLoop.phase.doneFailed": "CI com falhas",
+  "gitView.ciLoop.phase.error": "Falha ao monitorar o CI: {message}",
+  "gitView.ciLoop.phase.running": "CI em execução · {completed}/{total}",
+  "gitView.ciLoop.phase.timedOut": "Tempo esgotado aguardando o CI",
+  "gitView.ciLoop.phase.waiting": "Aguardando o CI iniciar…",
+  "gitView.ciLoop.title": "Monitor de CI",
+  "gitView.ciLoop.toast.toggleFailed": "Não foi possível atualizar o monitoramento de CI",
+  "gitView.ciLoop.toggleLabel": "Monitorar CI nesta sessão",
   "gitView.commit.addGitmoji": "Adicionar gitmoji",
   "gitView.commit.aiHighlights.insertAria": "Insertar",
   "gitView.commit.aiHighlights.insertTooltip": "Insertar",
@@ -1985,6 +1998,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.goal.dialog.evaluationModelLabel": "Modelo de avaliação",
   "chat.goal.status.active": "Ativo",
   "chat.goal.status.evaluating": "Avaliando…",
+  "chat.goal.driver.title": "Executado por {name}",
   "chat.goal.status.paused": "Pausado",
   "chat.goal.status.blocked": "Bloqueado",
   "chat.goal.status.budgetLimited": "Orçamento atingido",
@@ -2422,6 +2436,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.questionCard.submitFailed": "Falha ao enviar a resposta",
   "chat.questionCard.dismissFailed": "Falha ao descartar a pergunta",
   "chat.questionCard.noLongerPending": "Esta pergunta não está mais aguardando uma resposta.",
+  "chat.questionCard.orphanedBadge": "Interrompida",
+  "chat.questionCard.orphanedNotice": "A sessão foi reiniciada antes desta pergunta ser respondida. Sua resposta será enviada ao agente como uma nova mensagem.",
   "chat.questionCard.tryAgain": "Tente novamente em instantes.",
   "chat.textSelection.toast.noProject": "Não foi encontrado projeto para esta sessão",
   "chat.textSelection.toast.addToNotesFailed": "Não foi possível adicionar às notas",

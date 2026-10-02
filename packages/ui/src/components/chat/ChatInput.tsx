@@ -228,6 +228,7 @@ import { BackgroundShellsStrip } from '@/components/chat/BackgroundShellsStrip';
 import { ComposerStatusStrip } from '@/components/chat/ComposerStatusStrip';
 import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { FormDock } from '@/components/chat/FormDock';
+import { useOrphanedQuestions } from '@/lib/questions/useOrphanedQuestions';
 import { PermissionDock } from '@/components/chat/PermissionDock';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import {
@@ -498,10 +499,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // visible) while the composer talks to the main session again.
     const btwPanel = useBtwPanelState(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const pendingForms = useScopedBlockingForms(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const orphaned = useOrphanedQuestions(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined, pendingForms);
     const pendingPermissions = useScopedBlockingPermissions(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const hasPendingPermission = pendingPermissions.length > 0;
     // A pending permission or form owns the dock; the composer is not for sending then.
-    const hasPendingForm = pendingForms.length > 0 || hasPendingPermission;
+    const hasPendingForm = pendingForms.length > 0 || orphaned.questions.length > 0 || hasPendingPermission;
     const btwSessionId = btwPanel.btwSessionId;
     const btwDirectory = btwPanel.btwDirectory;
     const btwComposerSessionId = btwPanel.pending && currentSessionId
@@ -4472,6 +4474,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible}
             />
             <FormDock
+                orphanedQuestions={orphaned.questions}
+                onOrphanedResolved={orphaned.refresh}
                 sessionId={currentSessionId}
                 directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}
                 hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingPermission}

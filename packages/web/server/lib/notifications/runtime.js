@@ -76,6 +76,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     goal_complete: 'Goal complete',
     goal_blocked: 'Goal blocked',
     goal_budget: 'Goal reached its token budget',
+    'browser-help': 'Agent needs you in the browser',
   };
 
   const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
@@ -85,14 +86,19 @@ export const createNotificationTriggerRuntime = (deps) => {
     const sessionName = typeof data.sessionName === 'string' && data.sessionName.trim().length > 0
       ? data.sessionName.trim()
       : 'Session';
+    // sessionId and url are forwarded so a tapped push can deep-link; both are
+    // opaque identifiers (a session id, a same-shape `/?session=…` path), not
+    // message/project content.
+    const forwardedData = {};
+    if (String(data.sessionId) === data.sessionId) forwardedData.sessionId = data.sessionId;
+    if (String(data.url) === data.url && data.url.length > 0) forwardedData.url = data.url;
     return {
       title: genericTitleOf(payload),
       // A session name is derived from the conversation.
       body: isEnterpriseMode() ? '' : sessionName,
       badge: trackPushAndCountBadge(typeof payload?.tag === 'string' ? payload.tag : undefined),
       tag: payload?.tag,
-      // sessionId is forwarded so a tapped push can deep-link; it is an opaque id, not content.
-      data: typeof data.sessionId === 'string' ? { sessionId: data.sessionId } : undefined,
+      data: Object.keys(forwardedData).length > 0 ? forwardedData : undefined,
     };
   };
 
@@ -847,6 +853,26 @@ export const createNotificationTriggerRuntime = (deps) => {
     );
   };
 
+  // browser.requestHelp push: same fanout every other trigger uses, so it
+  // reaches web-push and APNs the same way a "ready" or goal-settle push
+  // does. `panel` opens the guest's shared surface alongside the session on
+  // the client that handles the deep link (see packages/ui/src/lib/router).
+  const sendBrowserHelpPush = async ({ sessionId, guestId, title, body }) => {
+    await fanoutPush(
+      {
+        title,
+        body,
+        tag: `browser-help-${sessionId}`,
+        data: {
+          url: `${buildSessionDeepLinkUrl(sessionId)}&panel=${encodeURIComponent(guestId)}`,
+          sessionId,
+          type: 'browser-help',
+        },
+      },
+      { requireNoSse: true },
+    );
+  };
+
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
@@ -854,5 +880,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     setGetIsSessionAutoAccepting,
     clearPendingPushBadge,
     sendGoalSettlePush,
+    sendBrowserHelpPush,
   };
 };

@@ -34,6 +34,8 @@ import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useChildStoreManager } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { BrowserPane } from '@/components/browser/BrowserPane';
+import { ServerBrowserView } from '@/components/browser/ServerBrowserView';
+import { BUILTIN_BROWSER_PROVIDER } from '@/lib/guests/browser-providers';
 import { browserUrlLabel } from '@/lib/browser/url';
 import { registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
@@ -961,6 +963,8 @@ export const ContextPanel: React.FC = () => {
               /></React.Suspense>
             : null;
 
+  const browserProvider = useUIStore((state) => state.browserProvider);
+  const serverBrowserGuest = browserProvider && browserProvider !== BUILTIN_BROWSER_PROVIDER ? browserProvider : null;
   const visibleBrowserTabId = isOpen && activeTab?.mode === 'browser' ? activeTab.id : null;
   React.useEffect(() => {
     if (visibleBrowserTabId) wakeBrowserTab(visibleBrowserTabId);
@@ -1360,7 +1364,17 @@ export const ContextPanel: React.FC = () => {
             />
           </section>
         ) : null}
-        {loadedBrowserTabs.map((tab) => {
+        {serverBrowserGuest ? (
+          // One live view for every Browser tab: switching tabs points it at
+          // another Chrome tab instead of reconnecting the picture.
+          <div className={cn('absolute inset-0', activeTab?.mode !== 'browser' && 'hidden')}>
+            <ServerBrowserView
+              guestId={serverBrowserGuest}
+              directory={directoryKey}
+              tabID={activeTab?.mode === 'browser' ? activeTab.id : null}
+            />
+          </div>
+        ) : loadedBrowserTabs.map((tab) => {
           const shown = tab.directory === directoryKey && activeTab?.id === tab.id;
           return (
             <div

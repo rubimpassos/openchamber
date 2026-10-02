@@ -8,9 +8,13 @@
  * module evaluation runs on the thread Chromium needs to finish initialising.
  */
 
+// Keep first: it sets OPENCHAMBER_DATA_DIR before anything reads the data
+// directory (early-startup only resolves it lazily, main.mjs loads after ready).
+import './turbo2-data-dir-apply.mjs';
 import { app, protocol } from 'electron';
 import path from 'node:path';
 import { enableMainProcessCompileCache } from './compile-cache.mjs';
+import fs from 'node:fs';
 import { shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import {
   APP_USER_MODEL_ID,
@@ -28,7 +32,8 @@ recordEarlyStartupMark('electron.entry');
 
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
-app.setName('OpenChamber');
+app.setName('OpenChamber Turbo 2');
+process.env.OPENCHAMBER_UPDATE_REPO = 'rubimpassos/openchamber';
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
 }
@@ -42,6 +47,32 @@ if (isDev) {
 const userDataOverride = String(process.env.OPENCHAMBER_DESKTOP_USER_DATA_DIR || '').trim();
 if (userDataOverride) {
   app.setPath('userData', userDataOverride);
+}
+// Seed the fork profile before Chromium or electron-log opens it. Never copy
+// into an explicitly isolated profile (including startup profiling runs).
+if (!isDev && !userDataOverride) {
+  const target = app.getPath('userData');
+  const source = path.join(path.dirname(target), 'OpenChamber Turbo');
+  const volatileEntries = new Set([
+    'Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'DawnGraphiteCache',
+    'DawnWebGPUCache', 'Crashpad', 'logs', 'Partitions', 'Service Worker',
+    'blob_storage', 'Network',
+  ]);
+  if (!fs.existsSync(target) && fs.existsSync(source)) {
+    try {
+      fs.cpSync(source, target, {
+        recursive: true,
+        filter: (entry) => !(path.dirname(entry) === source && volatileEntries.has(path.basename(entry))),
+      });
+    } catch (error) {
+      try {
+        fs.rmSync(target, { recursive: true, force: true });
+      } catch (cleanupError) {
+        console.warn('[electron] could not remove partial imported profile', cleanupError);
+      }
+      console.warn('[electron] could not import official OpenChamber user data; starting on a clean profile', error);
+    }
+  }
 }
 // After the userData path is final, before main.mjs and the server load.
 enableMainProcessCompileCache({ packaged: app.isPackaged, userDataDir: app.getPath('userData') });
