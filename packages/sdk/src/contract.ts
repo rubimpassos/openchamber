@@ -615,10 +615,16 @@ export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
 );
 
 export type HostShellsMessage = Envelope & { type: 'shells'; payload: { subscriptionId: string; snapshot: GuestRunningShellsSnapshot } };
+/** Project files a guest watches (`host.watchFiles`); at most `GUEST_FILE_WATCH_PATHS_MAX` relative paths. */
+export const GUEST_FILE_WATCH_PATHS_MAX = 16;
+export type FilesWatchRequest = { subscriptionId: string; paths: string[] };
+/** Pushed when watched files were written; `paths` are the ones that changed, as the guest named them. */
+export type FilesChangedUpdate = { subscriptionId: string; paths: string[] };
 
 export type HostMessage =
   | (Envelope & { type: 'workspace'; payload: GuestWorkspaceUpdate })
   | HostShellsMessage
+  | (Envelope & { type: 'files-changed'; payload: FilesChangedUpdate })
   | HostReadyMessage
   | HostDirectoryMessage
   | HostSessionMessage
@@ -693,6 +699,8 @@ export type GuestMessage =
   | GuestShellsUnsubscribeMessage
   | GuestShellOutputMessage
   | GuestShellStopMessage
+  | GuestCall<'files-watch', FilesWatchRequest>
+  | GuestCall<'files-unwatch', { subscriptionId: string }>
   | GuestCall<'storage', GuestStorageRequest>
   | GuestCall<'open-session', { sessionId: string }>
   | GuestHelloMessage
@@ -767,6 +775,7 @@ export const isGenerateResult = (
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'workspace',
   'shells',
+  'files-changed',
   'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
   'status-control-event', 'popover-closed',
   'file-open', 'file-snapshot', 'file-saved',

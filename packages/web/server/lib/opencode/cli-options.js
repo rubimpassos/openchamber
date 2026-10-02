@@ -10,6 +10,7 @@ export const parseServeCliOptions = ({
     env.OPENCHAMBER_UI_PASSWORD ||
     env.OPENCODE_UI_PASSWORD ||
     null;
+  const envPasswordHash = env.OPENCHAMBER_UI_PASSWORD_HASH || null;
   const envCfTunnel = env.OPENCHAMBER_TRY_CF_TUNNEL === 'true';
   const envTunnelProvider = env.OPENCHAMBER_TUNNEL_PROVIDER || undefined;
   const envTunnelMode = env.OPENCHAMBER_TUNNEL_MODE || undefined;
@@ -25,6 +26,7 @@ export const parseServeCliOptions = ({
     port: defaultPort,
     host: undefined,
     uiPassword: envPassword,
+    uiPasswordHash: envPasswordHash,
     tryCfTunnel: envCfTunnel,
     tunnelProvider: envTunnelProvider,
     tunnelMode: envTunnelMode,
@@ -74,6 +76,8 @@ export const parseServeCliOptions = ({
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
       options.uiPassword = typeof value === 'string' ? value : '';
+      // An explicit --ui-password overrides an inherited hash.
+      options.uiPasswordHash = null;
       continue;
     }
 

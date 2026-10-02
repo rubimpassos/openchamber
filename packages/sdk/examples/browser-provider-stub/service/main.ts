@@ -87,9 +87,24 @@ const navigate = (url: string): void => {
 // with one browser per project or chat would key its targets on this.
 let lastCaller: BrowserProviderRequest['context'] = { directory: null, sessionId: null };
 
-const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
+// ---- Profile: the one saved store every chat's disposable copy comes from -
+//
+// This stub keeps one page, so there is nothing to actually copy, but the
+// version bookkeeping is real: each chat's first action records the version
+// its copy started at, and browser.saveProfile only succeeds when nobody
+// else saved since — the same conflict a provider with real per-chat
+// profiles would hit.
+const PROFILE_NAME = 'default';
+let profileVersion = 1;
+const copyTakenAtVersion = new Map<string, number>();
+
+const callerKey = (context: BrowserProviderRequest['context']): string => context.sessionId ?? 'unscoped';
+
+const handle = async (request: BrowserProviderRequest): Promise<BrowserProviderResult> => {
   markAgentActive();
   lastCaller = request.context;
+  const caller = callerKey(request.context);
+  if (!copyTakenAtVersion.has(caller)) copyTakenAtVersion.set(caller, profileVersion);
   // One page, no tabs: an id this stub never issued is refused, never
   // answered from the one page it has.
   if (request.parameters.tabId !== undefined) {
@@ -162,6 +177,23 @@ const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
     case 'browser.resize':
       page.viewport = request.parameters.viewport;
       return { ok: true, data: { viewport: viewport() } };
+    case 'browser.requestHelp': {
+      const { outcome, waitedSeconds } = await waitForHandBack(request.parameters.timeoutSeconds);
+      if (outcome === 'handed-back' && request.parameters.kind === 'login') {
+        profileVersion += 1;
+        copyTakenAtVersion.set(caller, profileVersion);
+        return { ok: true, data: { outcome: 'signed-in', url: page.url, title: page.title, waitedSeconds } };
+      }
+      return { ok: true, data: { outcome, url: page.url, title: page.title, waitedSeconds } };
+    }
+    case 'browser.saveProfile': {
+      if (copyTakenAtVersion.get(caller) !== profileVersion) {
+        return { ok: false, error: 'Another chat saved this profile first; take a fresh copy and redo your change.' };
+      }
+      profileVersion += 1;
+      copyTakenAtVersion.set(caller, profileVersion);
+      return { ok: true, data: { saved: true, profile: PROFILE_NAME, version: profileVersion, reopenedTabs: 0 } };
+    }
   }
 };
 
@@ -210,6 +242,40 @@ const markAgentActive = (): void => {
   surface.agentActiveUntil = Date.now() + 3_000;
   touch();
 };
+
+// ---- browser.requestHelp: wait for the person to take control and give it
+// back, same as a real provider would over the surface's own control path.
+let heldByUser = false;
+const handBackWaiters = new Set<() => void>();
+
+/** Called wherever `surface.controller` changes, so a hand-back after the
+    person acted resolves every pending browser.requestHelp. */
+const noteControllerChanged = (controller: SurfaceController): void => {
+  if (controller === 'user') {
+    heldByUser = true;
+    return;
+  }
+  if (!heldByUser) return;
+  heldByUser = false;
+  for (const resolve of handBackWaiters) resolve();
+  handBackWaiters.clear();
+};
+
+const waitForHandBack = (
+  timeoutSeconds: number,
+): Promise<{ outcome: 'handed-back' | 'timeout'; waitedSeconds: number }> => new Promise((resolve) => {
+  const startedAt = Date.now();
+  const onHandBack = (): void => {
+    clearTimeout(timer);
+    handBackWaiters.delete(onHandBack);
+    resolve({ outcome: 'handed-back', waitedSeconds: Math.round((Date.now() - startedAt) / 1000) });
+  };
+  const timer = setTimeout(() => {
+    handBackWaiters.delete(onHandBack);
+    resolve({ outcome: 'timeout', waitedSeconds: timeoutSeconds });
+  }, timeoutSeconds * 1000);
+  handBackWaiters.add(onHandBack);
+});
 
 const crc32Table = (() => {
   const table = new Uint32Array(256);
@@ -372,6 +438,7 @@ const handleSurface = async (req: http.IncomingMessage, res: http.ServerResponse
       return true;
     }
     surface.controller = notice.controller;
+    noteControllerChanged(notice.controller);
     touch();
     res.writeHead(204);
     res.end();
@@ -455,7 +522,7 @@ http.createServer((req, res) => {
         json(res, 400, { ok: false, error: 'Not a browser action' });
         return;
       }
-      json(res, 200, handle(request));
+      void handle(request).then((result) => json(res, 200, result));
     });
     return;
   }

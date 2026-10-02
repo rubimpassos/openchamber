@@ -106,6 +106,20 @@ export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlyS
   return false;
 };
 
+/** How many sessions below this one (subagents, background tasks) are running now. */
+export const countActiveSubagents = (sessionId: string, activeSessionIds: ReadonlySet<string>): number => {
+  let count = 0;
+  for (const activeId of activeSessionIds) {
+    if (activeId === sessionId) continue;
+    let below = false;
+    forEachAncestorId(activeId, (ancestorId) => {
+      if (ancestorId === sessionId) below = true;
+    });
+    if (below) count += 1;
+  }
+  return count;
+};
+
 /**
  * Active sessions plus every session whose turn they keep open: ancestors of
  * running subagents, and sessions waiting on a background command.
@@ -127,6 +141,9 @@ const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlySet<stri
   hasActiveSubagent(sessionId, activeSessionIds) || hasRunningShell(sessionId)
 );
 
+export const useActiveSubagentCount = (sessionId: string): number => useGlobalSessionStatusStore(
+  (state) => countActiveSubagents(sessionId, state.activeSessionIds),
+);
 /**
  * What keeps the session's turn open, or null when nothing does: the session
  * runs itself, or it idles while a subagent below it runs, or while a command

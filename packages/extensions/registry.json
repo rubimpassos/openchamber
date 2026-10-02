@@ -1,4 +1,20 @@
 {
   "version": 1,
-  "extensions": []
+  "extensions": [
+    {
+      "id": "openchamber-builtin-server-browser",
+      "directory": "server-browser",
+      "files": [
+        "NOTICE",
+        "LICENSE"
+      ],
+      "build": [
+        {
+          "entry": "src/main.js",
+          "out": "service/main.js",
+          "target": "node"
+        }
+      ]
+    }
+  ]
 }

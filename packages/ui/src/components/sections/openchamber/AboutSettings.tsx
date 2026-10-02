@@ -23,6 +23,8 @@ import {
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
+declare const __APP_VERSION__: string | undefined;
+
 const GITHUB_URL = 'https://github.com/openchamber/openchamber';
 const DISCORD_URL = 'https://discord.gg/ZYRSdnwwKA';
 const X_URL = 'https://x.com/openchamber_dev';
@@ -215,7 +217,14 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       runtimeType: updateStore.runtimeType,
     };
 
-  const currentVersion = openChamberVersion || update.info?.currentVersion || 'unknown';
+  // Only a fork build carries semver build metadata (`1.23.1+turbo.5518dc22`);
+  // /api/system/info reports the bare upstream version of the connected instance.
+  // Needs `typeof`, not optional chaining: only the web Vite build defines
+  // __APP_VERSION__, so a bare read throws ReferenceError in bundles that do not.
+  const forkBuildVersion = typeof __APP_VERSION__ === 'string' && __APP_VERSION__.includes('+')
+    ? __APP_VERSION__
+    : null;
+  const currentVersion = forkBuildVersion || openChamberVersion || update.info?.currentVersion || 'unknown';
   const appVersion = desktopAppVersion || updateStore.info?.currentVersion || 'unknown';
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
   const openCode = useOpenCodeUpgrade(t('opencodeUpdate.toast.failed.description'));
