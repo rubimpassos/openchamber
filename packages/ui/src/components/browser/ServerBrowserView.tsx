@@ -33,6 +33,7 @@ import {
 } from '@/lib/browser/serverBrowser/panelTabs';
 import { findSelectedScope, type ServerBrowserState } from '@/lib/browser/serverBrowser/types';
 import { useUIStore } from '@/stores/useUIStore';
+import { getSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import { useServerBrowserConnection } from '@/lib/browser/serverBrowser/useServerBrowserConnection';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
 
@@ -86,13 +87,23 @@ const closeChromeTabsOfPanelTab = async (guestId: string, tabID: string): Promis
     })
     .filter((entry) => entry.panelTabId === tabID);
   if (owned.length === 0) return;
-  for (const entry of owned) release(entry.scopeId, entry.panelTabId);
-  const current = await getServerBrowserState(guestId, undefined);
-  if (!current.ok) return;
-  const scope = findSelectedScope(current.data);
-  for (const entry of owned) {
-    if (!scope || scope.id !== entry.scopeId || !scope.tabs.some((tab) => tab.id === entry.chromeTabId)) continue;
-    await closeServerBrowserTab(guestId, undefined, { generation: current.data.generation, tabId: entry.chromeTabId });
+  // As this window's viewer: it may hold control, and the service refuses
+  // dock commands from anyone else while it does.
+  const viewerId = getSurfaceViewerId(guestId);
+  try {
+    const current = await getServerBrowserState(guestId, viewerId);
+    if (!current.ok) return;
+    const scope = findSelectedScope(current.data);
+    let generation = current.data.generation;
+    for (const entry of owned) {
+      if (!scope || scope.id !== entry.scopeId || !scope.tabs.some((tab) => tab.id === entry.chromeTabId)) continue;
+      const closed = await closeServerBrowserTab(guestId, viewerId, { generation, tabId: entry.chromeTabId });
+      if (closed.ok) generation = closed.data.generation;
+    }
+  } finally {
+    // Released only now: while the claim stands, the open Chrome tab is not
+    // "unclaimed", so it does not get a panel tab of its own again.
+    for (const entry of owned) release(entry.scopeId, entry.panelTabId);
   }
 };
 
@@ -215,6 +226,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
       claim(scope.id, tabID, pick);
       return;
     }
+    // No tab yet: the picture's first request opens the first page, which
+    // this panel tab then claims. Opening another here would make two.
+    if (scope.tabs.length === 0) return;
     // Every Chrome tab already has a panel tab: this one is new, so it gets
     // a new Chrome tab, which opens blank on the dev-server list.
     pairingRef.current = true;

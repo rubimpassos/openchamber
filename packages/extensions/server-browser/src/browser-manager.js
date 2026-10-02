@@ -582,8 +582,16 @@ export const createBrowserManager = ({
     selectTab(tabId, expectedGeneration, access) {
       return dockCommand('tab-select', { tabId }, expectedGeneration, access);
     },
-    closeTab(tabId, expectedGeneration, access) {
-      return dockCommand('tab-close', { tabId }, expectedGeneration, access);
+    // Names its tab, so it means the same whatever is on screen: a tab switch
+    // landing just before it (the panel showing the next tab) is no reason
+    // to refuse it. Only who may use the dock is checked.
+    closeTab(tabId, _expectedGeneration, access) {
+      return enqueue(async () => {
+        requireDockAccess({ ...access, frameSeq: null });
+        const entry = requireSelected();
+        touch(entry);
+        await entry.runtime.command('tab-close', { tabId });
+      });
     },
     setViewport({ mode, width, height, mobile }, expectedGeneration, access) {
       return enqueue(async () => {
