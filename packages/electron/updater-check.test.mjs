@@ -8,7 +8,7 @@ const compareVersions = (left, right) => left.localeCompare(right, undefined, { 
 test('signals failed checks without replacing an existing pending update', async () => {
   const pendingUpdate = { version: '2.0.0', electronUpdate: { id: 'existing' } };
   await assert.rejects(
-    checkForDesktopUpdate({
+    checkForDesktopUpdate({ frozen: false,
       autoUpdater: { checkForUpdates: async () => { throw new Error('feed unavailable'); } },
       currentVersion: '1.0.0',
       pendingUpdate,
@@ -20,7 +20,7 @@ test('signals failed checks without replacing an existing pending update', async
 });
 
 test('treats missing update feed (404) as no update available', async () => {
-  const result = await checkForDesktopUpdate({
+  const result = await checkForDesktopUpdate({ frozen: false,
     autoUpdater: {
       checkForUpdates: async () => {
         throw new Error('HttpError: 404 Not Found "https://github.com/.../latest-linux.yml"');
@@ -36,7 +36,7 @@ test('treats missing update feed (404) as no update available', async () => {
 });
 
 test('authoritative no-update result clears pending update', async () => {
-  const result = await checkForDesktopUpdate({
+  const result = await checkForDesktopUpdate({ frozen: false,
     autoUpdater: { checkForUpdates: async () => ({ updateInfo: { version: '1.0.0' } }) },
     currentVersion: '1.0.0',
     pendingUpdate: { version: '2.0.0' },
@@ -44,4 +44,15 @@ test('authoritative no-update result clears pending update', async () => {
   });
   assert.equal(result.available, false);
   assert.equal(result.pendingUpdate, null);
+});
+
+test('a frozen 1.x desktop never asks the feed', async () => {
+  let asked = false;
+  const result = await checkForDesktopUpdate({
+    autoUpdater: { checkForUpdates: async () => { asked = true; return { updateInfo: { version: '2.0.3' } }; } },
+    currentVersion: '1.24.9',
+    compareVersions: () => 1,
+  });
+  assert.equal(asked, false);
+  assert.equal(result.available, false);
 });

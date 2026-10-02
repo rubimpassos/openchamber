@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fetchUpdateNotes } from './changelog/update-notes.js';
+import { FORK_UPDATES_FROZEN } from './fork-identity.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -912,6 +913,10 @@ export async function checkForUpdates(options = {}) {
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
   const platform = normalizePlatform(options.platform);
+
+  if (options.frozen ?? FORK_UPDATES_FROZEN) {
+    return { available: false, currentVersion, packageManager: pm };
+  }
 
   const forkSource = getForkReleaseSource();
   if (forkSource) {

@@ -6,7 +6,15 @@ const isMissingUpdateFeedError = (error) => {
   return MISSING_UPDATE_FEED_RE.test(message);
 };
 
-export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate, compareVersions }) => {
+// The 1.x line of this fork is frozen: the repository's latest release is a 2.x
+// build (OpenCode 2), which this desktop must never download. See FORK_UPDATES_FROZEN
+// in packages/web/server/lib/fork-identity.js.
+export const DESKTOP_UPDATES_FROZEN = true;
+
+export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate, compareVersions, frozen = DESKTOP_UPDATES_FROZEN }) => {
+  if (frozen) {
+    return { available: false, updateInfo: null, updateResult: null, nextVersion: currentVersion, pendingUpdate: null };
+  }
   let updateResult;
   try {
     updateResult = await autoUpdater.checkForUpdates();

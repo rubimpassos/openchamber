@@ -18,3 +18,11 @@ export function applyForkReleaseSource(environment = process.env) {
   if ((environment.OPENCHAMBER_UPDATE_REPO || '').trim()) return;
   environment.OPENCHAMBER_UPDATE_REPO = FORK_RELEASE_REPO;
 }
+
+/**
+ * The 1.x line of this fork is frozen. `main` moved to 2.x (OpenCode 2), and its
+ * releases are published to the same repository, so "latest" there is a 2.x
+ * build that cannot run against OpenCode 1.x. A 1.x install must never offer or
+ * install it: every update check on this branch reports "no update".
+ */
+export const FORK_UPDATES_FROZEN = true;

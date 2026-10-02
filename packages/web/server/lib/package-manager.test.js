@@ -38,6 +38,12 @@ function createFetchMock() {
 }
 
 describe('checkForUpdates', () => {
+  it('reports no update while the 1.x line is frozen', async () => {
+    const result = await checkForUpdates({ currentVersion: '1.0.0' });
+    expect(result.available).toBe(false);
+    expect(result.currentVersion).toBe('1.0.0');
+  });
+
   let fetchMock;
   let originalFetch;
 
@@ -74,7 +80,7 @@ describe('checkForUpdates', () => {
         text: async () => '## [1.10.0] - 2026-05-01\n\n- Great new feature',
       });
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(true);
     expect(result.version).toBe('1.10.0');
@@ -100,7 +106,7 @@ describe('checkForUpdates', () => {
         }),
       });
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(false);
   });
@@ -115,7 +121,7 @@ describe('checkForUpdates', () => {
         }),
       });
 
-    const result = await checkForUpdates({ currentVersion: '1.10.0' });
+    const result = await checkForUpdates({ currentVersion: '1.10.0', frozen: false });
 
     expect(result.available).toBe(false);
   });
@@ -132,6 +138,7 @@ describe('checkForUpdates', () => {
       });
 
     const result = await checkForUpdates({
+      frozen: false,
       appType: 'desktop-electron',
       currentVersion: '1.9.10',
       installId: '4f4dfead-9688-4c4f-97d7-4607fbbfc3ab',
@@ -180,6 +187,7 @@ describe('checkForUpdates', () => {
       });
 
     const result = await checkForUpdates({
+      frozen: false,
       appType: 'mobile-capacitor',
       platform: 'android',
       currentVersion: '1.9.10',
@@ -200,6 +208,7 @@ describe('checkForUpdates', () => {
     });
 
     const result = await checkForUpdates({
+      frozen: false,
       appType: 'mobile-capacitor',
       platform: 'android',
       currentVersion: '1.9.10',
@@ -226,7 +235,7 @@ describe('checkForUpdates', () => {
         }),
       });
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(false);
   });
@@ -242,7 +251,7 @@ describe('checkForUpdates', () => {
       }),
     });
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(false);
   });
@@ -263,7 +272,7 @@ describe('checkForUpdates', () => {
         text: async () => '## [1.10.0] - 2026-05-01\n\n- Great new feature',
       });
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(true);
     expect(result.version).toBe('1.10.0');
@@ -279,7 +288,7 @@ describe('checkForUpdates', () => {
         }),
       });
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(false);
   });
@@ -300,7 +309,7 @@ describe('checkForUpdates', () => {
         }),
       });
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(false);
   });
@@ -312,7 +321,7 @@ describe('checkForUpdates', () => {
       .when('api.openchamber.dev', Promise.reject(new Error('Network error')))
       .when('registry.npmjs.org', Promise.reject(new Error('Registry unreachable')));
 
-    const result = await checkForUpdates({ currentVersion: '1.9.10' });
+    const result = await checkForUpdates({ currentVersion: '1.9.10', frozen: false });
 
     expect(result.available).toBe(false);
   });
