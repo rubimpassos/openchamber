@@ -28,6 +28,12 @@ export interface SessionGoalPayload {
   lastAccountedMessageID: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * An extension plugin that runs this goal itself (`contributes.goal.driver`).
+   * OpenChamber's loop leaves it alone while that extension is enabled; the
+   * UI still shows and controls it through this same metadata.
+   */
+  driver: string | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -71,6 +77,7 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
     createdAt: typeof goal.createdAt === 'number' ? goal.createdAt : 0,
     updatedAt: typeof goal.updatedAt === 'number' ? goal.updatedAt : 0,
+    driver: typeof goal.driver === 'string' && goal.driver ? goal.driver : null,
   };
 }
 

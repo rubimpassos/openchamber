@@ -1873,6 +1873,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.goal.dialog.evaluationModelLabel": "Modelo de avaliação",
   "chat.goal.status.active": "Ativo",
   "chat.goal.status.evaluating": "Avaliando…",
+  "chat.goal.driver.title": "Executado por {name}",
   "chat.goal.status.paused": "Pausado",
   "chat.goal.status.blocked": "Bloqueado",
   "chat.goal.status.budgetLimited": "Orçamento atingido",

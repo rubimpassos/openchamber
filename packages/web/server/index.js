@@ -102,7 +102,7 @@ import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
-import { findInstalledGuest } from './lib/guests/catalog.js';
+import { findInstalledGuest, listInstalledGuests } from './lib/guests/catalog.js';
 import { extensionsPersistPath } from './lib/guests/persist.js';
 import { createGuestSurfaceRuntime } from './lib/guests/surface.js';
 import { BROWSER_PROVIDER_IDLE_MS } from '@openchamber/sdk';
@@ -900,6 +900,10 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
+  isGoalDriverActive: async (driver) => {
+    const guests = await listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) });
+    return guests.some((guest) => guest.enabled && guest.goal?.driver === driver);
+  },
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
     // The goal settle notification replaces the per-turn ready notifications
     // (suppressed while the goal is active) — so it obeys the same toggle.

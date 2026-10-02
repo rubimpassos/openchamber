@@ -1897,6 +1897,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.dialog.evaluationModelLabel': '평가 모델',
   'chat.goal.status.active': '진행 중',
   'chat.goal.status.evaluating': '평가 중…',
+  'chat.goal.driver.title': '{name}이(가) 실행',
   'chat.goal.status.paused': '일시 중지됨',
   'chat.goal.status.blocked': '차단됨',
   'chat.goal.status.budgetLimited': '예산 도달',

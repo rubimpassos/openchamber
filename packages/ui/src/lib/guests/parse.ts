@@ -121,6 +121,7 @@ const installedGuestSchema = z.object({
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
   messages: z.array(guestMessageSchema).max(GUEST_MESSAGES_MAX).optional(),
+  goal: z.object({ driver: z.string().min(1) }).optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),
     granted: z.array(z.enum(GUEST_CAPABILITIES)),

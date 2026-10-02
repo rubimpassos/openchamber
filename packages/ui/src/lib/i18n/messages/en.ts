@@ -1895,6 +1895,7 @@ export const dict = {
   'chat.goal.dialog.evaluationModelLabel': 'Evaluation model',
   'chat.goal.status.active': 'Active',
   'chat.goal.status.evaluating': 'Evaluating…',
+  'chat.goal.driver.title': 'Run by {name}',
   'chat.goal.status.paused': 'Paused',
   'chat.goal.status.blocked': 'Blocked',
   'chat.goal.status.budgetLimited': 'Budget reached',

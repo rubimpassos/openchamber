@@ -2,6 +2,7 @@ import type {
   AttachContribution,
   GuestActionContribution,
   GuestCommandContribution,
+  GuestGoalContribution,
   GuestMessageContribution,
   GuestSurfaceDock,
   GuestToolContribution,
@@ -48,6 +49,8 @@ export type InstalledGuest = {
   tools?: GuestToolContribution[];
   /** Declared `contributes.messages`; the chat applies them only for an active guest. */
   messages?: GuestMessageContribution[];
+  /** Declared `contributes.goal`: the goal driver this extension's plugin is. */
+  goal?: GuestGoalContribution;
   /** What the package asks for and what the user approved at install. */
   capabilities: PublicGuestCapabilities;
   source?: GuestSource;
