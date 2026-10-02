@@ -11,6 +11,7 @@ import { registerBuiltInGuests } from '../guests/catalog.js';
 import { extensionsPersistPath } from '../guests/persist.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
+import { registerCiLoopRoutes } from '../ci-loop/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
@@ -650,7 +651,25 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitIdentity,
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders });
+    registerGuestRoutes(app, {
+      openchamberDataDir,
+      openchamberVersion,
+      resolveGitBinaryForSpawn,
+      resolveOptionalProjectDirectory,
+      getSmallModelService,
+      onGuestDeactivated,
+      surfaceViewerHeaders,
+      emitGuestFilesChanged: ({ guestId, watchId, paths }) => {
+        const clients = getOpenChamberEventClients();
+        for (const client of clients) {
+          try {
+            writeSseEvent(client, { type: 'openchamber:guest-files-changed', properties: { guestId, watchId, paths } });
+          } catch {
+            clients.delete(client);
+          }
+        }
+      },
+    });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,
@@ -684,6 +703,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
     registerLinearRoutes(app);
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
+    registerCiLoopRoutes(app);
     registerMagicPromptRoutes(app, {
       fsPromises,
       path,

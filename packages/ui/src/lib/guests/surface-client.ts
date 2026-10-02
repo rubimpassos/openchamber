@@ -81,6 +81,7 @@ const defaultDependencies: SurfaceClientDependencies = {
 export class SurfaceClient {
   private socket: RelayTunnelWebSocket | null = null;
   private pendingFrame: Omit<SurfaceFrame, 'bytes'> | null = null;
+  private lastSize: { width: number; height: number } | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wakeCleanup: (() => void) | null = null;
   private failures = 0;
@@ -129,6 +130,9 @@ export class SurfaceClient {
   }
 
   resize(width: number, height: number): void {
+    // Kept so a (re)connect can repeat it: a size measured before the socket
+    // opens would otherwise be lost until the panel changes size again.
+    this.lastSize = { width, height };
     this.send({ type: 'resize', width, height });
   }
 
@@ -174,6 +178,7 @@ export class SurfaceClient {
       opened = true;
       this.failures = 0;
       this.pendingFrame = null;
+      if (this.lastSize) this.send({ type: 'resize', ...this.lastSize });
       this.handlers.onConnection({ status: 'open' });
     };
     socket.onmessage = (event) => {

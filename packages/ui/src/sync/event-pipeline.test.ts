@@ -175,6 +175,14 @@ describe("createEventPipeline", () => {
     expect(events[1]).toEqual({ type: "openchamber.permission-auto-accept", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } })
   })
 
+  test("passes a browser-help notification's guestId through, for the panel deep link", async () => {
+    const { events } = await collect(
+      [{ type: "openchamber:notification", properties: { kind: "plugin", sessionId: "ses_1", title: "Help", guestId: "server-chrome" } }],
+      1,
+    )
+    expect(events[0]).toEqual({ type: "openchamber.notification", properties: { kind: "plugin", sessionId: "ses_1", title: "Help", guestId: "server-chrome" } })
+  })
+
   test("ignores payloads that are neither wire events nor bridge events", async () => {
     const { events } = await collect([{ type: "something.else", properties: {} }, textEnded("x")], 1)
     expect(events.map(describeEvent)).toEqual(["updated:x"])

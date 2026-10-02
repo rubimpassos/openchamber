@@ -40,6 +40,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("session.created nests an oh-my-openagent child under metadata.omoParentID", () => {
+    const [event] = translateWireEvent({
+      ...base,
+      type: "session.created",
+      durable,
+      data: {
+        sessionID: "ses_child",
+        projectID: "proj_1",
+        location: { directory: "/repo" },
+        slug: "child",
+        version: "2.0.2",
+        metadata: { omoParentID: "ses_1" },
+      },
+    })
+    expect(event?.type === "session.created" ? event.properties.info.parentID : undefined).toBe("ses_1")
+  })
+
   test("session.forked carries the fork and parent ids (2.x sends no session.created for a fork)", () => {
     const forked = translateWireEvent({
       ...base,

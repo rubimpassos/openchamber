@@ -57,8 +57,8 @@
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
-    "appId": "dev.openchamber.desktop",
-    "productName": "OpenChamber",
+    "appId": "dev.openchamber.turbo2",
+    "productName": "OpenChamber Turbo 2",
     "asarUnpack": [
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",
       "node_modules/@openchamber/web/server/lib/git/credential-helper.js",
@@ -107,12 +107,12 @@
       "buildResources": "resources/icons",
       "output": "dist"
     },
-    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "artifactName": "OpenChamber-Turbo2-${version}-${arch}.${ext}",
     "npmRebuild": false,
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",
-      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "artifactName": "OpenChamber-${version}-mac-${arch}.${ext}",
       "extendInfo": {
         "CFBundleIconName": "AppIcon",
         "NSLocalNetworkUsageDescription": "OpenChamber needs access to devices and services on your local network."
@@ -133,7 +133,7 @@
         "nsis"
       ],
       "verifyUpdateCodeSignature": false,
-      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+      "artifactName": "OpenChamber-${version}-win-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -147,7 +147,7 @@
       "synopsis": "Desktop runtime for OpenChamber",
       "icon": "resources/icons/app-icon.png",
       "executableName": "openchamber",
-      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "artifactName": "OpenChamber-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
           "Name": "OpenChamber",
@@ -168,6 +168,7 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
+      "shortcutName": "OpenChamber Turbo 2",
       "installerIcon": "resources/icons/icon.ico",
       "uninstallerIcon": "resources/icons/icon.ico",
       "installerHeaderIcon": "resources/icons/icon.ico"
@@ -198,8 +199,11 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "openchamber",
+      "owner": "rubimpassos",
       "repo": "openchamber"
+    },
+    "extraMetadata": {
+      "name": "openchamber-turbo2"
     }
   }
 }

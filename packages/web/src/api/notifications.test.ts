@@ -40,11 +40,14 @@ const installNotificationMock = (
   });
 };
 
+type MockDesktopNotifyArgs = { payload: { sessionId?: string; guestId?: string } };
+
 const installWindowMock = (overrides?: {
   pathname?: string;
   search?: string;
   focus?: () => void;
   assign?: (url: string) => void;
+  __OPENCHAMBER_DESKTOP__?: { invoke: (cmd: string, args?: MockDesktopNotifyArgs) => Promise<undefined> };
 }) => {
   const storage = new Map<string, string>();
   const focus = overrides?.focus ?? (() => undefined);
@@ -63,6 +66,7 @@ const installWindowMock = (overrides?: {
         assign,
       },
       focus,
+      ...(overrides?.__OPENCHAMBER_DESKTOP__ ? { __OPENCHAMBER_DESKTOP__: overrides.__OPENCHAMBER_DESKTOP__ } : {}),
     },
   });
 };
@@ -312,6 +316,26 @@ describe('web notifications API', () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith('desktop_notify', {
       payload: expect.objectContaining({ sessionId: 'ses_123', runtimeKey: 'host:abc123' }),
+    });
+  });
+
+  it('forwards guestId to the desktop bridge, for the notification-click panel deep link', async () => {
+    const invoke = vi.fn(async () => undefined);
+    installWindowMock({ __OPENCHAMBER_DESKTOP__: { invoke } });
+
+    const { createWebNotificationsAPI } = await import('./notifications');
+    const api = createWebNotificationsAPI();
+
+    await expect(api.notifyAgentCompletion({
+      title: 'The agent needs your help in the browser',
+      body: 'Sign in to continue',
+      tag: 'browser-help-ses_1',
+      sessionId: 'ses_1',
+      guestId: 'server-chrome',
+    })).resolves.toBe(true);
+
+    expect(invoke).toHaveBeenCalledWith('desktop_notify', {
+      payload: expect.objectContaining({ sessionId: 'ses_1', guestId: 'server-chrome' }),
     });
   });
 });

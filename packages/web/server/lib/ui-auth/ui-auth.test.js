@@ -506,3 +506,47 @@ describe('ui auth login rate limit', () => {
     expect(statuses.slice(10)).toEqual([429, 429]);
   });
 });
+
+describe('ui auth with OPENCHAMBER_UI_PASSWORD_HASH', () => {
+  const login = async (auth, candidate) => {
+    const res = createResponse();
+    await auth.handleSessionCreate({ method: 'POST', headers: {}, body: { password: candidate } }, res);
+    return res;
+  };
+
+  it('logs in with the password matching the configured hash', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const { hashUiPassword } = await import('./ui-password-hash.js');
+    const auth = createUiAuth({ passwordHash: hashUiPassword('correct horse') });
+
+    const res = await login(auth, '  correct horse  ');
+
+    expect(auth.enabled).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(String(res.getHeader('set-cookie') || '').startsWith('oc_ui_session=')).toBe(true);
+  });
+
+  it('rejects a wrong password against the configured hash', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const { hashUiPassword } = await import('./ui-password-hash.js');
+    const auth = createUiAuth({ passwordHash: hashUiPassword('correct horse') });
+
+    const res = await login(auth, 'battery staple');
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('prefers the hash over a plaintext password when both are configured', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const { hashUiPassword } = await import('./ui-password-hash.js');
+    const auth = createUiAuth({ password: 'plaintext-one', passwordHash: hashUiPassword('hashed-one') });
+
+    expect((await login(auth, 'plaintext-one')).statusCode).toBe(401);
+  });
+
+  it('fails closed on a malformed hash instead of disabling auth', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+
+    expect(() => createUiAuth({ passwordHash: 'scrypt$bad' })).toThrow(/malformed/);
+  });
+});

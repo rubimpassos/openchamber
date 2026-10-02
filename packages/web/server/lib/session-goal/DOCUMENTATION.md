@@ -24,6 +24,7 @@ the web server and survives UI disconnects.
   evaluationProviderID,    // provider of the latest check; '' when Jev answered
   evaluationModelID,       // model of the latest check (Jev's model id for Jev)
   lastAccountedMessageID,  // incremental accounting cursor
+  driver,                  // optional: extension plugin that runs this goal (contributes.goal.driver)
   createdAt, updatedAt
 }
 ```
@@ -40,6 +41,21 @@ part telling the agent goal mode is active and that each turn should end
 with a factual done/verified/remaining statement for the independent audit.
 Freshness/stale-write protection is by `id`: every runtime write re-reads the
 session and drops the write when the stored goal id no longer matches.
+
+## Driven goals (`driver`)
+
+An extension may declare `contributes.goal: { driver: "<id>" }`: its plugin
+runs goals itself (oh-my-openagent's `/goal`) and mirrors each one into this
+same metadata with `driver: "<id>"`. While an enabled installed extension
+declares that driver (`isGoalDriverActive`, read from the guest catalog), the
+tick returns right after reading the goal: no audit, no accounting, no
+continuation. The plugin owns all of that and writes status, tokens and turns
+back. Everything the UI does still goes through the metadata (strip, Work
+Status row, sidebar icon, pause/resume/edit/clear), and the plugin applies
+those writes to its own goal. A driven goal keeps its objective inline,
+because the plugin cannot read OpenChamber's objective files. When the
+extension is paused or removed the goal is an ordinary goal again and this
+loop picks it up on the next idle.
 
 ## File-backed objectives
 

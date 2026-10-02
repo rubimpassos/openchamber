@@ -193,6 +193,8 @@ const parseGoalMetadata = (session) => {
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
     createdAt: Number.isFinite(goal.createdAt) ? goal.createdAt : 0,
     updatedAt: Number.isFinite(goal.updatedAt) ? goal.updatedAt : 0,
+    // An extension's plugin that runs this goal itself (contributes.goal.driver).
+    driver: typeof goal.driver === 'string' ? goal.driver : '',
   };
 };
 
@@ -355,6 +357,9 @@ export const createSessionGoalRuntime = ({
   getMaxAutoTurns = () => readGoalSettings().maxAutoTurns,
   persistSessionGoal = null,
   readSessionMetadata = null,
+  // Whether an enabled extension declares this goal driver. Its plugin runs
+  // the goal; this loop only takes over when the driver is gone.
+  isGoalDriverActive = async () => false,
 }) => {
   const timers = new Map();
   const inflight = new Set();
@@ -558,6 +563,7 @@ export const createSessionGoalRuntime = ({
 
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;
+    if (goal.driver && await isGoalDriverActive(goal.driver).catch(() => false)) return;
 
     // File-backed objectives: the metadata carries only a flag; the objective
     // TEXT lives under the OpenChamber data dir keyed by session id and is

@@ -5,6 +5,7 @@ import {
   applyGlobalSessionStatusEvents,
   applyGlobalSessionStatusSnapshot,
   getDirectoryOwnedSessionIds,
+  countActiveSubagents,
   hasActiveSubagent,
   setSessionParentResolver,
   useGlobalSessionStatusStore,
@@ -264,6 +265,13 @@ describe("background subagent keeps its parent's turn open", () => {
     expect(hasActiveSubagent("nested-parent", active, (id) => parents.get(id))).toBe(true)
     expect(hasActiveSubagent("nested-parent", active)).toBe(false)
     expect(hasActiveSubagent("parent", new Set(["child"]))).toBe(true)
+  })
+
+  test("counts the running sessions below a parent, nested ones included", () => {
+    setSessionParentResolver((sessionId) => ({ a: "parent", b: "parent", grand: "a" } as Record<string, string>)[sessionId])
+    expect(countActiveSubagents("parent", new Set(["parent", "a", "b", "grand", "other"]))).toBe(3)
+    expect(countActiveSubagents("a", new Set(["a", "grand"]))).toBe(1)
+    expect(countActiveSubagents("parent", new Set(["parent"]))).toBe(0)
   })
 
   test("a subagent ending while the parent runs again leaves the parent's timer alone", () => {

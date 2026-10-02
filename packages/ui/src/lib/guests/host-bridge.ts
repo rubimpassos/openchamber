@@ -52,6 +52,9 @@ type HostBridgeEffects = {
   shellsUnsubscribe: (subscriptionId: string) => void;
   shellOutput: (request: GuestShellOutputRequest) => Promise<GuestShellOutputResult>;
   shellStop: (request: { shellId: string }) => Promise<GuestShellStopResult>;
+  /** Starts pushing changes of these project files; rejects when the server cannot watch. */
+  filesWatch: (request: { subscriptionId: string; paths: string[] }) => Promise<void>;
+  filesUnwatch: (subscriptionId: string) => void;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
   setStatusControls: (controls: GuestStatusControl[]) => void;
   openSession: (sessionId: string) => void;
@@ -262,6 +265,8 @@ export const answerGuestMessage = async (
     case 'shells-unsubscribe': effects.shellsUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
     case 'shell-output': return okResult(message.id, await effects.shellOutput(message.payload));
     case 'shell-stop': return okResult(message.id, await effects.shellStop(message.payload));
+    case 'files-watch': await effects.filesWatch(message.payload); return okResult(message.id);
+    case 'files-unwatch': effects.filesUnwatch(message.payload.subscriptionId); return okResult(message.id);
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'status-controls': effects.setStatusControls(message.payload.controls); return okResult(message.id);
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);

@@ -46,6 +46,15 @@ oldest pending form and counts the rest in its header. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
+The fork also recovers interrupted question tools in this dock. Once the session
+status snapshot confirms idle, `useOrphanedQuestions` inspects the last assistant
+message, ignoring v2 idle markers, and excludes live or dismissed questions.
+`projection.ts` maps the question tool's input and form metadata. Submission
+rechecks `form.list`: a live match gets a normal form reply; otherwise
+`answerOrphanedQuestion` sends a continuation with the originating model and
+agent. A failed recheck or runtime switch never triggers that fallback. Recovery
+owns the dock ahead of the queue and suggestion, just like a live form.
+
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,
 a `when` clause reads only the answers of active earlier fields (an
