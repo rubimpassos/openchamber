@@ -29,6 +29,10 @@ import { readMenuTheme } from './context-menu.js';
 import { InspectorError } from './inspector.js';
 import { MAX_VIEWPORT_DIMENSION } from './viewports.js';
 
+// A held state request stays under the host proxy's 20 s timeout.
+const STATE_WAIT_MAX_MS = 15_000;
+const STATE_WAIT_STEP_MS = 60;
+
 const BODY_MAX_BYTES = 17 * 1024 * 1024;
 export const HELP_ACTION = 'browser.requestHelp';
 export const SAVE_ACTION = 'browser.saveProfile';
@@ -296,7 +300,28 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
     const access = dockAccess(request);
 
     if (request.method === 'GET' && url.pathname === '/browser/state') {
-      return json(response, 200, runtime.state(access, { problems: url.searchParams.get('problems') === '1' }));
+      const options = { problems: url.searchParams.get('problems') === '1' };
+      const versioned = () => {
+        const state = runtime.state(access, options);
+        const version = crypto.createHash('sha1').update(JSON.stringify(state)).digest('base64url').slice(0, 16);
+        return { ...state, version };
+      };
+      // `since` + `wait`: answer as soon as the state differs from the
+      // version the dock already has, so its address bar, tabs, and loading
+      // state follow the page instead of a fixed poll.
+      const since = url.searchParams.get('since');
+      const wait = Math.min(STATE_WAIT_MAX_MS, Math.max(0, Number(url.searchParams.get('wait')) || 0));
+      let current = versioned();
+      if (since && wait > 0 && current.version === since) {
+        const deadline = Date.now() + wait;
+        let gone = false;
+        response.once('close', () => { gone = true; });
+        while (!gone && Date.now() < deadline && current.version === since) {
+          await new Promise((resolve) => setTimeout(resolve, STATE_WAIT_STEP_MS));
+          current = versioned();
+        }
+      }
+      return json(response, 200, current);
     }
 
     if (request.method === 'POST' && url.pathname === '/browser/scope') {
@@ -452,6 +477,21 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
       try {
         const capture = await runtime.pageCapture(generation, access);
         return json(response, 200, { ok: true, ...capture });
+      } catch (error) {
+        return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/page/color-scheme') {
+      const body = await readObjectBody(request);
+      const generation = generationProperty(body);
+      const scheme = body?.scheme;
+      if (generation === null || !['system', 'light', 'dark'].includes(scheme)) {
+        return text(response, 400, 'generation is required, and scheme must be system, light, or dark\n');
+      }
+      try {
+        await runtime.pageColorScheme(scheme, generation, access);
+        return json(response, 200, runtime.state(access));
       } catch (error) {
         return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });
       }

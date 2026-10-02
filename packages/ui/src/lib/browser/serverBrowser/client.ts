@@ -89,8 +89,12 @@ const stateCall = async (
 export const getServerBrowserState = async (
   guestId: string,
   viewerId: string | undefined,
+  /** Hold the request until the state differs from this version (or `waitMs` passes). */
+  waitFor?: { since: string; waitMs: number },
 ): Promise<ServerBrowserResult<ServerBrowserState>> => {
-  const result = await call<unknown>(guestId, viewerId, 'GET', '/browser/state');
+  const result = await call<unknown>(guestId, viewerId, 'GET', '/browser/state', waitFor
+    ? { query: { since: waitFor.since, wait: String(waitFor.waitMs) } }
+    : {});
   if (!result.ok) return result;
   const state = asServerBrowserState(result.data);
   return state ? { ok: true, data: state } : { ok: false, error: 'The server browser returned no state.' };
@@ -140,6 +144,12 @@ const tabCommand = (operation: 'new' | 'select' | 'close') => (
 export const newServerBrowserTab = tabCommand('new');
 export const selectServerBrowserTab = tabCommand('select');
 export const closeServerBrowserTab = tabCommand('close');
+
+export const setServerBrowserColorScheme = (
+  guestId: string,
+  viewerId: string | undefined,
+  body: { generation: number; scheme: 'system' | 'light' | 'dark' },
+): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/page/color-scheme', body);
 
 export const setServerBrowserViewport = (
   guestId: string,

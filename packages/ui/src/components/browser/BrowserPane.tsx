@@ -53,8 +53,6 @@ export type BrowserPaneProps = {
   initialUrl: string;
   directory: string;
   tabID: string;
-  /** Whether this panel tab is the one in front (server engine only draws that one). */
-  active?: boolean;
 };
 
 /**
@@ -981,7 +979,7 @@ export const BrowserPane: React.FC<BrowserPaneProps> = (props) => {
   const [chromium] = React.useState(isChromiumHost);
   const browserProvider = useUIStore((state) => state.browserProvider);
   if (browserProvider && browserProvider !== BUILTIN_BROWSER_PROVIDER) {
-    return <ServerBrowserView guestId={browserProvider} directory={props.directory} tabID={props.tabID} active={props.active ?? true} />;
+    return <ServerBrowserView guestId={browserProvider} directory={props.directory} tabID={props.tabID} />;
   }
   return chromium ? <WebviewBrowser {...props} /> : <IframeBrowser {...props} />;
 };

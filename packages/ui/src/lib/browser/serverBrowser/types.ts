@@ -70,9 +70,13 @@ export type ServerBrowserScope = {
   readonly problems: { readonly errors: number; readonly warnings: number };
   /** Chrome zoom level, -5..+5 in the service's steps (factor 1.2^level). */
   readonly zoomLevel: number;
+  /** Older services do not report it. */
+  readonly colorScheme?: 'system' | 'light' | 'dark';
 };
 
 export type ServerBrowserState = {
+  /** Changes whenever anything else in the state does; used to wait for the next change. */
+  readonly version?: string;
   readonly controller: ServerBrowserController;
   readonly viewerInControl: boolean;
   readonly selectedScopeId: string | null;

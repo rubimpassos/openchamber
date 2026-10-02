@@ -31,6 +31,7 @@ import {
   setServerBrowserViewer,
   setServerBrowserViewport,
   setServerBrowserZoom,
+  setServerBrowserColorScheme,
   stopServerBrowser,
   type ServerBrowserCapture,
   type ServerBrowserResult,
@@ -38,6 +39,7 @@ import {
 import { findSelectedScope, type ServerBrowserScope, type ServerBrowserState } from './types';
 
 const POLL_MS = 2_000;
+const STATE_WAIT_MS = 15_000;
 const POLL_MS_HIDDEN = 10_000;
 
 export type ServerBrowserConnection = {
@@ -58,6 +60,7 @@ export type ServerBrowserConnection = {
   readonly closeTab: (tabId: string) => Promise<ServerBrowserState | null>;
   readonly setViewport: (viewport: { mode: 'auto' | 'fixed'; mobile: boolean; width?: number; height?: number }) => Promise<ServerBrowserState | null>;
   readonly setZoom: (level: number) => Promise<ServerBrowserState | null>;
+  readonly setColorScheme: (scheme: 'system' | 'light' | 'dark') => Promise<ServerBrowserState | null>;
   readonly clearData: (what: 'cookies' | 'cache') => Promise<ServerBrowserState | null>;
   readonly selectScope: (scopeId: string) => Promise<ServerBrowserState | null>;
   readonly closeScope: (scopeId: string) => Promise<ServerBrowserState | null>;
@@ -82,6 +85,8 @@ export const useServerBrowserConnection = (
   const stateRef = React.useRef<ServerBrowserState | null>(null);
 
   const applyState = React.useCallback((next: ServerBrowserState) => {
+    // A held request that timed out returns the same state; nothing to render.
+    if (next.version && next.version === stateRef.current?.version) return;
     stateRef.current = next;
     generationRef.current = next.generation;
     setState(next);
@@ -178,15 +183,20 @@ export const useServerBrowserConnection = (
   React.useEffect(() => {
     if (!enabled || viewerId === undefined) return;
     let disposed = false;
+    // Held requests: the service answers as soon as the state changes, so
+    // the address bar, tabs, and loading state follow the page at once. A
+    // hidden window or a failed request falls back to a slow poll.
     const tick = async () => {
       if (disposed) return;
-      const result = await getServerBrowserState(guestId, viewerId);
+      const since = stateRef.current?.version;
+      const visible = document.visibilityState !== 'hidden';
+      const result = await getServerBrowserState(guestId, viewerId, since && visible ? { since, waitMs: STATE_WAIT_MS } : undefined);
       if (!disposed && result.ok) applyState(result.data);
       if (disposed) return;
-      const delay = document.visibilityState === 'hidden' ? POLL_MS_HIDDEN : POLL_MS;
+      const delay = !visible ? POLL_MS_HIDDEN : result.ok && result.data.version ? 0 : POLL_MS;
       timer = setTimeout(tick, delay);
     };
-    let timer = setTimeout(tick, POLL_MS);
+    let timer = setTimeout(tick, 0);
     return () => { disposed = true; clearTimeout(timer); };
   }, [applyState, enabled, guestId, viewerId]);
 
@@ -209,6 +219,7 @@ export const useServerBrowserConnection = (
     closeTab: (tabId) => act((generation) => closeServerBrowserTab(guestId, viewerId, { generation, tabId })),
     setViewport: (viewport) => act((generation) => setServerBrowserViewport(guestId, viewerId, { generation, ...viewport })),
     setZoom: (level) => act((generation) => setServerBrowserZoom(guestId, viewerId, { generation, level })),
+    setColorScheme: (scheme) => act((generation) => setServerBrowserColorScheme(guestId, viewerId, { generation, scheme })),
     clearData: (what) => act((generation) => clearServerBrowserData(guestId, viewerId, { generation, what })),
     selectScope: (scopeId) => act((generation) => selectServerBrowserScope(guestId, viewerId, { scopeId, generation })),
     closeScope: (scopeId) => act((generation) => closeServerBrowserScope(guestId, viewerId, { scopeId, generation })),

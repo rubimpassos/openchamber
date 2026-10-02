@@ -278,6 +278,7 @@ export const createBrowserRuntime = ({
       if (userAgent) await cdp.sendSession(sessionId, 'Emulation.setUserAgentOverride', { userAgent });
       if (nativeSelectEnabled) await current.compatibility.setEnabled(true).catch(() => {});
       if (zoomLevel !== 0) await applyZoomToTab(current).catch(() => {});
+      if (colorScheme !== 'system') await applyColorScheme(current).catch(() => {});
       await refreshNavigation(current);
       return current;
     })().finally(() => attaching.delete(targetId));
@@ -662,6 +663,19 @@ export const createBrowserRuntime = ({
     await Promise.allSettled([...tabs.values()].filter((current) => current !== active).map(applyZoomToTab));
   };
   Object.defineProperty(runtime, 'zoomLevel', { get: () => zoomLevel, enumerable: true });
+
+  // prefers-color-scheme for every tab: 'system' drops the override.
+  let colorScheme = 'system';
+  const applyColorScheme = (current) => cdp.sendSession(current.sessionId, 'Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-color-scheme', value: colorScheme === 'system' ? '' : colorScheme }],
+  });
+  runtime.setColorScheme = async (scheme) => {
+    if (!['system', 'light', 'dark'].includes(scheme)) throw new Error('Color scheme must be system, light, or dark');
+    colorScheme = scheme;
+    await runtime.ensurePage();
+    await Promise.allSettled([...tabs.values()].map(applyColorScheme));
+  };
+  Object.defineProperty(runtime, 'colorScheme', { get: () => colorScheme, enumerable: true });
 
   // `/page/evaluate`, `/page/capture`, and `/page/clear` act on the visible
   // tab for the native dock, independent of the agent's own queued actions

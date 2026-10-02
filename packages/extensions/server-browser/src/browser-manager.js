@@ -467,6 +467,7 @@ export const createBrowserManager = ({
           viewport: entry.runtime.viewportState ?? null,
           problems: entry.runtime.problemCounts ?? { errors: 0, warnings: 0 },
           zoomLevel: entry.runtime.zoomLevel ?? 0,
+          colorScheme: entry.runtime.colorScheme ?? 'system',
         })),
       };
     },
@@ -532,6 +533,15 @@ export const createBrowserManager = ({
       if (entry.runtime.agentActive) throw new Error('The agent is using this page right now; capture it again once the action finishes');
       touch(entry);
       return entry.runtime.pageCapture();
+    },
+    pageColorScheme(scheme, expectedGeneration, access) {
+      return enqueue(async () => {
+        requireDockAccess(access);
+        requireGeneration(expectedGeneration);
+        const entry = requireSelected();
+        touch(entry);
+        await entry.runtime.setColorScheme(scheme);
+      });
     },
     pageZoom(level, expectedGeneration, access) {
       return enqueue(async () => {
