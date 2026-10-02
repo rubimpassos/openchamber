@@ -42,6 +42,8 @@ import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { GuestToolTable } from './GuestToolTable';
+import { TodoListOutput } from './TodoListOutput';
+import { parseTodoList } from './todoList';
 import type { JsonValue } from '@openchamber/sdk';
 import {
     guestToolTableRows,
@@ -764,6 +766,14 @@ const ToolScrollableTextOutput: React.FC<{
                 wrap
             />
         );
+    }
+
+    if (!forcedMode && (part.tool === 'todowrite' || part.tool === 'todoread') && jsonResult.isJson) {
+        // SAFETY: `tryParseJsonOutput` fills `data` from JSON.parse of the tool output.
+        const todos = parseTodoList(jsonResult.data as JsonValue);
+        if (todos) {
+            return <TodoListOutput todos={todos} />;
+        }
     }
 
     if (jsonResult.isJson) {
