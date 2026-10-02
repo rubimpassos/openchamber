@@ -38,6 +38,7 @@ import {
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
+import { watchGuestFiles } from '@/lib/guests/file-watch';
 import { guestGenerate } from '@/lib/guests/generate';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -419,6 +420,29 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           }));
         },
         workspaceUnsubscribe: (id) => { subscriptions.get(id)?.(); subscriptions.delete(id); },
+        filesWatch: async ({ subscriptionId, paths }) => {
+          if (!guestEnabledRef.current) throw new HostRequestError('DISABLED', 'This extension is disabled in Settings → Extensions.');
+          if (!guestMay(currentGuest(), 'files')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
+          const directory = directoryRef.current || null;
+          if (!directory) throw new HostRequestError('NO_DIRECTORY', 'No project is open.');
+          const key = `files:${subscriptionId}`;
+          subscriptions.get(key)?.();
+          subscriptions.delete(key);
+          if (subscriptions.size >= 32) throw new HostRequestError('HOST_REJECTED', 'At most 32 subscriptions per frame.');
+          const stop = await watchGuestFiles({
+            guestId: guestIdRef.current,
+            directory,
+            paths,
+            onChange: (changed) => {
+              if (!disposed && guestEnabledRef.current) postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
+                type: 'files-changed', payload: { subscriptionId, paths: changed } });
+            },
+          });
+          if (!stop) throw new HostRequestError('HOST_REJECTED', 'This server cannot watch files.');
+          if (disposed) { stop(); return; }
+          subscriptions.set(key, stop);
+        },
+        filesUnwatch: (id) => { subscriptions.get(`files:${id}`)?.(); subscriptions.delete(`files:${id}`); },
         storage: (request) => guestStorageOperation(guestIdRef.current, request),
         openSession: (id) => { requireSessions(); openGuestSession(id); },
         toast: (request) => {

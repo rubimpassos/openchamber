@@ -22,6 +22,7 @@ import {
   GUEST_CLIPBOARD_TEXT_MAX,
   GUEST_COMPOSE_TEXT_MAX,
   GUEST_FILE_CONTENT_MAX,
+  GUEST_FILE_WATCH_PATHS_MAX,
   GUEST_FILE_ENTRY_KINDS,
   GUEST_FILE_LIST_MAX,
   GUEST_GENERATE_OUTPUT_TOKENS_MAX,
@@ -265,6 +266,7 @@ const hostResultSchema = z.object({
 
 export const hostMessageSchema = z.union([
   z.object({ ...envelope, type: z.literal('workspace'), payload: z.object({ subscriptionId: z.string().min(1).max(128), snapshot: guestWorkspaceSnapshotSchema }) }),
+  z.object({ ...envelope, type: z.literal('files-changed'), payload: z.object({ subscriptionId: z.string().min(1).max(128), paths: z.array(z.string().min(1).max(GUEST_FILE_PATH_MAX)).max(GUEST_FILE_WATCH_PATHS_MAX) }) }),
   z.object({
     ...envelope,
     type: z.literal('ready'),
@@ -346,6 +348,8 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('workspace-read'), id: z.string().min(1), payload: guestWorkspaceQuerySchema }),
   z.object({ ...envelope, type: z.literal('workspace-subscribe'), id: z.string().min(1), payload: z.object({ subscriptionId: z.string().min(1).max(128), query: guestWorkspaceQuerySchema }) }),
   z.object({ ...envelope, type: z.literal('workspace-unsubscribe'), id: z.string().min(1), payload: z.object({ subscriptionId: z.string().min(1).max(128) }) }),
+  z.object({ ...envelope, type: z.literal('files-watch'), id: z.string().min(1), payload: z.object({ subscriptionId: z.string().min(1).max(128), paths: z.array(filePathSchema).min(1).max(GUEST_FILE_WATCH_PATHS_MAX) }) }),
+  z.object({ ...envelope, type: z.literal('files-unwatch'), id: z.string().min(1), payload: z.object({ subscriptionId: z.string().min(1).max(128) }) }),
   z.object({ ...envelope, type: z.literal('storage'), id: z.string().min(1), payload: guestStorageRequestSchema }),
   z.object({ ...envelope, type: z.literal('open-session'), id: z.string().min(1), payload: z.object({ sessionId: z.string().min(1).max(1024) }) }),
   z.object({

@@ -144,8 +144,17 @@ type OpenChamberEvent =
   | BrowserControlRequestEvent
   | FileOpenRequestEvent
   | BrowserProviderResetEvent
-  | AgentMemoryChangedEvent;
+  | AgentMemoryChangedEvent
+  | GuestFilesChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
+
+/** Files an extension frame watches (`host.watchFiles`) were written; only the paths, never contents. */
+const guestFilesChangedSchema = z.object({
+  guestId: z.string().min(1),
+  watchId: z.string().min(1),
+  paths: z.array(z.string().min(1)).max(16),
+});
+type GuestFilesChangedEvent = { type: 'guest-files-changed' } & z.infer<typeof guestFilesChangedSchema>;
 
 const worktreeChangedPropertiesSchema = z.object({
   directories: z.array(z.string().min(1)).min(1),
@@ -388,6 +397,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     for (const listener of listeners) {
       listener(nextEvent);
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:guest-files-changed') {
+    const parsed = guestFilesChangedSchema.safeParse(envelope.properties);
+    if (!parsed.success) return;
+    const nextEvent: GuestFilesChangedEvent = { type: 'guest-files-changed', ...parsed.data };
+    for (const listener of listeners) listener(nextEvent);
     return;
   }
 
