@@ -1280,8 +1280,11 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         [currentDirectory, diffContent, metadata]
     );
     const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
-    // `execute` renders its script and its call list itself, below.
+    // `execute` renders its script and its call list itself, below; a todo
+    // tool's result is the list it was given, drawn by `TodoListOutput`.
     const hideToolInputPreview = part.tool === 'openchamber'
+        || part.tool === 'todowrite'
+        || part.tool === 'todoread'
         || part.tool === 'openchamber_web'
         || part.tool === 'openchamber_memory'
         || part.tool === 'openchamber_notify'

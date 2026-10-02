@@ -51,7 +51,7 @@ const todoPart: ToolPartData = {
   type: 'tool', tool: 'todowrite', callID: 'call_todo',
   state: {
     status: 'completed',
-    input: {},
+    input: { todos: [{ content: 'Ship the fix', status: 'in_progress' }] },
     output: JSON.stringify([
       { content: 'Write the test', status: 'completed', priority: 'high' },
       { content: 'Open the PR', status: 'pending', priority: 'low' },
@@ -127,6 +127,9 @@ test('a todowrite result is drawn as the todo list grouped by status', async () 
     expect(text.indexOf('Open the PR')).toBeLessThan(text.indexOf('Write the test'));
     expect(container.querySelector('.line-through')?.textContent).toBe('Old idea');
     expect(container.querySelector('table')).toBeNull();
+    // The input is the same list; it is not repeated as JSON above the result.
+    expect(container.querySelector('.tool-input-text')).toBeNull();
+    expect(container.textContent).not.toContain('"status"');
   } finally {
     await act(async () => { root.unmount(); });
     await happyWindow.happyDOM.abort();
