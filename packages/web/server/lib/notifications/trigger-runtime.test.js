@@ -185,3 +185,84 @@ describe('subagent finish with subagent notifications off', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('sendBrowserHelpPush', () => {
+  it('carries session/panel data through the same fanout as other triggers', async () => {
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const sendApnsToAllUiSessions = vi.fn(async () => undefined);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true }),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: async () => ({}),
+      extractLastMessageText: () => '',
+      fetchLastAssistantMessageText: async () => '',
+      resolveNotificationTemplate: () => '',
+      shouldApplyResolvedTemplateMessage: () => false,
+      emitDesktopNotification: vi.fn(),
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions,
+      isAnyInteractiveClientVisible: () => false,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+
+    await runtime.sendBrowserHelpPush({
+      sessionId: 'ses_help',
+      guestId: 'server-chrome',
+      title: 'The agent needs your help in the browser',
+      body: 'Sign in with your Google account to continue',
+    });
+
+    expect(sendPushToAllUiSessions).toHaveBeenCalledTimes(1);
+    const [payload, options] = sendPushToAllUiSessions.mock.calls[0];
+    expect(payload).toEqual({
+      title: 'The agent needs your help in the browser',
+      body: 'Sign in with your Google account to continue',
+      tag: 'browser-help-ses_help',
+      data: {
+        url: '/?session=ses_help&panel=server-chrome',
+        sessionId: 'ses_help',
+        type: 'browser-help',
+      },
+    });
+    expect(options).toEqual({ requireNoSse: true });
+
+    expect(sendApnsToAllUiSessions).toHaveBeenCalledTimes(1);
+    expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({
+      title: 'Agent needs you in the browser',
+      body: 'Session',
+      tag: 'browser-help-ses_help',
+      data: { sessionId: 'ses_help', url: '/?session=ses_help&panel=server-chrome' },
+    });
+  });
+
+  it('percent-encodes the session id and guest id in the deep link', async () => {
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true }),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: async () => ({}),
+      extractLastMessageText: () => '',
+      fetchLastAssistantMessageText: async () => '',
+      resolveNotificationTemplate: () => '',
+      shouldApplyResolvedTemplateMessage: () => false,
+      emitDesktopNotification: vi.fn(),
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => true,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+
+    await runtime.sendBrowserHelpPush({
+      sessionId: 'ses help/1',
+      guestId: 'server chrome',
+      title: 'Help needed',
+      body: 'Reason',
+    });
+
+    expect(sendPushToAllUiSessions.mock.calls[0][0].data.url).toBe('/?session=ses%20help%2F1&panel=server%20chrome');
+  });
+});

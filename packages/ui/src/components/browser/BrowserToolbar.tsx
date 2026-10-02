@@ -58,6 +58,9 @@ export type BrowserToolbarProps = {
   /** These need a real Chromium host; hidden without one. */
   onAnnotate?: () => void;
   onOpenDevTools?: () => void;
+  /** The server browser's console/network drawer, shown instead of `onOpenDevTools`. */
+  onToggleInspector?: () => void;
+  isInspectorOpen?: boolean;
   isAnnotating?: boolean;
   onHardReload?: () => void;
   onZoomIn?: () => void;
@@ -86,6 +89,8 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   isLoading,
   onAnnotate,
   onOpenDevTools,
+  onToggleInspector,
+  isInspectorOpen,
   isAnnotating,
   onHardReload,
   onZoomIn,
@@ -234,6 +239,14 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       ) : null}
       {onOpenDevTools ? (
         <ToolbarButton icon="terminal-box" label={t('contextPanel.browser.devTools')} onClick={onOpenDevTools} />
+      ) : null}
+      {onToggleInspector ? (
+        <ToolbarButton
+          icon="terminal-box"
+          label={t('contextPanel.browser.server.inspector.toggle')}
+          onClick={onToggleInspector}
+          pressed={isInspectorOpen}
+        />
       ) : null}
       <ToolbarButton icon="external-link" label={t('contextPanel.browser.openExternal')} onClick={onOpenExternal} />
     </div>

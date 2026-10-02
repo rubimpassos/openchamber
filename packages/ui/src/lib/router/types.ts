@@ -13,6 +13,8 @@ export interface RouteState {
   settingsPath: string | null;
   /** File path for diff view */
   diffFile: string | null;
+  /** Guest id whose panel to reveal, from a `browser.requestHelp` push deep link */
+  guestPanelId: string | null;
 }
 
 /**
@@ -43,4 +45,5 @@ export const ROUTE_PARAMS = {
   TAB: 'tab',
   SETTINGS: 'settings',
   FILE: 'file',
+  PANEL: 'panel',
 } as const;

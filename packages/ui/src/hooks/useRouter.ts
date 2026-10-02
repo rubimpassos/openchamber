@@ -3,6 +3,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
+import { openGuestPanelFromRoute } from '@/lib/router/openGuestPanelFromRoute';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
@@ -98,6 +99,17 @@ export function useRouter(): void {
         // 4. Apply diff file (only if going to diff tab)
         if (route.diffFile && (route.tab === 'diff' || !route.tab)) {
           navigateToDiff(route.diffFile);
+        }
+
+        // 5. Reveal a guest's panel named by a browser-help deep link
+        // (?session=...&panel=<guestId>), once the session's directory is
+        // known. Unknown/disabled guests and runtimes with no guest panel
+        // (VS Code, mobile) are handled inside openGuestPanelFromRoute.
+        if (route.guestPanelId) {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (directory) {
+            await openGuestPanelFromRoute(directory, route.guestPanelId);
+          }
         }
       } finally {
         isApplyingRouteRef.current = false;

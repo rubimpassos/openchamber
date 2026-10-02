@@ -1,0 +1,17 @@
+OpenChamber built-in: Server Browser
+
+This built-in's service engine is adapted from the community extension
+openchamber-server-browser (MIT), which itself adapted browser backend code
+from OpenChamber:
+  https://github.com/JosueGalRe/openchamber-server-browser
+  https://github.com/openchamber/openchamber (PR #3425)
+
+Source used for this move: https://github.com/rubimpassos/openchamber-server-browser
+(branch feat/phase1, commit 4794b4c).
+
+Copyright (c) 2025 Bohdan Triapitsyn
+Licensed under the MIT License; see LICENSE in this directory.
+
+This package depends only on @openchamber/sdk at runtime (also MIT,
+published from this repository's packages/sdk). It carries no other
+third-party runtime dependency.

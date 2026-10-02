@@ -24,10 +24,36 @@ describe('browser provider contract', () => {
     expect(readBrowserProviderRequest(JSON.stringify({ requestId: 'r', action: 'browser.back' }))).toBeNull();
   });
 
-  test('the action list is the tool\'s ten browser actions', () => {
-    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(10);
+  test('the action list is the tool\'s twelve browser actions', () => {
+    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(12);
     expect(isBrowserControlAction('browser.snapshot')).toBe(true);
+    expect(isBrowserControlAction('browser.requestHelp')).toBe(true);
+    expect(isBrowserControlAction('browser.saveProfile')).toBe(true);
     expect(isBrowserControlAction('projects.list')).toBe(false);
+  });
+
+  test('reads a browser.requestHelp request, kind included or defaulted by the host', () => {
+    const body = JSON.stringify({
+      requestId: 'req-4',
+      action: 'browser.requestHelp',
+      parameters: { reason: 'Sign in with your Google account to continue', timeoutSeconds: 300, kind: 'login' },
+    });
+    expect(readBrowserProviderRequest(body)).toEqual({
+      requestId: 'req-4',
+      action: 'browser.requestHelp',
+      parameters: { reason: 'Sign in with your Google account to continue', timeoutSeconds: 300, kind: 'login' },
+      context: { directory: null, sessionId: null },
+    });
+  });
+
+  test('reads a browser.saveProfile request', () => {
+    const body = JSON.stringify({ requestId: 'req-5', action: 'browser.saveProfile', parameters: { tabId: 'tab-1' } });
+    expect(readBrowserProviderRequest(body)).toEqual({
+      requestId: 'req-5',
+      action: 'browser.saveProfile',
+      parameters: { tabId: 'tab-1' },
+      context: { directory: null, sessionId: null },
+    });
   });
 
   test('the host accepts ok/data and ok/error answers only', () => {
@@ -36,5 +62,31 @@ describe('browser provider contract', () => {
     expect(browserProviderResultSchema.safeParse({ ok: true }).success).toBe(false);
     expect(browserProviderResultSchema.safeParse({ ok: false, error: '' }).success).toBe(false);
     expect(browserProviderResultSchema.safeParse({ data: {} }).success).toBe(false);
+  });
+
+  test('the host accepts a browser.requestHelp outcome, including signed-in', () => {
+    expect(browserProviderResultSchema.safeParse({
+      ok: true,
+      data: { outcome: 'timeout', url: 'http://a/', title: 'A', waitedSeconds: 300 },
+    }).success).toBe(true);
+    expect(browserProviderResultSchema.safeParse({
+      ok: true,
+      data: { outcome: 'handed-back', tabId: 'tab-1', url: 'http://a/', title: 'A', waitedSeconds: 42 },
+    }).success).toBe(true);
+    expect(browserProviderResultSchema.safeParse({
+      ok: true,
+      data: { outcome: 'signed-in', url: 'http://a/', title: 'A', waitedSeconds: 12 },
+    }).success).toBe(true);
+  });
+
+  test('the host accepts a browser.saveProfile outcome', () => {
+    expect(browserProviderResultSchema.safeParse({
+      ok: true,
+      data: { saved: true, profile: 'default', version: 3, reopenedTabs: 2 },
+    }).success).toBe(true);
+    expect(browserProviderResultSchema.safeParse({
+      ok: false,
+      error: 'Another chat saved this profile first; take a fresh copy and redo your change.',
+    }).success).toBe(true);
   });
 });

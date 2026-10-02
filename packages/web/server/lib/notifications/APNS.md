@@ -13,18 +13,21 @@ registered them — so a leaked device token alone can't be used to push.
    `POST /v1/push/register-token`, signed with its auto-generated ECDSA P-256 key
    (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
    `token → serverId` where `serverId = SHA-256(publicKey)`.
-3. On a trigger (ready/error/question/permission), the server composes **generic, content-free**
-   text — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
-   needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
-   message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
-   badge, env, data:{sessionId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
-   (`apns-runtime.js` → `sendViaRelay`). It does **not** gate on UI visibility (see below).
+3. On a trigger (ready/error/question/permission/browser-help), the server composes **generic,
+   content-free** text — a fixed scenario title ("Agent response is ready" / "Agent needs your
+   input" / "Agent needs permission" / "Agent hit an error" / "Agent needs you in the browser")
+   + the **session name** as the body, no model/project/message content — plus a **`badge`**
+   count (see below) — and POSTs `{ tokens, title, body, badge, env, data:{sessionId, url?},
+   publicKeyJwk, ts, sig }` to `POST /v1/push/send` (`apns-runtime.js` → `sendViaRelay`). `url` is
+   the same-shape deep link the web push `data.url` carries (`/?session=…`, `&panel=…` for
+   browser-help); it is forwarded whenever the trigger payload has one, generic path shape only,
+   still no message/project content. It does **not** gate on UI visibility (see below).
 4. The **relay** (`openchamber-website/apps/api`, Cloudflare Worker) verifies the signature +
    `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
    the single project APNs `.p8` key, signs an ES256 JWT with `crypto.subtle`, and sends each
    token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
    (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
-5. Tapping a push deep-links to its session via the forwarded `sessionId`.
+5. Tapping a push deep-links to its session via the forwarded `url` (preferred) or `sessionId`.
 
 ## Foreground suppression
 
@@ -117,17 +120,20 @@ to APNs). The request **signature is authentication, not encryption** — the re
 Who can read the alert text:
 
 - **Network hops:** nothing (TLS).
-- **The relay (Cloudflare):** the generic title + body (session name), the device token, and
-  `sessionId`. It stores only `token → serverId` hashes (no text, no payload).
+- **The relay (Cloudflare):** the generic title + body (session name), the device token,
+  `sessionId`, and `url` when the trigger has one. It stores only `token → serverId` hashes (no
+  text, no payload).
 - **Apple APNs:** the alert text too — APNs always reads the alert payload of an `alert` push.
 - **The device:** displays it.
 
 This is acceptable **because the text is deliberately content-free**: a fixed scenario title +
 the session name only — no model, project, or message content (`runtime.js` →
 `toApnsGenericPayload`). The session name is the single semi-personal field that crosses the
-relay/Apple. To hide even that from Apple would require an end-to-end **encrypted payload**
-(`mutable-content` + a Notification Service Extension that decrypts on-device with a key never
-sent to the relay) — not implemented, and unnecessary for generic text.
+relay/Apple; `url` is a generic `/?session=…[&panel=…]` path built from the same opaque ids as
+`sessionId` (a chat and, for browser-help, which installed extension it named), never
+message/project text. To hide even that from Apple would require an end-to-end **encrypted
+payload** (`mutable-content` + a Notification Service Extension that decrypts on-device with a
+key never sent to the relay) — not implemented, and unnecessary for generic text.
 
 ## Android (FCM) note
 

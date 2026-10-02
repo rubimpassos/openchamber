@@ -45,6 +45,11 @@ This module provides notification message preparation utilities for the web serv
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
 - Returned API:
   - `maybeSendPushForTrigger(payload)`
+  - `sendGoalSettlePush({ sessionId, directory, status, title, body })`
+  - `sendBrowserHelpPush({ sessionId, guestId, title, body })` — the browser-help
+    fanout (see "browser.requestHelp notification" below); `data.url` adds
+    `&panel=<guestId>` to the session deep link so the client opens that
+    guest's shared surface alongside the session.
 - Owns:
   - completion/error/question/permission trigger routing; permission suppression consults the authoritative permission-auto-accept runtime
   - session parent cache for subtask suppression
@@ -174,3 +179,35 @@ The control stream retains its browser-control capability declaration, runtime
 switch cleanup, stale-source rejection, heartbeat, and reconnect-ready events.
 Electron uses its native notification path; VS Code does not subscribe to this
 server-only stream. Mobile shells retain their existing push behavior.
+
+## `browser.requestHelp` notification
+
+`notifyBrowserHelp` (built in `packages/web/server/index.js`, injected into
+`browser-control/provider.js`) tells the person a `browser.requestHelp`
+action needs them: a live in-app notification (`kind: 'plugin'`,
+`requireHidden: false` so it shows even while OpenChamber is focused — this
+one cannot wait) built the same way `createPluginNotificationEmitter` builds
+one, plus a web-push/APNs fanout through
+`notificationTriggerRuntime.sendBrowserHelpPush`, the same `fanoutPush` every
+other trigger (ready, error, question, permission, goal-settle) uses. Both
+halves are skipped when `nativeNotificationsEnabled === false`; there is no
+separate rate window, unlike `POST /api/notifications/emit`, because the
+browser-control router calls this at most once per `browser.requestHelp`
+action, not on every agent tool call.
+
+It is deliberately **not** gated by `agentNotifyToolEnabled` (`notify.send`'s
+toggle): the user already opted into this by picking an extension as their
+browser provider in Settings → OpenChamber Tools. A provider that answers
+`browser.requestHelp` cannot make progress without the person seeing the
+prompt — unlike `notify.send`, which pages the user about routine progress
+they can choose to hear about or not. Gating it the same way would mean an
+agent could reach a login wall with a provider selected and no way for
+anyone to learn a person is needed, silently, from server logs alone.
+
+The push payload's `data` carries `type: 'browser-help'` and a deep link
+`/?session=<id>&panel=<guestId>` — `panel` is `ROUTE_PARAMS.PANEL` in
+`packages/ui/src/lib/router`, parsed into `RouteState.guestPanelId` and
+applied by `useRouter` through `openGuestPanelFromRoute`, which opens that
+guest's context-panel surface once its directory is known. An unknown,
+disabled, or unapproved guest id is ignored silently, and VS Code and mobile
+never open it (guest panels do not exist on those runtimes).

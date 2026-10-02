@@ -1544,6 +1544,61 @@ const emitBrowserProviderResetEvent = ({ guestId, guestName }) => {
     }
   }
 };
+const BROWSER_HELP_NOTIFICATION_TITLE = 'The agent needs your help in the browser';
+const BROWSER_HELP_LOGIN_NOTIFICATION_TITLE = 'The agent needs you to sign in';
+const BROWSER_HELP_REASON_MAX = 500;
+
+/**
+ * Tells the person a `browser.requestHelp` needs them: the live in-app
+ * notification (desktop + SSE, same as `notify.send`) and, unlike that tool,
+ * a web-push/APNs fanout too — see notifications/DOCUMENTATION.md for why
+ * this one is not gated by the notify tool's own toggle. Skips both when the
+ * user turned native notifications off; `notificationTriggerRuntime` is
+ * declared above this point specifically so it can be captured here.
+ * `reason` arrives already validated (1-300 chars) by the control service
+ * that built these `parameters`; only its length here is this function's own
+ * concern, since a push notification body has a smaller budget. `kind` is
+ * the agent's `browser.requestHelp` parameter (`'login'`/`'page'`), read
+ * only to pick the title — the provider decides what to actually do with it.
+ */
+const notifyBrowserHelp = async ({ guestId, reason, kind, context }) => {
+  const settings = await readSettingsFromDiskMigrated();
+  if (settings.nativeNotificationsEnabled === false) {
+    return;
+  }
+  const sessionId = context?.sessionId || null;
+  const directory = context?.directory || null;
+  const title = kind === 'login' ? BROWSER_HELP_LOGIN_NOTIFICATION_TITLE : BROWSER_HELP_NOTIFICATION_TITLE;
+  const body = reason.trim().slice(0, BROWSER_HELP_REASON_MAX);
+  const tag = `browser-help-${sessionId || guestId}`;
+  const notificationPayload = {
+    title,
+    body,
+    tag,
+    kind: 'plugin',
+    sessionId,
+    directory,
+    requireHidden: false,
+    // Read by the Electron click handler (maybeShowNativeNotification) to
+    // open this guest's panel alongside the session; ignored elsewhere.
+    guestId,
+  };
+  const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+  broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+
+  // The push deep link needs a session to reopen; a help request with none
+  // (a CLI-invoked action, for instance) still gets the in-app notice above.
+  if (!sessionId) {
+    return;
+  }
+  await notificationTriggerRuntime.sendBrowserHelpPush({
+    sessionId,
+    guestId,
+    title,
+    body,
+  });
+};
+
 // Every browser action passes through here: the in-app view by default, or an
 // extension service chosen in Settings → OpenChamber Tools.
 const browserControlRouter = createBrowserControlRouter({
@@ -1558,6 +1613,7 @@ const browserControlRouter = createBrowserControlRouter({
     userControls: (guestId) => guestSurfaceRuntime?.userControls(guestId) ?? false,
     noteAgentActivity: (guestId) => guestSurfaceRuntime?.noteAgentActivity(guestId),
   },
+  notifyBrowserHelp,
 });
 
 // "Show this file" reaches every connected client; the ones showing that

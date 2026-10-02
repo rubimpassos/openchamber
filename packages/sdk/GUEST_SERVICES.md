@@ -170,7 +170,9 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 
 ## Browser provider (`provides: ["browser"]`)
 
-The host's `openchamber_web` tool gives agents ten `browser.*` actions. By default a connected desktop app answers them with its browser panel; on a server with no desktop client the agent gets nothing. A service that declares `provides: ["browser"]` can answer instead, from a browser it runs itself (headless Chrome over CDP, for instance). The agent sees one tool either way.
+The host's `openchamber_web` tool gives agents twelve `browser.*` actions. By default a connected desktop app answers them with its browser panel; on a server with no desktop client the agent gets nothing. A service that declares `provides: ["browser"]` can answer instead, from a browser it runs itself (headless Chrome over CDP, for instance). The agent sees one tool either way.
+
+Every chat's browser runs on a disposable copy of one saved profile (cookies, storage, logins). A provider that keeps profiles takes the copy when the chat's browser first opens and discards it when the chat ends; nothing the agent does — a login it renews, a cookie it accepts — reaches another chat unless it explicitly calls `browser.saveProfile`, and `browser.requestHelp` with `kind: 'login'` saves it for the agent once the person is done. A provider without a profile store answers every action against a single shared browser instead, same as before; `browser.saveProfile` is then meaningless and can refuse it.
 
 The user picks the provider in Settings → General → OpenChamber Tools → Browser provider. The dropdown lists installed, enabled, fully approved extensions with the role; with none it shows only "OpenChamber Web", disabled. The choice is `browserProvider` in the instance's `settings.json` (`builtin` or the extension id) and is read on every action, so it applies to the next action without a restart. Pausing, removing, or withdrawing approval from the selected extension puts `builtin` back and every open client shows a toast saying so; the same happens on the next action if the extension became unusable any other way.
 
@@ -217,12 +219,32 @@ Parameters the host sends and `data` the service answers; types are exported fro
 | `browser.inspect` | `selector` | `selector`, `tag`, `label`, `bounds`, `inViewport`, `styles` (computed, as strings) |
 | `browser.capture` | `label?` | `base64`, `mime`, `width`, `height`, `url`, `title`, `viewport`; the host writes the file into the project and returns its path |
 | `browser.resize` | `viewport` (`mobile`/`tablet`/`desktop`/`fill`) | `viewport` |
+| `browser.requestHelp` | `reason` (1-300 chars, what the person must do), `timeoutSeconds` (30-900, host default 300), `kind?` (`login`/`page`, default `page`) | `outcome` (`handed-back`/`signed-in`/`timeout`), `url`, `title`, `waitedSeconds` |
+| `browser.saveProfile` | none beyond `tabId` | `saved: true`, `profile`, `version`, `reopenedTabs` |
 
 Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your snapshot listed (`[{ id, title, url, active }]`, `active` being the tab the user sees), passed through from the agent untouched. Without it, act on the tab the user sees, except `browser.open`: without `tabId` it opens a new background tab and answers its id as `tabId` (`BrowserOpenData`), so the agent never replaces the user's page. Refuse an id you did not issue with `ok: false`; never act on another tab instead. A provider with one page lists no tabs and refuses every id.
 
+### `browser.requestHelp`
+
+The agent hit a login, a CAPTCHA, an OTP, or anything else only a person can do, and is asking one to step in. The host already notified the person (a live notification, plus web-push/APNs so it reaches them away from the app) before this request reaches you; your part is showing them the page and giving control back once they act.
+
+On arrival, select the chat's browser scope and the named tab (or the tab the user sees, absent `tabId`) as the picture your shared surface (`surface: true`) draws, so the person opening the notification sees the right page immediately. Then wait: `handed-back` (or `signed-in`, see below) once the person releases control after acting (an explicit hand-back, same as any other shared-surface release), `timeout` once `timeoutSeconds` elapses with nobody taking control, or with control taken but never released. Answer `{ outcome, tabId?, url, title, waitedSeconds }` either way — `url`/`title` are the page as it stands when you answer, so the agent can read what the person did (or the unchanged page, on a timeout).
+
+`kind` says what the surface is for. `'page'` (default, omitted by older callers) is scoped to this page only — a CAPTCHA, a one-time code, a confirmation — and answers `handed-back`. `'login'` is a site account on the chat's disposable profile copy: once the person signs in and releases control, save the profile yourself (the same write `browser.saveProfile` does) before answering, and answer `signed-in` instead of `handed-back` so the agent knows the save already happened and it does not need to call `browser.saveProfile` itself.
+
+Answer your own `timeout` at `timeoutSeconds`; do not rely on the host giving up first. The host waits `timeoutSeconds * 1000 + 15_000` ms before it gives up on you, and that slack exists only to let your own bookkeeping land — an agent that gets the host's generic cutoff instead of your `outcome: 'timeout'` learns nothing about what the person did or didn't do.
+
+`browser.requestHelp` needs a shared surface (`surface: true`): a provider without one has no picture to show the person, so the host refuses the action before it ever reaches your service — same 400 it answers when no provider is selected at all, since the in-app browser view has nobody to hand a page to either.
+
 `viewport` in answers is `{ mode, width, height }` (`mode` may be `custom`; `fill` has `null` sizes). Snapshot `elements` carry `selector`, `tag`, `bounds`, and only the fields that apply (`inViewport`, `type`, `role`, `label`, `disabled`, `missingAccessibleName`). Keep `text` and `elements` bounded yourself; report what was dropped with the truncation fields.
 
-`examples/browser-provider-stub` is a checked-in provider with no browser: one in-memory page that answers every action. Install it to see the dropdown, the routing, and the idle stop before writing a real one.
+### `browser.saveProfile`
+
+Writes the chat's disposable browser copy (cookies, storage, logins) back into the saved profile other chats take their own copy from. No parameters beyond the optional `tabId` inherited from `BrowserTabTarget`, which a profile-keeping provider ignores — the whole browser is the profile, not one tab.
+
+Track a version counter per profile, handed to the chat's copy when it was taken. Answer `ok: false` when this chat's version no longer matches the saved profile's current version — another chat saved first — with an error telling the agent to take a fresh copy and redo its change, not silently overwrite the other chat's save. On success, bump the version, answer `{ saved: true, profile, version, reopenedTabs }`, and restart the chat's browser onto a fresh copy of what you just saved, reopening the tabs it had (`reopenedTabs` is how many); the agent's later actions land on the fresh copy, not the pre-save one. A provider with no profile store — one shared browser, nothing to copy — refuses this action; there is nothing to write back.
+
+`examples/browser-provider-stub` is a checked-in provider with no browser: one in-memory page that answers every action, including a stub profile version counter and `requestHelp`'s `kind: 'login'` → `signed-in` path. Install it to see the dropdown, the routing, and the idle stop before writing a real one.
 
 ## Shared surface (`surface: true`)
 

@@ -1171,6 +1171,11 @@ const maybeShowNativeNotification = (rawInput) => {
   const directory = typeof payload.directory === 'string' && payload.directory.trim()
     ? payload.directory.trim()
     : null;
+  // Set only for a browser.requestHelp notification; the renderer opens this
+  // guest's panel alongside the session (openGuestPanelFromRoute) on click.
+  const guestId = String(payload.guestId) === payload.guestId && payload.guestId.trim()
+    ? payload.guestId.trim()
+    : null;
 
   const notification = new Notification({
     title,
@@ -1185,7 +1190,7 @@ const maybeShowNativeNotification = (rawInput) => {
   notification.on('click', () => {
     focusForegroundWindow();
     if (sessionId) {
-      emitToPrimaryWindow('openchamber:open-session', { sessionId, directory });
+      emitToPrimaryWindow('openchamber:open-session', { sessionId, directory, guestId });
     }
     release();
   });
