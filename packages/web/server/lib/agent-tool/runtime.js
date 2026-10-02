@@ -198,9 +198,12 @@ const resolveConcreteBoundAddress = (value) => {
  * answer with an empty completion instead of an error, and the `oneOf` branches
  * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters }) => String.raw`    tools.add({
+const createToolEntry = ({ name, description, definitions, parameters, direct = false }) => String.raw`    tools.add({
       name: ${JSON.stringify(name)},
-      description: ${JSON.stringify(description)},
+      description: ${JSON.stringify(description)},${direct ? `
+      // A direct agent tool, not one reached from a code-mode script: the
+      // agent has to see the browser to pick it over other browsing paths.
+      options: { codemode: false },` : ''}
       input: {
         type: "object",
         properties: {
@@ -287,6 +290,7 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory, include
       description: WEB_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS,
       parameters: WEB_PARAMETER_PROPERTIES,
+      direct: true,
     }));
   }
   if (includeMemory) {

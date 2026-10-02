@@ -160,6 +160,9 @@ describe('managed agent tool runtime', () => {
       expect(description).toContain(phrase);
     }
     expect(description.length).toBeLessThan(2400);
+    // Shown to the agent as a tool of its own, not hidden behind code mode.
+    expect(tool.openchamber_web.options).toEqual({ codemode: false });
+    expect(tool.openchamber.options).toBeUndefined();
   });
 
   it('keeps the action schema to one validator keyword', async () => {
