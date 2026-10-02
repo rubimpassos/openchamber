@@ -105,6 +105,20 @@ export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlyS
   return false;
 };
 
+/** How many sessions below this one (subagents, background tasks) are running now. */
+export const countActiveSubagents = (sessionId: string, activeSessionIds: ReadonlySet<string>): number => {
+  let count = 0;
+  for (const activeId of activeSessionIds) {
+    if (activeId === sessionId) continue;
+    let below = false;
+    forEachAncestorId(activeId, (ancestorId) => {
+      if (ancestorId === sessionId) below = true;
+    });
+    if (below) count += 1;
+  }
+  return count;
+};
+
 /** Active sessions plus every ancestor whose turn they keep open. */
 const withSubagentAncestors = (activeSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   let extended: Set<string> | null = null;
@@ -121,6 +135,10 @@ const withSubagentAncestors = (activeSessionIds: ReadonlySet<string>): ReadonlyS
 /** The session's turn is still open: it runs itself, or one of its subagents does. */
 export const useSessionTurnActive = (sessionId: string): boolean => useGlobalSessionStatusStore(
   (state) => state.activeSessionIds.has(sessionId) || hasActiveSubagent(sessionId, state.activeSessionIds),
+);
+
+export const useActiveSubagentCount = (sessionId: string): number => useGlobalSessionStatusStore(
+  (state) => countActiveSubagents(sessionId, state.activeSessionIds),
 );
 
 const normalizeStatusType = (type: string | undefined): ActiveStatusType | 'idle' => {

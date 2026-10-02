@@ -333,7 +333,25 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerGitHubRoutes(app);
     registerLinearRoutes(app);
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders });
+    registerGuestRoutes(app, {
+      openchamberDataDir,
+      openchamberVersion,
+      resolveGitBinaryForSpawn,
+      resolveOptionalProjectDirectory,
+      getSmallModelService,
+      onGuestDeactivated,
+      surfaceViewerHeaders,
+      emitGuestFilesChanged: ({ guestId, watchId, paths }) => {
+        const clients = getOpenChamberEventClients();
+        for (const client of clients) {
+          try {
+            writeSseEvent(client, { type: 'openchamber:guest-files-changed', properties: { guestId, watchId, paths } });
+          } catch {
+            clients.delete(client);
+          }
+        }
+      },
+    });
     registerGitRoutes(app, {
       emitWorktreeChanged: ({ directories, at }) => {
         const clients = getOpenChamberEventClients();

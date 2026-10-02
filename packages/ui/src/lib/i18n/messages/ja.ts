@@ -648,6 +648,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'サブエージェントタスクを含める',
   'sessions.sidebar.session.export.dialog.confirm': 'エクスポート',
   'sessions.sidebar.session.status.active': 'セッションアクティブ',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} 個のサブエージェントが実行中',
   'sessions.sidebar.session.status.unread': '未読の更新',
   'sessions.sidebar.session.status.nextStep': '提案された次のステップ: {suggestion}',
   'sessions.sidebar.session.status.pinned': 'ピン留めされたセッション',

@@ -560,6 +560,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Unteraufgaben des Sub-Agents einbeziehen',
   'sessions.sidebar.session.export.dialog.confirm': 'Exportieren',
   'sessions.sidebar.session.status.active': 'Sitzung aktiv',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} Subagenten laufen',
   'sessions.sidebar.session.status.unread': 'Ungelesene Updates',
   'sessions.sidebar.session.status.nextStep': 'Vorgeschlagener nächster Schritt: {suggestion}',
   'sessions.sidebar.session.status.pinned': 'Angeheftete Sitzung',

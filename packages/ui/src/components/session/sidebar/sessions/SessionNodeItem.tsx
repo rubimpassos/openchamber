@@ -1,5 +1,5 @@
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
-import { useSessionTurnActive } from '@/sync/global-session-status';
+import { useActiveSubagentCount, useSessionTurnActive } from '@/sync/global-session-status';
 import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
@@ -496,6 +496,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
   );
   const isStreaming = useSessionTurnActive(session.id);
+  // Subagents and background tasks still running under this session.
+  const activeSubagentCount = useActiveSubagentCount(session.id);
   // Read as a boolean, not as the value: the row must not re-render on every
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
@@ -1723,6 +1725,17 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                             )}
                           </span>
                         </div>
+                      ) : null}
+                      {activeSubagentCount > 0 ? (
+                        <span
+                          className={cn('inline-flex items-center gap-0.5 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info flex-shrink-0', badgeVisibilityClass)}
+                          title={t('sessions.sidebar.session.status.subagentsRunning', { count: activeSubagentCount })}
+                          aria-label={t('sessions.sidebar.session.status.subagentsRunning', { count: activeSubagentCount })}
+                          data-active-subagents={activeSubagentCount}
+                        >
+                          <Icon name="robot-2" className="h-3 w-3" />
+                          <span className="leading-none tabular-nums">{activeSubagentCount}</span>
+                        </span>
                       ) : null}
                       {nextStepBadge(badgeVisibilityClass)}
                       {pendingPermissionCount > 0 ? (

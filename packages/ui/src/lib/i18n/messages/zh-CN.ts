@@ -648,6 +648,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': '包含子智能体任务',
   'sessions.sidebar.session.export.dialog.confirm': '导出',
   'sessions.sidebar.session.status.active': '会话活跃中',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} 个子代理运行中',
   'sessions.sidebar.session.status.unread': '有未读更新',
   'sessions.sidebar.session.status.nextStep': '建议的下一步：{suggestion}',
   'sessions.sidebar.session.status.pinned': '已置顶会话',

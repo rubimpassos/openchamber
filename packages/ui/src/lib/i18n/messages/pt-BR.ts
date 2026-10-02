@@ -648,6 +648,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Incluir tarefas de subagente",
   "sessions.sidebar.session.export.dialog.confirm": "Exportar",
   "sessions.sidebar.session.status.active": "Sessão ativa",
+  "sessions.sidebar.session.status.subagentsRunning": "{count} subagentes rodando",
   "sessions.sidebar.session.status.unread": "Atualizações não lidas",
   "sessions.sidebar.session.status.nextStep": "Próximo passo sugerido: {suggestion}",
   "sessions.sidebar.session.status.pinned": "Sessão fixada",

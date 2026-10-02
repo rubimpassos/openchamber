@@ -1,4 +1,5 @@
 import type { MessagePatch, SessionPatch, SyncEvent, ToolTransition } from "@/lib/opencode/events"
+import { sessionParentID } from "@/lib/opencode/projection"
 import {
   compact,
   isFinalToolStatus,
@@ -195,6 +196,12 @@ function applySessionPatch(session: Session, patch: SessionPatch): Session {
   else if (patch.revert !== undefined) next.revert = patch.revert
   if (patch.outcome !== undefined) next.outcome = patch.outcome
   if (patch.metadata !== undefined) next.metadata = patch.metadata
+  // oh-my-openagent may set `omoParentID` after the session exists; nest it
+  // then, as `session.created` would have. A native parent always wins.
+  if (patch.metadata !== undefined && !next.parentID) {
+    const parentID = sessionParentID(undefined, patch.metadata)
+    if (parentID) next.parentID = parentID
+  }
   if (patch.time) {
     const { archived, ...rest } = patch.time
     next.time = compact({ ...session.time, ...rest, archived: archived === null ? undefined : (archived ?? session.time.archived) })

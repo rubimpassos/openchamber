@@ -628,6 +628,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Alt agent görevlerini dahil et',
   'sessions.sidebar.session.export.dialog.confirm': 'Dışa aktar',
   'sessions.sidebar.session.status.active': 'Session aktif',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} alt ajan çalışıyor',
   'sessions.sidebar.session.status.unread': 'Okunmamış güncellemeler',
   'sessions.sidebar.session.status.nextStep': 'Önerilen sonraki adım: {suggestion}',
   'sessions.sidebar.session.status.pinned': 'Sabitlenmiş session',
