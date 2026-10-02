@@ -107,6 +107,11 @@ const clipboardExpression = `(() => {
   return '';
 })()`;
 
+const MOTION_QUALITY = 75;
+const REFINE_QUALITY = 88;
+const REFINE_AFTER_MS = 180;
+const REFINE_ECHO_MS = 120;
+
 const stopScreencast = (page) => {
   if (page?.cdp.isOpen) void page.cdp.sendSession(page.sessionId, 'Page.stopScreencast').catch(() => {});
 };
@@ -124,6 +129,13 @@ export const createSurface = (runtime) => {
   let swallowEscapeUp = false;
   // The viewport the running screencast was sized for.
   let streamedFor = null;
+  // Motion streams at CSS size, which Chrome encodes fast; once the page
+  // holds still, one screenshot at the viewer's density replaces the last
+  // frame so text is sharp at rest. Anything that happens while that
+  // screenshot is taken (a frame, input) makes it stale, and it is dropped.
+  let refineTimer = null;
+  let changes = 0;
+  let refinedAt = 0;
 
   const finishWaiter = (waiter, value) => {
     if (!waiters.delete(waiter)) return;
@@ -139,7 +151,55 @@ export const createSurface = (runtime) => {
     }
   };
 
+  const cancelRefine = () => {
+    clearTimeout(refineTimer);
+    refineTimer = null;
+  };
+
+  const refine = async (current, mark) => {
+    const viewport = runtime.viewport;
+    if (!viewport || deviceScale(viewport, viewport.scale) <= 1) return;
+    let capture;
+    try {
+      capture = await current.cdp.sendSession(current.sessionId, 'Page.captureScreenshot', {
+        format: 'jpeg',
+        quality: REFINE_QUALITY,
+        optimizeForSpeed: true,
+      });
+    } catch {
+      return;
+    }
+    if (closed || page !== current) return;
+    if (changes !== mark) {
+      scheduleRefine(current);
+      return;
+    }
+    const bytes = Buffer.from(String(capture.data ?? ''), 'base64');
+    if (bytes.length === 0 || bytes.length > SURFACE_FRAME_MAX_BYTES) return;
+    refinedAt = Date.now();
+    sequence += 1;
+    publish({
+      sequence,
+      bytes,
+      mime: 'image/jpeg',
+      width: viewport.width,
+      height: viewport.height,
+      title: runtime.title,
+    });
+  };
+
+  const scheduleRefine = (current) => {
+    cancelRefine();
+    const mark = changes;
+    refineTimer = setTimeout(() => {
+      refineTimer = null;
+      void refine(current, mark);
+    }, REFINE_AFTER_MS);
+    refineTimer.unref?.();
+  };
+
   const detach = () => {
+    cancelRefine();
     unsubscribe?.();
     unsubscribe = null;
     stopScreencast(page);
@@ -161,8 +221,13 @@ export const createSurface = (runtime) => {
         void current.cdp.sendSession(current.sessionId, 'Page.screencastFrameAck', {
           sessionId: event.params.sessionId,
         }).catch(() => {});
+        // Chrome repaints after taking the screenshot; that frame shows the
+        // same page, blurrier, so it does not replace the sharp one.
+        if (Date.now() - refinedAt < REFINE_ECHO_MS) return;
         const bytes = Buffer.from(String(event.params.data ?? ''), 'base64');
         if (bytes.length === 0 || bytes.length > SURFACE_FRAME_MAX_BYTES) return;
+        changes += 1;
+        scheduleRefine(current);
         sequence += 1;
         publish({
           sequence,
@@ -174,19 +239,14 @@ export const createSurface = (runtime) => {
         });
       });
       try {
-        // Frames sized for the viewer's density: Chrome renders at the top
-        // scale and shrinks each frame to this box before encoding it.
         const viewport = runtime.viewport;
         const scale = viewport ? deviceScale(viewport, viewport.scale) : 1;
         streamedFor = viewport ? `${viewport.width}x${viewport.height}@${scale}` : null;
         await current.cdp.sendSession(current.sessionId, 'Page.startScreencast', {
           format: 'jpeg',
-          quality: 85,
+          quality: MOTION_QUALITY,
           everyNthFrame: 1,
-          ...(viewport ? {
-            maxWidth: Math.round(viewport.width * scale),
-            maxHeight: Math.round(viewport.height * scale),
-          } : {}),
+          ...(viewport ? { maxWidth: viewport.width, maxHeight: viewport.height } : {}),
         });
       } catch (error) {
         detach();
@@ -239,6 +299,9 @@ export const createSurface = (runtime) => {
     },
     async input(events, theme = null) {
       const current = await start();
+      // Input usually changes the page: a screenshot in flight is stale.
+      changes += 1;
+      if (refineTimer) scheduleRefine(current);
       const menu = runtime.contextMenu;
       for (const event of events) {
         if (event.type === 'key' && event.key === 'Escape' && event.action === 'up' && swallowEscapeUp) {

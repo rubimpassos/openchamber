@@ -233,7 +233,7 @@ test.skipIf(noChrome)('runs every browser action and the shared surface against 
   }
 });
 
-test.skipIf(noChrome)('runs page/evaluate and page/capture, zooms the page, and clears its cookies and cache', async () => {
+test.skipIf(noChrome)('runs page/evaluate and page/capture, zooms the page, sets its color scheme, and clears its cookies and cache', async () => {
   // Given a throwaway scope and a profile-copy scope, both on the fixture.
   const web = await startWebFixture();
   const cleanups = [() => close(web.server)];
@@ -262,6 +262,16 @@ test.skipIf(noChrome)('runs page/evaluate and page/capture, zooms the page, and 
     await expect(runtime.setZoomLevel(6)).rejects.toThrow(/-5 to 5/);
     await runtime.setZoomLevel(0);
     expect(await runtime.pageEvaluate('getComputedStyle(document.documentElement).zoom')).toBe('1');
+
+    // When the dock picks a color scheme, then the page's prefers-color-scheme follows it, and system drops the override.
+    const prefersDark = "matchMedia('(prefers-color-scheme: dark)').matches";
+    await runtime.setColorScheme('dark');
+    expect(runtime.colorScheme).toBe('dark');
+    expect(await runtime.pageEvaluate(prefersDark)).toBe(true);
+    await runtime.setColorScheme('light');
+    expect(await runtime.pageEvaluate(prefersDark)).toBe(false);
+    await runtime.setColorScheme('system');
+    await expect(runtime.setColorScheme('sepia')).rejects.toThrow(/system, light, or dark/);
 
     // When the dock clears cookies on a throwaway scope's page, then the server no longer sees it.
     // `/login`'s cookie is HttpOnly, invisible to `document.cookie`; `/whoami`

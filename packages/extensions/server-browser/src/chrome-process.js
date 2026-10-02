@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { connectCdp } from './cdp-client.js';
 import { describeMissingLibraries } from './chrome-install.js';
-import { MAX_DEVICE_SCALE } from './viewports.js';
 
 const MINIMUM_CHROME_MAJOR_VERSION = 109;
 const SYSTEM_NAMES = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
@@ -132,11 +131,6 @@ export const createChromeProcess = ({
     if (closed) throw new Error('Chrome launch was cancelled');
     child = spawn(binary, [
       '--headless=new',
-      // Headless screencasts come at the window's scale, not the page's
-      // emulated one. Rendering at the highest density a viewer may want and
-      // letting each stream downscale to its viewer keeps text sharp on
-      // high-DPI screens without blurring anyone else's.
-      `--force-device-scale-factor=${MAX_DEVICE_SCALE}`,
       '--webrtc-ip-handling-policy=disable_non_proxied_udp',
       '--remote-debugging-port=0',
       '--remote-debugging-address=127.0.0.1',

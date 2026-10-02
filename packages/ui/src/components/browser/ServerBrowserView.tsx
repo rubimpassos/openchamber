@@ -47,11 +47,11 @@ import { ServerBrowserInspector } from './ServerBrowserInspector';
 export type ServerBrowserViewProps = {
   guestId: string;
   directory: string;
-  /** The Browser panel tab this view draws; it shows one Chrome tab of the chat. */
-  tabID: string;
-  /** Only the panel tab in front talks to the server and draws the page. */
-  active: boolean;
+  /** The Browser panel tab in front, which shows one Chrome tab of the chat; null when no Browser tab is. */
+  tabID: string | null;
 };
+
+type LiveViewProps = { guestId: string; directory: string; tabID: string };
 
 const ZOOM_MIN = -5;
 const ZOOM_MAX = 5;
@@ -73,16 +73,11 @@ const toServiceViewport = (viewport: BrowserViewport): { mode: 'auto' | 'fixed';
  * protocol (`ServerBrowserCanvas` / `SurfaceClient`), which is also what
  * extension rail panels use — this view never talks to Chrome directly.
  */
-const panelTabExists = (directory: string, tabID: string): boolean => Object.values(useUIStore.getState().contextPanelByDirectory)
+const panelTabExists = (tabID: string): boolean => Object.values(useUIStore.getState().contextPanelByDirectory)
   .some((panel) => panel?.tabs.some((tab) => tab.id === tabID));
 
-/**
- * Closing a Browser panel tab closes the Chrome tab it showed. Run from the
- * view's unmount, which is also what a chat or directory switch causes, so it
- * only acts once the panel tab is really gone from the store.
- */
-const closeChromeTabsOfPanelTab = async (guestId: string, directory: string, tabID: string): Promise<void> => {
-  if (panelTabExists(directory, tabID)) return;
+const closeChromeTabsOfPanelTab = async (guestId: string, tabID: string): Promise<void> => {
+  if (panelTabExists(tabID)) return;
   const { claims, release } = useServerBrowserPanelTabs.getState();
   const owned = Object.entries(claims)
     .map(([key, chromeTabId]) => {
@@ -101,21 +96,81 @@ const closeChromeTabsOfPanelTab = async (guestId: string, directory: string, tab
   }
 };
 
-export const ServerBrowserView: React.FC<ServerBrowserViewProps> = (props) => {
-  const { guestId, directory, tabID, active } = props;
-  React.useEffect(() => () => {
-    // After the store update that removed the tab has been rendered.
-    queueMicrotask(() => { void closeChromeTabsOfPanelTab(guestId, directory, tabID); });
-  }, [directory, guestId, tabID]);
-  if (!active) return null;
-  return <ServerBrowserLiveView {...props} />;
+/**
+ * Closing a Browser panel tab closes the Chrome tab it showed. Watches the
+ * panel's tabs rather than a view's unmount: one view serves every tab.
+ */
+const useCloseChromeTabsOfClosedPanelTabs = (guestId: string): void => {
+  React.useEffect(() => {
+    const browserTabIds = (state: ReturnType<typeof useUIStore.getState>) => new Set(
+      Object.values(state.contextPanelByDirectory).flatMap((panel) => (panel?.tabs ?? [])
+        .filter((tab) => tab.mode === 'browser')
+        .map((tab) => tab.id)),
+    );
+    let previous = browserTabIds(useUIStore.getState());
+    return useUIStore.subscribe((state) => {
+      const current = browserTabIds(state);
+      for (const id of previous) {
+        if (!current.has(id)) void closeChromeTabsOfPanelTab(guestId, id);
+      }
+      previous = current;
+    });
+  }, [guestId]);
+};
+
+export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, directory, tabID }) => {
+  useCloseChromeTabsOfClosedPanelTabs(guestId);
+  if (!tabID) return null;
+  return <ServerBrowserLiveView guestId={guestId} directory={directory} tabID={tabID} />;
+};
+
+// Each dock request must answer within the host proxy's 20 s, but the
+// annotation script resolves only when the person finishes. So the promise is
+// started in the page and its result fetched by short requests that each wait
+// up to HELD_POLL_MS inside the page. `code` must be an expression.
+const HELD_POLL_MS = 8_000;
+let heldSequence = 0;
+
+const evaluateHeld = async (
+  evaluate: (expression: string, userGesture?: boolean) => Promise<unknown>,
+  code: string,
+  userGesture?: boolean,
+): Promise<unknown> => {
+  heldSequence += 1;
+  const key = JSON.stringify(`${Date.now()}-${heldSequence}`);
+  // Callers pass a statement-like expression, possibly ending in `;`.
+  const expression = code.trim().replace(/;+\s*$/, '');
+  await evaluate(`(() => {
+    const store = (window.__openchamberHeld ||= {});
+    const slot = store[${key}] = { done: false, value: null, error: null, wake: [] };
+    const finish = () => { slot.done = true; for (const wake of slot.wake.splice(0)) wake(); };
+    Promise.resolve((
+${expression}
+)).then((value) => { slot.value = value ?? null; finish(); }, (error) => { slot.error = String(error && error.message || error); finish(); });
+    return true;
+  })()`, userGesture);
+  for (;;) {
+    const result = await evaluate(`(async () => {
+      const slot = window.__openchamberHeld && window.__openchamberHeld[${key}];
+      if (!slot) return { gone: true };
+      if (!slot.done) await new Promise((resolve) => { slot.wake.push(resolve); setTimeout(resolve, ${HELD_POLL_MS}); });
+      if (!slot.done) return { pending: true };
+      delete window.__openchamberHeld[${key}];
+      return { done: true, value: slot.value, error: slot.error };
+    })()`) as { gone?: boolean; pending?: boolean; value?: unknown; error?: string | null } | null;
+    // The page navigated away: whatever the script was doing went with it.
+    if (!result || result.gone) return null;
+    if (result.pending) continue;
+    if (result.error) throw new Error(result.error);
+    return result.value ?? null;
+  }
 };
 
 const activeChromeTabOf = (state: ServerBrowserState | null): string | null => (
   findSelectedScope(state)?.tabs.find((tab) => tab.active)?.id ?? null
 );
 
-const ServerBrowserLiveView: React.FC<ServerBrowserViewProps> = ({ guestId, directory, tabID }) => {
+const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, tabID }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const canvasHandleRef = React.useRef<ServerBrowserCanvasHandle | null>(null);
@@ -259,7 +314,7 @@ const ServerBrowserLiveView: React.FC<ServerBrowserViewProps> = ({ guestId, dire
   }, [directory, recordHistoryVisit, scope]);
 
   const annotationHost = React.useMemo<AnnotationHost>(() => ({
-    executeJavaScript: (code, userGesture) => serverBrowser.evaluate(code, userGesture),
+    executeJavaScript: (code, userGesture) => evaluateHeld(serverBrowser.evaluate, code, userGesture),
     capturePage: async (): Promise<PageCapture | null> => {
       const capture = await serverBrowser.capture();
       return capture ? { mime: capture.mime, base64: capture.base64, width: capture.width, height: capture.height } : null;
@@ -292,6 +347,16 @@ const ServerBrowserLiveView: React.FC<ServerBrowserViewProps> = ({ guestId, dire
         toast.error(t('contextPanel.browser.annotate.failed'));
       });
   }, [annotationHost, attachAnnotation, currentTheme, isAnnotating, overlayLabels, scope?.url, t]);
+
+  // An annotation belongs to the page it started on; another tab ends it.
+  const annotatingRef = React.useRef(isAnnotating);
+  annotatingRef.current = isAnnotating;
+  React.useEffect(() => {
+    if (!annotatingRef.current) return;
+    setIsAnnotating(false);
+    void cancelAnnotationSession(annotationHost);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabID]);
 
   const handleSaveSignIn = React.useCallback(() => {
     const profileId = scope?.profile?.id;
@@ -388,8 +453,8 @@ const ServerBrowserLiveView: React.FC<ServerBrowserViewProps> = ({ guestId, dire
         <BrowserDeviceBar
           viewport={viewport}
           onViewportChange={handleViewportChange}
-          colorScheme="system"
-          onColorSchemeChange={() => {}}
+          colorScheme={scope?.colorScheme ?? 'system'}
+          onColorSchemeChange={(scheme) => void serverBrowser.setColorScheme(scheme)}
           scale={1}
         />
       ) : null}
