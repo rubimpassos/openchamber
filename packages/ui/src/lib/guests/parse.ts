@@ -11,6 +11,9 @@ import {
   GUEST_TOOLS_MAX,
   GUEST_TOOL_MATCH,
   GUEST_TOOL_OUTPUTS,
+  GUEST_MESSAGES_MAX,
+  GUEST_MESSAGE_BODIES,
+  GUEST_MESSAGE_TONES,
 } from '@openchamber/sdk';
 import { z } from 'zod';
 
@@ -80,6 +83,16 @@ const guestToolSchema = z.object({
   columns: z.array(z.string().trim().min(1)).optional(),
 });
 
+const guestMessageSchema = z.object({
+  match: z.string().min(1),
+  name: z.string().trim().min(1),
+  icon: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).optional(),
+  subtitle: z.string().trim().min(1).optional(),
+  tone: z.enum(GUEST_MESSAGE_TONES).optional(),
+  body: z.enum(GUEST_MESSAGE_BODIES).optional(),
+});
+
 export const guestUpdateSchema = z.object({
   version: z.string().trim().min(1).max(64),
 });
@@ -107,6 +120,7 @@ const installedGuestSchema = z.object({
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
+  messages: z.array(guestMessageSchema).max(GUEST_MESSAGES_MAX).optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),
     granted: z.array(z.enum(GUEST_CAPABILITIES)),

@@ -161,6 +161,43 @@ export type GuestToolContribution = {
   columns?: string[];
 };
 
+/** How many `contributes.messages` entries a package may declare. */
+export const GUEST_MESSAGES_MAX = 32;
+/** Characters in a `contributes.messages` `match` pattern. */
+export const GUEST_MESSAGE_MATCH_MAX = 300;
+/** Characters of a message the host tests a pattern against; the rest is ignored. */
+export const GUEST_MESSAGE_TEXT_SCAN_MAX = 64 * 1024;
+
+export const GUEST_MESSAGE_TONES = ['neutral', 'info', 'success', 'warning', 'error'] as const;
+/** The colour of a message row's icon. */
+export type GuestMessageTone = (typeof GUEST_MESSAGE_TONES)[number];
+
+export const GUEST_MESSAGE_BODIES = ['markdown', 'text', 'none'] as const;
+/** What the expanded row shows: the message as markdown, as plain text, or nothing (header only). */
+export type GuestMessageBody = (typeof GUEST_MESSAGE_BODIES)[number];
+
+/**
+ * How a message a plugin sent on the user's behalf looks in the chat,
+ * declared without code. `match` is a JavaScript regular expression source
+ * (flags `m`), tested against the whole text of a user message; the first
+ * matching rule wins. A match draws the message as a row of agent activity
+ * (icon, title, collapsible body) instead of the user's bubble. `title` and
+ * `subtitle` are templates with `{match.<group>}` placeholders for named
+ * capture groups and `{match.1}` for numbered ones. The body hides
+ * `<system-reminder>` tags and HTML comments.
+ */
+export type GuestMessageContribution = {
+  match: string;
+  /** Header title when `title` is absent or renders empty. */
+  name: string;
+  /** Remixicon name or package `.svg` path, same rules as `panel.icon`. */
+  icon?: string;
+  title?: string;
+  subtitle?: string;
+  tone?: GuestMessageTone;
+  body?: GuestMessageBody;
+};
+
 export type IntegrationSettingField = {
   id: string;
   label: string;
@@ -408,6 +445,8 @@ export type OpenChamberContributes = {
   commands?: GuestCommandContribution[];
   /** How the extension's tool calls look in the chat. */
   tools?: GuestToolContribution[];
+  /** Which user messages are a plugin's own and how they look as agent activity. */
+  messages?: GuestMessageContribution[];
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -530,7 +569,8 @@ export type ParseManifestErrorCode =
   | 'invalid-filesystem'
   | 'invalid-actions'
   | 'invalid-commands'
-  | 'invalid-tools';
+  | 'invalid-tools'
+  | 'invalid-messages';
 
 export type ParseManifestFailure = {
   ok: false;

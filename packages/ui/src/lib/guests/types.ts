@@ -2,6 +2,7 @@ import type {
   AttachContribution,
   GuestActionContribution,
   GuestCommandContribution,
+  GuestMessageContribution,
   GuestSurfaceDock,
   GuestToolContribution,
   PublicService,
@@ -45,6 +46,8 @@ export type InstalledGuest = {
   commands?: GuestCommandContribution[];
   /** Declared `contributes.tools`; the chat applies them only for an active guest. */
   tools?: GuestToolContribution[];
+  /** Declared `contributes.messages`; the chat applies them only for an active guest. */
+  messages?: GuestMessageContribution[];
   /** What the package asks for and what the user approved at install. */
   capabilities: PublicGuestCapabilities;
   source?: GuestSource;

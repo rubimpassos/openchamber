@@ -1,4 +1,6 @@
 import React from 'react';
+import { guestMessagePresentationIn, userMessageText } from '@/lib/guests/message-presentation';
+import { useGuestsStore } from '@/lib/guests/store';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 
@@ -253,6 +255,8 @@ const ChatViewport = React.memo(({
     // Cache normalized parts per source array so unchanged messages keep the
     // same reference and the memo below can bail out to the previous map.
     const normalizedPromptPartsCache = React.useRef(new WeakMap<Part[], Part[]>());
+    // Message rules come and go with the extension catalog.
+    const guestCatalog = useGuestsStore((state) => state.guests);
     const promptPreviewsByTurnId = React.useMemo(() => {
         const next = new Map<string, Part[]>();
         for (let index = 0; index < renderedMessages.length; index += 1) {
@@ -272,6 +276,10 @@ const ChatViewport = React.memo(({
             if (displayParts.length === 0) {
                 continue;
             }
+            // A plugin message an extension draws as agent activity is not a prompt.
+            if (guestMessagePresentationIn(guestCatalog, userMessageText(message.parts))) {
+                continue;
+            }
             next.set(message.info.id, displayParts);
         }
         const prev = promptPreviewsByTurnIdRef.current;
@@ -289,7 +297,7 @@ const ChatViewport = React.memo(({
         }
         promptPreviewsByTurnIdRef.current = next;
         return next;
-    }, [renderedMessages]);
+    }, [guestCatalog, renderedMessages]);
     // Only real (non-synthetic) prompts become rail entries; selection still
     // targets the same turn anchors as the timeline.
     const promptTurnIds = React.useMemo(

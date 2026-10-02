@@ -20,6 +20,10 @@ import {
   GUEST_TOOL_MATCH_MAX,
   GUEST_TOOL_NAME_MAX,
   GUEST_TOOL_OUTPUTS,
+  GUEST_MESSAGES_MAX,
+  GUEST_MESSAGE_BODIES,
+  GUEST_MESSAGE_MATCH_MAX,
+  GUEST_MESSAGE_TONES,
   GUEST_TOOL_TEMPLATE_MAX,
   PANEL_ID,
   hasGuestPage,
@@ -257,6 +261,27 @@ const toolSchema = z.object({
 
 const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
 
+const compilesAsPattern = (source: string): boolean => {
+  try {
+    new RegExp(source, 'm');
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const messageSchema = z.object({
+  match: z.string().min(1).max(GUEST_MESSAGE_MATCH_MAX).refine(compilesAsPattern),
+  name: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX),
+  icon: z.string().trim().refine(isPanelIcon).optional(),
+  title: z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).optional(),
+  subtitle: z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).optional(),
+  tone: z.enum(GUEST_MESSAGE_TONES).optional(),
+  body: z.enum(GUEST_MESSAGE_BODIES).optional(),
+});
+
+const messagesSchema = z.array(messageSchema).min(1).max(GUEST_MESSAGES_MAX);
+
 const contributesSchema = z.object({
   panel: panelSchema,
   background: z.object({
@@ -281,6 +306,7 @@ const contributesSchema = z.object({
   actions: actionsSchema.optional(),
   commands: commandsSchema.optional(),
   tools: toolsSchema.optional(),
+  messages: messagesSchema.optional(),
 });
 
 /**
@@ -357,7 +383,7 @@ export const openChamberManifestSchema = z.object({
     ctx.addIssue({
       code: 'custom',
       path: ['panel'],
-      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools.`,
+      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools and messages.`,
     });
   }),
 });
@@ -475,6 +501,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-tools',
       'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table", language (code only), and columns (table only, 1 to 16).',
+    );
+  }
+  if (path.startsWith('contributes.messages')) {
+    return fail(
+      'invalid-messages',
+      'contributes.messages lists up to 32 entries with a match that compiles as a JavaScript regular expression (1 to 300 characters), a name (1 to 40), optional icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), tone "neutral" | "info" | "success" | "warning" | "error", and body "markdown" | "text" | "none".',
     );
   }
   if (path.startsWith('contributes.integration')) {
