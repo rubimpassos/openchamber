@@ -2612,6 +2612,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.dialog.evaluationModelLabel': 'Model oceniający',
   'chat.goal.status.active': 'Aktywny',
   'chat.goal.status.evaluating': 'Ocenianie…',
+  'chat.goal.driver.title': 'Uruchamiane przez {name}',
   'chat.goal.status.paused': 'Wstrzymany',
   'chat.goal.status.blocked': 'Zablokowany',
   'chat.goal.status.budgetLimited': 'Budżet wyczerpany',

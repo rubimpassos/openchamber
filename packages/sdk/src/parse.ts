@@ -20,6 +20,7 @@ import {
   GUEST_TOOL_MATCH_MAX,
   GUEST_TOOL_NAME_MAX,
   GUEST_TOOL_OUTPUTS,
+  GUEST_GOAL_DRIVER,
   GUEST_MESSAGES_MAX,
   GUEST_MESSAGE_BODIES,
   GUEST_MESSAGE_MATCH_MAX,
@@ -307,6 +308,7 @@ const contributesSchema = z.object({
   commands: commandsSchema.optional(),
   tools: toolsSchema.optional(),
   messages: messagesSchema.optional(),
+  goal: z.object({ driver: z.string().regex(GUEST_GOAL_DRIVER) }).strict().optional(),
 });
 
 /**
@@ -383,7 +385,7 @@ export const openChamberManifestSchema = z.object({
     ctx.addIssue({
       code: 'custom',
       path: ['panel'],
-      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools and messages.`,
+      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools, messages and goal.`,
     });
   }),
 });
@@ -507,6 +509,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-messages',
       'contributes.messages lists up to 32 entries with a match that compiles as a JavaScript regular expression (1 to 300 characters), a name (1 to 40), optional icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), tone "neutral" | "info" | "success" | "warning" | "error", and body "markdown" | "text" | "none".',
+    );
+  }
+  if (path.startsWith('contributes.goal')) {
+    return fail(
+      'invalid-goal',
+      'contributes.goal is { "driver": "<id>" } with an id matching /^[a-z][a-z0-9-]{0,31}$/.',
     );
   }
   if (path.startsWith('contributes.integration')) {

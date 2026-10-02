@@ -198,6 +198,22 @@ export type GuestMessageContribution = {
   body?: GuestMessageBody;
 };
 
+/** A goal driver id: what an extension writes into `metadata.openchamber.goal.driver`. */
+export const GUEST_GOAL_DRIVER = /^[a-z][a-z0-9-]{0,31}$/;
+
+/**
+ * The extension's plugin drives session goals itself. A goal whose
+ * `metadata.openchamber.goal.driver` names this driver renders with the host's
+ * own goal chrome (composer strip, Work Status row, sidebar icon), and the
+ * host's pause, resume, edit and clear write the goal metadata as always; the
+ * built-in goal loop leaves it to the driver while this extension is enabled.
+ * The plugin mirrors its goal into that metadata and applies the user's
+ * changes it finds there.
+ */
+export type GuestGoalContribution = {
+  driver: string;
+};
+
 export type IntegrationSettingField = {
   id: string;
   label: string;
@@ -447,6 +463,8 @@ export type OpenChamberContributes = {
   tools?: GuestToolContribution[];
   /** Which user messages are a plugin's own and how they look as agent activity. */
   messages?: GuestMessageContribution[];
+  /** Session goals this extension's plugin drives. */
+  goal?: GuestGoalContribution;
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -570,7 +588,8 @@ export type ParseManifestErrorCode =
   | 'invalid-actions'
   | 'invalid-commands'
   | 'invalid-tools'
-  | 'invalid-messages';
+  | 'invalid-messages'
+  | 'invalid-goal';
 
 export type ParseManifestFailure = {
   ok: false;

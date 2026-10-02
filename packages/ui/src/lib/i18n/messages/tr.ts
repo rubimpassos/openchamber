@@ -1854,6 +1854,7 @@ export const dict = {
   'chat.goal.dialog.evaluationModelLabel': 'Değerlendirme modeli',
   'chat.goal.status.active': 'Etkin',
   'chat.goal.status.evaluating': 'Değerlendiriliyor…',
+  'chat.goal.driver.title': '{name} tarafından yürütülüyor',
   'chat.goal.status.paused': 'Duraklatıldı',
   'chat.goal.status.blocked': 'Engellendi',
   'chat.goal.status.budgetLimited': 'Bütçeye ulaşıldı',

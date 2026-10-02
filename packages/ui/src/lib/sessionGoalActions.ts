@@ -79,7 +79,10 @@ export async function setSessionGoal(
   const tokenBudget = typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0
     ? Math.floor(input.tokenBudget)
     : null;
-  const objectiveFile = await writeGoalObjectiveFile(sessionId, objective);
+  // A driven goal keeps its objective inline: the extension's plugin reads it
+  // from the metadata and has no access to OpenChamber's objective files.
+  const driven = Boolean(existing?.driver) && existing?.status !== 'complete';
+  const objectiveFile = driven ? false : await writeGoalObjectiveFile(sessionId, objective);
   const now = Date.now();
   await writeGoal(sessionId, directory, (currentGoal): Metadata => {
     if (existing && currentGoal && currentGoal.id === existing.id && existing.status !== 'complete') {

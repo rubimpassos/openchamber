@@ -1703,6 +1703,7 @@ export const dict = {
   'chat.goal.dialog.budgetLabel': 'Token-Budget',
   'chat.goal.status.active': 'Aktiv',
   'chat.goal.status.evaluating': 'Wird bewertet…',
+  'chat.goal.driver.title': 'Ausgeführt von {name}',
   'chat.goal.status.paused': 'Pausiert',
   'chat.goal.status.blocked': 'Gesperrt',
   'chat.goal.status.budgetLimited': 'Budget erreicht',

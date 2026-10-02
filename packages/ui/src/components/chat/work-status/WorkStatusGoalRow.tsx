@@ -7,6 +7,7 @@ import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { WorkStatusRow, WorkStatusRowAction } from './WorkStatusPrimitives';
+import { useGoalDriverName } from '@/lib/guests/goal-driver';
 
 type Props = {
   sessionId: string | null;
@@ -19,6 +20,7 @@ export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => 
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory ?? undefined);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const driverName = useGoalDriverName(goal?.driver);
 
   const handleToggleStatus = React.useCallback(async (nextStatus: 'active' | 'paused') => {
     if (!sessionId || busy) return;
@@ -51,7 +53,7 @@ export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => 
             style={{ color: goal ? sessionGoalStatusColor[goal.status] : undefined }}
           />
         )}
-        label={objective}
+        label={driverName ? `${objective} · ${driverName}` : objective}
         onClick={() => setDialogOpen(true)}
         ariaLabel={t('chat.workStatus.goal.open')}
         value={canPause || canResume ? (

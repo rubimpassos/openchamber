@@ -280,6 +280,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.tools?.length) {
     guest.tools = parsed.manifest.contributes.tools.map((tool) => ({ ...tool }));
   }
+  if (parsed.manifest.contributes.goal) {
+    guest.goal = { ...parsed.manifest.contributes.goal };
+  }
   if (parsed.manifest.contributes.messages?.length) {
     guest.messages = parsed.manifest.contributes.messages.map((message) => ({ ...message }));
   }
@@ -367,6 +370,9 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));
+  }
+  if (guest.goal) {
+    row.goal = { ...guest.goal };
   }
   if (Array.isArray(guest.messages) && guest.messages.length > 0) {
     row.messages = guest.messages.map((message) => ({ ...message }));

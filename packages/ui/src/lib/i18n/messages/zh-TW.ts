@@ -1863,6 +1863,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.dialog.evaluationModelLabel': '評估模型',
   'chat.goal.status.active': '進行中',
   'chat.goal.status.evaluating': '評估中…',
+  'chat.goal.driver.title': '由 {name} 執行',
   'chat.goal.status.paused': '已暫停',
   'chat.goal.status.blocked': '已受阻',
   'chat.goal.status.budgetLimited': '已達預算',
