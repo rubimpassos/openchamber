@@ -36,10 +36,10 @@ import { cn } from '@/lib/utils';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { pluginModeFromId } from '@/lib/surfaces/modes';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useServerBrowserSignIn } from '@/lib/browser/serverBrowser/panelTabs';
 import type { ProjectEntry } from '@/lib/api/types';
 import {
-  SERVER_BROWSER_GUEST_ID,
   bindProfile,
   clearProfileSite,
   closeProfile,
@@ -168,10 +168,16 @@ export const BrowserProfilesSection: React.FC = () => {
     }
     setBusyNotice(null);
     setProfiles(result.value.profiles);
+    // Take the person to the page they sign in on: the Browser panel, showing
+    // this profile's sign-in browser with a bar to save it.
     const activeProjectId = useProjectsStore.getState().activeProjectId;
-    const directory = projects.find((entry) => entry.id === activeProjectId)?.path ?? projects[0]?.path;
+    const directory = useDirectoryStore.getState().currentDirectory
+      || projects.find((entry) => entry.id === activeProjectId)?.path
+      || projects[0]?.path;
+    useServerBrowserSignIn.getState().setSignIn({ profileId: profile.id, name: profile.name });
     if (directory) {
-      useUIStore.getState().openContextSurface(directory, pluginModeFromId(SERVER_BROWSER_GUEST_ID));
+      useUIStore.getState().openContextBrowser(directory);
+      useUIStore.getState().setSettingsDialogOpen(false);
     }
   }, [projects, t]);
 
@@ -186,6 +192,7 @@ export const BrowserProfilesSection: React.FC = () => {
       return;
     }
     setProfiles(result.value.profiles);
+    if (useServerBrowserSignIn.getState().signIn?.profileId === profile.id) useServerBrowserSignIn.getState().setSignIn(null);
     toast.success(t('settings.browser.profiles.save.toast.success', { name: profile.name }));
   }, [t]);
 

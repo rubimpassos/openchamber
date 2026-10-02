@@ -472,28 +472,31 @@ export const createBrowserManager = ({
     },
     // A viewer opens the browser of the chat it is looking at, before any agent
     // action. The dock reports that chat; the host does not attest it per request.
+    // Opening or picking a scope chooses the view rather than acting on the
+    // picture, so the viewer's last frame (of a scope that may be gone, with
+    // nothing on screen since) is no reason to refuse it.
     openScope(context, expectedGeneration, access) {
       return enqueue(async () => {
         if (closed) throw new Error('Browser manager is closed');
-        requireDockAccess(access);
+        requireDockAccess({ ...access, frameSeq: null });
         requireGeneration(expectedGeneration);
         const entry = await ensureScope(context);
         touch(entry);
         if (selectedScopeId === entry.id) return;
         if (surfaceSize) await entry.runtime.surfaceResize(surfaceSize);
-        requireDockAccess(access);
+        requireDockAccess({ ...access, frameSeq: null });
         select(entry);
         notice = null;
       });
     },
     selectScope(id, expectedGeneration, access) {
       return enqueue(async () => {
-        requireDockAccess(access);
+        requireDockAccess({ ...access, frameSeq: null });
         requireGeneration(expectedGeneration);
         const entry = scopes.get(id);
         if (!entry) throw new Error('The selected browser scope no longer exists');
         if (surfaceSize) await entry.runtime.surfaceResize(surfaceSize);
-        requireDockAccess(access);
+        requireDockAccess({ ...access, frameSeq: null });
         requireGeneration(expectedGeneration);
         select(entry);
         touch(entry);
@@ -589,8 +592,15 @@ export const createBrowserManager = ({
         if (ratio === devicePixelRatio) return;
         const measuredWithoutRatio = devicePixelRatio === null;
         devicePixelRatio = ratio;
-        if (!measuredWithoutRatio || !surfaceViewport) return;
-        surfaceSize = cssSize(surfaceViewport, ratio);
+        if (!surfaceViewport) return;
+        if (!measuredWithoutRatio) {
+          // Same CSS size, new density: only the render scale changes.
+          surfaceSize = { ...(surfaceSize ?? cssSize(surfaceViewport, ratio)), scale: ratio };
+          const entry = selected();
+          if (entry) await entry.runtime.surfaceResize(surfaceSize);
+          return;
+        }
+        surfaceSize = { ...cssSize(surfaceViewport, ratio), scale: ratio };
         const entry = selected();
         if (entry) await entry.runtime.surfaceResize(surfaceSize);
       });
@@ -692,7 +702,7 @@ export const createBrowserManager = ({
     surfaceResize(size) {
       return enqueue(() => {
         surfaceViewport = size;
-        surfaceSize = cssSize(size, devicePixelRatio ?? 1);
+        surfaceSize = { ...cssSize(size, devicePixelRatio ?? 1), scale: devicePixelRatio ?? 1 };
         return requireSelected().runtime.surfaceResize(surfaceSize);
       });
     },

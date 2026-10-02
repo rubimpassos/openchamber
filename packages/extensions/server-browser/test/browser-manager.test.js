@@ -321,7 +321,7 @@ test('applies the current viewer size before publishing a newly selected scope',
   // When the user selects that scope, then the surface viewport is applied before it becomes visible.
   await manager.selectScope(manager.state().scopes[1].id, manager.state().generation);
   const calls = runtimes.get('ses_two').calls;
-  assert.deepEqual(calls.at(-1), ['resize', { width: 700, height: 500 }]);
+  assert.deepEqual(calls.at(-1), ['resize', { width: 700, height: 500, scale: 1 }]);
   assert.equal(manager.state().selectedScopeId, manager.state().scopes[1].id);
 });
 
@@ -497,14 +497,13 @@ test('converts the viewer panel with its pixel ratio and sizes a first scope cre
   // When the first scope appears, then it gets the panel's CSS size.
   await manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_one'));
   const runtime = runtimes.get('ses_one');
-  assert.deepEqual(runtime.calls.find(([kind]) => kind === 'resize'), ['resize', { width: 700, height: 500 }]);
+  assert.deepEqual(runtime.calls.find(([kind]) => kind === 'resize'), ['resize', { width: 700, height: 500, scale: 2 }]);
 
-  // When the window moves to a 1x display, then the page keeps its CSS size, and the host's next measurement uses the new ratio.
-  const callCount = runtime.calls.length;
+  // When the window moves to a 1x display, then the page keeps its CSS size but renders at the new density, and the host's next measurement uses the new ratio.
   await manager.setDevicePixelRatio(1);
-  assert.equal(runtime.calls.length, callCount);
+  assert.deepEqual(runtime.calls.at(-1), ['resize', { width: 700, height: 500, scale: 1 }]);
   await manager.surfaceResize({ width: 800, height: 600 });
-  assert.deepEqual(runtime.calls.at(-1), ['resize', { width: 800, height: 600 }]);
+  assert.deepEqual(runtime.calls.at(-1), ['resize', { width: 800, height: 600, scale: 1 }]);
 
   // When the dock sets a viewport, then it is marked as the viewer's and guarded like other dock mutations.
   await manager.setViewport({ mode: 'fixed', width: 500, height: 400, mobile: false }, manager.state().generation);
@@ -522,7 +521,7 @@ test('works out a panel measured before the dock reported its pixel ratio once t
 
   // When the ratio arrives, then the page gets the panel's CSS size.
   await manager.setDevicePixelRatio(2);
-  assert.deepEqual(runtime.calls.at(-1), ['resize', { width: 700, height: 500 }]);
+  assert.deepEqual(runtime.calls.at(-1), ['resize', { width: 700, height: 500, scale: 2 }]);
 });
 
 test('lists the visible tab\'s errors and warnings only for a dock whose console is open', async () => {
@@ -984,4 +983,19 @@ test('sets a scope\'s zoom level, reports it in state, and clears its cookies or
   await assert.rejects(manager.pageZoom(1, manager.state().generation + 1, {}), /view changed/i);
   manager.surfaceControl('user');
   await assert.rejects(manager.pageClear('cookies', manager.state().generation, {}), /idle/i);
+});
+
+test('opens a chat scope for a viewer whose last frame showed a scope that has since closed', async () => {
+  // Given a viewer that drew a frame of a sign-in browser, which then closed and left nothing selected.
+  const { factory } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_one'));
+  const shown = await manager.surfaceFrame({ after: 0, wait: 0 });
+  const scopeId = manager.state().selectedScopeId;
+  await manager.closeScope(scopeId, manager.state().generation);
+  assert.equal(manager.state().selectedScopeId, null);
+
+  // When it opens its chat's scope carrying that old frame, then the scope opens.
+  await manager.openScope({ directory: '/repo', sessionId: 'ses_two' }, manager.state().generation, { viewer: 'v1', frameSeq: shown.sequence });
+  assert.notEqual(manager.state().selectedScopeId, null);
 });

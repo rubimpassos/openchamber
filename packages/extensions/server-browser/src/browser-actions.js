@@ -1,6 +1,6 @@
 import { buildClickScript, buildSnapshotScript, buildTypeScript } from './page-scripts.js';
 import { buildInspectScript, buildScrollScript } from './page-scripts-more.js';
-import { viewportSummary } from './viewports.js';
+import { cssScreenshotParams, viewportSummary } from './viewports.js';
 
 const OPEN_SETTLE_MS = 30_000;
 
@@ -146,7 +146,7 @@ export const createBrowserActions = (runtime) => async (action, parameters, sign
   }
   if (action === 'browser.capture') {
     await withAbort(signal, page.cdp.sendSession(page.sessionId, 'Page.enable'));
-    const capture = await withAbort(signal, page.cdp.sendSession(page.sessionId, 'Page.captureScreenshot', { format: 'png' }));
+    const capture = await withAbort(signal, page.cdp.sendSession(page.sessionId, 'Page.captureScreenshot', cssScreenshotParams(runtime.viewport)));
     const metrics = await withAbort(signal, page.cdp.sendSession(page.sessionId, 'Page.getLayoutMetrics'));
     const info = await readPageInfo(page, signal);
     const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport;

@@ -1418,7 +1418,7 @@ export const ContextPanel: React.FC = () => {
             )}
             aria-hidden={activeTab?.id !== tab.id || undefined}
           >
-            <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
+            <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} active={activeTab?.id === tab.id} />
           </div>
         ))}
         {diffTabs.map((tab) => (

@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import { BrowserEngineSelect } from './BrowserEngineSelect';
 import { BrowserProfilesSection } from './BrowserProfilesSection';
 import { BrowserChromeStatusSection } from './BrowserChromeStatusSection';
+import { BrowserNetworkSection } from './BrowserNetworkSection';
 
 export const BrowserPage: React.FC = () => {
   const { t } = useI18n();
@@ -23,6 +24,7 @@ export const BrowserPage: React.FC = () => {
         </div>
       </SettingsSection>
 
+      <BrowserNetworkSection />
       <BrowserProfilesSection />
       <BrowserChromeStatusSection />
     </SettingsPageLayout>

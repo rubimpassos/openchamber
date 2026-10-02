@@ -1,4 +1,5 @@
 import { SURFACE_FRAME_MAX_BYTES, SURFACE_TEXT_MAX } from '@openchamber/sdk';
+import { deviceScale } from './viewports.js';
 
 const BUTTON_NAMES = ['left', 'middle', 'right'];
 const KEY_CODES = Object.freeze({
@@ -121,6 +122,8 @@ export const createSurface = (runtime) => {
   // Bumps whenever the runtime's active tab changes.
   let target = 0;
   let swallowEscapeUp = false;
+  // The viewport the running screencast was sized for.
+  let streamedFor = null;
 
   const finishWaiter = (waiter, value) => {
     if (!waiters.delete(waiter)) return;
@@ -171,10 +174,19 @@ export const createSurface = (runtime) => {
         });
       });
       try {
+        // Frames sized for the viewer's density: Chrome renders at the top
+        // scale and shrinks each frame to this box before encoding it.
+        const viewport = runtime.viewport;
+        const scale = viewport ? deviceScale(viewport, viewport.scale) : 1;
+        streamedFor = viewport ? `${viewport.width}x${viewport.height}@${scale}` : null;
         await current.cdp.sendSession(current.sessionId, 'Page.startScreencast', {
           format: 'jpeg',
-          quality: 72,
+          quality: 85,
           everyNthFrame: 1,
+          ...(viewport ? {
+            maxWidth: Math.round(viewport.width * scale),
+            maxHeight: Math.round(viewport.height * scale),
+          } : {}),
         });
       } catch (error) {
         detach();
@@ -255,8 +267,20 @@ export const createSurface = (runtime) => {
       if (runtime.controller !== controller) void runtime.contextMenu.close();
       runtime.controller = controller;
     },
-    resize({ width, height }) {
-      return runtime.setPanelSize({ width, height });
+    async resize(size) {
+      const shown = await runtime.setPanelSize(size);
+      this.refreshStream();
+      return shown;
+    },
+    // The viewport or density changed: restart the screencast at the new
+    // frame size. A long-poll waiting on the old stream gets the next frame.
+    refreshStream() {
+      const viewport = runtime.viewport;
+      if (!page || !viewport) return;
+      const wanted = `${viewport.width}x${viewport.height}@${deviceScale(viewport, viewport.scale)}`;
+      if (wanted === streamedFor) return;
+      detach();
+      void start().catch(() => {});
     },
     async clipboard() {
       const current = await start();

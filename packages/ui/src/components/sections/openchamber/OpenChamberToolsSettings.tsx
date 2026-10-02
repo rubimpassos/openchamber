@@ -3,10 +3,8 @@ import * as React from 'react';
 import {
   SettingsSection,
   SettingsCheckboxRow,
-  SettingsFieldRow,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { BrowserEngineSelect } from '@/components/sections/browser/BrowserEngineSelect';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -89,14 +87,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           ariaLabel={t('settings.openchamber.tools.field.agentWebToolAria')}
           info={t('settings.openchamber.tools.field.agentWebToolInfo')}
         />
-
-        <SettingsFieldRow
-          settingsItem="sessions.browser-provider"
-          label={t('settings.openchamber.tools.browserProvider.label')}
-          info={t('settings.openchamber.tools.browserProvider.info')}
-        >
-          <BrowserEngineSelect disabled={!agentWebToolEnabled} />
-        </SettingsFieldRow>
 
         <SettingsCheckboxRow
           settingsItem="sessions.agent-notify-tool"

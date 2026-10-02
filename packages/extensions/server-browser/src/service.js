@@ -245,7 +245,7 @@ const handleInspector = async (runtime, operation, request, url) => {
   return runtime.inspectorRequest(captureId, entryId, body.includeBody);
 };
 
-export const createService = ({ runtime, token, port = 0, chromeStatus = null, profileSites = null }) => {
+export const createService = ({ runtime, token, port = 0, chromeStatus = null, profileSites = null, networkPolicy = null }) => {
   if (!runtime?.perform || !runtime?.close) throw new Error('createService requires a browser runtime');
   if (typeof token !== 'string' || token.length === 0) throw new Error('createService requires a bearer token');
   if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('Service port must be from 0 to 65535');
@@ -490,6 +490,22 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
     if (request.method === 'GET' && url.pathname === '/chrome') {
       if (!chromeStatus) return text(response, 404, 'Not found\n');
       return json(response, 200, chromeStatus());
+    }
+
+    // Whether pages may open localhost and private addresses (Settings → Browser).
+    if (networkPolicy && url.pathname === '/network') {
+      if (request.method === 'GET') return json(response, 200, { ok: true, ...networkPolicy.state() });
+      if (request.method !== 'POST') return text(response, 405, 'Method not allowed\n');
+      const body = await readObjectBody(request);
+      const value = body?.allowPrivateNetwork;
+      if (value !== null && typeof value !== 'boolean') {
+        return text(response, 400, 'allowPrivateNetwork must be true, false, or null\n');
+      }
+      try {
+        return json(response, 200, { ok: true, ...networkPolicy.set(value) });
+      } catch (error) {
+        return json(response, 500, { ok: false, error: errorMessage(error) });
+      }
     }
 
     if (profileSites && url.pathname === '/profiles/sites') {

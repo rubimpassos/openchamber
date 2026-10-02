@@ -271,3 +271,28 @@ test('points a blocked loopback address at development-server discovery', async 
     assert.match(body, expected);
   }
 });
+test('opens private and loopback addresses when private networks are allowed, but never the always-denied ones', async () => {
+  const lookup = async (hostname) => (hostname === 'lan.test'
+    ? [{ address: '192.168.1.20', family: 4 }]
+    : [{ address: '169.254.169.254', family: 4 }]);
+  let allowed = true;
+  const policy = { lookup, allowPrivateNetwork: () => allowed };
+  assert.equal((await classifyProxyTarget('http://lan.test:3100/', policy)).allowed, true);
+  assert.equal((await classifyProxyTarget('http://meta.test/', policy)).allowed, false);
+
+  // Read on every request: turning it off takes effect at once.
+  allowed = false;
+  assert.equal((await classifyProxyTarget('http://lan.test:3100/', policy)).allowed, false);
+});
+
+test('sends localhost to the loopback family that is listening when private networks are allowed', async () => {
+  const server = http.createServer((request, response) => response.end('ok'));
+  const port = await listen(server);
+  try {
+    const decision = await classifyProxyTarget(`http://localhost:${port}/`, { allowPrivateNetwork: true });
+    assert.equal(decision.allowed, true);
+    assert.equal(decision.address, '127.0.0.1');
+  } finally {
+    server.close();
+  }
+});
