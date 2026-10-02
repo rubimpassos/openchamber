@@ -37,6 +37,15 @@ describe("projectSession", () => {
     expect("agent" in session).toBe(false)
   })
 
+  test("an oh-my-openagent child takes its parent from metadata.omoParentID", () => {
+    const child = projectSession({ ...sessionInfo, metadata: { omoParentID: "ses_parent" } })
+    expect(child.parentID).toBe("ses_parent")
+    const native = projectSession({ ...sessionInfo, parentID: "ses_native", metadata: { omoParentID: "ses_other" } })
+    expect(native.parentID).toBe("ses_native")
+    const bogus = projectSession({ ...sessionInfo, metadata: { omoParentID: 42 } })
+    expect("parentID" in bogus).toBe(false)
+  })
+
   test("an untitled session gets an empty title rather than undefined", () => {
     const session = projectSession({ ...sessionInfo, title: undefined })
     expect(session.title).toBe("")

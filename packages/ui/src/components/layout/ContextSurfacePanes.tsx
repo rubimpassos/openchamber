@@ -3,6 +3,8 @@ import React from 'react';
 import { TerminalView } from '@/components/views/TerminalView';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { BrowserPane } from '@/components/browser/BrowserPane';
+import { ServerBrowserView } from '@/components/browser/ServerBrowserView';
+import { BUILTIN_BROWSER_PROVIDER } from '@/lib/guests/browser-providers';
 import { ChatView } from '@/components/views/ChatView';
 import { Icon } from '@/components/icon/Icon';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -448,6 +450,8 @@ export const ContextSurfacePanes: React.FC = () => {
     });
   }, [diffActiveTab, directoryKey, openContextPanelTab]);
 
+  const browserProvider = useUIStore((state) => state.browserProvider);
+  const serverBrowserGuest = browserProvider && browserProvider !== BUILTIN_BROWSER_PROVIDER ? browserProvider : null;
   const visibleBrowserTabId = browserZone.isOpen && browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
   React.useEffect(() => {
     if (visibleBrowserTabId) wakeBrowserTab(visibleBrowserTabId);
@@ -564,7 +568,22 @@ export const ContextSurfacePanes: React.FC = () => {
           </section>
         </ZonePane>
       ) : null}
-      {loadedBrowserTabs.map((tab) => {
+      {serverBrowserGuest ? (
+        // One live view for every Browser tab: switching tabs points it at
+        // another Chrome tab instead of reconnecting the picture.
+        <ZonePane
+          zone={browserZone.zone}
+          isOpen={browserZone.isOpen}
+          directoryKey={directoryKey}
+          className={cn('absolute inset-0', browserZone.activeTab?.mode !== 'browser' && 'hidden')}
+        >
+          <ServerBrowserView
+            guestId={serverBrowserGuest}
+            directory={directoryKey}
+            tabID={browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null}
+          />
+        </ZonePane>
+      ) : loadedBrowserTabs.map((tab) => {
         const shown = tab.directory === directoryKey && browserZone.activeTab?.id === tab.id;
         return (
           <ZonePane

@@ -1,0 +1,35 @@
+{
+  "name": "@openchamber/builtin-server-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Built-in Chrome browser provider and shared surface for OpenChamber, running on the OpenChamber server.",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "openchamber-builtin-server-browser",
+        "name": "Server Browser",
+        "icon": "computer"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "provides": [
+          "browser"
+        ],
+        "surface": true,
+        "permissions": {
+          "exec": [
+            "chromium",
+            "google-chrome",
+            "lsof",
+            "ps",
+            "ldd"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -17,6 +17,11 @@ const providerGuest = (overrides = {}) => ({
   ...overrides,
 });
 
+const surfaceProviderGuest = (overrides = {}) => providerGuest({
+  service: { entry: 'service/main.js', runtime: 'host', provides: ['browser'], surface: true },
+  ...overrides,
+});
+
 const createRouter = ({
   settings = { browserProvider: 'server-chrome' },
   guest = providerGuest(),
@@ -24,12 +29,14 @@ const createRouter = ({
   userControls = false,
   readSettingsError = null,
   findGuestError = null,
+  notifyBrowserHelp,
 } = {}) => {
   const brokerCalls = [];
   const proxied = [];
   const persisted = [];
   const resets = [];
   const agentActivity = [];
+  const helpNotifications = [];
   let current = { ...settings };
   const router = createBrowserControlRouter({
     surfaceControl: {
@@ -62,8 +69,11 @@ const createRouter = ({
       if (serviceAnswer instanceof Error) throw serviceAnswer;
       return serviceAnswer;
     },
+    notifyBrowserHelp: notifyBrowserHelp ?? (async (event) => {
+      helpNotifications.push(event);
+    }),
   });
-  return { router, brokerCalls, proxied, persisted, resets, agentActivity };
+  return { router, brokerCalls, proxied, persisted, resets, agentActivity, helpNotifications };
 };
 
 describe('isBrowserProviderGuest', () => {
@@ -77,12 +87,23 @@ describe('isBrowserProviderGuest', () => {
 });
 
 describe('browser control router', () => {
-  test('sends the action to the in-app broker when no provider is selected', async () => {
-    const { router, brokerCalls, proxied } = createRouter({ settings: {} });
+  test('an unset setting resolves to the built-in Server Browser extension, not the in-app broker', async () => {
+    const builtinGuest = providerGuest({ id: 'openchamber-builtin-server-browser', name: 'Server Browser' });
+    const { router, brokerCalls, proxied } = createRouter({ settings: {}, guest: builtinGuest });
+    const result = await router.request('browser.snapshot', {}, { timeoutMs: 20_000 });
+    expect(result).toEqual({ url: 'http://localhost:3000/', title: 'App' });
+    expect(brokerCalls).toHaveLength(0);
+    expect(proxied).toHaveLength(1);
+    expect(proxied[0].guestId).toBe('openchamber-builtin-server-browser');
+  });
+
+  test('an unset setting with no built-in guest registered runs in-app, the same as an unusable selection', async () => {
+    const { router, brokerCalls, proxied, resets } = createRouter({ settings: {}, guest: providerGuest({ id: 'something-else' }) });
     const result = await router.request('browser.snapshot', {}, { timeoutMs: 20_000 });
     expect(result).toEqual({ from: 'broker' });
     expect(brokerCalls).toHaveLength(1);
     expect(proxied).toHaveLength(0);
+    expect(resets).toEqual([{ guestId: 'openchamber-builtin-server-browser', guestName: 'openchamber-builtin-server-browser' }]);
   });
 
   test('"builtin" is the in-app broker as well', async () => {
@@ -237,6 +258,93 @@ describe('browser control router', () => {
     }
   });
 
+  test('browser.requestHelp refuses with a clear 400 when the in-app browser would answer', async () => {
+    const { router, brokerCalls, proxied } = createRouter({ settings: {} });
+    await expect(router.request('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 300 }))
+      .rejects.toMatchObject({
+        status: 400,
+        message: 'Asking for help needs a browser provider extension with a shared surface (Settings → OpenChamber Tools → Browser provider).',
+      });
+    expect(brokerCalls).toHaveLength(0);
+    expect(proxied).toHaveLength(0);
+  });
+
+  test('browser.requestHelp refuses with the same 400 when a selected extension cannot serve', async () => {
+    const { router, brokerCalls, resets } = createRouter({ guest: providerGuest({ enabled: false }) });
+    await expect(router.request('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 300 }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(brokerCalls).toHaveLength(0);
+    expect(resets).toEqual([{ guestId: 'server-chrome', guestName: 'Server Chrome' }]);
+  });
+
+  test('browser.requestHelp refuses when the selected provider has no shared surface', async () => {
+    const { router, proxied } = createRouter({ guest: providerGuest() });
+    await expect(router.request('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 300 }))
+      .rejects.toMatchObject({
+        status: 400,
+        message: 'Asking for help needs a browser provider extension with a shared surface (Settings → OpenChamber Tools → Browser provider).',
+      });
+    expect(proxied).toHaveLength(0);
+  });
+
+  test('browser.requestHelp notifies the user before proxying, after the surface 409 check', async () => {
+    const { router, proxied, helpNotifications } = createRouter({
+      guest: surfaceProviderGuest(),
+      serviceAnswer: { status: 200, body: JSON.stringify({ ok: true, data: { outcome: 'timeout', url: 'http://a/', title: 'A', waitedSeconds: 300 } }) },
+    });
+    const result = await router.request(
+      'browser.requestHelp',
+      { reason: 'Sign in with Google', timeoutSeconds: 300 },
+      { context: { directory: '/repo', sessionId: 'ses_1' }, timeoutMs: 315_000 },
+    );
+    expect(result).toEqual({ outcome: 'timeout', url: 'http://a/', title: 'A', waitedSeconds: 300 });
+    expect(helpNotifications).toEqual([{
+      guestId: 'server-chrome',
+      guestName: 'Server Chrome',
+      reason: 'Sign in with Google',
+      kind: undefined,
+      context: { directory: '/repo', sessionId: 'ses_1' },
+    }]);
+    expect(proxied).toHaveLength(1);
+  });
+
+  test('browser.requestHelp passes kind through to notifyBrowserHelp', async () => {
+    const { router, helpNotifications } = createRouter({
+      guest: surfaceProviderGuest(),
+      serviceAnswer: { status: 200, body: JSON.stringify({ ok: true, data: { outcome: 'signed-in', url: 'http://a/', title: 'A', waitedSeconds: 10 } }) },
+    });
+    await router.request('browser.requestHelp', { reason: 'Sign in to your account', timeoutSeconds: 300, kind: 'login' });
+    expect(helpNotifications[0]).toMatchObject({ kind: 'login' });
+  });
+
+  test('browser.requestHelp is refused with 409 while the user drives the surface, and nobody is notified', async () => {
+    const { router, proxied, helpNotifications } = createRouter({ guest: surfaceProviderGuest(), userControls: true });
+    await expect(router.request('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 300 }))
+      .rejects.toMatchObject({ status: 409 });
+    expect(proxied).toHaveLength(0);
+    expect(helpNotifications).toHaveLength(0);
+  });
+
+  test('a notifyBrowserHelp failure is logged, and the action still runs', async () => {
+    const warn = console.warn;
+    const warnings = [];
+    console.warn = (...args) => warnings.push(args.join(' '));
+    try {
+      const { router, proxied } = createRouter({
+        guest: surfaceProviderGuest(),
+        notifyBrowserHelp: async () => {
+          throw new Error('push service unavailable');
+        },
+      });
+      const result = await router.request('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 300 });
+      expect(result).toEqual({ url: 'http://localhost:3000/', title: 'App' });
+      expect(proxied).toHaveLength(1);
+    } finally {
+      console.warn = warn;
+    }
+    expect(warnings.some((line) => line.includes('push service unavailable'))).toBe(true);
+  });
+
   test('a settings read that fails during deactivation is logged, not raised', async () => {
     const { router, persisted } = createRouter({ readSettingsError: new Error('disk') });
     const warn = console.warn;
@@ -247,5 +355,43 @@ describe('browser control router', () => {
       console.warn = warn;
     }
     expect(persisted).toHaveLength(0);
+  });
+
+  test('browser.saveProfile refuses with a clear 400 when the in-app browser would answer', async () => {
+    const { router, brokerCalls, proxied } = createRouter({ settings: {} });
+    await expect(router.request('browser.saveProfile', {}))
+      .rejects.toMatchObject({
+        status: 400,
+        message: 'Saving a browser profile needs the Server Browser extension (Settings → OpenChamber Tools → Browser provider).',
+      });
+    expect(brokerCalls).toHaveLength(0);
+    expect(proxied).toHaveLength(0);
+  });
+
+  test('browser.saveProfile refuses with the same 400 when a selected extension cannot serve', async () => {
+    const { router, brokerCalls, resets } = createRouter({ guest: providerGuest({ enabled: false }) });
+    await expect(router.request('browser.saveProfile', {}))
+      .rejects.toMatchObject({ status: 400 });
+    expect(brokerCalls).toHaveLength(0);
+    expect(resets).toEqual([{ guestId: 'server-chrome', guestName: 'Server Chrome' }]);
+  });
+
+  test('browser.saveProfile needs no shared surface, unlike requestHelp', async () => {
+    const { router, proxied } = createRouter({
+      guest: providerGuest(),
+      serviceAnswer: { status: 200, body: JSON.stringify({ ok: true, data: { saved: true, profile: 'default', version: 2, reopenedTabs: 1 } }) },
+    });
+    const result = await router.request('browser.saveProfile', {});
+    expect(result).toEqual({ saved: true, profile: 'default', version: 2, reopenedTabs: 1 });
+    expect(proxied).toHaveLength(1);
+  });
+
+  test('browser.saveProfile does not notify the user', async () => {
+    const { router, helpNotifications } = createRouter({
+      guest: providerGuest(),
+      serviceAnswer: { status: 200, body: JSON.stringify({ ok: true, data: { saved: true, profile: 'default', version: 2, reopenedTabs: 0 } }) },
+    });
+    await router.request('browser.saveProfile', {});
+    expect(helpNotifications).toHaveLength(0);
   });
 });

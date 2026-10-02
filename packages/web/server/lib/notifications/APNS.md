@@ -13,18 +13,21 @@ registered them — so a leaked device token alone can't be used to push.
    `POST /v1/push/register-token`, signed with its auto-generated ECDSA P-256 key
    (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
    `token → serverId` where `serverId = SHA-256(publicKey)`.
-3. On a trigger (ready/error/question/permission), the server composes **generic, content-free**
+3. On a trigger (ready/error/question/permission/browser-help), the server composes **generic, content-free**
    clear text (a phone with a push key also gets the real text sealed, see *Data confidentiality*) — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
-   needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
+   needs permission" / "Agent hit an error" / "Agent needs you in the browser") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
-   badge, env, data:{sessionId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
-   (`apns-runtime.js` → `sendViaRelay`). It does **not** gate on UI visibility (see below).
+   badge, env, data:{sessionId, url?}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
+   (`apns-runtime.js` → `sendViaRelay`). `url` is
+   the same-shape deep link the web push `data.url` carries (`/?session=…`, `&panel=…` for
+   browser-help); it is forwarded whenever the trigger payload has one, generic path shape only,
+   still no message/project content. It does **not** gate on UI visibility (see below).
 4. The **relay** (`openchamber-website/apps/api`, Cloudflare Worker) verifies the signature +
    `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
    the single project APNs `.p8` key, signs an ES256 JWT with `crypto.subtle`, and sends each
    token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
    (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
-5. Tapping a push deep-links to its session via the forwarded `sessionId`.
+5. Tapping a push deep-links to its session via the forwarded `url` (preferred) or `sessionId`.
 
 ## Foreground suppression
 
@@ -121,7 +124,7 @@ Notification Service Extension and Android's `SealedPushMessagingService` open i
 Who can read what:
 
 - **Network hops:** nothing (TLS).
-- **The relay (Cloudflare):** the generic title, the device token, `sessionId` and the sealed
+- **The relay (Cloudflare):** the generic title, the device token, `sessionId`, `url` when the trigger has one and the sealed
   blob. It stores only `token → serverId` hashes (no text, no payload).
 - **Apple APNs / Google FCM:** the same as the relay.
 - **The device:** opens the blob and shows the real text.

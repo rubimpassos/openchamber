@@ -1,5 +1,5 @@
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
-import { useSessionTurnActivity } from '@/sync/global-session-status';
+import { useActiveSubagentCount, useSessionTurnActivity } from '@/sync/global-session-status';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
@@ -49,6 +49,7 @@ import { hasTreeSlotContext, isTwoLineTimelineContext, type SessionSidebarRender
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
+import { sessionAgentLabel } from '@/lib/opencode/subagentTitle';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
@@ -620,6 +621,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   );
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
+  // Subagents and background tasks still running under this session.
+  const activeSubagentCount = useActiveSubagentCount(session.id);
   // Read as a boolean, not as the value: the row must not re-render on every
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
@@ -652,6 +655,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </RowMarkTooltip>
   ) : null;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
+  // A subagent row shows its description; the agent becomes a label beside it.
+  const agentLabel = sessionAgentLabel(resolvedSession);
+  const sessionDisplayTitle = agentLabel.agent ? agentLabel.title : sessionTitle;
+  const agentChip = (className?: string) => (agentLabel.agent ? (
+    <span
+      className={cn('inline-flex max-w-[45%] flex-shrink-0 items-center truncate rounded bg-primary/10 px-1 py-0.5 text-[0.7rem] leading-none text-primary', className)}
+      title={agentLabel.agent}
+      data-session-agent={agentLabel.agent}
+    >
+      {agentLabel.agent}
+    </span>
+  ) : null);
   // Timeline is a flat list: a node that still carries children renders as a
   // leaf, without a chevron and without an expansion state.
   const hasChildren = !isTimelineRow && node.children.length > 0;
@@ -1597,8 +1612,17 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </RowMarkTooltip>
   ) : null);
   const permissionLabel = t('sessions.sidebar.session.status.permissionRequired');
-  const rowBadges = (hasPendingPermission || hasPendingForm) ? (
+  const subagentsLabel = t('sessions.sidebar.session.status.subagentsRunning', { count: activeSubagentCount });
+  const rowBadges = (activeSubagentCount > 0 || hasPendingPermission || hasPendingForm) ? (
     <>
+      {activeSubagentCount > 0 ? (
+        <RowMarkTooltip label={subagentsLabel}>
+          <span className="inline-flex flex-shrink-0 items-center gap-0.5 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info" aria-label={subagentsLabel} data-active-subagents={activeSubagentCount}>
+            <Icon name="robot-2" className="h-3 w-3" />
+            <span className="leading-none tabular-nums">{activeSubagentCount}</span>
+          </span>
+        </RowMarkTooltip>
+      ) : null}
       {hasPendingPermission ? (
         <RowMarkTooltip label={permissionLabel}>
           <span className="inline-flex flex-shrink-0 items-center rounded bg-destructive/10 px-1 py-0.5 text-destructive" aria-label={permissionLabel}>
@@ -1662,7 +1686,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       compact={!isTwoLineTimelineContext(renderContext)}
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
-      title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
+      title={agentLabel.agent ? <>{renderHighlightedText(sessionDisplayTitle, normalizedSessionSearchQuery)} {agentChip('ms-1 align-middle')}</> : renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
       // recede.
@@ -1850,7 +1874,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 <TooltipContent side="right" sideOffset={8} className="max-w-xs text-start">
                   <div className="flex min-w-44 flex-col gap-1.5 text-start text-xs">
                     <div className="flex items-center justify-between gap-3">
-                      <span dir="auto" className="oc-ui-start-align min-w-0 truncate font-medium text-foreground">{sessionTitle}</span>
+                      <span dir="auto" className="oc-ui-start-align min-w-0 truncate font-medium text-foreground">{sessionDisplayTitle}</span>
+                      {agentChip()}
                       <span className="flex-shrink-0 text-muted-foreground" title={sessionUpdatedLabel}>{sessionCompactUpdatedLabel}</span>
                     </div>
                     {tooltipProjectLabel ? (

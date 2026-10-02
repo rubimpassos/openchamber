@@ -83,7 +83,7 @@ import {
   selectQuakeToggleAction,
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
-import { resolveUpdaterFeed } from './updater-feed.mjs';
+import { PRODUCTION_UPDATER_FEED, resolveUpdaterFeed } from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
@@ -1441,6 +1441,11 @@ const maybeShowNativeNotification = (rawInput) => {
     ? payload.directory.trim()
     : null;
   const runtimeKey = readTrimmedString(payload.runtimeKey) || null;
+  // Set only for a browser.requestHelp notification; the renderer opens this
+  // guest's panel alongside the session (openGuestPanelFromRoute) on click.
+  const guestId = String(payload.guestId) === payload.guestId && payload.guestId.trim()
+    ? payload.guestId.trim()
+    : null;
 
   const notification = new Notification({
     title,
@@ -1458,7 +1463,7 @@ const maybeShowNativeNotification = (rawInput) => {
       // Name the runtime that owns the session so the receiving window can
       // tell a session of its own instance from one of another, and route
       // cross-instance clicks to the owning instance's window.
-      const openSessionPayload = { sessionId, directory };
+      const openSessionPayload = { sessionId, directory, guestId };
       if (runtimeKey) openSessionPayload.runtimeKey = runtimeKey;
       emitToPrimaryWindow('openchamber:open-session', openSessionPayload);
     }
@@ -3682,6 +3687,22 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
 
 const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareSemver);
 
+// Fork releases can carry generated Markdown notes without a changelog file.
+const fetchReleaseNotesFromFeed = async (version) => {
+  if (!version) return null;
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${PRODUCTION_UPDATER_FEED.owner}/${PRODUCTION_UPDATER_FEED.repo}/releases/tags/v${encodeURIComponent(version)}`,
+      { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'openchamber-update-check' }, signal: AbortSignal.timeout(10000) },
+    );
+    if (!response.ok) return null;
+    const release = await response.json();
+    return typeof release?.body === 'string' && release.body.trim() ? release.body : null;
+  } catch {
+    return null;
+  }
+};
+
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
 
 // Async variants. sips + mdfind via spawnSync blocked the Electron main event
@@ -5203,7 +5224,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
-        await parseRelevantChangelogNotes(currentVersion, nextVersion);
+        await parseRelevantChangelogNotes(currentVersion, nextVersion) ||
+        await fetchReleaseNotesFromFeed(nextVersion);
       state.pendingUpdate = pendingUpdate;
       return {
         available,

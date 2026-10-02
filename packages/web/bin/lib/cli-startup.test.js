@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildSystemdUserService, enableStartupService, stablePnpmEntrypoint } from './cli-startup.js';
+import { buildSystemdUserService, collectStartupEnv, enableStartupService, stablePnpmEntrypoint } from './cli-startup.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../../server/lib/injected-env.js';
+import { hashUiPassword } from '../../server/lib/ui-auth/ui-password-hash.js';
 
 const join = (...parts) => path.join(...parts);
 
@@ -119,5 +120,38 @@ describe('macOS startup service', () => {
       }
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+const PLAINTEXT_KEY = 'OPENCHAMBER_UI_PASSWORD';
+const HASH_KEY = 'OPENCHAMBER_UI_PASSWORD_HASH';
+const saved = { [PLAINTEXT_KEY]: process.env[PLAINTEXT_KEY], [HASH_KEY]: process.env[HASH_KEY] };
+
+afterEach(() => {
+  for (const [key, value] of Object.entries(saved)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
+describe('startup env persistence of the UI password', () => {
+  it('persists a hash of a plaintext password and never the plaintext', () => {
+    process.env[PLAINTEXT_KEY] = 'plain-startup-pass';
+    delete process.env[HASH_KEY];
+
+    const env = collectStartupEnv({ uiPassword: 'plain-startup-pass' });
+
+    expect(env).not.toHaveProperty(PLAINTEXT_KEY);
+    expect(JSON.stringify(env)).not.toContain('plain-startup-pass');
+    expect(env[HASH_KEY]).toMatch(/^scrypt\$/);
+  });
+
+  it('persists an inherited hash unchanged', () => {
+    const hash = hashUiPassword('inherited');
+    process.env[HASH_KEY] = hash;
+
+    const env = collectStartupEnv({ uiPasswordHash: hash });
+
+    expect(env[HASH_KEY]).toBe(hash);
   });
 });

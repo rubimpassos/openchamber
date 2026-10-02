@@ -249,7 +249,13 @@ describe('managed agent tool runtime', () => {
     expect(tools.openchamber.input.properties.action.oneOf.map((entry) => entry.const)).not.toContain('knowledge.list');
     for (const tool of ['openchamber', 'openchamber_web', 'openchamber_memory']) {
       for (const field of ['kind', 'expected', 'completed']) {
-        expect(tools[tool].input.properties.parameters.properties).not.toHaveProperty(field);
+        const toolParameters = tools[tool].input.properties.parameters.properties;
+        // This fork's browser.requestHelp takes its own `kind`: login or page.
+        if (tool === 'openchamber_web' && field === 'kind') {
+          expect(toolParameters.kind.enum).toEqual(['login', 'page']);
+          continue;
+        }
+        expect(toolParameters).not.toHaveProperty(field);
       }
     }
     await runtime.materializePlugin({ includeKnowledge: false });

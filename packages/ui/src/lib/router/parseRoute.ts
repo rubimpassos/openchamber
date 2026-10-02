@@ -20,6 +20,7 @@ export function parseRoute(searchParams?: URLSearchParams): RouteState {
     tab: parseTab(params),
     settingsPath: parseSettingsPath(params),
     diffFile: parseDiffFile(params),
+    guestPanelId: parseGuestPanelId(params),
   };
 }
 
@@ -129,6 +130,18 @@ function parseDiffFile(params: URLSearchParams): string | null {
 }
 
 /**
+ * Parse the guest id whose panel to reveal from URL parameters.
+ * Returns null if missing or empty.
+ */
+function parseGuestPanelId(params: URLSearchParams): string | null {
+  const value = params.get(ROUTE_PARAMS.PANEL);
+  if (!value || value.trim().length === 0) {
+    return null;
+  }
+  return value.trim();
+}
+
+/**
  * Check if the current URL has any route parameters.
  */
 export function hasRouteParams(): boolean {
@@ -142,7 +155,8 @@ export function hasRouteParams(): boolean {
       params.has(ROUTE_PARAMS.SESSION) ||
       params.has(ROUTE_PARAMS.TAB) ||
       params.has(ROUTE_PARAMS.SETTINGS) ||
-      params.has(ROUTE_PARAMS.FILE)
+      params.has(ROUTE_PARAMS.FILE) ||
+      params.has(ROUTE_PARAMS.PANEL)
     );
   } catch {
     return false;
