@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { parseUiPasswordHash } from '../ui-auth/ui-password-hash.js';
 
 const stripIpv6Brackets = (value) => {
   if (typeof value !== 'string') return '';
@@ -34,7 +35,13 @@ export const isNetworkExposedBindHost = (host) => !isLoopbackBindHost(host);
 export const isUnsafeUnauthenticatedLanAllowed = (env = process.env) =>
   env?.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN === 'true';
 
+// UI auth counts as configured with either a non-blank plaintext password or a
+// well-formed OPENCHAMBER_UI_PASSWORD_HASH.
+export const isUiAuthConfigured = ({ password, passwordHash } = {}) =>
+  (typeof password === 'string' && password.trim().length > 0)
+  || parseUiPasswordHash(passwordHash) !== null;
+
 export const getUnauthenticatedLanErrorMessage = (host) =>
   `OpenChamber refuses to bind to ${host || 'a network-exposed host'} without UI authentication. `
-  + 'Set --ui-password or OPENCHAMBER_UI_PASSWORD before exposing it over LAN, '
+  + 'Set --ui-password, OPENCHAMBER_UI_PASSWORD or OPENCHAMBER_UI_PASSWORD_HASH before exposing it over LAN, '
   + 'or set OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true to accept the risk.';

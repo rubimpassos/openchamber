@@ -22,6 +22,9 @@ import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
 import { materializeSessionSnapshots } from "./materialization"
+import { buildOrphanedAnswerMessage } from "@/lib/questions/orphanedQuestions"
+import type { QuestionRequest } from "@/lib/opencode/model"
+import { projectQuestionForm } from "@/lib/opencode/projection"
 import { sessionEvents } from "@/lib/sessionEvents"
 import {
   getOriginalSessionID,
@@ -1855,8 +1858,10 @@ export async function optimisticSend(input: {
     }
   }
 
+  // Perf invariant: never await between here and `optimisticAdd` below, or the
+  // message stops appearing within one frame. The connection wait moved into
+  // the try block so a saturated server cannot delay or drop it.
   assertRuntimeUnchanged()
-  await waitForConnectionOrThrow()
   input.beforeOptimisticInsert?.()
   assertRuntimeUnchanged()
   input.appendSubmissions?.()
@@ -1970,6 +1975,8 @@ export async function optimisticSend(input: {
   })
 
   try {
+    assertRuntimeUnchanged()
+    await waitForConnectionOrThrow()
     assertRuntimeUnchanged()
     await input.send(messageID, context)
   } catch (error) {
@@ -2281,6 +2288,78 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     }
     throw error
   }
+}
+
+function findAssistantMessageInfo(sessionId: string, messageId: string | undefined): Message | null {
+  const stores = _childStores
+  if (!stores) return null
+
+  for (const [, store] of stores.children) {
+    const messages = store.getState().message[sessionId]
+    if (!messages?.length) continue
+    if (messageId) {
+      const exact = messages.find((message) => message.id === messageId && message.role === "assistant")
+      if (exact) return exact
+    }
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "assistant") return messages[index]
+    }
+  }
+
+  return null
+}
+
+/**
+ * Answer a question whose pending request was destroyed by an OpenCode server
+ * restart (see `@/lib/questions/orphanedQuestions`). The server is re-checked
+ * authoritatively first: if the question is actually still pending (the client
+ * merely lost it), it is answered through the normal `form.reply` path so
+ * the waiting tool call resumes. Otherwise the answers are delivered as a new
+ * user message using the model/agent of the assistant message that asked,
+ * re-entering the session loop.
+ *
+ * The pending re-check failing is a hard error (never assume "not pending"
+ * from a failed fetch — sending a duplicate message while the question is
+ * still live would be destructive).
+ */
+export async function answerOrphanedQuestion(
+  question: QuestionRequest,
+  answers: string[][],
+): Promise<void> {
+  const runtimeKey = getRuntimeKey()
+  await waitForConnectionOrThrow()
+  if (isStaleRuntime(runtimeKey)) throw new Error("runtime changed")
+  const sessionId = question.sessionID
+  const directory = getSessionDirectory(sessionId) || dir()
+
+  const forms = await opencodeClient.listPendingForms({ directories: [directory] })
+  if (isStaleRuntime(runtimeKey)) throw new Error("runtime changed")
+  const pending = forms.map(projectQuestionForm).filter((form) => form !== null)
+  const match = pending.find((candidate) =>
+    candidate.sessionID === sessionId
+    && Boolean(candidate.tool?.callID)
+    && candidate.tool?.callID === question.tool?.callID)
+  if (match) {
+    await replyToForm(sessionId, match.id, Object.fromEntries(answers.map((values, index) => [
+      `q${index}`, question.questions[index]?.multiple ? values : values[0] ?? "",
+    ])))
+    return
+  }
+
+  const askingMessage = findAssistantMessageInfo(sessionId, question.tool?.messageID)
+  if (!askingMessage || askingMessage.role !== "assistant") {
+    throw new Error("Cannot answer interrupted question: originating assistant message not found")
+  }
+
+  await opencodeClient.sendMessage({
+    runtimeKey,
+    id: sessionId,
+    providerID: askingMessage.providerID,
+    model: { id: askingMessage.modelID, providerID: askingMessage.providerID, variant: askingMessage.variant },
+    agent: askingMessage.agent || undefined,
+    text: buildOrphanedAnswerMessage(question, answers),
+    directory,
+  })
 }
 
 /**

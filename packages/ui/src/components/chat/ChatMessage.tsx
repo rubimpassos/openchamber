@@ -43,6 +43,8 @@ import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { focusChatInput } from './composer/editor/dom';
 import { isFileChangeTool, isShellTool } from '@/lib/opencode/tools';
+import { useGuestMessagePresentation, userMessageText } from '@/lib/guests/message-presentation';
+import { GuestMessageActivity } from './message/GuestMessageActivity';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -425,6 +427,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return { name, token: rawValue } satisfies AgentMentionInfo;
     }, [isUser, normalizedParts]);
 
+    // A notice or directive a plugin sent on the user's behalf, claimed by an
+    // extension's `contributes.messages`, renders as agent activity.
+    const userText = React.useMemo(() => (isUser ? userMessageText(message.parts) : null), [isUser, message.parts]);
+    const guestMessagePresentation = useGuestMessagePresentation(userText);
     const shouldHideUserMessage = isUser && displayParts.length === 0;
 
     const themeVariant = currentTheme?.metadata.variant;
@@ -741,6 +747,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }
 
     const allowAnimation = shouldAnimateMessage && !isAnimationSettled && !isStreamingPhase && !hasEverStreamedRef.current;
+
+    if (guestMessagePresentation) {
+        return <GuestMessageActivity messageId={message.info.id} presentation={guestMessagePresentation} />;
+    }
 
     if (shouldHideUserMessage) {
         return null;

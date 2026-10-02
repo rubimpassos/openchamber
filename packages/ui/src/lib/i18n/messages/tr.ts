@@ -6,6 +6,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -65,6 +66,7 @@ export const dict = {
   ...routingI18n.tr,
   ...pluginPanelI18n.tr,
   ...surfacePanelI18n.tr,
+  ...browserServerPanelI18n.tr,
   ...fileArtifactsI18n.tr,
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
@@ -600,6 +602,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Alt agent görevlerini dahil et',
   'sessions.sidebar.session.export.dialog.confirm': 'Dışa aktar',
   'sessions.sidebar.session.status.active': 'Session aktif',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} alt ajan çalışıyor',
   'sessions.sidebar.session.status.unread': 'Okunmamış güncellemeler',
   'sessions.sidebar.session.status.backgroundSubagent': 'Alt ajan arka planda çalışıyor',
   'sessions.sidebar.session.status.backgroundCommand': 'Komut arka planda çalışıyor',
@@ -812,6 +815,16 @@ export const dict = {
   'gitView.changes.unstageAllAria': 'Tüm değişiklikleri unstage et',
   'gitView.changes.unstageDirectoryAria': '{path} içindeki tüm değişiklikleri unstage et',
   'gitView.changes.unstageFileAria': '{path} öğesini unstage et',
+  'gitView.ciLoop.description': 'Her push sonrasında GitHub Actions süreçlerini izler ve sonuçları ajana bildirir.',
+  'gitView.ciLoop.phase.doneClean': 'CI başarılı',
+  'gitView.ciLoop.phase.doneFailed': 'CI başarısız',
+  'gitView.ciLoop.phase.error': 'CI izleme başarısız: {message}',
+  'gitView.ciLoop.phase.running': 'CI çalışıyor · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': 'CI beklenirken zaman aşımına uğradı',
+  'gitView.ciLoop.phase.waiting': 'CI başlangıcı bekleniyor…',
+  'gitView.ciLoop.title': 'CI İzleyici',
+  'gitView.ciLoop.toast.toggleFailed': 'CI izleme güncellenemedi',
+  'gitView.ciLoop.toggleLabel': 'Bu oturum için CI izle',
   'gitView.commit.addGitmoji': 'gitmoji ekle',
   'gitView.commit.aiHighlights.insertAria': 'Ekle  aria etiketi',
   'gitView.commit.aiHighlights.insertTooltip': 'Ekle  araç ipucu',
@@ -1843,6 +1856,7 @@ export const dict = {
   'chat.goal.dialog.evaluationModelLabel': 'Değerlendirme modeli',
   'chat.goal.status.active': 'Etkin',
   'chat.goal.status.evaluating': 'Değerlendiriliyor…',
+  'chat.goal.driver.title': '{name} tarafından yürütülüyor',
   'chat.goal.status.paused': 'Duraklatıldı',
   'chat.goal.status.blocked': 'Engellendi',
   'chat.goal.status.budgetLimited': 'Bütçeye ulaşıldı',
@@ -2248,6 +2262,8 @@ export const dict = {
   'chat.questionCard.submitFailed': 'Yanıt gönderilemedi',
   'chat.questionCard.dismissFailed': 'Soru yok sayılamadı',
   'chat.questionCard.noLongerPending': 'Bu soru artık yanıt beklemiyor.',
+  'chat.questionCard.orphanedBadge': 'Kesintiye uğradı',
+  'chat.questionCard.orphanedNotice': 'Bu soru yanıtlanmadan önce oturum yeniden başlatıldı. Yanıtınız ajana yeni bir mesaj olarak gönderilecek.',
   'chat.questionCard.tryAgain': 'Birazdan tekrar dene.',
   'chat.textSelection.toast.noProject': 'Bu session için proje bulunamadı',
   'chat.textSelection.toast.addToNotesFailed': 'Notlara eklenemedi',

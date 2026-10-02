@@ -150,6 +150,7 @@ function parseUpdateCheckResponse(data: {
   packageManager?: string;
   updateCommand?: string;
   installBlocked?: string;
+  error?: string;
 }): UpdateInfo {
   return {
     available: data.available ?? false,
@@ -164,6 +165,7 @@ function parseUpdateCheckResponse(data: {
         : undefined,
     packageManager: data.packageManager,
     updateCommand: data.updateCommand,
+    error: typeof data.error === 'string' && data.error.trim() ? data.error : undefined,
     installBlocked: data.installBlocked === 'service-manager' ? 'service-manager' : undefined,
   };
 }
@@ -268,13 +270,16 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           checkForWebUpdates('desktop', appVersion),
         ]);
         const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
-        suggestedSec = apiResult.status === 'fulfilled'
-          ? (apiResult.value?.nextSuggestedCheckInSec ?? null)
-          : null;
+        const apiInfo = apiResult.status === 'fulfilled' ? apiResult.value : null;
+        suggestedSec = apiInfo?.nextSuggestedCheckInSec ?? null;
+        // A desktop build without an electron-updater feed answers null, and the
+        // server check is then the only source that knows its releases.
+        const resolvedInfo = desktopInfo ?? apiInfo;
         set({
           checking: false,
-          available: desktopInfo?.available ?? false,
-          info: desktopInfo,
+          available: resolvedInfo?.available ?? false,
+          info: resolvedInfo,
+          error: resolvedInfo?.error ?? null,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
         });
@@ -296,6 +301,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
         checking: false,
         available: runtime === 'vscode' ? false : (info?.available ?? false),
         info: runtime === 'vscode' ? null : info,
+        error: runtime === 'vscode' ? null : (info?.error ?? null),
         lastChecked: Date.now(),
         nextCheckInSec: suggestedSec,
       });

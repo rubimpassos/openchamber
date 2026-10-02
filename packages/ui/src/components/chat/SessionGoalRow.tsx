@@ -8,6 +8,7 @@ import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useGoalDriverName } from '@/lib/guests/goal-driver';
 
 interface SessionGoalRowProps {
   sessionId: string | null;
@@ -25,6 +26,9 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
   const objectiveContent = useGoalObjectiveContent(sessionId ?? '', goal);
   const sessionStatus = useSessionStatus(sessionId ?? '', directory);
   const [busy, setBusy] = React.useState(false);
+  // An extension plugin running this goal (e.g. Oh-My-OpenAgent) continues it
+  // itself: there is no quiet-window audit to show, and the strip names it.
+  const driverName = useGoalDriverName(goal?.driver);
 
   const handleToggleStatus = React.useCallback(async (nextStatus: 'active' | 'paused') => {
     if (!sessionId || busy) return;
@@ -75,7 +79,15 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       <span className="min-w-0 flex-1 truncate typography-meta text-foreground">
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
-      {goal.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle') ? (
+      {driverName ? (
+        <span
+          className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[0.7rem] leading-none text-primary"
+          title={t('chat.goal.driver.title', { name: driverName })}
+        >
+          {driverName}
+        </span>
+      ) : null}
+      {goal.status === 'active' && !driverName && (!sessionStatus || sessionStatus.type === 'idle') ? (
         // The agent stopped but the goal is still active: the server is
         // sitting out the quiet window and running the audit — show that
         // instead of a static "Active" that looks stuck.

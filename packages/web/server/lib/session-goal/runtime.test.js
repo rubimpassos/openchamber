@@ -187,6 +187,30 @@ describe('session goal tick on v2 messages', () => {
     runtime.stop();
   });
 
+  it('leaves a goal to the extension that drives it, and takes over when that driver is gone', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({ messages: [assistantRecord()] });
+    const seam = wired({ openchamber: { goal: activeGoal({ driver: 'omo' }) } });
+    let driverActive = true;
+    const generate = vi.fn(async () => ({ text: JSON.stringify({ verdict: 'continue', note: 'more' }) }));
+    const { runtime } = makeRuntime({
+      ...seam,
+      isGoalDriverActive: async (driver) => driverActive && driver === 'omo',
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+    });
+
+    await runTick(runtime);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+
+    driverActive = false;
+    await runTick(runtime);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(calls.some((call) => call.method === 'POST')).toBe(true);
+    runtime.stop();
+  });
+
   it('treats a finished compaction as a summary turn: no audit, continuation sent', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const { calls } = v2OpenCode({

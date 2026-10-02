@@ -261,3 +261,4 @@ Why: only navigation tools use the compact static path; all other tools need obs
 - Reasoning/justification: `ReasoningPart.tsx`, `JustificationBlock.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`, `BusyDots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`
+- `todowrite` / `todoread` (OpenCode 1.x, or a plugin such as oh-my-openagent registering them on 2.x): with no extension `output` rule, a JSON result with `{ content, status }` items (the array or `{ todos: [] }`, parsed by `todoList.ts`) is drawn by `TodoListOutput` as the 1.x layout: a counts line, then In Progress / Pending / Completed / Cancelled groups with priority dots. Anything else falls through to the JSON views.

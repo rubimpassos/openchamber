@@ -38,6 +38,7 @@ import {
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
+import { watchGuestFiles } from '@/lib/guests/file-watch';
 import { guestGenerate } from '@/lib/guests/generate';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
@@ -282,6 +283,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onSessionStartedRef.current = onSessionStarted;
   const onResizeRef = React.useRef(onResize);
   onResizeRef.current = onResize;
+  // The app scales its interface by resizing the root rem (Settings → font
+  // size). A guest document has its own root, so zoom the frame by the same
+  // factor; the guest keeps laying out in its own CSS pixels.
+  const interfaceScale = useUIStore((state) => state.fontSize) / 100;
+  const frameZoom = Number.isFinite(interfaceScale) && interfaceScale > 0 ? interfaceScale : 1;
+  const frameZoomRef = React.useRef(frameZoom);
+  frameZoomRef.current = frameZoom;
   const fileChannel = fileEditor?.channel ?? null;
   const fileChannelRef = React.useRef(fileChannel);
   fileChannelRef.current = fileChannel;
@@ -445,6 +453,29 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           }));
         },
         workspaceUnsubscribe: (id) => { subscriptions.get(id)?.(); subscriptions.delete(id); },
+        filesWatch: async ({ subscriptionId, paths }) => {
+          if (!guestEnabledRef.current) throw new HostRequestError('DISABLED', 'This extension is disabled in Settings → Extensions.');
+          if (!guestMay(currentGuest(), 'files')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
+          const directory = directoryRef.current || null;
+          if (!directory) throw new HostRequestError('NO_DIRECTORY', 'No project is open.');
+          const key = `files:${subscriptionId}`;
+          subscriptions.get(key)?.();
+          subscriptions.delete(key);
+          if (subscriptions.size >= 32) throw new HostRequestError('HOST_REJECTED', 'At most 32 subscriptions per frame.');
+          const stop = await watchGuestFiles({
+            guestId: guestIdRef.current,
+            directory,
+            paths,
+            onChange: (changed) => {
+              if (!disposed && guestEnabledRef.current) postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
+                type: 'files-changed', payload: { subscriptionId, paths: changed } });
+            },
+          });
+          if (!stop) throw new HostRequestError('HOST_REJECTED', 'This server cannot watch files.');
+          if (disposed) { stop(); return; }
+          subscriptions.set(key, stop);
+        },
+        filesUnwatch: (id) => { subscriptions.get(`files:${id}`)?.(); subscriptions.delete(`files:${id}`); },
         storage: (request) => guestStorageOperation(guestIdRef.current, request),
         openSession: (id) => { requireSessions(); openGuestSession(id); },
         toast: (request) => {
@@ -631,7 +662,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           });
         },
         resize: (height) => {
-          onResizeRef.current?.(height);
+          // The guest measures in its own CSS pixels; the host sizes the zoomed frame.
+          onResizeRef.current?.(Math.ceil(height * frameZoomRef.current));
         },
         resolveResult: (id, payload: ResolveResultPayload) => {
           const waiter = resolveWaitersRef.current.get(id);
@@ -730,6 +762,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       src={src || undefined}
       srcDoc={srcDoc}
       sandbox="allow-scripts"
+      style={frameZoom === 1 ? undefined : { zoom: frameZoom }}
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
         // The attach window and the Work Status card draw their own chrome behind the page.

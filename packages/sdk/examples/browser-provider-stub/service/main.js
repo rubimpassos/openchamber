@@ -115,7 +115,9 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.forward",
   "browser.inspect",
   "browser.capture",
-  "browser.resize"
+  "browser.resize",
+  "browser.requestHelp",
+  "browser.saveProfile"
 ];
 var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
 var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
@@ -297,9 +299,16 @@ var navigate = (url) => {
   page.scrollY = 0;
 };
 var lastCaller = { directory: null, sessionId: null };
-var handle = (request) => {
+var PROFILE_NAME = "default";
+var profileVersion = 1;
+var copyTakenAtVersion = new Map;
+var callerKey = (context) => context.sessionId ?? "unscoped";
+var handle = async (request) => {
   markAgentActive();
   lastCaller = request.context;
+  const caller = callerKey(request.context);
+  if (!copyTakenAtVersion.has(caller))
+    copyTakenAtVersion.set(caller, profileVersion);
   if (request.parameters.tabId !== undefined) {
     return { ok: false, error: "This browser has a single page and no tabs; omit tabId." };
   }
@@ -380,6 +389,23 @@ Name: ${page.fields.get("#name") ?? ""}`,
     case "browser.resize":
       page.viewport = request.parameters.viewport;
       return { ok: true, data: { viewport: viewport() } };
+    case "browser.requestHelp": {
+      const { outcome, waitedSeconds } = await waitForHandBack(request.parameters.timeoutSeconds);
+      if (outcome === "handed-back" && request.parameters.kind === "login") {
+        profileVersion += 1;
+        copyTakenAtVersion.set(caller, profileVersion);
+        return { ok: true, data: { outcome: "signed-in", url: page.url, title: page.title, waitedSeconds } };
+      }
+      return { ok: true, data: { outcome, url: page.url, title: page.title, waitedSeconds } };
+    }
+    case "browser.saveProfile": {
+      if (copyTakenAtVersion.get(caller) !== profileVersion) {
+        return { ok: false, error: "Another chat saved this profile first; take a fresh copy and redo your change." };
+      }
+      profileVersion += 1;
+      copyTakenAtVersion.set(caller, profileVersion);
+      return { ok: true, data: { saved: true, profile: PROFILE_NAME, version: profileVersion, reopenedTabs: 0 } };
+    }
   }
 };
 var surface = {
@@ -404,6 +430,33 @@ var markAgentActive = () => {
   surface.agentActiveUntil = Date.now() + 3000;
   touch();
 };
+var heldByUser = false;
+var handBackWaiters = new Set;
+var noteControllerChanged = (controller) => {
+  if (controller === "user") {
+    heldByUser = true;
+    return;
+  }
+  if (!heldByUser)
+    return;
+  heldByUser = false;
+  for (const resolve of handBackWaiters)
+    resolve();
+  handBackWaiters.clear();
+};
+var waitForHandBack = (timeoutSeconds) => new Promise((resolve) => {
+  const startedAt = Date.now();
+  const onHandBack = () => {
+    clearTimeout(timer);
+    handBackWaiters.delete(onHandBack);
+    resolve({ outcome: "handed-back", waitedSeconds: Math.round((Date.now() - startedAt) / 1000) });
+  };
+  const timer = setTimeout(() => {
+    handBackWaiters.delete(onHandBack);
+    resolve({ outcome: "timeout", waitedSeconds: timeoutSeconds });
+  }, timeoutSeconds * 1000);
+  handBackWaiters.add(onHandBack);
+});
 var crc32Table = (() => {
   const table = new Uint32Array(256);
   for (let n = 0;n < 256; n += 1) {
@@ -560,6 +613,7 @@ var handleSurface = async (req, res, url) => {
       return true;
     }
     surface.controller = notice.controller;
+    noteControllerChanged(notice.controller);
     touch();
     res.writeHead(204);
     res.end();
@@ -640,7 +694,7 @@ http.createServer((req, res) => {
         json(res, 400, { ok: false, error: "Not a browser action" });
         return;
       }
-      json(res, 200, handle(request));
+      handle(request).then((result) => json(res, 200, result));
     });
     return;
   }

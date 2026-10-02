@@ -7,6 +7,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -66,6 +67,7 @@ export const dict: Record<I18nKey, string> = {
   ...routingI18n['zh-CN'],
   ...pluginPanelI18n['zh-CN'],
   ...surfacePanelI18n['zh-CN'],
+  ...browserServerPanelI18n['zh-CN'],
   ...fileArtifactsI18n['zh-CN'],
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
@@ -620,6 +622,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': '包含子智能体任务',
   'sessions.sidebar.session.export.dialog.confirm': '导出',
   'sessions.sidebar.session.status.active': '会话活跃中',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} 个子代理运行中',
   'sessions.sidebar.session.status.unread': '有未读更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子代理正在后台运行',
   'sessions.sidebar.session.status.backgroundCommand': '命令正在后台运行',
@@ -832,6 +835,16 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.unstageAllAria': '取消暂存所有更改',
   'gitView.changes.unstageDirectoryAria': '取消暂存 {path} 中的所有更改',
   'gitView.changes.unstageFileAria': '取消暂存 {path}',
+  'gitView.ciLoop.description': '每次推送后监视 GitHub Actions，并将结果报告给智能体。',
+  'gitView.ciLoop.phase.doneClean': 'CI 通过',
+  'gitView.ciLoop.phase.doneFailed': 'CI 失败',
+  'gitView.ciLoop.phase.error': 'CI 监控失败：{message}',
+  'gitView.ciLoop.phase.running': 'CI 运行中 · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': '等待 CI 超时',
+  'gitView.ciLoop.phase.waiting': '等待 CI 启动…',
+  'gitView.ciLoop.title': 'CI 监控',
+  'gitView.ciLoop.toast.toggleFailed': '无法更新 CI 监控',
+  'gitView.ciLoop.toggleLabel': '在此会话中监控 CI',
   'gitView.commit.addGitmoji': '添加 gitmoji',
   'gitView.commit.aiHighlights.insertAria': '将高亮插入提交信息',
   'gitView.commit.aiHighlights.insertTooltip': '将高亮追加到提交信息',
@@ -1848,6 +1861,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.dialog.evaluationModelLabel': '评估模型',
   'chat.goal.status.active': '进行中',
   'chat.goal.status.evaluating': '评估中…',
+  'chat.goal.driver.title': '由 {name} 运行',
   'chat.goal.status.paused': '已暂停',
   'chat.goal.status.blocked': '已阻塞',
   'chat.goal.status.budgetLimited': '已达预算',
@@ -2272,6 +2286,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': '发送回答失败',
   'chat.questionCard.dismissFailed': '忽略问题失败',
   'chat.questionCard.noLongerPending': '此问题不再等待回答。',
+  'chat.questionCard.orphanedBadge': '已中断',
+  'chat.questionCard.orphanedNotice': '会话在此问题得到回答前已重启。你的回答将作为新消息发送给智能体。',
   'chat.questionCard.tryAgain': '请稍后重试。',
   'chat.textSelection.toast.noProject': '未找到此会话对应的项目',
   'chat.textSelection.toast.addToNotesFailed': '添加到笔记失败',

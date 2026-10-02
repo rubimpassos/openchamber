@@ -13,14 +13,172 @@ const __dirname = path.dirname(__filename);
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
-const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
-const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
+const UPSTREAM_REPO = 'openchamber/openchamber';
+
+// Release links follow the repo the update check reads, so a fork build never
+// sends the user to the official releases for the build it is offering, and the
+// Android APK it advertises is its own.
+function releasesApiUrl() {
+  return `${GITHUB_API_URL}/repos/${getForkReleaseSource()?.repo ?? UPSTREAM_REPO}/releases`;
+}
+
+function releasesWebUrl() {
+  return `https://github.com/${getForkReleaseSource()?.repo ?? UPSTREAM_REPO}/releases`;
+}
 let cachedDetectedPm = null;
 
 function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
 }
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
+const GITHUB_API_URL = 'https://api.github.com';
+
+/**
+ * A fork publishes its own releases and is absent from npm, and
+ * `api.openchamber.dev` only knows official versions — asking either would
+ * report an upstream build as if it were the fork's. With
+ * `OPENCHAMBER_UPDATE_REPO` set, the check reads that repo's releases instead of
+ * the npm and update-service paths below. Every fork entry point sets it, so the
+ * desktop window, a browser attached to it, and the CLI agree. Unset, this is
+ * upstream and nothing here changes.
+ *
+ * `OPENCHAMBER_UPDATE_RELEASE_TAG` picks between the two release models. Set, it
+ * names one rolling release rewritten in place and builds are told apart by
+ * their build marker; unset, releases are versioned and semver decides.
+ *
+ * Read at call time, not at module load: Electron sets these before starting the
+ * in-process server, and ESM imports run before that.
+ */
+function getForkReleaseSource() {
+  const repo = (process.env.OPENCHAMBER_UPDATE_REPO || '').trim();
+  const tag = (process.env.OPENCHAMBER_UPDATE_RELEASE_TAG || '').trim();
+  // Also keeps a malformed value out of the request URL.
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return null;
+  return { repo, tag: tag || null };
+}
+
+/**
+ * The build marker a fork stamps into its version, e.g. `turbo.5518dc22` in
+ * `1.23.1+turbo.5518dc22`. A rolling release reuses one tag and keeps the
+ * upstream semver, so this marker — not semver — is what tells two builds apart.
+ */
+function extractBuildId(value) {
+  if (typeof value !== 'string') return null;
+  return value.match(/[A-Za-z][\w-]*\.[0-9a-f]{7,40}\b/)?.[0] ?? null;
+}
+
+function extractVersion(value) {
+  if (typeof value !== 'string') return null;
+  return value.match(/\d+\.\d+\.\d+[\w.+-]*/)?.[0] ?? null;
+}
+
+/**
+ * Throws on transport/HTTP failure so the caller reports a failed check: a fork
+ * build has no second source, and answering "no update" here would make an
+ * unreachable GitHub look up to date.
+ */
+async function fetchForkRelease(source) {
+  const endpoint = source.tag
+    ? `releases/tags/${encodeURIComponent(source.tag)}`
+    : 'releases/latest';
+  const response = await fetch(`${GITHUB_API_URL}/repos/${source.repo}/${endpoint}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'openchamber-update-check',
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+
+  // A fork that has not published a versioned release yet answers 404 here, and
+  // so does one whose releases are all prereleases. That is "nothing to update
+  // to", not a failed check. A rolling tag is different: it is supposed to
+  // exist, so its 404 stays an error.
+  if (response.status === 404 && !source.tag) return null;
+
+  if (!response.ok) {
+    const target = source.tag ? `release "${source.tag}"` : 'the latest release';
+    throw new Error(`GitHub returned ${response.status} for ${source.repo} ${target}`);
+  }
+
+  return response.json();
+}
+
+async function checkForkRelease(currentVersion, source) {
+  const release = await fetchForkRelease(source);
+  if (!release) return { available: false, currentVersion };
+
+  const body = typeof release?.body === 'string' && release.body.trim() ? release.body : undefined;
+  const releaseUrl = typeof release?.html_url === 'string' ? release.html_url : undefined;
+  const assetNames = Array.isArray(release?.assets)
+    ? release.assets.map((asset) => (typeof asset?.name === 'string' ? asset.name : '')).join(' ')
+    : '';
+
+  if (!source.tag) {
+    // Versioned releases carry the version in the tag, so semver decides, and a
+    // republished or rolled-back release cannot offer a build already installed.
+    const remoteVersion = extractVersion(release?.tag_name) || extractVersion(release?.name);
+    return {
+      available: Boolean(remoteVersion) && compareVersions(remoteVersion, currentVersion) > 0,
+      version: remoteVersion || undefined,
+      currentVersion,
+      body,
+      releaseUrl,
+    };
+  }
+
+  const searchableReleaseText = [release?.name, release?.tag_name, assetNames]
+    .filter((value) => typeof value === 'string' && value)
+    .join(' ');
+  const remoteBuildId = extractBuildId(searchableReleaseText);
+  const installedBuildId = extractBuildId(currentVersion);
+  const remoteVersion = extractVersion(release?.name) || extractVersion(assetNames) || remoteBuildId;
+
+  return {
+    // A rolling release keeps one tag and the upstream semver, so build markers
+    // are what tell two builds apart. Without a marker on either side there is
+    // nothing to compare, so report no update rather than offering the build
+    // already installed.
+    available: Boolean(remoteBuildId && installedBuildId && remoteBuildId !== installedBuildId),
+    version: remoteVersion || undefined,
+    currentVersion,
+    body,
+    releaseUrl,
+  };
+}
+
+/**
+ * What `openchamber update` should install.
+ *
+ * Upstream installs the npm package. A fork is absent from npm, so it installs
+ * the tarball its release carries; falling back to `@latest` there would replace
+ * the fork with the official build, which is the one thing this must never do.
+ * So a configured fork with no usable tarball is an error, not a fallback.
+ */
+export async function resolveUpdateTarget() {
+  const source = getForkReleaseSource();
+  if (!source) return { target: `${PACKAGE_NAME}@latest`, origin: 'npm' };
+
+  const release = await fetchForkRelease(source);
+  if (!release) {
+    throw new Error(`${source.repo} has published no release to update from yet.`);
+  }
+
+  const tarball = (Array.isArray(release.assets) ? release.assets : []).find((asset) => (
+    typeof asset?.name === 'string'
+    && asset.name.startsWith('openchamber-web-')
+    && asset.name.endsWith('.tgz')
+    && typeof asset.browser_download_url === 'string'
+  ));
+
+  if (!tarball) {
+    throw new Error(
+      `The ${source.repo} release carries no .tgz asset to install. `
+      + `This build is not published to npm, so there is nothing else to update from.`,
+    );
+  }
+
+  return { target: tarball.browser_download_url, origin: 'fork' };
+}
 
 function getOpenChamberConfigDir() {
   if (process.platform === 'win32') {
@@ -97,7 +255,7 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
   }
 
   try {
-    const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/v${version}`, {
+    const response = await fetch(`${releasesApiUrl()}/tags/v${version}`, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': 'openchamber-update-check',
@@ -161,7 +319,7 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
     if (versionComparison < 0) return null;
 
-    const releaseUrl = `${GITHUB_RELEASES_URL}/tag/v${data.latestVersion}`;
+    const releaseUrl = `${releasesWebUrl()}/tag/v${data.latestVersion}`;
     const downloadUrl = typeof data.downloadUrl === 'string'
       ? data.downloadUrl
       : typeof data.download?.url === 'string'
@@ -655,19 +813,26 @@ function isPackageInstalledWith(pm) {
 }
 
 /**
- * Get the update command for the detected package manager
+ * Get the update command for the detected package manager.
+ *
+ * `target` is whatever the package manager should install. It defaults to the
+ * npm package; a fork passes the tarball URL from its own release instead,
+ * because it publishes no npm package and `@latest` would fetch the official
+ * build over it. Every supported package manager installs a URL with the same
+ * subcommand it uses for a package name.
  */
-export function getUpdateCommand(pm = detectPackageManager()) {
+export function getUpdateCommand(pm = detectPackageManager(), target = `${PACKAGE_NAME}@latest`) {
   const pmCommand = quoteCommand(resolvePackageManagerCommand(pm));
+  const quotedTarget = quoteCommand(target);
   switch (pm) {
     case 'pnpm':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g ${quotedTarget}`;
     case 'yarn':
-      return `${pmCommand} global add ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} global add ${quotedTarget}`;
     case 'bun':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g ${quotedTarget}`;
     default:
-      return `${pmCommand} install -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} install -g ${quotedTarget}`;
   }
 }
 
@@ -751,6 +916,19 @@ export async function checkForUpdates(options = {}) {
   const appType = normalizeAppType(options.appType);
   const platform = normalizePlatform(options.platform);
 
+  const forkSource = getForkReleaseSource();
+  if (forkSource) {
+    try {
+      return { ...await checkForkRelease(currentVersion, forkSource), packageManager: pm };
+    } catch (error) {
+      return {
+        available: false,
+        currentVersion,
+        error: error instanceof Error ? error.message : 'Failed to check the fork release',
+      };
+    }
+  }
+
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);
     if (remote) {
@@ -793,7 +971,7 @@ export async function checkForUpdates(options = {}) {
     version: latestVersion,
     currentVersion,
     body: changelog,
-    releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${latestVersion}`,
+    releaseUrl: `${releasesWebUrl()}/tag/v${latestVersion}`,
     downloadUrl,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
@@ -805,7 +983,7 @@ export async function checkForUpdates(options = {}) {
  * Execute the update (used by CLI)
  */
 export function executeUpdate(pm = detectPackageManager(), options = {}) {
-  const command = getUpdateCommand(pm);
+  const command = options?.target ? getUpdateCommand(pm, options.target) : getUpdateCommand(pm);
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
     console.log(`Running: ${command}`);

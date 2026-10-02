@@ -7,6 +7,17 @@ import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
 
+// OpenChamber's own UI credentials and session-signing secret must never reach
+// the managed OpenCode process (or anything it spawns).
+const OPENCHAMBER_PRIVATE_ENV_KEYS = ['OPENCHAMBER_UI_PASSWORD', 'OPENCHAMBER_UI_PASSWORD_HASH', 'OPENCODE_JWT_SECRET'];
+
+export const stripOpenChamberPrivateEnv = (env) => {
+  for (const key of OPENCHAMBER_PRIVATE_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
+};
+
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -765,7 +776,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
-    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
+    const processEnv = stripOpenChamberPrivateEnv(stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
       ...shellEnv,
       ...process.env,
       ...managedOpenCodeEnv,
@@ -775,7 +786,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // we send with openCodePassword would get 401.
       OPENCODE_PASSWORD: openCodePassword,
       OPENCODE_SERVER_PASSWORD: openCodePassword,
-    })));
+    }))));
     managedProcessEnv = processEnv;
 
     let serverInstance;

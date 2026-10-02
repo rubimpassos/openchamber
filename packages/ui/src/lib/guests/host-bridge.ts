@@ -42,6 +42,9 @@ type HostBridgeEffects = {
   workspaceRead: (query: GuestWorkspaceQuery) => GuestWorkspaceSnapshot;
   workspaceSubscribe: (subscription: GuestWorkspaceSubscription) => void;
   workspaceUnsubscribe: (subscriptionId: string) => void;
+  /** Starts pushing changes of these project files; rejects when the server cannot watch. */
+  filesWatch: (request: { subscriptionId: string; paths: string[] }) => Promise<void>;
+  filesUnwatch: (subscriptionId: string) => void;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
   openSession: (sessionId: string) => void;
   toast: (request: ToastRequest) => void;
@@ -244,6 +247,8 @@ export const answerGuestMessage = async (
     case 'workspace-read': return okResult(message.id, effects.workspaceRead(message.payload));
     case 'workspace-subscribe': effects.workspaceSubscribe(message.payload); return okResult(message.id);
     case 'workspace-unsubscribe': effects.workspaceUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
+    case 'files-watch': await effects.filesWatch(message.payload); return okResult(message.id);
+    case 'files-unwatch': effects.filesUnwatch(message.payload.subscriptionId); return okResult(message.id);
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);
     // No answer: the pane handles these itself. File editor traffic belongs to

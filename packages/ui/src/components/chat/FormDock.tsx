@@ -8,7 +8,9 @@ import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import type { FormRequest } from '@/lib/opencode/model';
+import type { FormRequest, QuestionRequest } from '@/lib/opencode/model';
+import { questionToForm } from '@/lib/opencode/projection';
+import { markOrphanedQuestionDismissed } from '@/lib/questions/orphanedQuestions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useScopedBlockingForms, useSessions } from '@/sync/sync-context';
@@ -52,19 +54,22 @@ interface FormDockProps {
     sessionId: string | null;
     directory?: string;
     hidden: boolean;
+    orphanedQuestions: QuestionRequest[];
+    onOrphanedResolved: () => void;
 }
 
-export const FormDock: React.FC<FormDockProps> = ({ sessionId, directory, hidden }) => {
+export const FormDock: React.FC<FormDockProps> = ({ sessionId, directory, hidden, orphanedQuestions: questions, onOrphanedResolved }) => {
     const forms = useScopedBlockingForms(sessionId, directory);
+    const orphanedQuestion = forms.length === 0 ? questions[0] : undefined;
     // The session's own forms come first; a location-scoped form (an MCP
     // elicitation, owned by no session) follows and shows in every session
     // of the directory that raised it.
-    const form = forms[0];
+    const form = forms[0] ?? (orphanedQuestion ? questionToForm(orphanedQuestion) : undefined);
     if (hidden || !form) return null;
     const webSearchConsent = readWebSearchConsent(form);
     if (webSearchConsent) return <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />;
     // Keyed on the form id so a different request starts from a clean slate.
-    return <FormDockPanel key={form.id} form={form} waiting={forms.length - 1} />;
+    return <FormDockPanel key={form.id} form={form} waiting={Math.max(0, forms.length + questions.length - 1)} orphanedQuestion={orphanedQuestion} onOrphanedResolved={onOrphanedResolved} />;
 };
 
 type FormDraft = { fieldsSignature: string; values: FormValues; step: number };
@@ -91,7 +96,7 @@ const isStepAnswered = (field: FormField, values: FormValues): boolean => {
     return !(Array.isArray(answer) && answer.length === 0);
 };
 
-const FormDockPanel: React.FC<{ form: FormRequest; waiting: number }> = ({ form, waiting }) => {
+const FormDockPanel: React.FC<{ form: FormRequest; waiting: number; orphanedQuestion?: QuestionRequest; onOrphanedResolved: () => void }> = ({ form, waiting, orphanedQuestion, onOrphanedResolved }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const sessions = useSessions();
@@ -174,26 +179,41 @@ const FormDockPanel: React.FC<{ form: FormRequest; waiting: number }> = ({ form,
         }
         setIsResponding(true);
         try {
-            await sessionActions.replyToForm(form.sessionID, form.id, buildFormAnswer(fields, values));
+            const answer = buildFormAnswer(fields, values);
+            if (orphanedQuestion) {
+                await sessionActions.answerOrphanedQuestion(orphanedQuestion, orphanedQuestion.questions.map((_, index) => {
+                    const value = answer[`q${index}`];
+                    return Array.isArray(value) ? value.map(String) : value === undefined ? [] : [String(value)];
+                }));
+                if (orphanedQuestion.tool) markOrphanedQuestionDismissed(orphanedQuestion.tool.callID);
+                onOrphanedResolved();
+            } else {
+                await sessionActions.replyToForm(form.sessionID, form.id, answer);
+            }
             formDrafts.delete(form.id);
         } catch {
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
             setIsResponding(false);
         }
-    }, [canSubmit, fields, form.id, form.sessionID, missing, shown, t, values]);
+    }, [canSubmit, fields, form.id, form.sessionID, missing, shown, t, values, orphanedQuestion, onOrphanedResolved]);
 
     const handleDismiss = React.useCallback(async () => {
         setIsResponding(true);
         try {
-            await sessionActions.cancelForm(form.sessionID, form.id);
+            if (orphanedQuestion) {
+                if (orphanedQuestion.tool) markOrphanedQuestionDismissed(orphanedQuestion.tool.callID);
+                onOrphanedResolved();
+            } else {
+                await sessionActions.cancelForm(form.sessionID, form.id);
+            }
             formDrafts.delete(form.id);
         } catch {
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
             setIsResponding(false);
         }
-    }, [form.id, form.sessionID, t]);
+    }, [form.id, form.sessionID, t, orphanedQuestion, onOrphanedResolved]);
 
     const goNext = React.useCallback(() => {
         setStep(Math.min(currentStep + 1, lastStep));
@@ -253,6 +273,9 @@ const FormDockPanel: React.FC<{ form: FormRequest; waiting: number }> = ({ form,
                     <Icon name="question" className="size-3.5 shrink-0 text-primary" />
                     <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
                     <span className="typography-ui-label min-w-0 truncate text-foreground">{title}</span>
+                    {orphanedQuestion ? (
+                        <span className="typography-micro shrink-0 text-muted-foreground">{t('chat.questionCard.orphanedBadge')}</span>
+                    ) : null}
                     {isFromSubagent ? (
                         <span className="typography-micro shrink-0 rounded bg-foreground/5 px-1.5 py-0.5 text-muted-foreground">
                             {t('chat.formCard.fromSubagent')}
@@ -305,6 +328,9 @@ const FormDockPanel: React.FC<{ form: FormRequest; waiting: number }> = ({ form,
         >
             {!collapsed ? (
                 <div onKeyDown={handlePanelKeyDown}>
+                    {orphanedQuestion ? (
+                        <p className="typography-micro px-3 pb-2 text-muted-foreground">{t('chat.questionCard.orphanedNotice')}</p>
+                    ) : null}
                     <div
                         ref={bodyRef}
                         className="max-h-[50vh] overflow-y-auto overscroll-contain px-1.5"

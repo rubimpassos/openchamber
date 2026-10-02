@@ -26,6 +26,7 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
       executeUpdate,
       detectPackageManager,
       getCurrentVersion,
+      resolveUpdateTarget,
     } = await importFromFilePath(packageManagerPath);
 
     const runningInstances = await discoverRunningInstances();
@@ -92,7 +93,8 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
     }
 
     const pm = detectPackageManager();
-    const result = executeUpdate(pm, { silent: isJsonMode(options) || isQuietMode(options) });
+    const { target } = await resolveUpdateTarget();
+    const result = executeUpdate(pm, { silent: isJsonMode(options) || isQuietMode(options), target });
     if (!result.success) {
       updateSpin?.error('Update failed');
       if (showOutput) {

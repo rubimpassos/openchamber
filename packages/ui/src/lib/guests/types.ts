@@ -4,6 +4,8 @@ import type {
   GuestActionContribution,
   GuestCapability,
   GuestCommandContribution,
+  GuestGoalContribution,
+  GuestMessageContribution,
   GuestSurfaceDock,
   GuestToolContribution,
   PublicService,
@@ -49,6 +51,10 @@ export type InstalledGuest = {
   commands?: GuestCommandContribution[];
   /** Declared `contributes.tools`; the chat applies them only for an active guest. */
   tools?: GuestToolContribution[];
+  /** Declared `contributes.messages`; the chat applies them only for an active guest. */
+  messages?: GuestMessageContribution[];
+  /** Declared `contributes.goal`: the goal driver this extension's plugin is. */
+  goal?: GuestGoalContribution;
   /** Declared `contributes.fileEditors`; the Files view opens matching files in them only for an active guest. */
   fileEditors?: FileEditorContribution[];
   /** What the package asks for and what the user approved at install. */

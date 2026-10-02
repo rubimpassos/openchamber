@@ -7,6 +7,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -66,6 +67,7 @@ export const dict: Record<I18nKey, string> = {
   ...routingI18n.pl,
   ...pluginPanelI18n.pl,
   ...surfacePanelI18n.pl,
+  ...browserServerPanelI18n.pl,
   ...fileArtifactsI18n.pl,
   ...usageStatsI18n.pl,
   ...webSearchI18n.pl,
@@ -620,6 +622,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Dołącz pod-agentów',
   'sessions.sidebar.session.export.dialog.confirm': 'Eksportuj',
   'sessions.sidebar.session.status.active': 'Sesja aktywna',
+  'sessions.sidebar.session.status.subagentsRunning': 'Uruchomione subagenty: {count}',
   'sessions.sidebar.session.status.unread': 'Nieprzeczytane aktualizacje',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent działa w tle',
   'sessions.sidebar.session.status.backgroundCommand': 'Polecenie działa w tle',
@@ -957,6 +960,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': 'Nie udało się wysłać odpowiedzi',
   'chat.questionCard.dismissFailed': 'Nie udało się odrzucić pytania',
   'chat.questionCard.noLongerPending': 'To pytanie nie czeka już na odpowiedź.',
+  'chat.questionCard.orphanedBadge': 'Przerwane',
+  'chat.questionCard.orphanedNotice': 'Sesja została uruchomiona ponownie, zanim udzielono odpowiedzi na to pytanie. Twoja odpowiedź zostanie wysłana do agenta jako nowa wiadomość.',
   'chat.questionCard.tryAgain': 'Spróbuj ponownie za chwilę.',
   'chat.textSelection.toast.noProject': 'Nie znaleziono projektu dla tej sesji',
   'chat.textSelection.toast.addToNotesFailed': 'Nie udało się dodać do notatek',
@@ -2166,6 +2171,16 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.unstageAllAria': 'Usuń wszystkie zmiany z indeksu',
   'gitView.changes.unstageDirectoryAria': 'Usuń z indeksu wszystkie zmiany w {path}',
   'gitView.changes.unstageFileAria': 'Usuń {path} z indeksu',
+  'gitView.ciLoop.description': 'Obserwuje GitHub Actions po każdym pushu i przekazuje wyniki agentowi.',
+  'gitView.ciLoop.phase.doneClean': 'CI zielone',
+  'gitView.ciLoop.phase.doneFailed': 'CI z błędami',
+  'gitView.ciLoop.phase.error': 'Monitorowanie CI nie powiodło się: {message}',
+  'gitView.ciLoop.phase.running': 'CI w toku · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': 'Przekroczono czas oczekiwania na CI',
+  'gitView.ciLoop.phase.waiting': 'Oczekiwanie na start CI…',
+  'gitView.ciLoop.title': 'Monitor CI',
+  'gitView.ciLoop.toast.toggleFailed': 'Nie udało się zaktualizować monitorowania CI',
+  'gitView.ciLoop.toggleLabel': 'Monitoruj CI w tej sesji',
   'gitView.commit.addGitmoji': 'Dodaj gitmoji',
   'gitView.commit.aiHighlights.insertAria': 'Wstaw',
   'gitView.commit.aiHighlights.insertTooltip': 'Wstaw',
@@ -2551,6 +2566,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.dialog.evaluationModelLabel': 'Model oceniający',
   'chat.goal.status.active': 'Aktywny',
   'chat.goal.status.evaluating': 'Ocenianie…',
+  'chat.goal.driver.title': 'Uruchamiane przez {name}',
   'chat.goal.status.paused': 'Wstrzymany',
   'chat.goal.status.blocked': 'Zablokowany',
   'chat.goal.status.budgetLimited': 'Budżet wyczerpany',

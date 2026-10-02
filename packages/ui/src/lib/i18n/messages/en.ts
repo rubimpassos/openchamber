@@ -6,6 +6,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -65,6 +66,7 @@ export const dict = {
   ...routingI18n.en,
   ...pluginPanelI18n.en,
   ...surfacePanelI18n.en,
+  ...browserServerPanelI18n.en,
   ...fileArtifactsI18n.en,
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
@@ -619,6 +621,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Include sub-agent tasks',
   'sessions.sidebar.session.export.dialog.confirm': 'Export',
   'sessions.sidebar.session.status.active': 'Session active',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} subagents running',
   'sessions.sidebar.session.status.unread': 'Unread updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent running in the background',
   'sessions.sidebar.session.status.backgroundCommand': 'Command running in the background',
@@ -831,6 +834,16 @@ export const dict = {
   'gitView.changes.unstageAllAria': 'Unstage all changes',
   'gitView.changes.unstageDirectoryAria': 'Unstage all changes in {path}',
   'gitView.changes.unstageFileAria': 'Unstage {path}',
+  'gitView.ciLoop.description': 'Watches GitHub Actions after each push and reports results to the agent.',
+  'gitView.ciLoop.phase.doneClean': 'CI green',
+  'gitView.ciLoop.phase.doneFailed': 'CI failed',
+  'gitView.ciLoop.phase.error': 'CI watch failed: {message}',
+  'gitView.ciLoop.phase.running': 'CI running · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': 'Timed out waiting for CI',
+  'gitView.ciLoop.phase.waiting': 'Waiting for CI to start…',
+  'gitView.ciLoop.title': 'CI Monitor',
+  'gitView.ciLoop.toast.toggleFailed': 'Failed to update CI monitoring',
+  'gitView.ciLoop.toggleLabel': 'Monitor CI for this session',
   'gitView.commit.addGitmoji': 'Add gitmoji',
   'gitView.commit.aiHighlights.insertAria': 'Insert  aria label',
   'gitView.commit.aiHighlights.insertTooltip': 'Insert  tooltip',
@@ -1882,6 +1895,7 @@ export const dict = {
   'chat.goal.dialog.evaluationModelLabel': 'Evaluation model',
   'chat.goal.status.active': 'Active',
   'chat.goal.status.evaluating': 'Evaluating…',
+  'chat.goal.driver.title': 'Run by {name}',
   'chat.goal.status.paused': 'Paused',
   'chat.goal.status.blocked': 'Blocked',
   'chat.goal.status.budgetLimited': 'Budget reached',
@@ -2306,6 +2320,8 @@ export const dict = {
   'chat.questionCard.submitFailed': 'Failed to send response',
   'chat.questionCard.dismissFailed': 'Failed to dismiss question',
   'chat.questionCard.noLongerPending': 'This question is no longer waiting for a response.',
+  'chat.questionCard.orphanedBadge': 'Interrupted',
+  'chat.questionCard.orphanedNotice': 'The session restarted before this question was answered. Your answer will be sent to the agent as a new message.',
   'chat.questionCard.tryAgain': 'Please try again in a moment.',
   'chat.textSelection.toast.noProject': 'No project found for this session',
   'chat.textSelection.toast.addToNotesFailed': 'Failed to add to notes',

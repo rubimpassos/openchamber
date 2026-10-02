@@ -24,6 +24,8 @@ import {
   GUEST_REQUEST_TIMEOUT_MS,
   GUEST_RESOLVE_ERROR_MAX,
   isGuestFilePath,
+  guestFileScope,
+  GUEST_FILE_WATCH_PATHS_MAX,
   isGuestRequestPath,
   clampAttachRequest,
   clampBadgeCount,
@@ -170,6 +172,14 @@ export type HostClient = {
   /** Kind, size, and mtime of a path. A missing path is `kind: 'missing'`, not an error. Same path rules as `readFile`. */
   stat: (path: string) => Promise<FileStatResult>;
   /**
+   * Be told when project files change (capability `files`): up to
+   * `GUEST_FILE_WATCH_PATHS_MAX` project-relative paths, which need not exist
+   * yet. The listener gets the paths that were written, debounced. A host
+   * that cannot watch rejects, so keep a slower poll as the fallback. Resolves
+   * to the unsubscribe function.
+   */
+  watchFiles: (paths: string[], listener: (paths: string[]) => void) => Promise<() => void>;
+  /**
    * One-off text generation with the user's Small Model (capability
    * `model`). Nothing enters a session and no history is kept. `prompt` is
    * 1 to `GUEST_GENERATE_PROMPT_MAX` characters, `system` up to
@@ -274,6 +284,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   let saveShortcutInstalled = false;
   const pending = new Map<string, Pending>();
   const workspaceListeners = new Map<string, (snapshot: GuestWorkspaceSnapshot) => void>();
+  const fileWatchListeners = new Map<string, (paths: string[]) => void>();
   let disposed = false;
   const ids = { value: 0 };
   let lastReady: HostReadyContext | null = null;
@@ -311,6 +322,11 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     if (message.type === 'workspace') {
       const listener = workspaceListeners.get(message.payload.subscriptionId);
       if (listener) emit([listener], message.payload.snapshot);
+      return;
+    }
+    if (message.type === 'files-changed') {
+      const listener = fileWatchListeners.get(message.payload.subscriptionId);
+      if (listener) emit([listener], message.payload.paths);
       return;
     }
 
@@ -816,6 +832,23 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       }
       return result;
     }),
+    watchFiles: async (paths, listener) => {
+      if (paths.length === 0 || paths.length > GUEST_FILE_WATCH_PATHS_MAX || !paths.every((path) => isGuestFilePath(path) && guestFileScope(path) === 'project')) {
+        throw new HostRequestError('BAD_PATH', `watchFiles takes 1 to ${GUEST_FILE_WATCH_PATHS_MAX} project-relative paths.`);
+      }
+      const subscriptionId = nextId(ids);
+      fileWatchListeners.set(subscriptionId, listener);
+      try {
+        await request({ ...envelope, type: 'files-watch', id: nextId(ids), payload: { subscriptionId, paths } });
+      } catch (error) {
+        fileWatchListeners.delete(subscriptionId);
+        throw error;
+      }
+      return () => {
+        if (!fileWatchListeners.delete(subscriptionId) || disposed) return;
+        post({ ...envelope, type: 'files-unwatch', id: nextId(ids), payload: { subscriptionId } });
+      };
+    },
     readFile: (path) => (isGuestFilePath(path) ? send({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,
@@ -949,6 +982,10 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         post({ ...envelope, type: 'workspace-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
       }
       workspaceListeners.clear();
+      for (const subscriptionId of fileWatchListeners.keys()) {
+        post({ ...envelope, type: 'files-unwatch', id: nextId(ids), payload: { subscriptionId } });
+      }
+      fileWatchListeners.clear();
       disposed = true;
       resolveHandler = null;
       actionHandler = null;

@@ -46,6 +46,8 @@ import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { GuestToolTable } from './GuestToolTable';
+import { TodoListOutput } from './TodoListOutput';
+import { parseTodoList } from './todoList';
 import type { JsonValue } from '@openchamber/sdk';
 import {
     guestToolTableRows,
@@ -784,6 +786,14 @@ const ToolScrollableTextOutput: React.FC<{
         );
     }
 
+    if (!forcedMode && (part.tool === 'todowrite' || part.tool === 'todoread') && jsonResult.isJson) {
+        // SAFETY: `tryParseJsonOutput` fills `data` from JSON.parse of the tool output.
+        const todos = parseTodoList(jsonResult.data as JsonValue);
+        if (todos) {
+            return <TodoListOutput todos={todos} />;
+        }
+    }
+
     if (jsonResult.isJson) {
         return <JsonToolOutput jsonResult={jsonResult} renderedOutput={renderedOutput} />;
     }
@@ -1309,8 +1319,11 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         [currentDirectory, diffContent, metadata]
     );
     const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
-    // `execute` renders its script and its call list itself, below.
+    // `execute` renders its script and its call list itself, below; a todo
+    // tool's result is the list it was given, drawn by `TodoListOutput`.
     const hideToolInputPreview = part.tool === 'openchamber'
+        || part.tool === 'todowrite'
+        || part.tool === 'todoread'
         || part.tool === 'openchamber_web'
         || part.tool === 'openchamber_memory'
         || part.tool === 'openchamber_notify'

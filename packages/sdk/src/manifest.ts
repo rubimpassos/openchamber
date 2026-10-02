@@ -162,6 +162,59 @@ export type GuestToolContribution = {
   columns?: string[];
 };
 
+/** How many `contributes.messages` entries a package may declare. */
+export const GUEST_MESSAGES_MAX = 32;
+/** Characters in a `contributes.messages` `match` pattern. */
+export const GUEST_MESSAGE_MATCH_MAX = 300;
+/** Characters of a message the host tests a pattern against; the rest is ignored. */
+export const GUEST_MESSAGE_TEXT_SCAN_MAX = 64 * 1024;
+
+export const GUEST_MESSAGE_TONES = ['neutral', 'info', 'success', 'warning', 'error'] as const;
+/** The colour of a message row's icon. */
+export type GuestMessageTone = (typeof GUEST_MESSAGE_TONES)[number];
+
+export const GUEST_MESSAGE_BODIES = ['markdown', 'text', 'none'] as const;
+/** What the expanded row shows: the message as markdown, as plain text, or nothing (header only). */
+export type GuestMessageBody = (typeof GUEST_MESSAGE_BODIES)[number];
+
+/**
+ * How a message a plugin sent on the user's behalf looks in the chat,
+ * declared without code. `match` is a JavaScript regular expression source
+ * (flags `m`), tested against the whole text of a user message; the first
+ * matching rule wins. A match draws the message as a row of agent activity
+ * (icon, title, collapsible body) instead of the user's bubble. `title` and
+ * `subtitle` are templates with `{match.<group>}` placeholders for named
+ * capture groups and `{match.1}` for numbered ones. The body hides
+ * `<system-reminder>` tags and HTML comments.
+ */
+export type GuestMessageContribution = {
+  match: string;
+  /** Header title when `title` is absent or renders empty. */
+  name: string;
+  /** Remixicon name or package `.svg` path, same rules as `panel.icon`. */
+  icon?: string;
+  title?: string;
+  subtitle?: string;
+  tone?: GuestMessageTone;
+  body?: GuestMessageBody;
+};
+
+/** A goal driver id: what an extension writes into `metadata.openchamber.goal.driver`. */
+export const GUEST_GOAL_DRIVER = /^[a-z][a-z0-9-]{0,31}$/;
+
+/**
+ * The extension's plugin drives session goals itself. A goal whose
+ * `metadata.openchamber.goal.driver` names this driver renders with the host's
+ * own goal chrome (composer strip, Work Status row, sidebar icon), and the
+ * host's pause, resume, edit and clear write the goal metadata as always; the
+ * built-in goal loop leaves it to the driver while this extension is enabled.
+ * The plugin mirrors its goal into that metadata and applies the user's
+ * changes it finds there.
+ */
+export type GuestGoalContribution = {
+  driver: string;
+};
+
 export type IntegrationSettingField = {
   id: string;
   label: string;
@@ -417,6 +470,10 @@ export type OpenChamberContributes = {
   commands?: GuestCommandContribution[];
   /** How the extension's tool calls look in the chat. */
   tools?: GuestToolContribution[];
+  /** Which user messages are a plugin's own and how they look as agent activity. */
+  messages?: GuestMessageContribution[];
+  /** Session goals this extension's plugin drives. */
+  goal?: GuestGoalContribution;
   /** Editors the Files view opens matching files in. */
   fileEditors?: FileEditorContribution[];
 };
@@ -544,6 +601,8 @@ export type ParseManifestErrorCode =
   | 'invalid-actions'
   | 'invalid-commands'
   | 'invalid-tools'
+  | 'invalid-messages'
+  | 'invalid-goal'
   | 'invalid-file-editors';
 
 export type ParseManifestFailure = {

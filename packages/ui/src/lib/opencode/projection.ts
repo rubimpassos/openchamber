@@ -7,6 +7,7 @@
  * id and every tool-state conversion lives here and nowhere else.
  */
 
+import { z } from "zod"
 import type {
   ConfigEntry,
   JsonValue,
@@ -37,7 +38,49 @@ import {
   type ToolState,
   type UserMessage,
   type Vcs,
+  type FormRequest,
+  type QuestionRequest,
 } from "./model"
+
+/** v2 question forms carry the provider tool id in metadata, not `tool.callID`. */
+const questionFormMetadata = z.object({
+  kind: z.literal("question"),
+  tool: z.object({ id: z.string(), messageID: z.string() }),
+})
+
+export function projectQuestionForm(form: FormRequest): QuestionRequest | null {
+  const parsed = questionFormMetadata.safeParse(form.metadata)
+  if (!parsed.success) return null
+  const { tool } = parsed.data
+  return {
+    id: form.id,
+    sessionID: form.sessionID,
+    tool: { messageID: tool.messageID, callID: tool.id },
+    questions: form.fields.map((field) => ({
+      question: field.description ?? field.title ?? field.key,
+      header: field.title ?? "",
+      options: field.type === "string" || field.type === "multiselect"
+        ? (field.options ?? []).map((option) => ({ label: option.label ?? option.value, description: option.description ?? "" }))
+        : [],
+      multiple: field.type === "multiselect",
+    })),
+  }
+}
+
+/** Mirror the question tool's field keys so a recovered live form accepts the answer. */
+export function questionToForm(question: QuestionRequest): FormRequest {
+  const fields = question.questions.map((info, index) => ({
+    key: `q${index}`,
+    title: info.header,
+    description: info.question,
+    type: info.multiple ? "multiselect" as const : "string" as const,
+    options: info.options.map((option) => ({ value: option.label, ...option })),
+    custom: true,
+  }))
+  const [first, ...rest] = fields
+  if (!first) throw new Error("Cannot render a question without fields")
+  return { id: question.id, sessionID: question.sessionID, title: "Questions", fields: [first, ...rest] }
+}
 
 /** One item of an assistant message's ordered content. */
 export type AssistantContentItem = SessionMessageAssistant["content"][number]
@@ -47,10 +90,22 @@ export type AssistantToolItem = Extract<AssistantContentItem, { type: "tool" }>
 // Sessions
 // ---------------------------------------------------------------------------
 
+/**
+ * OpenCode 2.x's public session create has no parent, so oh-my-openagent
+ * records the parent of the sessions it starts (delegated tasks, look_at) as
+ * `metadata.omoParentID`. Reading it here nests those sessions under their
+ * parent like native subagents; a native parent always wins.
+ */
+export function sessionParentID(parentID: string | undefined, metadata: SessionInfo["metadata"]): string | undefined {
+  if (parentID) return parentID
+  const omoParentID = metadata?.omoParentID
+  return typeof omoParentID === "string" && omoParentID.length > 0 ? omoParentID : undefined
+}
+
 export function projectSession(info: SessionInfo): Session {
   return compact({
     id: info.id,
-    parentID: info.parentID,
+    parentID: sessionParentID(info.parentID, info.metadata),
     projectID: info.projectID,
     directory: info.location.directory,
     subpath: info.subpath,

@@ -202,6 +202,25 @@ describe('connectHost', () => {
     host.dispose();
     await expect(host.listProjects()).rejects.toMatchObject({ code: 'HOST_UNAVAILABLE' });
   });
+  test('watchFiles delivers changed paths, unsubscribes, and refuses paths outside the project', async () => {
+    const guest = createFrame();
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const seen: string[][] = [];
+    const watching = host.watchFiles(['.omo/v2-state/todos.json'], (paths) => seen.push(paths));
+    const call = guest.posted.at(-1);
+    if (call?.type !== 'files-watch') throw new Error('Expected a watch');
+    expect(call.payload.paths).toEqual(['.omo/v2-state/todos.json']);
+    guest.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: call.id, ok: true } }));
+    const stop = await watching;
+    guest.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'files-changed',
+      payload: { subscriptionId: call.payload.subscriptionId, paths: ['.omo/v2-state/todos.json'] } } }));
+    expect(seen).toEqual([['.omo/v2-state/todos.json']]);
+    stop();
+    expect(guest.posted.at(-1)?.type).toBe('files-unwatch');
+    await expect(host.watchFiles(['/etc/hosts'], () => {})).rejects.toMatchObject({ code: 'BAD_PATH' });
+    await expect(host.watchFiles([], () => {})).rejects.toMatchObject({ code: 'BAD_PATH' });
+    host.dispose();
+  });
   test('sends hello and delivers ready from the parent frame only', () => {
     const parent = createFrame();
     const guest = createFrame();

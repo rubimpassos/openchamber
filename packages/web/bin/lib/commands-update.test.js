@@ -35,13 +35,20 @@ describe('update command', () => {
           detectPackageManager: vi.fn(() => 'npm'),
           executeUpdate,
           getCurrentVersion: vi.fn(() => '1.0.0'),
+          resolveUpdateTarget: vi.fn(async () => ({
+            target: '@openchamber/web@latest',
+            origin: 'npm',
+          })),
         })),
       });
 
       try {
         await updateCommand({ json: true });
 
-        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true });
+        expect(executeUpdate).toHaveBeenCalledWith('npm', {
+          silent: true,
+          target: '@openchamber/web@latest',
+        });
       } finally {
         process.stdout.write = originalWrite;
       }

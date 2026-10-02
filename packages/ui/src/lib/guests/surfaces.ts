@@ -1,4 +1,4 @@
-import { GUEST_SURFACE_DOCK_DEFAULT, GUEST_SURFACE_DOCK_SIZE_DEFAULT, hasGuestPage, type GuestSurfaceDock } from '@openchamber/sdk';
+import { GUEST_SURFACE_DOCK_DEFAULT, GUEST_SURFACE_DOCK_SIZE_DEFAULT, hasGuestPage, serviceProvides, type GuestSurfaceDock } from '@openchamber/sdk';
 
 import type { ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
@@ -27,13 +27,18 @@ export const guestSurfaceDocking = (guest: Pick<InstalledGuest, 'service' | 'ent
  * Rail surfaces for the enabled guests with a page or a shared surface, in
  * catalog order. The rail and the digit shortcuts must agree on this list.
  * Background-only and tools-only extensions have no visible panel and get
- * no surface.
+ * no surface. Neither does a browser provider whose only view is its shared
+ * surface: the Browser panel already draws it, so a rail entry would be a
+ * second copy of the same picture.
  */
 export const enabledGuestSurfaces = (
   guests: readonly InstalledGuest[],
   authenticatedAsset: (path: string) => string,
 ): ContextSurfaceDescriptor[] => guests
-  .filter((guest) => isGuestActive(guest) && (hasGuestPage({ panel: guest }) || guestHasSharedSurface(guest)))
+  .filter((guest) => isGuestActive(guest) && (
+    hasGuestPage({ panel: guest })
+    || (guestHasSharedSurface(guest) && !serviceProvides(guest.service, 'browser'))
+  ))
   .map((guest) => guestSurfaceFromInstalled(guest, authenticatedAsset));
 
 const guestSurfaceFromInstalled = (

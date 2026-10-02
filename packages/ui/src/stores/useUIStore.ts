@@ -26,6 +26,11 @@ export type { ContextPanelMode };
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
+const RETIRED_SURFACE_MODES = new Set<string>([
+  'plugin:openchamber-builtin-server-browser',
+  'plugin:server-browser',
+]);
+
 const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
 const persistedPanelWidthsSchema = z.object({
   widthByMode: z.record(z.string(), z.number().finite().optional().catch(undefined)).catch({}),
@@ -459,6 +464,12 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     // State is shared with the desktop and web surfaces, which do have a
     // browser; inside VS Code such a tab would have no surface to belong to.
     if (dropBrowserTabs && candidate.mode === 'browser') {
+      continue;
+    }
+
+    // The Server Browser used to have a rail panel of its own; the Browser
+    // panel draws it now, and the old tab would only sit on "Connecting…".
+    if (RETIRED_SURFACE_MODES.has(candidate.mode)) {
       continue;
     }
 
@@ -1474,7 +1485,10 @@ export const useUIStore = create<UIStore>()(
         agentWebToolEnabled: true,
         messageSearchEnabled: false,
         messageSearchReasoningEnabled: false,
-        browserProvider: 'builtin',
+        // Unset on the server resolves to the server browser (contract:
+        // native-server-browser-contract.md); a value the user actually saved
+        // ('builtin' or an extension id) overrides this on load.
+        browserProvider: 'openchamber-builtin-server-browser',
         agentMemoryToolEnabled: false,
         agentNotifyToolEnabled: false,
         agentToolsCodeMode: false,

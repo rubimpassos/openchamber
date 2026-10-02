@@ -797,6 +797,8 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 
 These are `SyncEvent`s from `packages/ui/src/lib/opencode/events.ts`, not OpenCode wire events: the event pipeline translates every OpenCode 2.x wire event (`session.text.delta`, `session.tool.called`, `session.step.ended`, ...) into this vocabulary before coalescing. Wire-level knowledge lives only in that translator; the reducer applies patches and tool-state transitions against the store.
 
+A session's `parentID` comes from `sessionParentID` in `lib/opencode/projection.ts`, used by both the session list projection and the `session.created` translation: the wire `parentID`, else `metadata.omoParentID`. OpenCode 2.x's public session create takes no parent, so oh-my-openagent stores the parent of the sessions it starts (delegated tasks, `look_at`) there; reading it keeps those sessions nested under their parent in the sidebar, Work Status subagents, and extension session lists, like native subagents.
+
 ### Directory-less session events
 
 The global stream can omit a directory for a session-addressed event. Resolve it through the session routing index first. If the index is briefly stale during a session transition, route only when the event session matches the active session and that directory store exists; otherwise leave it un-routed rather than updating another directory.

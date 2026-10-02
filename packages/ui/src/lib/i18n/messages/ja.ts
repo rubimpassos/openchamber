@@ -7,6 +7,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -66,6 +67,7 @@ export const dict: Record<I18nKey, string> = {
   ...routingI18n.ja,
   ...pluginPanelI18n.ja,
   ...surfacePanelI18n.ja,
+  ...browserServerPanelI18n.ja,
   ...fileArtifactsI18n.ja,
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
@@ -620,6 +622,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'サブエージェントタスクを含める',
   'sessions.sidebar.session.export.dialog.confirm': 'エクスポート',
   'sessions.sidebar.session.status.active': 'セッションアクティブ',
+  'sessions.sidebar.session.status.subagentsRunning': '{count} 個のサブエージェントが実行中',
   'sessions.sidebar.session.status.unread': '未読の更新',
   'sessions.sidebar.session.status.backgroundSubagent': 'サブエージェントがバックグラウンドで実行中',
   'sessions.sidebar.session.status.backgroundCommand': 'コマンドがバックグラウンドで実行中',
@@ -832,6 +835,16 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.unstageAllAria': 'すべての変更をアンステージ',
   'gitView.changes.unstageDirectoryAria': '{path}のすべての変更をアンステージ',
   'gitView.changes.unstageFileAria': '{path}をアンステージ',
+  'gitView.ciLoop.description': 'プッシュのたびにGitHub Actionsを監視し、結果をエージェントに報告します。',
+  'gitView.ciLoop.phase.doneClean': 'CI成功',
+  'gitView.ciLoop.phase.doneFailed': 'CI失敗',
+  'gitView.ciLoop.phase.error': 'CI監視が失敗しました: {message}',
+  'gitView.ciLoop.phase.running': 'CI実行中 · {completed}/{total}',
+  'gitView.ciLoop.phase.timedOut': 'CIの待機がタイムアウトしました',
+  'gitView.ciLoop.phase.waiting': 'CIの開始を待機中…',
+  'gitView.ciLoop.title': 'CIモニター',
+  'gitView.ciLoop.toast.toggleFailed': 'CI監視の更新に失敗しました',
+  'gitView.ciLoop.toggleLabel': 'このセッションでCIを監視する',
   'gitView.commit.addGitmoji': 'Gitmojiを追加',
   'gitView.commit.aiHighlights.title': 'ハイライト',
   'gitView.commit.commit': 'コミット',
@@ -1878,6 +1891,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.dialog.evaluationModelLabel': '評価モデル',
   'chat.goal.status.active': '進行中',
   'chat.goal.status.evaluating': '評価中…',
+  'chat.goal.driver.title': '{name} が実行',
   'chat.goal.status.paused': '一時停止',
   'chat.goal.status.blocked': 'ブロック',
   'chat.goal.status.budgetLimited': '予算上限に到達',
@@ -2302,6 +2316,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.submitFailed': '応答の送信に失敗しました',
   'chat.questionCard.dismissFailed': '質問の閉じるのに失敗しました',
   'chat.questionCard.noLongerPending': 'この質問は応答待ちではなくなりました。',
+  'chat.questionCard.orphanedBadge': '中断',
+  'chat.questionCard.orphanedNotice': 'この質問に回答する前にセッションが再起動されました。回答は新しいメッセージとしてエージェントに送信されます。',
   'chat.questionCard.tryAgain': 'しばらくしてからもう一度お試しください。',
   'chat.textSelection.toast.noProject': 'このセッションのプロジェクトが見つかりません',
   'chat.textSelection.toast.addToNotesFailed': 'メモへの追加に失敗しました',

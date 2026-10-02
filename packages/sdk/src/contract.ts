@@ -588,8 +588,15 @@ export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
   | { ok: false; error: string; code: HostRequestErrorCode }
 );
 
+/** Project files a guest watches (`host.watchFiles`); at most `GUEST_FILE_WATCH_PATHS_MAX` relative paths. */
+export const GUEST_FILE_WATCH_PATHS_MAX = 16;
+export type FilesWatchRequest = { subscriptionId: string; paths: string[] };
+/** Pushed when watched files were written; `paths` are the ones that changed, as the guest named them. */
+export type FilesChangedUpdate = { subscriptionId: string; paths: string[] };
+
 export type HostMessage =
   | (Envelope & { type: 'workspace'; payload: GuestWorkspaceUpdate })
+  | (Envelope & { type: 'files-changed'; payload: FilesChangedUpdate })
   | HostReadyMessage
   | HostDirectoryMessage
   | HostSessionMessage
@@ -649,6 +656,8 @@ export type GuestMessage =
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
   | GuestCall<'workspace-subscribe', GuestWorkspaceSubscription>
   | GuestCall<'workspace-unsubscribe', { subscriptionId: string }>
+  | GuestCall<'files-watch', FilesWatchRequest>
+  | GuestCall<'files-unwatch', { subscriptionId: string }>
   | GuestCall<'storage', GuestStorageRequest>
   | GuestCall<'open-session', { sessionId: string }>
   | GuestHelloMessage
@@ -717,7 +726,7 @@ export const isGenerateResult = (
 ): value is GenerateResult => Boolean(value && 'text' in value && String(value.text) === value.text && !('status' in value));
 
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
-  'workspace',
+  'workspace', 'files-changed',
   'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
   'file-open', 'file-snapshot', 'file-saved',
 ]);
