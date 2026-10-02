@@ -999,3 +999,21 @@ test('opens a chat scope for a viewer whose last frame showed a scope that has s
   await manager.openScope({ directory: '/repo', sessionId: 'ses_two' }, manager.state().generation, { viewer: 'v1', frameSeq: shown.sequence });
   assert.notEqual(manager.state().selectedScopeId, null);
 });
+
+test('closes a named tab even after the view moved on since the dock last looked', async () => {
+  // Given a visible scope whose view changed after the dock read its generation.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_one'));
+  const stale = manager.state().generation;
+  const runtime = runtimes.get('ses_one');
+  runtime.tabs = [{ id: 'tab-x', active: true }];
+  const shown = await manager.surfaceFrame({ after: 0, wait: 0 });
+  runtime.tabs = [{ id: 'tab-x', active: false }, { id: 'tab-y', active: true }];
+  runtime.changeTabs();
+  assert.notEqual(manager.state().generation, stale);
+
+  // When the dock closes a tab by id with the old generation and an earlier frame, then it closes.
+  await manager.closeTab('tab-x', stale, { viewer: 'v1', frameSeq: shown.sequence });
+  assert.deepEqual(runtimes.get('ses_one').calls.at(-1), ['command', 'tab-close', { tabId: 'tab-x' }]);
+});
