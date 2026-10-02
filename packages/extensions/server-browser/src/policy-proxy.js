@@ -61,7 +61,23 @@ const hasGrant = (grants, hostname, address, port, protocol) => grants.some((gra
     && (host === hostname || (hostname === 'localhost' && host === address && LOOPBACK_ADDRESSES.includes(address)));
 });
 
-export const classifyProxyTarget = async (target, { grants = [], devServerGrants = null, lookup = dns.promises.lookup } = {}) => {
+// When private addresses are allowed wholesale, `localhost` goes to whichever
+// loopback family has a listener on the port, IPv4 first, like a browser would
+// after falling back.
+const loopbackListening = (address, port, timeoutMs = 300) => new Promise((resolve) => {
+  const socket = net.connect({ host: address, port });
+  const done = (result) => { socket.destroy(); resolve(result); };
+  socket.setTimeout(timeoutMs, () => done(false));
+  socket.once('connect', () => done(true));
+  socket.once('error', () => done(false));
+});
+
+export const classifyProxyTarget = async (target, {
+  grants = [],
+  devServerGrants = null,
+  allowPrivateNetwork = null,
+  lookup = dns.promises.lookup,
+} = {}) => {
   let url;
   try {
     url = target instanceof URL ? new URL(target) : new URL(String(target));
@@ -87,10 +103,21 @@ export const classifyProxyTarget = async (target, { grants = [], devServerGrants
     return resolvedGrants;
   };
 
+  // Read per request: the setting can change while browsers are open.
+  const privateAllowed = typeof allowPrivateNetwork === 'function' ? allowPrivateNetwork() === true : allowPrivateNetwork === true;
+
   let answers;
+  if (privateAllowed && hostname === 'localhost') {
+    for (const candidate of ['127.0.0.1', '::1']) {
+      if (await loopbackListening(candidate, port)) {
+        answers = [{ address: candidate, family: net.isIP(candidate) }];
+        break;
+      }
+    }
+  }
   // An exact localhost request uses the loopback family that has a grant, so
   // a server listening on only one of them still works when DNS lists both.
-  if (hostname === 'localhost') {
+  if (!answers && hostname === 'localhost') {
     const granted = await grantsFor();
     const address = LOOPBACK_ADDRESSES.find((candidate) => hasGrant(granted, hostname, candidate, port, url.protocol));
     if (address) answers = [{ address, family: net.isIP(address) }];
@@ -111,7 +138,7 @@ export const classifyProxyTarget = async (target, { grants = [], devServerGrants
     const address = normalizeHost(answer?.address);
     const reason = permanentlyDenied(address);
     if (reason) return { allowed: false, reason };
-    if (isPrivateAddress(address) && !hasGrant(await grantsFor(), hostname, address, port, url.protocol)) {
+    if (isPrivateAddress(address) && !privateAllowed && !hasGrant(await grantsFor(), hostname, address, port, url.protocol)) {
       return { allowed: false, reason: 'Private or loopback address requires an allowed origin', grantable: true };
     }
   }
@@ -158,6 +185,7 @@ const deniedPage = (reason, { origin = null, grantable = false, configPath = nul
   const [title, content] = grantable && origin ? [
     `Blocked: ${origin}`,
     `<h1>This private address is blocked</h1>
+<p>To open your own development servers, turn on <b>Allow localhost and private addresses</b> in OpenChamber's Settings → Browser.</p>
 <p>${shownOrigin} points to the machine running OpenChamber or its local network. Server Browser blocks private and loopback addresses until you allow them, so pages and agents cannot reach those services without permission.</p>
 <p>To allow it, add the origin to <code>allowedOrigins</code> in ${configFile} and restart the extension:</p>
 <pre>${escapeHtml(`{\n  "allowedOrigins": [${JSON.stringify(origin)}]\n}`)}</pre>

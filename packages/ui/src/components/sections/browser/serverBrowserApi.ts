@@ -188,6 +188,23 @@ export const clearProfileSite = (id: string, domain: string): Promise<ServerBrow
 );
 
 /** Whether a failed call means the extension is not usable at all (vs. a one-off error). */
+export interface NetworkPolicyState {
+  ok: true;
+  allowPrivateNetwork: boolean;
+  source: 'settings' | 'config' | 'default';
+  defaultValue: boolean;
+  personalMachine: boolean;
+}
+
+export const getNetworkPolicy = (): Promise<ServerBrowserResult<NetworkPolicyState>> => (
+  request<NetworkPolicyState>('GET', '/network')
+);
+
+/** `null` returns to the default for where OpenChamber runs. */
+export const setNetworkPolicy = (allowPrivateNetwork: boolean | null): Promise<ServerBrowserResult<NetworkPolicyState>> => (
+  request<NetworkPolicyState>('POST', '/network', { body: { allowPrivateNetwork } })
+);
+
 export const isServerBrowserUnavailable = (error: ServerBrowserError): boolean => error.kind === 'unavailable';
 
 /** The error thrown by the service when another viewer holds the shared surface. */

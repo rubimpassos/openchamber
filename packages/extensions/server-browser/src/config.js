@@ -95,7 +95,7 @@ export const parseConfig = (value) => {
   if (value.allowedNetworks !== undefined && !Array.isArray(value.allowedNetworks)) {
     throw new Error('config.allowedNetworks must be an array');
   }
-  for (const name of ['discoverDevServers', 'projectDevServers']) {
+  for (const name of ['discoverDevServers', 'projectDevServers', 'allowPrivateNetwork']) {
     if (value[name] !== undefined && typeof value[name] !== 'boolean') {
       throw new Error(`config.${name} must be true or false`);
     }
@@ -112,6 +112,8 @@ export const parseConfig = (value) => {
     allowedNetworks: Object.freeze((value.allowedNetworks ?? []).map(parseAllowedNetwork)),
     discoverDevServers: value.discoverDevServers === true,
     projectDevServers: value.projectDevServers !== false,
+    // null: decided by where OpenChamber runs (see network-policy.js).
+    allowPrivateNetwork: typeof value.allowPrivateNetwork === 'boolean' ? value.allowPrivateNetwork : null,
     profileStore: value.profileStore?.trim() ?? null,
     profileKeyFile: value.profileKeyFile?.trim() ?? null,
   });

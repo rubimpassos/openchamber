@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createBrowserManager } from './browser-manager.js';
 import { createBrowserRuntime } from './browser-runtime.js';
 import { loadConfig } from './config.js';
+import { createNetworkPolicy } from './network-policy.js';
 import { createChromeInstaller } from './chrome-install.js';
 import { resolveChromePath } from './chrome-process.js';
 import { createDevServerScanner } from './dev-servers.js';
@@ -40,6 +41,10 @@ export const startService = async ({
     keyFile: config.profileKeyFile ?? defaults.keyFile,
   });
   await profiles.removeStale().catch(() => []);
+  const networkPolicy = createNetworkPolicy({
+    file: path.join(defaults.root, 'network.json'),
+    configured: config.allowPrivateNetwork,
+  });
   // Plug and play: without a Chrome on the machine, the service downloads one.
   let systemChrome = null;
   try {
@@ -80,6 +85,7 @@ export const startService = async ({
       devServers,
       projectDevServers: config.projectDevServers ? scanner : null,
       projectDirectory: context.directory.startsWith('profile:') ? null : context.directory,
+      allowPrivateNetwork: networkPolicy.allowPrivateNetwork,
       profile: profile ? {
         id: profile.id,
         name: profile.name,
@@ -94,6 +100,7 @@ export const startService = async ({
     port: readPort(env.OPENCHAMBER_SERVICE_PORT),
     chromeStatus,
     profileSites,
+    networkPolicy,
   });
   await service.listen();
   return service;

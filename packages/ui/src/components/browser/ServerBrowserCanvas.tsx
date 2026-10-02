@@ -31,6 +31,19 @@ export type ServerBrowserCanvasHandle = {
   readonly release: () => void;
 };
 
+/**
+ * Lays the canvas out at the page's CSS size, shrunk to fit the panel when the
+ * page is larger (a fixed viewport), never stretched past it.
+ */
+const fitCanvas = (canvas: HTMLCanvasElement, container: HTMLElement | null, width: number, height: number) => {
+  if (width <= 0 || height <= 0) return;
+  const boxWidth = container?.clientWidth || width;
+  const boxHeight = container?.clientHeight || height;
+  const fit = Math.min(1, boxWidth / width, boxHeight / height);
+  canvas.style.width = `${Math.floor(width * fit)}px`;
+  canvas.style.height = `${Math.floor(height * fit)}px`;
+};
+
 export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
   guestId: string;
   onViewer: (viewerId: string | undefined) => void;
@@ -62,13 +75,20 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
     if (!canvas || !client) return;
     try {
       const bitmap = await createImageBitmap(new Blob([frame.bytes], { type: frame.mime }));
-      if (canvas.width !== frame.width || canvas.height !== frame.height) {
-        canvas.width = frame.width;
-        canvas.height = frame.height;
+      // The page renders at this screen's density, so the picture has more
+      // pixels than the frame's CSS size. Back the canvas with every one of
+      // them and lay it out at the CSS size; drawing it at CSS size would
+      // throw the extra sharpness away.
+      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
       }
+      fitCanvas(canvas, containerRef.current, frame.width, frame.height);
       const context = canvas.getContext('2d');
-      context?.drawImage(bitmap, 0, 0, frame.width, frame.height);
+      if (context) context.imageSmoothingQuality = 'high';
+      context?.drawImage(bitmap, 0, 0);
       bitmap.close();
+      // Pointer coordinates go to the page in CSS pixels.
       frameSizeRef.current = { width: frame.width, height: frame.height };
       setHasFrame(true);
     } catch {
@@ -122,6 +142,8 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
+        const size = frameSizeRef.current;
+        if (canvasRef.current && size) fitCanvas(canvasRef.current, container, size.width, size.height);
         const scale = window.devicePixelRatio || 1;
         const w = Math.round(width * scale);
         const h = Math.round(height * scale);
@@ -229,7 +251,7 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
       <canvas
         ref={canvasRef}
         className={cn(
-          'max-h-full max-w-full',
+          'shrink-0',
           hasFrame ? 'block' : 'hidden',
           controlRef.current.controller === 'user' && !controlRef.current.mine ? 'cursor-not-allowed' : 'cursor-default',
         )}

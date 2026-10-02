@@ -10,7 +10,7 @@ import { networkGrants, originGrants } from './config.js';
 import { createNativeSelectCompatibility } from './native-select-compatibility.js';
 import { createPolicyProxy } from './policy-proxy.js';
 import { createSurface } from './surface.js';
-import { applyViewport, presetViewport } from './viewports.js';
+import { applyViewport, cssScreenshotParams, presetViewport } from './viewports.js';
 
 const boundedText = (value, maximum = 1_000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maximum);
 
@@ -52,6 +52,7 @@ export const createBrowserRuntime = ({
   projectDevServers = null,
   projectDirectory = null,
   profile = null,
+  allowPrivateNetwork = null,
 } = {}) => {
   let chrome = profile ? null : createChromeProcess({ chromePath });
   let profileDirectory = null;
@@ -66,6 +67,7 @@ export const createBrowserRuntime = ({
     devServerGrants: grantSources.length > 0 ? async () => (await Promise.all(grantSources.map((source) => source()))).flat() : null,
     discoverDevServers: Boolean(devServers),
     projectDirectory: projectDevServers ? projectDirectory : null,
+    allowPrivateNetwork,
   });
   const shutdownController = new AbortController();
   const tabs = new Map();
@@ -91,11 +93,11 @@ export const createBrowserRuntime = ({
   const deathListeners = new Set();
   // 'auto' follows the viewer's panel; 'fixed' keeps a chosen size. The source
   // says who chose it, so an agent's size is not replaced by a panel resize.
-  let viewportConfig = { mode: 'auto', source: 'viewer', mobile: false, fixed: null, panel: null };
+  let viewportConfig = { mode: 'auto', source: 'viewer', mobile: false, fixed: null, panel: null, scale: 1 };
 
   const effectiveViewport = () => {
     const size = viewportConfig.mode === 'fixed' ? viewportConfig.fixed : viewportConfig.panel ?? presetViewport('desktop');
-    return { width: size.width, height: size.height, mobile: viewportConfig.mobile };
+    return { width: size.width, height: size.height, mobile: viewportConfig.mobile, scale: viewportConfig.scale };
   };
 
   const markDead = () => {
@@ -504,6 +506,7 @@ export const createBrowserRuntime = ({
     await Promise.allSettled([...tabs.values()]
       .filter((current) => current.sessionId !== page.sessionId)
       .map((current) => applyViewport(cdp, current.sessionId, viewport)));
+    surface?.refreshStream();
   };
 
   runtime.configureViewport = async ({ mode, source, width, height, mobile }) => {
@@ -526,11 +529,17 @@ export const createBrowserRuntime = ({
 
   // The CSS size the viewer's panel can show. A fixed viewport keeps its own
   // size and the host letterboxes it.
-  runtime.setPanelSize = async (size) => {
-    viewportConfig = { ...viewportConfig, panel: size };
-    if (viewportConfig.mode === 'auto') await applyViewportToTabs();
-    const { width, height } = effectiveViewport();
-    return { width, height };
+  runtime.setPanelSize = async ({ width, height, scale }) => {
+    const scaleChanged = typeof scale === 'number' && scale !== viewportConfig.scale;
+    viewportConfig = {
+      ...viewportConfig,
+      panel: { width, height },
+      scale: typeof scale === 'number' ? scale : viewportConfig.scale,
+    };
+    // A fixed viewport keeps its size but still follows the viewer's density.
+    if (viewportConfig.mode === 'auto' || scaleChanged) await applyViewportToTabs();
+    const shown = effectiveViewport();
+    return { width: shown.width, height: shown.height };
   };
 
   // Dock commands return once Chrome accepts them; loading and history state
@@ -675,7 +684,7 @@ export const createBrowserRuntime = ({
   runtime.pageCapture = async () => {
     const page = await runtime.ensurePage();
     await page.cdp.sendSession(page.sessionId, 'Page.enable').catch(() => {});
-    const capture = await page.cdp.sendSession(page.sessionId, 'Page.captureScreenshot', { format: 'png' });
+    const capture = await page.cdp.sendSession(page.sessionId, 'Page.captureScreenshot', cssScreenshotParams(runtime.viewport));
     const metrics = await page.cdp.sendSession(page.sessionId, 'Page.getLayoutMetrics');
     const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport;
     return {

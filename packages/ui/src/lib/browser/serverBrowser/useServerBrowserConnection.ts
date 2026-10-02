@@ -47,19 +47,20 @@ export type ServerBrowserConnection = {
   readonly loading: boolean;
   readonly error: string | null;
   readonly refresh: () => Promise<void>;
-  readonly navigate: (url: string) => Promise<void>;
-  readonly back: () => Promise<void>;
-  readonly forward: () => Promise<void>;
-  readonly reload: () => Promise<void>;
-  readonly stop: () => Promise<void>;
-  readonly newTab: () => Promise<void>;
-  readonly selectTab: (tabId: string) => Promise<void>;
-  readonly closeTab: (tabId: string) => Promise<void>;
-  readonly setViewport: (viewport: { mode: 'auto' | 'fixed'; mobile: boolean; width?: number; height?: number }) => Promise<void>;
-  readonly setZoom: (level: number) => Promise<void>;
-  readonly clearData: (what: 'cookies' | 'cache') => Promise<void>;
-  readonly selectScope: (scopeId: string) => Promise<void>;
-  readonly closeScope: (scopeId: string) => Promise<void>;
+  readonly navigate: (url: string) => Promise<ServerBrowserState | null>;
+  readonly back: () => Promise<ServerBrowserState | null>;
+  readonly forward: () => Promise<ServerBrowserState | null>;
+  readonly reload: () => Promise<ServerBrowserState | null>;
+  readonly stop: () => Promise<ServerBrowserState | null>;
+  /** Resolves to the state after the tab opened (its active tab is the new one), or null on failure. */
+  readonly newTab: () => Promise<ServerBrowserState | null>;
+  readonly selectTab: (tabId: string) => Promise<ServerBrowserState | null>;
+  readonly closeTab: (tabId: string) => Promise<ServerBrowserState | null>;
+  readonly setViewport: (viewport: { mode: 'auto' | 'fixed'; mobile: boolean; width?: number; height?: number }) => Promise<ServerBrowserState | null>;
+  readonly setZoom: (level: number) => Promise<ServerBrowserState | null>;
+  readonly clearData: (what: 'cookies' | 'cache') => Promise<ServerBrowserState | null>;
+  readonly selectScope: (scopeId: string) => Promise<ServerBrowserState | null>;
+  readonly closeScope: (scopeId: string) => Promise<ServerBrowserState | null>;
   readonly evaluate: (expression: string, userGesture?: boolean) => Promise<unknown>;
   readonly capture: () => Promise<ServerBrowserCapture | null>;
 };
@@ -68,6 +69,10 @@ export const useServerBrowserConnection = (
   guestId: string,
   directory: string,
   viewerId: string | undefined,
+  /** False for a panel tab in the background: it neither opens the scope nor polls. */
+  enabled = true,
+  /** A profile being signed into from Settings: show its sign-in browser instead of the chat's. */
+  signInProfileId: string | null = null,
 ): ServerBrowserConnection => {
   const sessionId = useSessionUIStore((storeState) => storeState.currentSessionId);
   const [state, setState] = React.useState<ServerBrowserState | null>(null);
@@ -85,14 +90,24 @@ export const useServerBrowserConnection = (
 
   const act = React.useCallback(async (
     fn: (generation: number) => Promise<ServerBrowserResult<ServerBrowserState>>,
-  ): Promise<void> => {
-    const result = await fn(generationRef.current);
+  ): Promise<ServerBrowserState | null> => {
+    let result = await fn(generationRef.current);
+    // The view moved on since our last poll (another tab, the agent): catch
+    // up and try once more instead of dropping the click.
+    if (!result.ok && /view changed/i.test(result.error)) {
+      const current = await getServerBrowserState(guestId, viewerId);
+      if (current.ok) {
+        applyState(current.data);
+        result = await fn(current.data.generation);
+      }
+    }
     if (result.ok) {
       applyState(result.data);
-      return;
+      return result.data;
     }
     setError(result.error);
-  }, [applyState]);
+    return null;
+  }, [applyState, guestId, viewerId]);
 
   const refresh = React.useCallback(async (): Promise<void> => {
     const result = await getServerBrowserState(guestId, viewerId);
@@ -108,33 +123,60 @@ export const useServerBrowserConnection = (
   // front of the shared surface. Re-runs when the current chat changes, so
   // switching chats while the panel is open follows the switch.
   React.useEffect(() => {
-    if (!sessionId || viewerId === undefined) return;
+    if (!enabled || viewerId === undefined) return;
+    if (signInProfileId) {
+      let cancelled = false;
+      void (async () => {
+        const current = await getServerBrowserState(guestId, viewerId);
+        if (cancelled || !current.ok) { setLoading(false); return; }
+        applyState(current.data);
+        const signInScope = current.data.scopes.find((entry) => entry.directory === `profile:${signInProfileId}`);
+        if (signInScope && current.data.selectedScopeId !== signInScope.id) {
+          const selected = await selectServerBrowserScope(guestId, viewerId, { scopeId: signInScope.id, generation: current.data.generation });
+          if (!cancelled && selected.ok) applyState(selected.data);
+        }
+        if (!cancelled) setLoading(false);
+      })();
+      return () => { cancelled = true; };
+    }
+    if (!sessionId) return;
     let cancelled = false;
     setLoading(true);
     void (async () => {
-      const result = await openServerBrowserScope(guestId, viewerId, {
-        directory,
-        sessionId,
-        generation: generationRef.current,
-      });
-      if (cancelled) return;
-      if (result.ok) applyState(result.data);
-      else setError(result.error);
+      // The generation guards against acting on a view that changed; a panel
+      // that just mounted has none yet, so it reads the current one first.
+      // One retry covers a change that lands between the read and the open.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const current = await getServerBrowserState(guestId, viewerId);
+        if (cancelled) return;
+        if (current.ok) applyState(current.data);
+        const result = await openServerBrowserScope(guestId, viewerId, {
+          directory,
+          sessionId,
+          generation: generationRef.current,
+        });
+        if (cancelled) return;
+        if (result.ok) {
+          applyState(result.data);
+          break;
+        }
+        setError(result.error);
+      }
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [applyState, directory, guestId, sessionId, viewerId]);
+  }, [applyState, directory, enabled, guestId, sessionId, signInProfileId, viewerId]);
 
   // Tells the service our pixel ratio once a viewer is attached, so a
   // high-DPI client gets crisp frames from the start.
   React.useEffect(() => {
-    if (viewerId === undefined) return;
+    if (!enabled || viewerId === undefined) return;
     void setServerBrowserViewer(guestId, viewerId, { devicePixelRatio: window.devicePixelRatio || 1 })
       .then((result) => { if (result.ok) applyState(result.data); });
-  }, [applyState, guestId, viewerId]);
+  }, [applyState, enabled, guestId, viewerId]);
 
   React.useEffect(() => {
-    if (viewerId === undefined) return;
+    if (!enabled || viewerId === undefined) return;
     let disposed = false;
     const tick = async () => {
       if (disposed) return;
@@ -146,7 +188,7 @@ export const useServerBrowserConnection = (
     };
     let timer = setTimeout(tick, POLL_MS);
     return () => { disposed = true; clearTimeout(timer); };
-  }, [applyState, guestId, viewerId]);
+  }, [applyState, enabled, guestId, viewerId]);
 
   const scope = React.useMemo(() => findSelectedScope(state), [state]);
 

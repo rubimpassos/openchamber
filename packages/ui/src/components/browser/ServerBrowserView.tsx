@@ -2,6 +2,7 @@ import React from 'react';
 
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
@@ -18,7 +19,20 @@ import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 import { toDisplayUrl } from '@/lib/browser/devTunnel';
 import { FILL_VIEWPORT, type BrowserViewport } from '@/lib/browser/viewport';
-import { closeServerBrowserProfile } from '@/lib/browser/serverBrowser/client';
+import {
+  closeServerBrowserProfile,
+  closeServerBrowserTab,
+  getServerBrowserState,
+} from '@/lib/browser/serverBrowser/client';
+import {
+  claimedChromeTab,
+  panelTabsByChromeTab,
+  unclaimedChromeTabs,
+  useServerBrowserPanelTabs,
+  useServerBrowserSignIn,
+} from '@/lib/browser/serverBrowser/panelTabs';
+import { findSelectedScope, type ServerBrowserState } from '@/lib/browser/serverBrowser/types';
+import { useUIStore } from '@/stores/useUIStore';
 import { useServerBrowserConnection } from '@/lib/browser/serverBrowser/useServerBrowserConnection';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
 
@@ -27,14 +41,16 @@ import { BrowserDeviceBar } from './BrowserDeviceBar';
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
 import { ServerBrowserCanvas, type ServerBrowserCanvasHandle } from './ServerBrowserCanvas';
-import { ServerBrowserHeader } from './ServerBrowserHeader';
 import { ServerBrowserBanners } from './ServerBrowserBanners';
-import { ServerBrowserTabs } from './ServerBrowserTabs';
 import { ServerBrowserInspector } from './ServerBrowserInspector';
 
 export type ServerBrowserViewProps = {
   guestId: string;
   directory: string;
+  /** The Browser panel tab this view draws; it shows one Chrome tab of the chat. */
+  tabID: string;
+  /** Only the panel tab in front talks to the server and draws the page. */
+  active: boolean;
 };
 
 const ZOOM_MIN = -5;
@@ -57,7 +73,49 @@ const toServiceViewport = (viewport: BrowserViewport): { mode: 'auto' | 'fixed';
  * protocol (`ServerBrowserCanvas` / `SurfaceClient`), which is also what
  * extension rail panels use — this view never talks to Chrome directly.
  */
-export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, directory }) => {
+const panelTabExists = (directory: string, tabID: string): boolean => Object.values(useUIStore.getState().contextPanelByDirectory)
+  .some((panel) => panel?.tabs.some((tab) => tab.id === tabID));
+
+/**
+ * Closing a Browser panel tab closes the Chrome tab it showed. Run from the
+ * view's unmount, which is also what a chat or directory switch causes, so it
+ * only acts once the panel tab is really gone from the store.
+ */
+const closeChromeTabsOfPanelTab = async (guestId: string, directory: string, tabID: string): Promise<void> => {
+  if (panelTabExists(directory, tabID)) return;
+  const { claims, release } = useServerBrowserPanelTabs.getState();
+  const owned = Object.entries(claims)
+    .map(([key, chromeTabId]) => {
+      const [scopeId, panelTabId] = key.split('\u0000');
+      return { scopeId, panelTabId, chromeTabId };
+    })
+    .filter((entry) => entry.panelTabId === tabID);
+  if (owned.length === 0) return;
+  for (const entry of owned) release(entry.scopeId, entry.panelTabId);
+  const current = await getServerBrowserState(guestId, undefined);
+  if (!current.ok) return;
+  const scope = findSelectedScope(current.data);
+  for (const entry of owned) {
+    if (!scope || scope.id !== entry.scopeId || !scope.tabs.some((tab) => tab.id === entry.chromeTabId)) continue;
+    await closeServerBrowserTab(guestId, undefined, { generation: current.data.generation, tabId: entry.chromeTabId });
+  }
+};
+
+export const ServerBrowserView: React.FC<ServerBrowserViewProps> = (props) => {
+  const { guestId, directory, tabID, active } = props;
+  React.useEffect(() => () => {
+    // After the store update that removed the tab has been rendered.
+    queueMicrotask(() => { void closeChromeTabsOfPanelTab(guestId, directory, tabID); });
+  }, [directory, guestId, tabID]);
+  if (!active) return null;
+  return <ServerBrowserLiveView {...props} />;
+};
+
+const activeChromeTabOf = (state: ServerBrowserState | null): string | null => (
+  findSelectedScope(state)?.tabs.find((tab) => tab.active)?.id ?? null
+);
+
+const ServerBrowserLiveView: React.FC<ServerBrowserViewProps> = ({ guestId, directory, tabID }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const canvasHandleRef = React.useRef<ServerBrowserCanvasHandle | null>(null);
@@ -67,8 +125,110 @@ export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, d
   const [connection, setConnection] = React.useState<SurfaceConnectionState>({ status: 'connecting' });
   const [canvasFocused, setCanvasFocused] = React.useState(false);
 
-  const serverBrowser = useServerBrowserConnection(guestId, directory, viewerId);
+  const signIn = useServerBrowserSignIn((store) => store.signIn);
+  const setSignIn = useServerBrowserSignIn((store) => store.setSignIn);
+  const serverBrowser = useServerBrowserConnection(guestId, directory, viewerId, true, signIn?.profileId ?? null);
   const { scope, state } = serverBrowser;
+
+  // ---- this panel tab <-> one Chrome tab of the chat ----------------------
+  const claims = useServerBrowserPanelTabs((store) => store.claims);
+  const claim = useServerBrowserPanelTabs((store) => store.claim);
+  const release = useServerBrowserPanelTabs((store) => store.release);
+  const openAgentBrowserTab = useUIStore((store) => store.openAgentBrowserTab);
+  const closeContextPanelTabs = useUIStore((store) => store.closeContextPanelTabs);
+  const setContextPanelTabTargetPath = useUIStore((store) => store.setContextPanelTabTargetPath);
+  const panelTabs = useUIStore((store) => store.contextPanelByDirectory[directory]?.tabs);
+  const myChromeTab = scope ? claimedChromeTab(claims, scope.id, tabID) : null;
+  const pairingRef = React.useRef(false);
+  const tabsSignature = scope ? scope.tabs.map((tab) => `${tab.id}:${tab.active ? 1 : 0}`).join(',') : '';
+
+  React.useEffect(() => {
+    if (signIn || !scope || pairingRef.current) return;
+    const mine = myChromeTab ? scope.tabs.find((tab) => tab.id === myChromeTab) : undefined;
+    if (mine) {
+      if (!mine.active) {
+        pairingRef.current = true;
+        void serverBrowser.selectTab(mine.id).finally(() => { pairingRef.current = false; });
+      }
+      return;
+    }
+    if (myChromeTab) release(scope.id, tabID);
+    const free = unclaimedChromeTabs(claims, scope);
+    const activeFree = scope.tabs.find((tab) => tab.active && free.includes(tab.id))?.id;
+    const pick = activeFree ?? free[0];
+    if (pick) {
+      claim(scope.id, tabID, pick);
+      return;
+    }
+    // Every Chrome tab already has a panel tab: this one is new, so it gets
+    // a new Chrome tab, which opens blank on the dev-server list.
+    pairingRef.current = true;
+    void serverBrowser.newTab().then((next) => {
+      const opened = activeChromeTabOf(next);
+      const nextScope = findSelectedScope(next);
+      if (opened && nextScope) claim(nextScope.id, tabID, opened);
+    }).finally(() => { pairingRef.current = false; });
+    // `scope` changes identity on every poll; the signature is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope?.id, tabsSignature, myChromeTab, claims, tabID, signIn]);
+
+  // Chrome tabs the page or the agent opened get panel tabs of their own,
+  // first reusing panel tabs that show nothing yet (after a reload), and a
+  // claimed Chrome tab that closed (a popup that finished) takes its panel
+  // tab with it.
+  React.useEffect(() => {
+    if (signIn || !scope || !myChromeTab || pairingRef.current) return;
+    const browserPanelTabs = (panelTabs ?? []).filter((tab) => tab.mode === 'browser');
+    const byChromeTab = panelTabsByChromeTab(claims, scope.id);
+    const liveIds = new Set(scope.tabs.map((tab) => tab.id));
+    const stale = [...byChromeTab.entries()].filter(([chromeTabId, panelTabId]) => !liveIds.has(chromeTabId) && panelTabId !== tabID);
+    const anyLive = [...byChromeTab.keys()].some((chromeTabId) => liveIds.has(chromeTabId));
+    if (stale.length > 0 && anyLive) {
+      for (const [, panelTabId] of stale) release(scope.id, panelTabId);
+      closeContextPanelTabs(directory, stale.map(([, panelTabId]) => panelTabId));
+    }
+    const claimedPanels = new Set(byChromeTab.values());
+    const idlePanels = browserPanelTabs.filter((tab) => tab.id !== tabID && !claimedPanels.has(tab.id));
+    for (const chromeTabId of unclaimedChromeTabs(claims, scope)) {
+      const reuse = idlePanels.shift();
+      if (reuse) {
+        claim(scope.id, reuse.id, chromeTabId);
+        continue;
+      }
+      const url = scope.tabs.find((tab) => tab.id === chromeTabId)?.url ?? '';
+      const panelTabId = openAgentBrowserTab(directory, url === BLANK_URL ? '' : url);
+      if (panelTabId) claim(scope.id, panelTabId, chromeTabId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope?.id, tabsSignature, myChromeTab, claims, panelTabs, signIn]);
+
+  // Panel tab names follow the page each one shows.
+  React.useEffect(() => {
+    if (!scope) return;
+    for (const [chromeTabId, panelTabId] of panelTabsByChromeTab(claims, scope.id)) {
+      const chromeTab = scope.tabs.find((tab) => tab.id === chromeTabId);
+      if (!chromeTab) continue;
+      const url = chromeTab.url === BLANK_URL ? '' : toDisplayUrl(chromeTab.url);
+      const panelTab = panelTabs?.find((tab) => tab.id === panelTabId);
+      if (panelTab && (panelTab.targetPath ?? '') !== url) setContextPanelTabTargetPath(directory, panelTabId, url);
+    }
+  }, [claims, directory, panelTabs, scope, setContextPanelTabTargetPath]);
+
+  const isSignInScope = Boolean(scope?.directory.startsWith('profile:'));
+  // A sign-in browser is not one of this panel's tabs: it is shown as is.
+  const showingMine = isSignInScope || Boolean(scope && myChromeTab && scope.tabs.some((tab) => tab.id === myChromeTab && tab.active));
+
+  const closeChatBrowser = React.useCallback(() => {
+    if (!scope) return;
+    const owned = [...panelTabsByChromeTab(claims, scope.id).values()];
+    for (const panelTabId of owned) release(scope.id, panelTabId);
+    void serverBrowser.closeScope(scope.id).then(() => {
+      const browserPanelIds = (useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [])
+        .filter((tab) => tab.mode === 'browser')
+        .map((tab) => tab.id);
+      closeContextPanelTabs(directory, browserPanelIds);
+    });
+  }, [claims, closeContextPanelTabs, directory, release, scope, serverBrowser]);
 
   const [address, setAddress] = React.useState('');
   React.useEffect(() => {
@@ -141,13 +301,22 @@ export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, d
       .then((result) => {
         if (result.ok) {
           toast.success(t('contextPanel.browser.server.help.saveSignInSuccess'));
+          // Back to this chat's own browser.
+          if (signIn?.profileId === profileId) setSignIn(null);
           void serverBrowser.refresh();
         } else {
           toast.error(t('contextPanel.browser.server.help.saveSignInFailed'));
         }
       })
       .finally(() => setSavingSignIn(false));
-  }, [guestId, scope?.profile?.id, serverBrowser, t, viewerId]);
+  }, [guestId, scope?.profile?.id, serverBrowser, setSignIn, signIn?.profileId, t, viewerId]);
+
+  // Leaves without saving: the sign-in browser closes and the profile keeps
+  // what it had.
+  const cancelSignIn = React.useCallback(() => {
+    if (!scope || !isSignInScope) return;
+    void serverBrowser.closeScope(scope.id).finally(() => setSignIn(null));
+  }, [isSignInScope, scope, serverBrowser, setSignIn]);
 
   const handleViewportChange = React.useCallback((next: BrowserViewport) => {
     setViewport(next);
@@ -160,16 +329,26 @@ export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, d
   const help = state?.help ?? null;
   const helpTargetsThisScope = Boolean(help && scope && (help.forScopeId ?? help.scopeId) === scope.id);
 
-  const loaded = Boolean(scope && scope.url && scope.url !== BLANK_URL);
+  const loaded = Boolean(showingMine && scope && scope.url && scope.url !== BLANK_URL);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
-      <ServerBrowserHeader
-        scope={scope}
-        allScopes={state?.scopes ?? []}
-        onSelectScope={(scopeId) => void serverBrowser.selectScope(scopeId)}
-        onCloseScope={(scopeId) => void serverBrowser.closeScope(scopeId)}
-      />
+      {isSignInScope && scope ? (
+        <div className="flex items-center gap-2 border-b border-border bg-[var(--status-info-background)] px-3 py-1.5 typography-ui-label">
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium">{t('contextPanel.browser.server.signingIn', { profile: scope.profile?.name ?? signIn?.name ?? '' })}</span>
+            {' — '}
+            {t('contextPanel.browser.server.help.loginHint')}
+          </span>
+          <Button size="xs" variant="ghost" onClick={cancelSignIn} disabled={savingSignIn}>
+            {t('contextPanel.browser.server.cancel')}
+          </Button>
+          <Button size="xs" variant="outline" onClick={handleSaveSignIn} disabled={savingSignIn}>
+            <Icon name="save-3" className="size-3.5" aria-hidden="true" />
+            {t('contextPanel.browser.server.help.saveSignIn')}
+          </Button>
+        </div>
+      ) : null}
       <BrowserToolbar
         address={address}
         onAddressChange={setAddress}
@@ -195,8 +374,13 @@ export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, d
         onZoomOut={() => void serverBrowser.setZoom(Math.max(ZOOM_MIN, zoomLevel - 1))}
         onZoomReset={() => void serverBrowser.setZoom(0)}
         zoomPercent={zoomPercent}
-        onClearCookies={() => setClearConfirm('cookies')}
-        onClearCache={() => setClearConfirm('cache')}
+        menuItems={[
+          { kind: 'item', id: 'cookies', icon: 'delete-bin', label: t('contextPanel.browser.clearCookies'), onSelect: () => setClearConfirm('cookies') },
+          { kind: 'item', id: 'cache', icon: 'database-2', label: t('contextPanel.browser.clearCache'), onSelect: () => setClearConfirm('cache') },
+          { kind: 'item', id: 'external', icon: 'external-link', label: t('contextPanel.browser.openExternal'), onSelect: () => void openExternalUrl(scope?.url || address), disabled: !loaded },
+          { kind: 'separator', id: 'sep' },
+          { kind: 'item', id: 'close', icon: 'close-circle', label: t('contextPanel.browser.server.closeScope'), onSelect: closeChatBrowser, destructive: true, disabled: !scope },
+        ]}
         onToggleDeviceBar={() => setShowDeviceBar((current) => !current)}
         isDeviceBarOpen={showDeviceBar}
       />
@@ -209,12 +393,6 @@ export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, d
           scale={1}
         />
       ) : null}
-      <ServerBrowserTabs
-        tabs={scope?.tabs ?? []}
-        onSelect={(tabId) => void serverBrowser.selectTab(tabId)}
-        onClose={(tabId) => void serverBrowser.closeTab(tabId)}
-        onNew={() => void serverBrowser.newTab()}
-      />
       <ServerBrowserBanners
         control={control}
         connection={connection}
@@ -226,7 +404,7 @@ export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, d
         savingSignIn={savingSignIn}
         chrome={state?.chrome ?? null}
       />
-      <div className="relative min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 flex-col">
         <ServerBrowserCanvas
           ref={canvasHandleRef}
           guestId={guestId}
@@ -235,7 +413,7 @@ export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, d
           onConnection={setConnection}
           onFocusChange={setCanvasFocused}
         />
-        {!loaded && !serverBrowser.loading ? (
+        {!loaded && (showingMine || !serverBrowser.loading) ? (
           <div className="absolute inset-0">
             <BrowserEmptyState onOpen={(url) => void serverBrowser.navigate(normalizeBrowserUrl(url))} directory={directory} />
           </div>

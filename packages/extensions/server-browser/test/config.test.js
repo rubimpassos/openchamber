@@ -11,6 +11,7 @@ test('defaults to no private origin grants', () => {
     allowedNetworks: [],
     discoverDevServers: false,
     projectDevServers: true,
+    allowPrivateNetwork: null,
     profileStore: null,
     profileKeyFile: null,
   });

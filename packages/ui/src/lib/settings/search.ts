@@ -587,14 +587,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'sessions.browser-provider',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.browserProvider.label',
-    descriptionKey: 'settings.openchamber.tools.browserProvider.info',
-    keywords: ['agent', 'browser', 'provider', 'extension', 'chrome', 'server', 'headless'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'sessions.agent-notify-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentNotifyTool',
@@ -627,7 +619,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'browser',
     titleKey: 'settings.browser.engine.title',
     descriptionKey: 'settings.openchamber.tools.browserProvider.info',
-    keywords: ['browser', 'engine', 'chrome', 'server', 'this device', 'extension'],
+    keywords: ['browser', 'engine', 'provider', 'chrome', 'server', 'this device', 'extension', 'headless'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -636,6 +628,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.browser.profiles.title',
     descriptionKey: 'settings.browser.profiles.description',
     keywords: ['profile', 'profiles', 'sign in', 'bind', 'project', 'saved', 'revoke'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'browser.network',
+    page: 'browser',
+    titleKey: 'settings.browser.network.title',
+    descriptionKey: 'settings.browser.network.allowPrivate.description',
+    keywords: ['localhost', 'local', 'private', 'network', 'lan', 'dev server', 'port', 'blocked'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
