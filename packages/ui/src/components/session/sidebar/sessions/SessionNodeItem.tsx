@@ -43,6 +43,7 @@ import { useSessionRowMenuState } from './useSessionRowMenuState';
 import type { SessionNode } from '../types';
 import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
+import { sessionAgentLabel } from '@/lib/opencode/subagentTitle';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openExternalUrl } from '@/lib/url';
@@ -521,6 +522,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </span>
   ) : null;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
+  // A subagent row shows its description; the agent becomes a label beside it.
+  const agentLabel = sessionAgentLabel(resolvedSession);
+  const sessionDisplayTitle = agentLabel.agent ? agentLabel.title : sessionTitle;
+  const agentChip = (className?: string) => (agentLabel.agent ? (
+    <span
+      className={cn('inline-flex max-w-[45%] flex-shrink-0 items-center truncate rounded bg-primary/10 px-1 py-0.5 text-[0.7rem] leading-none text-primary', className)}
+      title={agentLabel.agent}
+      data-session-agent={agentLabel.agent}
+    >
+      {agentLabel.agent}
+    </span>
+  ) : null);
   // Timeline is a flat list: a node that still carries children renders as a
   // leaf, without a chevron and without an expansion state.
   const hasChildren = !isTimelineRow && node.children.length > 0;
@@ -1471,7 +1484,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       compact={isTimelineChatRow}
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
-      title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
+      title={agentLabel.agent ? <>{renderHighlightedText(sessionDisplayTitle, normalizedSessionSearchQuery)} {agentChip('ml-1 align-middle')}</> : renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
       titleClassName={isActive || isRowSelected
         ? 'text-interactive-selection-foreground'
         : needsAttention ? 'text-foreground' : 'text-foreground/80'}
@@ -1632,7 +1645,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                       {/* Unread emphasis is color-only: a font-weight change
                           would reflow the truncated title and cause a micro
                           horizontal shift when the status flips. */}
-                      <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive || isRowSelected ? 'text-interactive-selection-foreground' : needsAttention ? 'text-foreground' : 'text-foreground/80')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
+                      <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive || isRowSelected ? 'text-interactive-selection-foreground' : needsAttention ? 'text-foreground' : 'text-foreground/80')}>{renderHighlightedText(sessionDisplayTitle, normalizedSessionSearchQuery)}</div>
+                      {agentChip()}
                       {!archivedBucket && sessionDirectory && renderContext === 'recent' ? (
                         <DirectoryActionIndicator
                           directory={sessionDirectory}
@@ -1733,7 +1747,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left">
                   <div className="flex min-w-44 flex-col gap-1.5 text-left text-xs">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 truncate font-medium text-foreground">{sessionTitle}</span>
+                      <span className="min-w-0 truncate font-medium text-foreground">{sessionDisplayTitle}</span>
+                      {agentChip()}
                       <span className="flex-shrink-0 text-muted-foreground" title={sessionUpdatedLabel}>{sessionCompactUpdatedLabel}</span>
                     </div>
                     {tooltipProjectLabel && !isTimelineRow ? (

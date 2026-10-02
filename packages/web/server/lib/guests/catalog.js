@@ -280,6 +280,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.tools?.length) {
     guest.tools = parsed.manifest.contributes.tools.map((tool) => ({ ...tool }));
   }
+  if (parsed.manifest.contributes.messages?.length) {
+    guest.messages = parsed.manifest.contributes.messages.map((message) => ({ ...message }));
+  }
   if (parsed.manifest.contributes.service) {
     const serviceEntry = await resolveGuestAssetPath(packageRoot, parsed.manifest.contributes.service.entry);
     if (!serviceEntry) {
@@ -354,7 +357,7 @@ export const toPublicGuest = (guest) => {
   if (Array.isArray(guest.filesystem) && guest.filesystem.length > 0) {
     row.filesystem = [...guest.filesystem];
   }
-  // Actions, commands, and tools are the parsed manifest entries as they
+  // Actions, commands, tools, and messages are the parsed manifest entries as they
   // are: the UI decides which ones to apply from the grant and the enabled flag.
   if (Array.isArray(guest.actions) && guest.actions.length > 0) {
     row.actions = guest.actions.map((action) => ({ ...action }));
@@ -364,6 +367,9 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));
+  }
+  if (Array.isArray(guest.messages) && guest.messages.length > 0) {
+    row.messages = guest.messages.map((message) => ({ ...message }));
   }
   const granted = Array.isArray(guest.capabilityGrants) ? guest.capabilityGrants : [];
   row.capabilities = {

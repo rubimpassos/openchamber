@@ -294,6 +294,7 @@ describe('page-less packages', () => {
         contributes: {
           panel: { id: 'tools-only', name: 'Tools Only', icon: 'tools' },
           tools: [{ match: 'mcp.*', icon: 'icons/tool.svg', output: 'json' }],
+          messages: [{ match: '^\\[NOTICE\\]', name: 'Notice', tone: 'info' }],
         },
       },
     }));
@@ -308,6 +309,7 @@ describe('page-less packages', () => {
         packageRoot: guestRoot,
         version: '1.0.0',
         tools: [{ match: 'mcp.*', icon: 'icons/tool.svg', output: 'json' }],
+        messages: [{ match: '^\\[NOTICE\\]', name: 'Notice', tone: 'info' }],
       },
     });
     if (!inspected.ok) {
@@ -317,6 +319,7 @@ describe('page-less packages', () => {
     const row = toPublicGuest({ ...inspected.guest, source: 'path', path: guestRoot });
     expect(row).not.toHaveProperty('entry');
     expect(row.tools).toEqual([{ match: 'mcp.*', icon: 'icons/tool.svg', output: 'json' }]);
+    expect(row.messages).toEqual([{ match: '^\\[NOTICE\\]', name: 'Notice', tone: 'info' }]);
 
     const hasRuntime = false;
     expect((await resolveGuestServedFile(guestRoot, 'icons/tool.svg', { hasRuntime }))?.contentType).toBe('image/svg+xml');
