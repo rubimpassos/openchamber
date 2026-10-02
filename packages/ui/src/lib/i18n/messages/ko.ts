@@ -646,6 +646,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': '서브 에이전트 작업 포함',
   'sessions.sidebar.session.export.dialog.confirm': '내보내기',
   'sessions.sidebar.session.status.active': '활성 세션',
+  'sessions.sidebar.session.status.subagentsRunning': '하위 에이전트 {count}개 실행 중',
   'sessions.sidebar.session.status.unread': '읽지 않은 업데이트',
   'sessions.sidebar.session.status.nextStep': '제안된 다음 단계: {suggestion}',
   'sessions.sidebar.session.status.pinned': '고정된 세션',

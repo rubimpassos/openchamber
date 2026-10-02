@@ -1,4 +1,5 @@
 import type { SessionPatch, SyncEvent } from "@/lib/opencode/events"
+import { sessionParentID } from "@/lib/opencode/projection"
 import type { Session } from "@/lib/opencode/model"
 import { compact } from "@/lib/opencode/model"
 import {
@@ -48,6 +49,11 @@ const applyPatch = (session: Session, patch: SessionPatch): Session => {
   else if (patch.subpath !== undefined) next.subpath = patch.subpath
   if (patch.revert === null) delete next.revert
   else if (patch.revert !== undefined) next.revert = patch.revert
+  // Same rule as the directory reducer: a late oh-my-openagent parent nests the row.
+  if (patch.metadata !== undefined && !next.parentID) {
+    const parentID = sessionParentID(undefined, patch.metadata)
+    if (parentID) next.parentID = parentID
+  }
   if (patch.time) {
     const { archived, ...rest } = patch.time
     next.time = compact({ ...session.time, ...rest, archived: archived ?? session.time.archived })

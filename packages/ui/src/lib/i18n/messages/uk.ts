@@ -646,6 +646,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Додати завдання під-агентів",
   "sessions.sidebar.session.export.dialog.confirm": "Експортувати",
   "sessions.sidebar.session.status.active": "Сесія активна",
+  "sessions.sidebar.session.status.subagentsRunning": "Працює субагентів: {count}",
   "sessions.sidebar.session.status.unread": "Непрочитані оновлення",
   "sessions.sidebar.session.status.nextStep": "Запропонований наступний крок: {suggestion}",
   "sessions.sidebar.session.status.pinned": "Закріплена сесія",

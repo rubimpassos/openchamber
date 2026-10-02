@@ -68,6 +68,15 @@ describe("session events", () => {
     expect(apply(draft, { type: "session.patched", properties: { sessionID: "ses_x", patch: { title: "x" } } })).toBe(false)
   })
 
+  test("metadata that names an oh-my-openagent parent nests the session, unless it has a native one", () => {
+    const draft = state()
+    apply(draft, { type: "session.patched", properties: { sessionID: "ses_1", patch: { metadata: { omoParentID: "ses_parent" } } } })
+    expect(draft.session[0]?.parentID).toBe("ses_parent")
+    const native = state({ session: [session({ parentID: "ses_native" })] })
+    apply(native, { type: "session.patched", properties: { sessionID: "ses_1", patch: { metadata: { omoParentID: "ses_parent" } } } })
+    expect(native.session[0]?.parentID).toBe("ses_native")
+  })
+
   test("clearing the revert removes the marker", () => {
     const draft = state({ session: [session({ revert: { messageID: "msg_a" } })] })
     apply(draft, { type: "session.patched", properties: { sessionID: "ses_1", patch: { revert: null } } })
