@@ -268,6 +268,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onSessionStartedRef.current = onSessionStarted;
   const onResizeRef = React.useRef(onResize);
   onResizeRef.current = onResize;
+  // The app scales its interface by resizing the root rem (Settings → font
+  // size). A guest document has its own root, so zoom the frame by the same
+  // factor; the guest keeps laying out in its own CSS pixels.
+  const interfaceScale = useUIStore((state) => state.fontSize) / 100;
+  const frameZoom = Number.isFinite(interfaceScale) && interfaceScale > 0 ? interfaceScale : 1;
+  const frameZoomRef = React.useRef(frameZoom);
+  frameZoomRef.current = frameZoom;
   const oauthPollRef = React.useRef<number | null>(null);
   // Outstanding `resolve` requests this pane sent; answered by `resolve-result`.
   const resolveWaitersRef = React.useRef(new Map<string, (outcome: GuestResolveOutcome) => void>());
@@ -593,7 +600,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           });
         },
         resize: (height) => {
-          onResizeRef.current?.(height);
+          // The guest measures in its own CSS pixels; the host sizes the zoomed frame.
+          onResizeRef.current?.(Math.ceil(height * frameZoomRef.current));
         },
         resolveResult: (id, payload: ResolveResultPayload) => {
           const waiter = resolveWaitersRef.current.get(id);
@@ -692,6 +700,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       src={src || undefined}
       srcDoc={srcDoc}
       sandbox="allow-scripts"
+      style={frameZoom === 1 ? undefined : { zoom: frameZoom }}
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
         // The attach window and the Work Status card draw their own chrome behind the page.
