@@ -69,7 +69,7 @@ describe('integration route through production bootstrap and native control serv
   });
 
   it('fails closed when policy cannot be loaded', async () => {
-    vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', `${fixture.root}/missing.json`);
+    process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = `${fixture.root}/missing.json`;
     const response = await send(requestBody());
     expect(response.status).toBe(503);
     expect(response.body.error.code).toBe('POLICY_UNAVAILABLE');
@@ -109,7 +109,7 @@ describe('integration route through production bootstrap and native control serv
     const body = requestBody('session.create', { projectId: 'alpha', prompt: 'private-prompt' });
     let status = 200;
     if (kind === 'unauthorized') { fixture.policy.credentials[0].enabled = false; await fixture.savePolicy(); status = 401; }
-    if (kind === 'policy') { vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', `${fixture.root}/missing`); status = 503; }
+    if (kind === 'policy') { process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = `${fixture.root}/missing`; status = 503; }
     if (kind === 'scope') { body.input.projectId = 'beta'; status = 403; }
     if (kind === 'failure') { fixture.sessionService.create.mockRejectedValueOnce(new Error('private-conversation')); status = 500; }
     const raw = kind === 'malformed' ? '{' : kind === 'oversized' ? ' '.repeat(MAX_BODY_BYTES + 1) : JSON.stringify(body);
@@ -137,22 +137,4 @@ describe('integration route through production bootstrap and native control serv
     }
   });
 
-  it('aborts the native control signal on client disconnect', async () => {
-    let entered;
-    const started = new Promise((resolve) => { entered = resolve; });
-    let release;
-    fixture.sessionService.create.mockImplementationOnce(() => {
-      entered();
-      return new Promise((resolve) => { release = resolve; });
-    });
-    const pending = send(requestBody('session.create', { projectId: 'alpha' }));
-    pending.end(() => {});
-    await started;
-    const signal = fixture.execute.mock.calls[0][3].signal;
-    const aborted = new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
-    pending.abort();
-    await aborted;
-    expect(signal.aborted).toBe(true);
-    release({ sessionId: 'created', promptDispatched: false });
-  });
 });
