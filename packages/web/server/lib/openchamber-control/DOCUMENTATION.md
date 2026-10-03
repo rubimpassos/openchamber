@@ -25,6 +25,9 @@ other.
   by the scheduled-task service. An empty update clears the target. Create
   without a model inherits the target selection; an explicit agent overrides
   it. A task without a target still requires a model.
+  `resolveSessionDirectory` reads the V2 session record by ID and uses
+  `location.directory`; a paged session index cannot establish ownership.
+  The restricted Hermes adapter shares this lookup with the managed tool.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation.
