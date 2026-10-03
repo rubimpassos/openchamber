@@ -1,5 +1,7 @@
+// allow: SIZE_OK — existing manifest contract registry; the new loopback policy is owned by loopback.ts, not this registry.
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
 import type { FileEditorContribution } from './file-editor.ts';
+import { isLoopbackContribution, type LoopbackContribution } from './loopback.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -13,6 +15,8 @@ export type PanelContribution = {
   name: string;
   icon: string;
   entry?: string;
+  /** Defaults to unread. Count badges survive opening the panel. */
+  readonly badge?: 'unread' | 'count';
   /**
    * Beside a shared surface (`service.surface`), the panel page is docked to
    * one edge of the host-drawn picture: a toolbar above it, an inspector
@@ -33,9 +37,11 @@ export const GUEST_SURFACE_DOCK_SIZE_DEFAULT = 40;
 export const GUEST_SURFACE_DOCK_SIZE_MIN = 24;
 export const GUEST_SURFACE_DOCK_SIZE_MAX = 480;
 
-/** Sandboxed HTML loaded on demand for background actions and slash commands. */
+/** Sandboxed HTML for background actions, commands, or an opt-in automatic host. */
 export type BackgroundContribution = {
   entry: string;
+  /** Omitted means on-demand, preserving existing extension lifetimes. */
+  readonly start?: 'on-demand' | 'automatic';
 };
 
 export type AttachMode = 'panel' | 'dialog';
@@ -417,7 +423,7 @@ export const serviceProvides = (
  * `contributes.integration`, `contributes.filesystem` and `contributes.origins`. `model` is one-off text generation with the
  * user's Small Model (`host.generate`), outside any session.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'loopback'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -463,6 +469,8 @@ export type OpenChamberContributes = {
   capabilities?: DeclaredGuestCapability[];
   integration?: IntegrationContribution;
   service?: ServiceContribution;
+  /** Approved routes on an existing server-local process; never starts a service. */
+  readonly loopback?: LoopbackContribution;
   /** Paths outside the project the panel may read and write. Grants `filesystem`. */
   filesystem?: string[];
   /**
@@ -496,14 +504,15 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'loopback'>,
 ): GuestCapability[] => {
-  const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
+  const declared = new Set<GuestCapability>(DECLARED_GUEST_CAPABILITIES.filter((capability) => contributes.capabilities?.includes(capability)));
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
   if (contributes.service) declared.add('service');
   if (contributes.integration) declared.add('network');
   if (contributes.filesystem && contributes.filesystem.length > 0) declared.add('filesystem');
   if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
+  if (contributes.loopback && isLoopbackContribution(contributes.loopback)) declared.add('loopback');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
@@ -602,6 +611,7 @@ export type ParseManifestErrorCode =
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'
+  | 'invalid-loopback'
   | 'invalid-filesystem'
   | 'invalid-origins'
   | 'invalid-actions'

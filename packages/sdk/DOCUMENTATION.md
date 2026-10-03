@@ -23,6 +23,10 @@ Public author pages live in `packages/docs/content/docs/sdk.mdx`, `sdk/host.mdx`
 
 ## Invariants
 
+- Loopback contracts live in `loopback.ts`, host-side Zod admission in `loopback-schemas.ts`, guest RPC admission in `loopback-client.ts`, and EventSource lifetime in `loopback-watch.ts`. `HostRequestError` lives in `host-errors.ts` and is still re-exported through `host.ts` and the package entry. This keeps stream helpers independent of the iframe dispatcher.
+- `contributes.loopback` derives its capability from a valid declaration and requires a guest runtime page. It never starts a service. `loopback-url` and `loopback-request` use the existing id-correlated `result` response and existing `NOT_GRANTED`, `HOST_TIMEOUT` and `UNSUPPORTED` codes. The path matcher returns the canonical pathname to forward. Host/server consumers must pass the raw pathname before any URL normalization or router decoding. See [API.md](./API.md#loopback-requests-and-streams) for all bounds, rejection rules and exported names.
+- Lifecycle declarations preserve legacy parse output: omitted `background.start` means `on-demand`; omitted `panel.badge` means `unread`. `automatic` and `count` require matching host lifecycle support. Count mode suppresses only panel-open clearing. SDK-only adoption does not implement the server approval/proxy or UI bridge; these must ship before advertising loopback support.
+
 - `scripts/bump-version.mjs` refreshes `bun.lock` after bumping package versions; include both in the release commit. Bun resolves `workspace:*` in published archives from lockfile versions, and a frozen install can succeed with stale versions. `scripts/bump-version.test.mjs` covers the bump, frozen install, and packed dependency versions together.
 
 - Extension activity uses `useConfigStore.isConnected` plus live status records and directory `sessionStatusReady` authority. `useUIStore.eventStreamStatus` is an unmaintained diagnostic field, not a connection gate; its default `idle` must not hide known running or idle sessions as `unknown`.
