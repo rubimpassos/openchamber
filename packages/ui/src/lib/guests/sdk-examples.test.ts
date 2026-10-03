@@ -57,7 +57,7 @@ const load = async (name: string, script = 'main', folder = 'panel') => {
     window, document: window.document, HTMLElement: window.HTMLElement, MessageEvent: window.MessageEvent, console,
     HTMLInputElement: window.HTMLInputElement, HTMLStyleElement: window.HTMLStyleElement, HTMLAnchorElement: window.HTMLAnchorElement,
     TextEncoder, URL, crypto, performance, setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window),
-    ResizeObserver: window.ResizeObserver,
+    ResizeObserver: window.ResizeObserver, AbortController: window.AbortController, AbortSignal: window.AbortSignal,
   });
   return { window, messages, send, ready, reply, request, button, update };
 };

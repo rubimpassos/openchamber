@@ -1,3 +1,4 @@
+// allow: SIZE_OK — existing store orchestration; loopback scope parsing lives in loopback-target.js.
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -5,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { GUEST_CAPABILITIES } from '@openchamber/sdk';
+import { loopbackGrantScopeSchema } from './loopback-target.js';
 
 const GUEST_SOURCES = ['path', 'zip', 'git'];
 
@@ -33,6 +35,7 @@ const storeSchema = z.object({
 });
 
 const capabilityScopeSchema = z.object({
+  loopback: loopbackGrantScopeSchema.optional(),
   filesystem: z.array(z.string().min(1)).optional(),
   origins: z.array(z.string().min(1)).optional(),
   apiOrigin: z.string().min(1).optional(),
@@ -46,7 +49,7 @@ const capabilityScopeSchema = z.object({
   }).optional(),
 });
 
-/** @returns {Record<string, { filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[] } }>} */
+/** @returns {Record<string, z.infer<typeof capabilityScopeSchema>>} */
 const knownScopesOnly = (scopes) => {
   const cleaned = {};
   for (const [guestId, raw] of Object.entries(scopes)) {
@@ -198,8 +201,9 @@ const writeExtensionStoreUnlocked = async (
   const scopes = {};
   for (const [id, scope] of Object.entries(capabilityScopes)) {
     // A scope only means something next to a grant.
-    if (grants[id] && capabilityScopeSchema.safeParse(scope).success) {
-      scopes[id] = scope;
+    const parsedScope = capabilityScopeSchema.safeParse(scope);
+    if (grants[id] && parsedScope.success) {
+      scopes[id] = parsedScope.data;
     }
   }
   const disabled = {};

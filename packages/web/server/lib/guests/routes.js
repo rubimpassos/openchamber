@@ -1,3 +1,4 @@
+// allow: SIZE_OK — existing route registry; loopback resolution belongs to loopback-target.js, not a new proxy here.
 import express from 'express';
 import { guestStorageRequestSchema } from '@openchamber/sdk/schemas';
 import { runGuestStorage } from './storage.js';
@@ -789,6 +790,9 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: 'invalid-request' });
       }
       const scope = guestGrantScope(guest);
+      if (granted.includes('loopback') && !scope.loopback) {
+        return res.status(400).json({ error: 'config-invalid', message: 'The server loopback port configuration is invalid.' });
+      }
       const store = await readExtensionStore(persistPath);
       const previousScope = store.capabilityScopes?.[guest.id];
       await setCapabilityGrants(guest.id, persistPath, granted, granted.length > 0 ? scope : null);
