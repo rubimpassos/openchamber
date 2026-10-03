@@ -35,8 +35,10 @@ export const requestBody = (action = 'projects.list', input = {}) => ({
 
 export const createTestApp = async ({ password = 'fixture-password' } = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-integration-app-'));
-  vi.stubEnv('OPENCHAMBER_DATA_DIR', root);
-  vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', path.join(root, 'policy.json'));
+  const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+  const previousPolicyFile = process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+  process.env.OPENCHAMBER_DATA_DIR = root;
+  process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = path.join(root, 'policy.json');
   const { createUiAuth } = await import('../ui-auth/ui-auth.js');
   const alpha = path.join(root, 'alpha');
   const beta = path.join(root, 'beta');
@@ -49,7 +51,7 @@ export const createTestApp = async ({ password = 'fixture-password' } = {}) => {
   const savePolicy = () => fs.writeFile(path.join(root, 'policy.json'), JSON.stringify(policy));
   await savePolicy();
   const settings = { projects: [{ id: 'alpha', path: alpha, label: 'Alpha' }, { id: 'beta', path: beta, label: 'Beta' }] };
-  const sessions = [{ id: 'foreign', directory: beta, title: 'Private' }, { id: 'human', directory: alpha, title: 'Human' }];
+  const sessions = [{ id: 'foreign', location: { directory: beta }, title: 'Private' }, { id: 'human', location: { directory: alpha }, title: 'Human' }];
   const readSettingsFromDiskMigrated = async () => settings;
   const normalization = createSettingsNormalizationRuntime({ os, path, processLike: process, realpathSync });
   const scopeDependencies = {
@@ -63,12 +65,12 @@ export const createTestApp = async ({ password = 'fixture-password' } = {}) => {
     fork: vi.fn(async (sessionId, payload) => ({ sourceSessionId: sessionId, sessionId: 'forked', promptDispatched: true, ...payload })),
   };
   const client = {
-    experimental: { session: { list: vi.fn(async () => ({ data: sessions })) } },
     session: {
+      get: vi.fn(async ({ sessionID }) => sessions.find(({ id }) => id === sessionID)),
       list: vi.fn(async () => ({ data: sessions })),
-      status: vi.fn(async () => ({ data: { human: { type: 'idle', private: 'omitted' } } })),
-      messages: vi.fn(async () => ({ data: [{ info: { id: 'msg', role: 'assistant' }, parts: [{ type: 'text', text: 'Hello' }] }] })),
+      active: vi.fn(async () => ({})),
     },
+    message: { list: vi.fn(async () => ({ data: [{ id: 'msg', type: 'assistant', time: { created: 1 }, content: [{ type: 'text', text: 'Hello' }] }] })) },
   };
   const controlService = createOpenChamberControlService({
     ...scopeDependencies, sessionService, createClient: () => client,
@@ -81,7 +83,7 @@ export const createTestApp = async ({ password = 'fixture-password' } = {}) => {
   const server = http.createServer(app);
   const agentToolRuntime = createAgentToolRuntime({ crypto, fsPromises: fs, path, dataDir: root,
     getActivePort: () => 12345, executeAction: controlService.execute, env: {} });
-  const agentEnv = await agentToolRuntime.prepareManagedOpenCodeEnv();
+  const agentEnv = agentToolRuntime.createChildEnv();
   const bootstrap = createBootstrapRuntime({
     express, createUiAuth, registerServerStatusRoutes, registerCommonRequestMiddleware,
     registerAuthAndAccessRoutes, registerTtsRoutes, registerNotificationRoutes, registerOpenChamberRoutes,
@@ -131,7 +133,10 @@ export const createTestApp = async ({ password = 'fixture-password' } = {}) => {
       wsRuntime.wsServer.close();
       if (server.listening) await new Promise((resolve) => server.close(resolve));
       await fs.rm(root, { recursive: true, force: true });
-      vi.unstubAllEnvs();
+      if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+      else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+      if (previousPolicyFile === undefined) delete process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+      else process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = previousPolicyFile;
     },
   };
 };
