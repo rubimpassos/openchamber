@@ -301,6 +301,31 @@ Only one extension popover is active per host document. Opening another retires 
 A `focus: true` request requires the source frame to have focus. Non-focusing previews are constrained to a visible anchor in the source frame; the host cannot verify pointer activity inside an opaque-origin guest document. The child can use `host.setHeight` to fit its content within the popover height limit; this resizes only that child and includes the host border. Scrolling an unrelated host panel does not dismiss the preview.
 
 Use `mountPopoverAnchor` from `@openchamber/sdk/ui` for DOM anchors. It measures the element, handles hover and keyboard opening, reports activity while the pointer crosses between frames, and retires the preview when the anchor scrolls away or is removed. Retain and call its `dispose()` when replacing rows. Low-level callers must perform those lifecycle steps themselves. The host can validate the source iframe and rectangle but cannot inspect an element inside its sandbox.
+### Loopback requests and streams
+
+These APIs require a matching host with loopback approval, proxy and bridge support. The SDK contract alone does not enable them on older hosts. No guest-selected server, guest ID, port or headers cross the bridge.
+
+| Method | Returns |
+| --- | --- |
+| `loopbackUrl(request: LoopbackUrlRequest)` | `Promise<LoopbackUrlResult>` |
+| `loopbackRequest(request: LoopbackRequest)` | `Promise<LoopbackRequestResult>` |
+| `watchLoopback(request: LoopbackUrlRequest, listener: (event: LoopbackWatchEvent) => void)` | `() => void` |
+
+`LoopbackUrlRequest` is `{ readonly path: string; readonly query?: Readonly<Record<string, string>> }`. `LoopbackUrlResult` is `{ readonly url: string; readonly expiresAt: number }`, with expiry in Unix milliseconds. The URL contains a short-lived guest-scoped GET token. Never log or persist it. A healthy stream is not reloaded merely because the token expires.
+
+`LoopbackRequest` adds `method: 'GET' | 'HEAD' | 'POST'`. Only POST accepts an optional `body: JsonValue`, serialized as JSON by the parent. GET and HEAD reject bodies. Results are `{ readonly status: number; readonly body: string }`. Application HTTP errors resolve with their status and UTF-8 text; admission and transport errors reject as `HostRequestError`.
+
+Paths are absolute pathnames, not URLs. Admission decodes each segment once, rejects traversal, separators and remaining percent escapes, and re-encodes the accepted pathname. Query is separate, serialized with `URLSearchParams`, bounded to 2 KiB without the leading `?`. All `oc_*` keys are reserved and rejected in the SDK. JSON bodies are bounded to 64 KiB and finite response text to 16 MiB, measured in UTF-8 bytes.
+
+Watch events are `{ type: 'data', text: string }` or `{ type: 'connection', state: 'connecting' | 'live' | 'unavailable', error?: HostRequestError }`. The helper owns one source or retry timer, creates EventSource with `withCredentials: false`, and obtains a fresh URL after every stream error, including server lease closure. Consecutive failures back off at 1, 2, 4, 8 and 15 seconds with 20 percent jitter and a 15-second cap. A data event resets the backoff. Hidden or offline pages use the cap; becoming visible or online interrupts a pending wait. `NOT_GRANTED` and `UNSUPPORTED` terminate the watch. Invalid requests, invalid host responses and host disposal also terminate rather than retrying permanently broken input. Other failures retry. Both the returned disposer and `host.dispose()` close sources, cancel retries and invalidate pending URL replies.
+
+Direct web and desktop hosts use scoped URLs. Relay hosts must answer URL requests with `UNSUPPORTED`; guests can instead poll through parent-mediated `loopbackRequest`. VS Code and mobile gain no guest support through these methods.
+
+Declare `contributes.loopback: LoopbackContribution` with an integer `port` from 1024 to 65535, an optional uppercase `env` name of at most 128 characters, and 1 to 32 unique routes. Each route has `path` and a nonempty unique `methods` subset of GET, HEAD and POST. A literal whole `*` segment matches exactly one nonempty safe segment. `/` needs an explicit declaration. Route paths are canonicalized before uniqueness checking; duplicate paths are rejected even when methods differ. Declarations reject unknown fields and require a guest runtime page. The contribution derives the `loopback` capability; listing `loopback` directly in `capabilities` is invalid. The optional environment variable is resolved by the server, never by the guest.
+
+`background.start` accepts `on-demand` or `automatic`; `panel.badge` accepts `unread` or `count`. Omission means on-demand and unread. Parsing preserves omitted fields rather than materializing defaults, so legacy manifests retain their shape. Matching hosts mount automatic backgrounds only while enabled and approved. Count mode suppresses panel-open badge clearing, not clearing after disable, uninstall or runtime changes.
+
+Host authors import `canonicalizeLoopbackPath`, `canonicalizeLoopbackRoutePath` and `matchLoopbackRoute` from `@openchamber/sdk`, including in JavaScript servers. `matchLoopbackRoute(routes, rawPath, method)` returns the admitted canonical pathname or `null`; forward that returned pathname. Supply the raw pathname before URL or router decoding, and never match one spelling while forwarding another. Import `loopbackContributionSchema`, `loopbackUrlRequestSchema`, `loopbackRequestSchema`, `loopbackUrlResultSchema` and `loopbackRequestResultSchema` only from `@openchamber/sdk/schemas`.
 
 ### 1.3 Error codes (`HostRequestError.code`)
 
