@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ERROR_DEFINITIONS } from './contract.js';
 import { loadIntegrationPolicy, validateIntegrationPolicy } from './policy.js';
 
@@ -18,13 +18,16 @@ const unavailable = {
 describe('integration policy', () => {
   let directory;
   let file;
+  let previousPolicyFile;
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'oc-policy-'));
     file = join(directory, 'policy.json');
-    vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', file);
+    previousPolicyFile = process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+    process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = file;
   });
   afterEach(async () => {
-    vi.unstubAllEnvs();
+    if (previousPolicyFile === undefined) delete process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+    else process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = previousPolicyFile;
     await rm(directory, { recursive: true, force: true });
   });
 
@@ -41,9 +44,9 @@ describe('integration policy', () => {
 
   it('denies missing, unconfigured and unreadable policy paths without disclosing them', async () => {
     expect(await loadIntegrationPolicy()).toEqual(unavailable);
-    vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', directory);
+    process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = directory;
     expect(await loadIntegrationPolicy()).toEqual(unavailable);
-    vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', undefined);
+    delete process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
     expect(await loadIntegrationPolicy()).toEqual(unavailable);
   });
 
