@@ -16,6 +16,17 @@ const POSIX_ENV_BINARIES = ['/usr/bin/env', '/bin/env'];
 /** Variables a PTY shell must never inherit from the OpenChamber host process. */
 const PTY_HOST_PRIVATE_VARIABLES = Object.freeze(['ARGV0', 'NODE_CHANNEL_FD']);
 
+// These belong to the server, never the managed OpenCode process or its tools.
+const OPENCHAMBER_PRIVATE_ENV_KEYS = ['OPENCHAMBER_UI_PASSWORD', 'OPENCHAMBER_UI_PASSWORD_HASH', 'OPENCODE_JWT_SECRET', 'OPENCHAMBER_INTEGRATION_POLICY_FILE'];
+
+export const stripOpenChamberPrivateEnv = (env) => {
+  for (const key of OPENCHAMBER_PRIVATE_ENV_KEYS) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('HERMES_OC_TOKEN_')) delete env[key];
+  }
+  return env;
+};
+
 /**
  * Remove AppImage `ARGV0` from a mutable env object (or `process.env`).
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined> | null | undefined} env
