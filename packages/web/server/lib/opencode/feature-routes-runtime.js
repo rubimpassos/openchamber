@@ -11,7 +11,6 @@ import { registerBuiltInGuests } from '../guests/catalog.js';
 import { extensionsPersistPath } from '../guests/persist.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
-import { registerCiLoopRoutes } from '../ci-loop/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
@@ -706,7 +705,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
     registerLinearRoutes(app);
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
-    registerCiLoopRoutes(app);
     registerMagicPromptRoutes(app, {
       fsPromises,
       path,

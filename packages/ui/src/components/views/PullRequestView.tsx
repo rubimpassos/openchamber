@@ -16,7 +16,6 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { PullRequestSection } from './git/PullRequestSection';
-import { CiLoopSection } from './git/CiLoopSection';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from './git/NestedRepoPicker';
 import { deriveBaseBranch } from './git/baseBranch';
@@ -250,7 +249,6 @@ export const PullRequestView: React.FC = () => {
             ahead={status?.ahead ?? 0}
             remoteBranches={remoteBranches}
           />
-          <CiLoopSection />
         </div>
       </ScrollableOverlay>
     </div>
