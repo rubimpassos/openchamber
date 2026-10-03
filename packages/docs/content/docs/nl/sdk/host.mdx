@@ -58,6 +58,9 @@ Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 | `request({ method, path, query?, body? })` | roept `apiOrigin` van uw integratie aan met het gebruikerstoken |
 | `serviceRequest({ method, path, query?, body? })` | roept de lokale service van de extensie aan; zie `GUEST_SERVICES.md` |
 | `serviceStatus()` | geeft `stopped`, `starting`, `ready` of `failed` |
+| `loopbackUrl({ path, query? })` | een kortlevende, aan deze gast gebonden GET-URL voor een route in `contributes.loopback` |
+| `loopbackRequest({ method, path, query?, body? })` | voert GET, HEAD of POST uit op een route in `contributes.loopback` via OpenChamber |
+| `watchLoopback({ path, query? }, listener)` | neemt een abonnement op een `text/event-stream`-route; geeft een functie terug om het op te zeggen |
 | `readFile(path)` | leest een tekstbestand en geeft `{ content }` terug |
 | `writeFile(path, content)` | schrijft een tekstbestand atomair, maakt bovenliggende mappen en geeft `{ written: true }` terug |
 | `listDir(path)` | geeft `{ entries: [{ name, kind }] }`, met `kind` als `file`, `directory` of `other` |
@@ -210,6 +213,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 Voor `path` gelden dezelfde regels als bij `request`. Een service declareren voegt `service` toe aan de bij installatie goed te keuren rechten. Tot goedkeuring geeft elke `serviceRequest` `NO_SERVICE`. Het volledige contract staat in `GUEST_SERVICES.md` in het pakket.
 
+## Loopback-aanroepen en streams
+
+Geeft het manifest `contributes.loopback` op, dan kan uw pagina via OpenChamber haar eigen, al draaiende proces op `127.0.0.1` aanroepen, zonder ooit de poort ervan te leren kennen:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` geeft `{ url, expiresAt }` terug, `expiresAt` in Unix-milliseconden. De URL draagt een kortlevend, aan deze gast gebonden GET-token; een gezonde stream die hiermee is geopend, wordt niet herladen alleen omdat het token verloopt. `loopbackRequest` voegt `method: "GET" | "HEAD" | "POST"` toe; alleen `POST` neemt een `body`, en GET/HEAD wijzen die af. Het resultaat is `{ status, body }` (`body` is tekst; verwerk JSON zelf). `watchLoopback` opent een `EventSource` tegen een opgegeven route en roept de listener aan met `{ type: "connection", state }` terwijl de stream verbindt, actief wordt of wegvalt, en met `{ type: "data", text }` voor elke gebeurtenis; roep de teruggegeven functie aan om te stoppen.
+
+Zowel `path` als de opgegeven routes worden vergeleken na canonicalisering; een routesegment dat in het manifest een letterlijke `*` is, komt tijdens de aanroep overeen met precies één padsegment. Een aanroep naar een pad of methode die het manifest niet opgeeft, krijgt `NOT_GRANTED`, net als bij een niet-goedgekeurd recht.
+
+Alleen directe web- en desktophosts kunnen een livestream openen. Een via relay verbonden host beantwoordt `watchLoopback` met `UNSUPPORTED`; val dan terug op pollen van dezelfde route met `loopbackRequest`. VS Code en mobiel bieden via deze methoden helemaal geen loopback-ondersteuning.
+
+Log of bewaar de URL van `loopbackUrl` nooit: behandel haar als een bearer-token. Zie [Een extensie bouwen](/nl/sdk/#contributesloopback) voor de manifestvorm en [Beveiliging](/nl/security/#enterprise-modus) voor hoe dit in de enterprise-modus beperkt wordt.
+
 ## Bestanden
 
 Een relatief pad ligt binnen het geopende project en vereist `files`. Een pad met `/` of `~/` moet passen bij een opgegeven `contributes.filesystem`-patroon en vereist `filesystem`. Zie [Een extensie bouwen](/nl/sdk/#bestanden) voor de regels.
@@ -247,6 +270,7 @@ Mislukte aanroepen werpen `HostRequestError`. `code` is een van de onderstaande 
 | `SESSION_BUSY` | `prompt({ send: true })` terwijl de sessie bezig is |
 | `DISABLED` | de gebruiker heeft de extensie gepauzeerd bij Instellingen → Extensies |
 | `NO_SERVICE` | geen service opgegeven, goedgekeurd of actief |
+| `UNSUPPORTED` | `watchLoopback` op een via relay verbonden host, of elke aanroep die deze OpenChamber niet kan uitvoeren, bijvoorbeeld `openCommit` zonder diffweergave |
 | `NOT_GRANTED` | het benodigde recht is niet goedgekeurd |
 | `SERVICE_FAILED` | de service is vastgelopen of werd nooit gereed |
 | `NO_DIRECTORY` | relatief bestandspad of `openCommit` zonder geopend project |
@@ -255,7 +279,6 @@ Mislukte aanroepen werpen `HostRequestError`. `code` is een van de onderstaande 
 | `DENIED` | het besturingssysteem weigert de bestandsbewerking |
 | `NO_MODEL` | `generate` zonder beschikbaar Small Model |
 | `MODEL_FAILED` | het Small Model gaf een fout |
-| `UNSUPPORTED` | deze OpenChamber kan de aanroep niet uitvoeren, bijvoorbeeld `openCommit` zonder diffweergave |
 
 ## Zie ook
 

@@ -58,6 +58,9 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | `request({ method, path, query?, body? })` | wywołuje `apiOrigin` Twojej integracji z dołączonym tokenem użytkownika |
 | `serviceRequest({ method, path, query?, body? })` | wywołuje usługę lokalną Twojego rozszerzenia (zobacz `GUEST_SERVICES.md`) |
 | `serviceStatus()` | `stopped`, `starting`, `ready` lub `failed` |
+| `loopbackUrl({ path, query? })` | krótkotrwały URL GET, przypisany do tego gościa, dla trasy w `contributes.loopback` |
+| `loopbackRequest({ method, path, query?, body? })` | wywołanie GET, HEAD lub POST na trasie w `contributes.loopback` przez OpenChamber |
+| `watchLoopback({ path, query? }, listener)` | subskrybuje trasę `text/event-stream`; zwraca funkcję anulowania subskrypcji |
 | `readFile(path)` | czyta plik tekstowy. Zwraca `{ content }`. |
 | `writeFile(path, content)` | zapisuje plik tekstowy atomowo, tworząc foldery nadrzędne. Zwraca `{ written: true }`. |
 | `listDir(path)` | wypisuje zawartość folderu. Zwraca `{ entries: [{ name, kind }] }`, `kind` to `file`, `directory` lub `other`. |
@@ -186,6 +189,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` podlega tym samym zasadom co w `request`. Zadeklarowanie usługi lokalnej dodaje `service` do uprawnień, które użytkownik zatwierdza przy instalacji; do tego czasu każde `serviceRequest` to `NO_SERVICE`. Pełny kontrakt: plik `GUEST_SERVICES.md` w pakiecie.
 
+## Żądania i strumienie loopback
+
+Gdy manifest deklaruje `contributes.loopback`, Twoja strona może wywoływać swój już działający proces na `127.0.0.1` przez OpenChamber, nigdy nie poznając jego portu:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` zwraca `{ url, expiresAt }`, `expiresAt` w milisekundach Unix. URL niesie krótkotrwały token GET przypisany do tego gościa; zdrowy strumień otwarty tym URL-em nie jest przeładowywany tylko dlatego, że token wygasł. `loopbackRequest` dodaje `method: "GET" | "HEAD" | "POST"`; tylko `POST` przyjmuje `body`, a GET/HEAD je odrzucają. Jego wynik to `{ status, body }` (`body` jest tekstem; JSON parsujesz samodzielnie). `watchLoopback` otwiera `EventSource` do zadeklarowanej trasy i wywołuje listenera z `{ type: "connection", state }` w miarę jak strumień się łączy, ożywa albo się zrywa, oraz z `{ type: "data", text }` dla każdego zdarzenia; wywołaj zwróconą funkcję, żeby go zatrzymać.
+
+Zarówno `path`, jak i zadeklarowane trasy są dopasowywane po kanonizacji; segment trasy będący dosłownym `*` w manifeście pasuje dokładnie do jednego segmentu ścieżki w momencie wywołania. Wywołanie ścieżki lub metody, której manifest nie deklaruje, to `NOT_GRANTED`, tak samo jak przy niezatwierdzonym uprawnieniu.
+
+Tylko hosty z bezpośrednim połączeniem web i desktop mogą otworzyć żywy strumień. Host połączony przez relay odpowiada na `watchLoopback` kodem `UNSUPPORTED`; w takim wypadku odpytuj tę samą trasę przez `loopbackRequest`. VS Code i mobile w ogóle nie obsługują loopback przez te metody.
+
+Nigdy nie loguj ani nie zapisuj URL-a z `loopbackUrl`: traktuj go jak token nośny. Zobacz [Tworzenie rozszerzenia](/sdk/#contributesloopback) po kształt manifestu i [Bezpieczeństwo](/security/#enterprise-mode) po to, jak jest bramkowany w trybie enterprise.
+
 ## Pliki
 
 Ścieżka względna leży w otwartym projekcie i wymaga uprawnienia `files`. Ścieżka zaczynająca się od `/` lub `~/` musi pasować do zadeklarowanego wzorca `contributes.filesystem` i wymaga uprawnienia `filesystem`. Zasady opisuje [Tworzenie rozszerzenia](/sdk/#pliki).
@@ -223,6 +246,7 @@ Nieudane wywołania rzucają `HostRequestError`. `code` to jeden z poniższych; 
 | `SESSION_BUSY` | `prompt({ send: true })`, gdy sesja była zajęta |
 | `DISABLED` | użytkownik wstrzymał rozszerzenie w Ustawienia → Rozszerzenia |
 | `NO_SERVICE` | usługa lokalna niezadeklarowana, niezatwierdzona albo nieuruchomiona |
+| `UNSUPPORTED` | `watchLoopback` na hoście połączonym przez relay, albo dowolne wywołanie, którego ten OpenChamber nie potrafi wykonać, na przykład `openCommit` tam, gdzie nie ma widoku Diff |
 | `NOT_GRANTED` | użytkownik nie zatwierdził uprawnienia, którego wymaga to wywołanie |
 | `SERVICE_FAILED` | usługa lokalna padła albo nigdy nie osiągnęła gotowości |
 | `NO_DIRECTORY` | względna ścieżka pliku użyta bez otwartego projektu albo `openCommit` bez otwartego projektu |
@@ -231,7 +255,6 @@ Nieudane wywołania rzucają `HostRequestError`. `code` to jeden z poniższych; 
 | `DENIED` | system operacyjny odmówił operacji na pliku |
 | `NO_MODEL` | `generate` bez dostępnego Small Model |
 | `MODEL_FAILED` | Small Model zwrócił błąd |
-| `UNSUPPORTED` | ten OpenChamber nie potrafi wykonać wywołania, na przykład `openCommit` tam, gdzie nie ma widoku Diff |
 
 ## Zobacz też
 

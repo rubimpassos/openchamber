@@ -58,6 +58,9 @@ const host = connectHost();
 | `request({ method, path, query?, body? })` | викликати `apiOrigin` вашої інтеграції з доданим токеном користувача |
 | `serviceRequest({ method, path, query?, body? })` | викликати локальний сервіс вашого розширення (див. `GUEST_SERVICES.md`) |
 | `serviceStatus()` | `stopped`, `starting`, `ready` або `failed` |
+| `loopbackUrl({ path, query? })` | короткоживучий, обмежений для гостя GET-URL для маршруту з `contributes.loopback` |
+| `loopbackRequest({ method, path, query?, body? })` | GET, HEAD або POST до маршруту з `contributes.loopback` через OpenChamber |
+| `watchLoopback({ path, query? }, listener)` | підписатися на маршрут `text/event-stream`; повертає функцію відписки |
 | `readFile(path)` | прочитати текстовий файл. Повертає `{ content }`. |
 | `writeFile(path, content)` | атомарно записати текстовий файл, створюючи батьківські теки. Повертає `{ written: true }`. |
 | `listDir(path)` | перелічити теку. Повертає `{ entries: [{ name, kind }] }`, `kind` - `file`, `directory` або `other`. |
@@ -186,6 +189,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` підкоряється тим самим правилам, що й у `request`. Оголошення сервісу додає `service` до дозволів, які користувач підтверджує під час встановлення; до того кожен `serviceRequest` - `NO_SERVICE`. Повний контракт: файл пакета `GUEST_SERVICES.md`.
 
+## Loopback-запити та потоки
+
+Коли маніфест оголошує `contributes.loopback`, ваша сторінка може звертатися до власного вже запущеного процесу на `127.0.0.1` через OpenChamber, ніколи не знаючи його порту:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` повертає `{ url, expiresAt }`, `expiresAt` - у мілісекундах Unix. URL несе короткоживучий GET-токен, обмежений для гостя; здоровий потік, відкритий із ним, не перезавантажується лише тому, що токен закінчився. `loopbackRequest` додає `method: "GET" | "HEAD" | "POST"`; лише `POST` приймає `body`, а GET/HEAD відхиляють його. Результат - `{ status, body }` (`body` - текст; JSON розбирайте самі). `watchLoopback` відкриває `EventSource` до оголошеного маршруту і викликає слухача з `{ type: "connection", state }`, коли потік з'єднується, стає живим або обривається, та з `{ type: "data", text }` для кожної події; викличте повернуту функцію, щоб зупинити його.
+
+Обидва - `path` і оголошені маршрути - порівнюються після канонізації; сегмент маршруту, що є буквальним `*` у маніфесті, відповідає рівно одному сегменту шляху під час викликe. Виклик шляху чи методу, якого маніфест не оголошує, - `NOT_GRANTED`, так само як непідтверджений дозвіл.
+
+Відкрити живий потік можуть лише прямі веб і десктопні хости. Хост через relay відповідає на `watchLoopback` кодом `UNSUPPORTED`; повертайтеся до опитування того самого маршруту через `loopbackRequest`. VS Code і мобільний застосунок узагалі не підтримують loopback через ці методи.
+
+Ніколи не логуйте й не зберігайте URL із `loopbackUrl`: ставтеся до нього як до bearer-токена. Форму маніфеста див. у [Зробити розширення](/sdk/#contributesloopback), а про обмеження в корпоративному режимі - у [Безпека](/security/#enterprise-mode).
+
 ## Файли
 
 Відносний шлях лежить усередині відкритого проєкту і потребує дозволу `files`. Шлях, що починається з `/` або `~/`, має збігатися з оголошеним шаблоном `contributes.filesystem` і потребує дозволу `filesystem`. Правила див. у [Зробити розширення](/sdk/#файли).
@@ -223,6 +246,7 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `SESSION_BUSY` | `prompt({ send: true })`, поки сесія була зайнята |
 | `DISABLED` | користувач призупинив розширення в Налаштування → Розширення |
 | `NO_SERVICE` | сервіс не оголошено, не підтверджено або не запущено |
+| `UNSUPPORTED` | `watchLoopback` на хості через relay, або будь-який виклик, який цей OpenChamber не вміє виконати, наприклад `openCommit` там, де немає Diff view |
 | `NOT_GRANTED` | користувач не підтвердив дозвіл, потрібний для цього виклику |
 | `SERVICE_FAILED` | сервіс упав або так і не став готовим |
 | `NO_DIRECTORY` | відносний шлях до файлу використано без відкритого проєкту, або `openCommit` без відкритого проєкту |
@@ -231,7 +255,6 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `DENIED` | операційна система відмовила у файловій операції |
 | `NO_MODEL` | `generate` без доступного Small Model |
 | `MODEL_FAILED` | Small Model повернула помилку |
-| `UNSUPPORTED` | цей OpenChamber не вміє виконати виклик, наприклад `openCommit` там, де немає Diff view |
 
 ## Дивіться також
 
