@@ -315,7 +315,7 @@ const GUEST_URL_AUTH_SCOPE = /^guest:([a-z][a-z0-9-]*)$/;
 
 /**
  * A URL token scope narrows where the token is accepted. `guest:<id>` is
- * minted for a guest iframe and only opens that guest's own package files:
+ * minted for a guest iframe and only opens that guest's files and approved loopback reads:
  * the iframe URL is readable by the guest's script, so the token must be
  * worthless anywhere else.
  * @returns {{ kind: 'guest', id: string } | null | undefined} `undefined` when the value is not a scope
@@ -329,6 +329,8 @@ const parseUrlAuthScope = (value) => {
 };
 
 const isGuestScopedPath = (pathname, guestId) => pathname.startsWith(`/api/guests/${guestId}/`);
+const isGuestLoopbackPath = (pathname) => /^\/api\/guests\/[a-z][a-z0-9-]*\/loopback(?:\/|$)/.test(pathname);
+const refuseLoopbackAuth = (res) => res.status(403).json({ error: 'NOT_GRANTED', message: 'UI authentication is required for loopback access.' });
 
 // An isolated space's raw file and its sockets, under `/api/spaces/<id>/`, matched by shape.
 const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
@@ -364,7 +366,8 @@ const canUseUrlAuthTokenForRequest = (req, scope = null) => {
   const method = typeof req?.method === 'string' ? req.method.toUpperCase() : 'GET';
   const pathname = getRequestPathname(req);
   if (scope?.kind === 'guest') {
-    return !isWebSocketUpgrade(req) && method === 'GET' && isGuestScopedPath(pathname, scope.id);
+    const readable = method === 'GET' || (method === 'HEAD' && isGuestLoopbackPath(pathname));
+    return !isWebSocketUpgrade(req) && readable && isGuestScopedPath(pathname, scope.id);
   }
   if (isWebSocketUpgrade(req)) {
     return isUrlAuthWebSocketPath(pathname);
@@ -574,6 +577,7 @@ export const createUiAuth = ({
       if (clientAuth) {
         return next();
       }
+      if (isGuestLoopbackPath(getRequestPathname(req))) return refuseLoopbackAuth(res);
       return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
     };
 
@@ -801,6 +805,7 @@ export const createUiAuth = ({
       return next();
     }
     clearSessionCookie(req, res);
+    if (isGuestLoopbackPath(getRequestPathname(req))) return refuseLoopbackAuth(res);
     return respondUnauthorized(req, res);
   };
 

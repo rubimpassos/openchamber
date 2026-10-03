@@ -35,6 +35,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setActiveTunnelController,
     tunnelAuthController,
     beginGuestServiceShutdown,
+    disposeFeatureRoutes = () => undefined,
     stopAllGuestServices,
     getGuestSurfaceRuntime,
     getRealtimeProxyRuntime,
@@ -68,6 +69,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
     setIsShuttingDown(true);
     beginGuestServiceShutdown();
+    disposeFeatureRoutes();
     syncToHmrState();
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
