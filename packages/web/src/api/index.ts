@@ -15,7 +15,6 @@ import { createWebPermissionsAPI } from './permissions';
 import { createWebNotificationsAPI } from './notifications';
 import { createWebPushAPI } from './push';
 import { createWebLinearAPI } from './linear';
-import { createWebCiLoopAPI } from './ciLoop';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebSourceControlAPI } from './source-control';
 
@@ -50,7 +49,6 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   notifications: createWebNotificationsAPI(),
   sourceControl: createWebSourceControlAPI(),
   linear: createWebLinearAPI(),
-  ciLoop: createWebCiLoopAPI(),
   push: createWebPushAPI(),
   clientAuth: createWebClientAuthAPI(),
   };
