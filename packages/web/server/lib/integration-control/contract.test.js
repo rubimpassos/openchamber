@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, lstatSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   ACTIONS, ERROR_DEFINITIONS, MAX_BODY_BYTES, MAX_PROMPT_LENGTH,
   parseRequest, parseResponse, serializeRequest, serializeResponse,
@@ -57,7 +59,8 @@ describe('integration wire v1', () => {
     for (const action of ACTIONS.filter((value) => value !== 'projects.list')) expect(parseInput(action, {})).toEqual(failure);
     for (const limit of [0, 101, 1.5, '10', null]) {
       for (const action of ['session.list', 'session.messages']) {
-        const input = { projectId: 'project_demo', limit, ...(action === 'session.messages' ? { sessionId: 'ses_demo' } : {}) };
+        const input = { projectId: 'project_demo', limit };
+        if (action === 'session.messages') input.sessionId = 'ses_demo';
         expect(parseInput(action, input)).toEqual(failure);
       }
     }
@@ -127,7 +130,9 @@ describe('integration wire v1', () => {
 
   it('pins fixture bytes and the independent HP copy', () => {
     const manifest = JSON.parse(readFileSync(new URL('manifest.json', fixtureRoot), 'utf8'));
-    const hpRoot = new URL('../../../../../../hermes-openchamber/tests/fixtures/protocol/', import.meta.url);
+    const hpRoot = process.env.HERMES_TEST_REPO
+      ? pathToFileURL(`${resolve(process.env.HERMES_TEST_REPO, 'tests/fixtures/protocol')}/`)
+      : new URL('../../../../../../hermes-openchamber/tests/fixtures/protocol/', import.meta.url);
     expect(manifest.fixtureSetVersion).toBe('1.0.0');
     expect(manifest.schemaVersion).toBe(1);
     expect(readdirSync(fixtureRoot).sort()).toEqual(['manifest.json', ...Object.keys(manifest.files)].sort());
