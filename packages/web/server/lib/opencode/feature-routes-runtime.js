@@ -83,6 +83,7 @@ import { completeWorktreeCheckoutHydration, configureRepositoryTransport } from 
 import { createPrivateRepositoryIdentityResolver } from '../source-control/repository-identity.js';
 import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
 
+// allow: SIZE_OK — existing feature composition; loopback mechanics stay in guests/loopback-*.js.
 export const createFeatureRoutesRuntime = (dependencies) => {
   const {
     clientReloadDelayMs,
@@ -93,6 +94,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   });
 
   let quotaProviders = null;
+  let loopbackRuntime;
   const getQuotaProviders = async () => {
     if (!quotaProviders) {
       quotaProviders = await import('../quota/index.js');
@@ -651,7 +653,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitIdentity,
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, {
+    loopbackRuntime = registerGuestRoutes(app, {
       openchamberDataDir,
       openchamberVersion,
       resolveGitBinaryForSpawn,
@@ -659,6 +661,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getSmallModelService,
       onGuestDeactivated,
       surfaceViewerHeaders,
+      isRequestOriginAllowed: routeDependencies.isRequestOriginAllowed,
       emitGuestFilesChanged: ({ guestId, watchId, paths }) => {
         const clients = getOpenChamberEventClients();
         for (const client of clients) {
@@ -751,5 +754,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     createChangeRequestWorktree,
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
+    dispose: () => loopbackRuntime?.dispose(),
   };
 };
