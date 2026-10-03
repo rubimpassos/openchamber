@@ -10,9 +10,17 @@ const reject = (res, code, status = ERROR_DEFINITIONS[code].statusCode) =>
   res.status(status).json({ error: publicError(code) });
 
 // Namespace rejection is independent of policy validity and ambient UI cookies.
-const hasIntegrationCredential = (req) => {
+const parseRequestUrl = (req) => {
+  try {
+    return new URL(req.url, 'http://localhost');
+  } catch {
+    return null;
+  }
+};
+
+const hasIntegrationCredential = (req, url) => {
   if (/\boc_integration_/i.test(req.headers.authorization || '')) return true;
-  const query = new URL(req.url, 'http://localhost').searchParams;
+  const query = url.searchParams;
   return ['oc_url_token', 'token'].some((key) => query.getAll(key).some((value) => value.startsWith('oc_integration_')));
 };
 
@@ -131,12 +139,16 @@ export const registerIntegrationControlRoutes = (app, dependencies) => {
 
   // Consume unsupported integration paths/methods, never common auth or proxy.
   app.use('/api/openchamber/integration', (_req, res) => reject(res, 'UNAUTHORIZED'));
-  app.use((req, res, next) => hasIntegrationCredential(req) ? reject(res, 'UNAUTHORIZED') : next());
+  app.use((req, res, next) => {
+    const url = parseRequestUrl(req);
+    return !url || hasIntegrationCredential(req, url) ? reject(res, 'UNAUTHORIZED') : next();
+  });
 
   // HTTP upgrades do not traverse Express. Close before any WS handler can
   // establish a connection, including when password-less UI access is enabled.
   server?.prependListener('upgrade', (req, socket) => {
-    if (!hasIntegrationCredential(req) && !new URL(req.url, 'http://localhost').pathname.startsWith('/api/openchamber/integration')) return;
+    const url = parseRequestUrl(req);
+    if (url && !hasIntegrationCredential(req, url) && !url.pathname.startsWith('/api/openchamber/integration')) return;
     socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
     socket.destroy();
   });
