@@ -10,6 +10,7 @@ import { OpenChamberControlError } from './error.js';
 const createService = (overrides = {}) => {
   const client = {
     session: {
+      get: vi.fn(async () => null),
       list: vi.fn(async () => ({ data: [] })),
       active: vi.fn(async () => ({})),
     },
@@ -221,12 +222,7 @@ describe('OpenChamber control service', () => {
 
   it('resolves the target session directory from the global session list when send omits it', async () => {
     const { service, sessionService, client } = createService();
-    client.session.list.mockResolvedValue({
-      data: [
-        { id: 'ses_other', location: { directory: '/repo/worktrees/other' } },
-        { id: 'ses_target', location: { directory: '/repo/worktrees/target' } },
-      ],
-    });
+    client.session.get.mockResolvedValue({ id: 'ses_target', location: { directory: '/repo/worktrees/target' } });
     sessionService.send.mockResolvedValue({ sessionId: 'ses_target', directory: '/repo/worktrees/target', promptDispatched: true });
 
     await service.execute('session.send', { sessionId: 'ses_target', prompt: 'Continue' }, '/repo');

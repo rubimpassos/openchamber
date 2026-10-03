@@ -409,11 +409,16 @@ export const createOpenChamberControlService = (dependencies) => {
   // session.send/fork default the directory to the caller's context directory,
   // which is wrong for sessions living in other worktrees: the prompt then
   // targets an instance that does not hold the session and the run dies with
-  // UnknownError. Resolve the target session's directory from the global
-  // session list when the caller did not scope explicitly.
+  // UnknownError. Resolve the target session's directory from its record,
+  // or from every page of the session list when the record has none.
   const resolveSessionDirectory = async (sessionID) => {
     try {
       const client = await getClient();
+      // The record by ID answers in one request however many sessions there
+      // are, and the restricted Hermes adapter authorizes against it.
+      const record = await client.session.get({ sessionID }).catch(() => null);
+      const recordedDirectory = asNonEmptyString(record?.location?.directory);
+      if (recordedDirectory) return recordedDirectory;
       const seenCursors = new Set();
       let cursor;
       for (;;) {
