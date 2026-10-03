@@ -290,7 +290,7 @@ export const ContextPanelRail: React.FC = () => {
 
   const guestSurfaces = useGuestSurfaces();
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
-  const clearGuestBadge = useGuestBadgeStore((state) => state.clearBadge);
+  const clearGuestBadge = useGuestBadgeStore((state) => state.panelOpened);
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   // One surface per open zone is on screen; each lights its rail icon.
   const shownModes = React.useMemo(
