@@ -59,8 +59,6 @@ function installGuestScrollbarActivity(doc) {
   }, { capture: true, passive: true });
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
-// packages/sdk/src/file-editor.ts
-var patternExpressions = new Map;
 // packages/sdk/src/contract.ts
 var GUEST_FILE_STAT_KINDS = ["file", "directory", "other", "missing"];
 var HOST_REQUEST_ERROR_CODES = [
@@ -93,6 +91,7 @@ var fileStatKindSet = new Set(GUEST_FILE_STAT_KINDS);
 var HOST_PUSH_TYPES = new Set([
   "workspace",
   "shells",
+  "files-changed",
   "ready",
   "directory",
   "session",
@@ -108,6 +107,17 @@ var HOST_PUSH_TYPES = new Set([
   "file-snapshot",
   "file-saved"
 ]);
+
+// packages/sdk/src/loopback.ts
+var GUEST_LOOPBACK_METHODS = ["GET", "HEAD", "POST"];
+var GUEST_LOOPBACK_QUERY_BYTES = 2 * 1024;
+var GUEST_LOOPBACK_BODY_BYTES = 64 * 1024;
+var GUEST_LOOPBACK_RESPONSE_BYTES = 16 * 1024 * 1024;
+var methods = new Set(GUEST_LOOPBACK_METHODS);
+// packages/sdk/src/manifest.ts
+var GUEST_MESSAGE_TEXT_SCAN_MAX = 64 * 1024;
+// packages/sdk/src/file-editor.ts
+var patternExpressions = new Map;
 // packages/sdk/src/service-providers.ts
 var BROWSER_PROVIDER_PATH = "/browser-control";
 var BROWSER_CONTROL_ACTIONS = [

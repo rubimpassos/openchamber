@@ -257,6 +257,10 @@ host.onReady((ctx) => {
 
 OpenChamber supplies thin, theme-aware native scrollbars inside extension documents, including nested lists, tabs, and textareas. Like the app's own, they stay hidden until you hover or scroll. The UI kit includes the same defaults for development previews. Existing installed bundles get the host stylesheet without rebuilding. Custom rendering hosts can use `GUEST_SCROLLBAR_CSS` from `@openchamber/sdk`. Authors can override these default rules; an extension's CSP still applies.
 
+## Loopback contract
+
+Matching host builds can approve `contributes.loopback` for declared paths on an existing server-local process. The SDK provides `host.loopbackUrl`, `host.loopbackRequest` and disposable `host.watchLoopback`, plus opt-in `background.start: "automatic"` and `panel.badge: "count"` declarations. Older manifests keep on-demand backgrounds and unread badges. These contracts require the host's approval, proxy, bridge and lifecycle implementation; upgrading the SDK alone does not add host support. See [Loopback requests and streams](./API.md#loopback-requests-and-streams) for signatures, limits and relay behavior.
+
 ## Schemas
 
 `@openchamber/sdk/schemas` exports the zod schemas for the manifest and the messages, for tools that validate extensions. The main entry has no zod dependency, so a page bundle stays small.

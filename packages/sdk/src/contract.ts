@@ -1,7 +1,8 @@
-
+// allow: SIZE_OK — existing SDK wire registry; loopback adds envelope membership only, with its contracts in loopback.ts.
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
 import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOutputResult, GuestShellStopResult, GuestShellsSubscription } from './shells.ts';
+import type { LoopbackRequest, LoopbackRequestResult, LoopbackUrlRequest, LoopbackUrlResult } from './loopback.ts';
 import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest } from './popover.ts';
@@ -173,6 +174,8 @@ export type GenerateRequest = {
 export type GenerateResult = { text: string };
 
 export type HostResultPayload =
+  | LoopbackUrlResult
+  | LoopbackRequestResult
   | GuestStorageResult
   | GuestWorkspaceSnapshot
   | GuestShellOutputResult
@@ -659,6 +662,8 @@ export type GuestCloseMessage = GuestCall<'close'>;
 export type GuestOauthStartMessage = GuestCall<'oauth-start'>;
 export type GuestOauthDisconnectMessage = GuestCall<'oauth-disconnect'>;
 export type GuestRequestMessage = GuestCall<'request', GuestRequest>;
+export type GuestLoopbackUrlMessage = GuestCall<'loopback-url', LoopbackUrlRequest>;
+export type GuestLoopbackRequestMessage = GuestCall<'loopback-request', LoopbackRequest>;
 export type GuestServiceRequestMessage = GuestCall<'service-request', GuestRequest>;
 export type GuestServiceStatusMessage = GuestCall<'service-status'>;
 export type GuestFileReadMessage = GuestCall<'file-read', FileReadRequest>;
@@ -717,6 +722,8 @@ export type GuestMessage =
   | GuestOauthStartMessage
   | GuestOauthDisconnectMessage
   | GuestRequestMessage
+  | GuestLoopbackUrlMessage
+  | GuestLoopbackRequestMessage
   | GuestServiceRequestMessage
   | GuestServiceStatusMessage
   | GuestFileReadMessage

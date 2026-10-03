@@ -1,4 +1,6 @@
+// allow: SIZE_OK — existing wire schema registry and bidirectional type proofs; loopback payload parsing lives in loopback-schemas.ts.
 import { z } from 'zod';
+import { loopbackRequestSchema, loopbackRequestResultSchema, loopbackUrlRequestSchema, loopbackUrlResultSchema } from './loopback-schemas.ts';
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
@@ -174,6 +176,8 @@ const shellStopResultPayloadSchema = z.object({
 });
 
 const hostResultPayloadSchema = z.union([
+  loopbackUrlResultSchema,
+  loopbackRequestResultSchema,
   guestStorageResultSchema,
   guestWorkspaceSnapshotSchema,
   shellOutputResultPayloadSchema,
@@ -437,6 +441,8 @@ export const hostMessageSchema = z.union([
 const filePathSchema = z.string().min(1).max(GUEST_FILE_PATH_MAX).refine(isGuestFilePath);
 
 export const guestMessageSchema = z.discriminatedUnion('type', [
+  z.object({ ...envelope, type: z.literal('loopback-url'), id: z.string().min(1), payload: loopbackUrlRequestSchema }).strict(),
+  z.object({ ...envelope, type: z.literal('loopback-request'), id: z.string().min(1), payload: loopbackRequestSchema }).strict(),
   z.object({
     ...envelope,
     type: z.literal('action-result'),
