@@ -112,6 +112,7 @@
     "dist",
     "server",
     "bin",
+    "scripts/integration-credentials.mjs",
     "public",
     "package.json",
     "README.md"
