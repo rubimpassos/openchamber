@@ -230,6 +230,7 @@ function shouldSkipCompression(req, res) {
   }
 
   const pathname = req.path || req.url || '';
+  if (/^\/api\/guests\/[^/]+\/loopback(?:\/|$)/.test(pathname)) return true;
   if ((pathname === '/api' || pathname.startsWith('/api/')) && shouldSkipApiCompression()) {
     return true;
   }
@@ -1953,6 +1954,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   tunnelAuthController,
   scheduledTasksRuntime,
   beginGuestServiceShutdown,
+  disposeFeatureRoutes: () => featureRoutesRuntime.dispose(),
   stopAllGuestServices,
   getGuestSurfaceRuntime: () => guestSurfaceRuntime,
   getRealtimeProxyRuntime: () => realtimeProxyRuntime,
@@ -2529,7 +2531,8 @@ async function main(options = {}) {
       guestSurfaceRuntime?.endForGuest(event.guestId);
       return browserControlRouter.handleGuestDeactivated(event);
     },
-    surfaceViewerHeaders: (guestId, viewerId) => guestSurfaceRuntime?.viewerHeaders(guestId, viewerId) ?? null,
+      surfaceViewerHeaders: (guestId, viewerId) => guestSurfaceRuntime?.viewerHeaders(guestId, viewerId) ?? null,
+      isRequestOriginAllowed,
     builtInExtensionsDir: options.builtInExtensionsDir,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
     managedChatsRoot: OPENCHAMBER_CHATS_DIR,

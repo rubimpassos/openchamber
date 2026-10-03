@@ -55,6 +55,7 @@ import {
   toPublicGuestAuth,
 } from './oauth.js';
 import { proxyGuestRequest } from './request.js';
+import { registerLoopbackRoutes } from './loopback-routes.js';
 import {
   GuestServiceError,
   getServiceStatus,
@@ -216,6 +217,7 @@ export const registerGuestRoutes = (app, {
   getSmallModelService,
   onGuestDeactivated = async () => false,
   surfaceViewerHeaders = () => null,
+  isRequestOriginAllowed,
   // Delivers `openchamber:guest-files-changed` to connected clients.
   emitGuestFilesChanged = () => undefined,
 }) => {
@@ -873,6 +875,7 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  const loopbackRuntime = registerLoopbackRoutes(app, { persistPath, isRequestOriginAllowed });
   app.get('/api/guests/:id/{*filePath}', async (req, res) => {
     try {
       const id = req.params.id;
@@ -938,4 +941,5 @@ export const registerGuestRoutes = (app, {
       res.status(500).json({ error: 'Failed to serve guest asset' });
     }
   });
+  return loopbackRuntime;
 };
