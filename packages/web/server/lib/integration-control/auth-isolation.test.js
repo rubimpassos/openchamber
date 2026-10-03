@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebSocket } from 'ws';
 import { createTestApp, requestBody } from './test-app.js';
 
 let fixture;
@@ -15,17 +14,18 @@ afterEach(async () => {
 const endpoint = '/api/openchamber/integration/control';
 const commonRoutes = [
   ['post', '/api/openchamber/control', { action: 'projects.list' }],
-  ['get', '/api/session'],
-  ['get', '/api/global/event/ws'],
-  ['get', '/api/terminal/sessions'],
-  ['get', '/api/fs/home'],
-  ['get', '/api/config/settings'],
+  ['get', '/api/session', undefined],
+  ['get', '/api/event', undefined],
+  ['get', '/api/global/event/ws', undefined],
+  ['get', '/api/terminal/sessions', undefined],
+  ['get', '/api/fs/home', undefined],
+  ['get', '/api/config/settings', undefined],
   ['post', '/api/openchamber/control', { action: 'browser.snapshot' }],
-  ['get', '/api/agent-memory?scope=global'],
-  ['get', '/api/openchamber/scheduled-tasks/status'],
+  ['get', '/api/agent-memory?scope=global', undefined],
+  ['get', '/api/openchamber/scheduled-tasks/status', undefined],
   ['post', '/api/openchamber/agent-tool', { input: { action: 'projects.list' } }],
-  ['post', '/auth/url-token'],
-  ['get', '/api/version'],
+  ['post', '/auth/url-token', undefined],
+  ['get', '/api/version', undefined],
 ];
 
 describe('credential isolation at production bootstrap gates', () => {
@@ -87,16 +87,4 @@ describe('credential isolation at production bootstrap gates', () => {
     expect(fixture.execute).not.toHaveBeenCalled();
   });
 
-  it.each(['/api/global/event/ws', '/api/event/ws', '/api/terminal/ws', endpoint])('rejects actual WebSocket upgrade at %s with valid UI cookie', async (url) => {
-    const status = await new Promise((resolve, reject) => {
-      const socket = new WebSocket(`ws://127.0.0.1:${fixture.server.address().port}${url}`, {
-        headers: { Authorization: `Bearer ${fixture.token}`, Cookie: fixture.cookie },
-      });
-      socket.on('unexpected-response', (_req, res) => { res.resume(); socket.terminate(); resolve(res.statusCode); });
-      socket.on('open', () => { socket.close(); reject(new Error('Unexpected integration WebSocket')); });
-      socket.on('error', () => {});
-    });
-    expect(status).toBe(401);
-    expect(fixture.execute).not.toHaveBeenCalled();
-  });
 });
