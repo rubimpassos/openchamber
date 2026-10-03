@@ -761,13 +761,15 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
-  it('keeps OpenChamber UI credentials and JWT secret out of the managed OpenCode env', async () => {
+  it('keeps UI credentials, integration configuration and JWT secret out of the managed OpenCode env', async () => {
     delete process.env.OPENCODE_BINARY;
-    const privateKeys = ['OPENCHAMBER_UI_PASSWORD', 'OPENCHAMBER_UI_PASSWORD_HASH', 'OPENCODE_JWT_SECRET'];
+    const privateKeys = ['OPENCHAMBER_UI_PASSWORD', 'OPENCHAMBER_UI_PASSWORD_HASH', 'OPENCODE_JWT_SECRET', 'OPENCHAMBER_INTEGRATION_POLICY_FILE', 'HERMES_OC_TOKEN_VPS'];
     const previous = Object.fromEntries(privateKeys.map((key) => [key, process.env[key]]));
     process.env.OPENCHAMBER_UI_PASSWORD = 'ui-plaintext';
     process.env.OPENCHAMBER_UI_PASSWORD_HASH = 'scrypt$c2FsdA==$aGFzaA==';
     process.env.OPENCODE_JWT_SECRET = 'jwt-secret';
+    process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = '/synthetic/policy.json';
+    process.env.HERMES_OC_TOKEN_VPS = 'synthetic-hermes-token';
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {
       queueMicrotask(() => {
@@ -782,6 +784,8 @@ describe('OpenCode lifecycle', () => {
           PATH: '/home/user/.bun/bin:/usr/local/bin:/usr/bin',
           SHELL_ONLY: 'yes',
           OPENCHAMBER_UI_PASSWORD: 'from-shell-rc',
+          OPENCHAMBER_INTEGRATION_POLICY_FILE: '/synthetic/shell-policy.json',
+          HERMES_OC_TOKEN_VPS: 'synthetic-shell-token',
         })),
       });
       const server = await runtime.startOpenCode();

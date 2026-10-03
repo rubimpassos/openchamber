@@ -1,22 +1,11 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
-import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
+import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripOpenChamberPrivateEnv } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
-
-// OpenChamber's own UI credentials and session-signing secret must never reach
-// the managed OpenCode process (or anything it spawns).
-const OPENCHAMBER_PRIVATE_ENV_KEYS = ['OPENCHAMBER_UI_PASSWORD', 'OPENCHAMBER_UI_PASSWORD_HASH', 'OPENCODE_JWT_SECRET'];
-
-export const stripOpenChamberPrivateEnv = (env) => {
-  for (const key of OPENCHAMBER_PRIVATE_ENV_KEYS) {
-    delete env[key];
-  }
-  return env;
-};
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
