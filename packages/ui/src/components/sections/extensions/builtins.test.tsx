@@ -140,6 +140,20 @@ describe('built-in extension settings', () => {
     expect(container.textContent).toContain('Third-party');
   });
 
+  test('keeps reapproval nonmodal when a loopback scope has changed', async () => {
+    // Given a catalog with a loopback extension whose effective grant was removed.
+    catalog = [{ ...installed, capabilities: { requested: ['loopback'], granted: [] }, loopback: {
+      port: 8123, status: 'ready', resolvedPort: 9123, routes: [{ path: '/state', methods: ['GET'] }],
+    } }];
+    // When Settings first loads that catalog.
+    await render(<ExtensionsPage />);
+    // Then review is a card state, not a startup modal or an automatic approval.
+    expect(container.textContent).toContain('Third-party');
+    expect(container.textContent).toContain('Needs approval');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(requests.some((entry) => entry.includes('/capabilities'))).toBe(false);
+  });
+
   test('opens the Git source in the external browser', async () => {
     await render(<ExtensionsPage />);
     const trigger = [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes('Third-party'));

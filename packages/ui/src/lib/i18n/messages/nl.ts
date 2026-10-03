@@ -18,6 +18,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict = {
+  'settings.extensions.capability.loopback': 'Een lokale server-app benaderen',
+  'settings.extensions.capability.loopback.detail': 'Alleen verbinden met de vermelde routes op de machine waarop OpenChamber draait, niet op de machine van deze browser. Dit start de app niet.',
+  'settings.extensions.capability.loopback.target': 'Doel op de server: {target}',
+  'settings.extensions.capability.loopback.defaultPort': 'Opgegeven standaardpoort: {port}',
+  'settings.extensions.capability.loopback.environment': 'Servervariabele: {env}. Als deze ontbreekt of leeg is, wordt poort {port} gebruikt.',
+  'settings.extensions.capability.loopback.routes': 'Toegestane methoden en paden',
+  'settings.extensions.capability.loopback.invalid': 'De ingestelde serverpoort is ongeldig. Gebruik een geheel getal van 1024 tot 65535 of maak de variabele leeg voor de standaardwaarde. Goedkeuring is pas mogelijk na de correctie.',
   "opencodeCompatibility.bundled": "OpenCode is inbegrepen bij OpenChamber. Werk OpenChamber bij om OpenCode v2 te krijgen.",
   "opencodeCompatibility.title": "OpenCode v2 vereist",
   "opencodeCompatibility.outdatedTitle": "OpenCode bijwerken",

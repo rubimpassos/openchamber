@@ -19,6 +19,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'settings.extensions.capability.loopback': '서버의 로컬 앱에 접근',
+  'settings.extensions.capability.loopback.detail': '이 브라우저의 기기가 아닌 OpenChamber가 실행 중인 기기의 지정된 경로에만 연결합니다. 앱을 시작하지는 않습니다.',
+  'settings.extensions.capability.loopback.target': '서버 연결 대상: {target}',
+  'settings.extensions.capability.loopback.defaultPort': '선언된 기본 포트: {port}',
+  'settings.extensions.capability.loopback.environment': '서버 환경 변수: {env}. 설정되지 않았거나 비어 있으면 포트 {port}를 사용합니다.',
+  'settings.extensions.capability.loopback.routes': '허용된 메서드와 경로',
+  'settings.extensions.capability.loopback.invalid': '서버 포트 설정이 잘못되었습니다. 1024~65535 사이의 정수를 입력하거나 변수를 비워 기본값을 사용하세요. 수정하기 전에는 승인할 수 없습니다.',
   "opencodeCompatibility.bundled": "OpenCode는 OpenChamber에 포함되어 있습니다. OpenCode v2를 사용하려면 OpenChamber를 업데이트하세요.",
   "opencodeCompatibility.title": "OpenCode v2가 필요합니다",
   "opencodeCompatibility.outdatedTitle": "OpenCode를 업데이트하세요",

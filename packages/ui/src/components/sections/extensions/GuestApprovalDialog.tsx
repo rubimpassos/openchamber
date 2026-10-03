@@ -26,6 +26,7 @@ const CAPABILITY_ROWS = {
   service: { icon: 'terminal', titleKey: 'settings.extensions.capability.service', detailKey: 'settings.extensions.capability.service.detail' },
   network: { icon: 'plug', titleKey: 'settings.extensions.capability.network', detailKey: 'settings.extensions.capability.network.detail' },
   origins: { icon: 'global', titleKey: 'settings.extensions.capability.origins', detailKey: 'settings.extensions.capability.origins.detail' },
+  loopback: { icon: 'plug', titleKey: 'settings.extensions.capability.loopback', detailKey: 'settings.extensions.capability.loopback.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -50,6 +51,30 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const serviceSockets = guest?.service?.permissions?.sockets ?? [];
   const providesBrowser = serviceProvides(guest?.service, 'browser');
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
+  const loopback = guest?.loopback;
+  let loopbackTarget: React.ReactNode = null;
+  if (loopback) {
+    switch (loopback.status) {
+      case 'ready':
+        loopbackTarget = (
+          <p className="typography-meta mt-1 break-all font-mono text-foreground">
+            {t('settings.extensions.capability.loopback.target', { target: `127.0.0.1:${loopback.resolvedPort}` })}
+          </p>
+        );
+        break;
+      case 'config-invalid':
+        loopbackTarget = (
+          <p role="alert" className="typography-meta mt-1 text-[var(--status-error-text)]">
+            {t('settings.extensions.capability.loopback.invalid')}
+          </p>
+        );
+        break;
+      default: {
+        const exhaustive: never = loopback;
+        throw new TypeError(`Unexpected loopback state: ${exhaustive}`);
+      }
+    }
+  }
 
   return (
     <Dialog
@@ -79,6 +104,21 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-foreground">{t(row.titleKey)}</div>
                   <p className="typography-meta text-muted-foreground">{t(row.detailKey)}</p>
+                  {capability === 'loopback' && loopback ? (
+                    <>
+                      {loopbackTarget}
+                      <p className="typography-meta mt-1 break-all text-muted-foreground">
+                        {loopback.env
+                          ? t('settings.extensions.capability.loopback.environment', { env: loopback.env, port: loopback.port })
+                          : t('settings.extensions.capability.loopback.defaultPort', { port: loopback.port })}
+                      </p>
+                      <ul className="mt-1 space-y-0.5" aria-label={t('settings.extensions.capability.loopback.routes')}>
+                        {loopback.routes.flatMap((route) => route.methods.map((method) => `${method} ${route.path}`)).sort().map((route) => (
+                          <li key={route} className="typography-meta break-all font-mono text-foreground">{route}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
                   {capability === 'filesystem' && filesystemPatterns.length > 0 ? (
                     <ul className="mt-1 space-y-0.5">
                       {filesystemPatterns.map((pattern) => (
@@ -132,7 +172,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
           </Button>
           <Button
             size="sm"
-            disabled={busy}
+            disabled={busy || loopback?.status === 'config-invalid'}
             onClick={() => guest && onApprove(guest)}
           >
             {t('settings.extensions.dialog.approve')}

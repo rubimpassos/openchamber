@@ -1,4 +1,5 @@
 import { resolveIntegrationApi } from '@openchamber/sdk';
+import { resolveLoopbackTarget } from './loopback-target.js';
 
 // What a grant covered when the user approved it. `filesystem` is the
 // declared pattern list, `origins` the origins the frame may reach, `network` the API origin, `service` the exec names
@@ -9,10 +10,10 @@ import { resolveIntegrationApi } from '@openchamber/sdk';
 const sortedUnique = (values) => [...new Set(values)].sort();
 
 /**
- * @param {{ filesystem?: string[], integration?: object, service?: { permissions?: { exec?: string[], sockets?: Array<{ id: string }> } } }} guest
- * @returns {{ filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[] } }}
+ * @param {Pick<import('@openchamber/sdk').OpenChamberContributes, 'filesystem' | 'origins' | 'integration' | 'service' | 'loopback'>} guest
+ * @param {import('./loopback-target.js').LoopbackTarget | undefined} loopbackTarget
  */
-export const guestGrantScope = (guest) => {
+export const guestGrantScope = (guest, loopbackTarget = guest.loopback ? resolveLoopbackTarget(guest.loopback) : undefined) => {
   const scope = {};
   if (Array.isArray(guest.filesystem) && guest.filesystem.length > 0) {
     scope.filesystem = sortedUnique(guest.filesystem);
@@ -40,6 +41,9 @@ export const guestGrantScope = (guest) => {
       sockets: sortedUnique((guest.service.permissions?.sockets ?? []).map((binding) => binding.id)),
     };
   }
+  if (loopbackTarget?.status === 'ready') {
+    scope.loopback = loopbackTarget.scope;
+  }
   return scope;
 };
 
@@ -60,7 +64,7 @@ const sameList = (a, b) => a.length === b.length && a.every((value, index) => va
 
 /**
  * The grants that still hold for the package as it is now. A scoped
- * capability (`filesystem`, `origins`, `network`, `service`) only counts when the stored
+ * capability (`filesystem`, `origins`, `network`, `service`, `loopback`) only counts when the stored
  * scope equals the current one; without a stored scope it never counts.
  * @param {string[]} granted
  * @param {ReturnType<typeof guestGrantScope> | undefined} stored
@@ -82,6 +86,13 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
     return Boolean(stored?.service)
       && sameList(stored.service.exec, current.service?.exec ?? [])
       && sameList(stored.service.sockets, current.service?.sockets ?? []);
+  }
+  if (capability === 'loopback') {
+    return Boolean(stored?.loopback && current.loopback)
+      && stored.loopback.port === current.loopback.port
+      && stored.loopback.env === current.loopback.env
+      && stored.loopback.resolvedPort === current.loopback.resolvedPort
+      && sameList(stored.loopback.routes, current.loopback.routes);
   }
   return true;
 });

@@ -15,16 +15,28 @@ import {
   GUEST_TOOL_MATCH,
   GUEST_TOOL_OUTPUTS,
   GUEST_MESSAGES_MAX,
+  GUEST_LOOPBACK_PORT_MIN,
+  GUEST_LOOPBACK_PORT_MAX,
   GUEST_MESSAGE_BODIES,
   GUEST_MESSAGE_TONES,
   isFileEditorPattern,
 } from '@openchamber/sdk';
+import { loopbackContributionSchema } from '@openchamber/sdk/schemas';
 import { z } from 'zod';
 
 import type { GuestCatalog, InstalledGuest } from './types.ts';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 const STORAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Reuse the SDK declaration schema, extending only the server-owned resolution.
+const publicLoopbackSchema = z.discriminatedUnion('status', [
+  loopbackContributionSchema.in.extend({
+    status: z.literal('ready'),
+    resolvedPort: z.number().int().min(GUEST_LOOPBACK_PORT_MIN).max(GUEST_LOOPBACK_PORT_MAX),
+  }),
+  loopbackContributionSchema.in.extend({ status: z.literal('config-invalid') }),
+]);
 
 const publicIntegrationSchema = z.object({
   name: z.string().trim().min(1),
@@ -119,7 +131,9 @@ const installedGuestSchema = z.object({
   /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
   entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   entrySize: z.number().int().positive().optional(),
+  panelBadge: z.enum(['unread', 'count']).optional(),
   backgroundEntry: z.string().trim().min(1).optional(),
+  backgroundStart: z.enum(['on-demand', 'automatic']).optional(),
   version: z.string().trim().min(1).max(64).optional(),
   attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
   attachEntry: z.string().trim().min(1).optional(),
@@ -134,6 +148,7 @@ const installedGuestSchema = z.object({
   filesystem: z.array(z.string().trim().min(1)).optional(),
   origins: z.array(z.string().trim().min(1)).optional(),
   service: publicServiceSchema.optional(),
+  loopback: publicLoopbackSchema.optional(),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),

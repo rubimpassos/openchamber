@@ -8,6 +8,7 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  * - `network`: host requests to its integration's API origin;
  * - `origins`: its frame fetching approved https origins directly;
  * - `service`: an unsandboxed process with the user's access.
+ * - `loopback`: approved access to an existing server-local process.
  * Such a package installs and runs only from a Git repository listed in the
  * policy (`allowedExtensions`; an entry ending in `/` allows every
  * repository under it, such as a whole organization), or from a local folder
@@ -16,7 +17,7 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  * The list names repositories, not package ids: a package declares its own
  * id, so an id would let a user ship any code under an allowed name.
  */
-const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service'];
+const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'loopback'];
 
 /** `host/path` of a clone URL (https or scp-style ssh), for comparing two spellings of one repository. */
 const repositoryKey = (value) => {

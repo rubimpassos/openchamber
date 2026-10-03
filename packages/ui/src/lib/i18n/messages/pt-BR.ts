@@ -19,6 +19,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'settings.extensions.capability.loopback': 'Acessar um aplicativo local do servidor',
+  'settings.extensions.capability.loopback.detail': 'Conectar apenas às rotas listadas na máquina que executa o OpenChamber, não na máquina deste navegador. Isso não inicia o aplicativo.',
+  'settings.extensions.capability.loopback.target': 'Destino no servidor: {target}',
+  'settings.extensions.capability.loopback.defaultPort': 'Porta padrão declarada: {port}',
+  'settings.extensions.capability.loopback.environment': 'Variável do servidor: {env}. Se não estiver definida ou estiver vazia, usar a porta {port}.',
+  'settings.extensions.capability.loopback.routes': 'Métodos e caminhos permitidos',
+  'settings.extensions.capability.loopback.invalid': 'A porta definida no servidor é inválida. Use um número inteiro de 1024 a 65535 ou limpe a variável para usar o padrão. A aprovação fica indisponível até a correção.',
   "opencodeCompatibility.bundled": "O OpenCode está incluído no OpenChamber. Atualize o OpenChamber para obter o OpenCode v2.",
   "opencodeCompatibility.title": "OpenCode v2 necessário",
   "opencodeCompatibility.outdatedTitle": "Atualize o OpenCode",
