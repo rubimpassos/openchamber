@@ -1,3 +1,4 @@
+// allow: SIZE_OK — existing catalog orchestration; loopback target mechanics live in loopback-target.js.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -6,6 +7,7 @@ import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
 import { effectiveGrants, guestGrantScope } from './grant-scope.js';
+import { resolveLoopbackTarget } from './loopback-target.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { ensureGuestStorageIds, onExtensionStoreWrite, readExtensionStore } from './persist.js';
@@ -199,6 +201,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.entry) {
     guest.entry = panel.entry;
   }
+  if (panel.badge !== undefined) guest.panelBadge = panel.badge;
   if (panel.dock !== undefined) {
     guest.entryDock = panel.dock;
   }
@@ -214,6 +217,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
       return { ok: false, code: 'missing-build' };
     }
     guest.backgroundEntry = backgroundEntry;
+    if (parsed.manifest.contributes.background.start !== undefined) {
+      guest.backgroundStart = parsed.manifest.contributes.background.start;
+    }
   }
   if (parsed.version) {
     guest.version = parsed.version;
@@ -284,6 +290,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   }
   if (parsed.manifest.contributes.integration) {
     guest.integration = parsed.manifest.contributes.integration;
+  }
+  if (parsed.manifest.contributes.loopback) {
+    guest.loopback = parsed.manifest.contributes.loopback;
   }
   if (parsed.manifest.contributes.filesystem?.length) {
     guest.filesystem = [...parsed.manifest.contributes.filesystem];
@@ -356,6 +365,13 @@ export const toPublicGuest = (guest) => {
   }
   if (guest.backgroundEntry) {
     row.backgroundEntry = guest.backgroundEntry;
+  }
+  if (guest.backgroundStart !== undefined) row.backgroundStart = guest.backgroundStart;
+  if (guest.panelBadge !== undefined) row.panelBadge = guest.panelBadge;
+  if (guest.loopback) {
+    const target = guest.loopbackTarget ?? resolveLoopbackTarget(guest.loopback);
+    row.loopback = { ...guest.loopback, status: target.status };
+    if (target.status === 'ready') row.loopback.resolvedPort = target.scope.resolvedPort;
   }
   if (typeof guest.version === 'string' && guest.version) {
     row.version = guest.version;
@@ -489,15 +505,31 @@ const withEnterprisePolicy = (guests) => {
 export const listInstalledGuests = async ({ persistPath } = {}) => {
   const cached = persistPath ? catalogCache.get(persistPath) : undefined;
   if (cached && cached.expiresAt > Date.now()) {
-    return withEnterprisePolicy(cached.guests);
+    return withEnterprisePolicy(withCurrentGrants(cached.guests));
   }
   const version = persistPath ? catalogVersionOf(persistPath) : 0;
   const guests = await listInstalledGuestsUncached({ persistPath });
   if (persistPath && catalogVersionOf(persistPath) === version) {
     catalogCache.set(persistPath, { guests, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS });
   }
-  return withEnterprisePolicy(guests);
+  return withEnterprisePolicy(withCurrentGrants(guests));
 };
+
+// Cache declarations and recorded approvals, never resolved environment values.
+// Built-ins keep their existing app-owned automatic approval policy.
+const withCurrentGrants = (guests) => guests.map(({ capabilityScope, ...guest }) => {
+  const loopbackTarget = guest.loopback ? resolveLoopbackTarget(guest.loopback) : undefined;
+  const currentScope = guestGrantScope(guest, loopbackTarget);
+  return {
+    ...guest,
+    ...(loopbackTarget ? { loopbackTarget } : {}),
+    capabilityGrants: effectiveGrants(
+      guest.capabilityGrants,
+      guest.source === 'bundled' ? currentScope : capabilityScope,
+      currentScope,
+    ),
+  };
+});
 
 const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
   const guests = [];
@@ -556,14 +588,8 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
     guests.push({
       ...withSource(guest, source, root),
       gitOrigin,
-      // Grants are narrowed to what the user actually approved for this
-      // version: a widened filesystem list, a new API origin, or new service
-      // permissions drop that capability until the dialog runs again.
-      capabilityGrants: effectiveGrants(
-        stored.capabilityGrants?.[guest.id] ?? [],
-        stored.capabilityScopes?.[guest.id],
-        guestGrantScope(guest),
-      ),
+      capabilityGrants: stored.capabilityGrants?.[guest.id] ?? [],
+      capabilityScope: stored.capabilityScopes?.[guest.id],
       enabled: !stored.disabledGuests?.[guest.id],
       socketBindings,
       storageDescriptor: { id: guest.id, storedPath, builtIn: false },

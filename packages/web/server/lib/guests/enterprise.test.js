@@ -11,8 +11,32 @@ import { setCapabilityGrants } from './persist.js';
 
 const enterprise = (allowedExtensions = []) => ({ enterpriseMode: true, allowedExtensions });
 const withOrigins = { origins: ['https://api.acme.test'] };
+const withLoopback = { loopback: { port: 8123, routes: [{ path: '/state', methods: ['GET'] }] } };
 
 describe('enterpriseBlockedCapabilities', () => {
+  test.each([
+    ['path', undefined, false, true],
+    ['path', undefined, true, false],
+    ['zip', undefined, true, true],
+    ['git', 'https://github.com/acme/ext.git', false, false],
+    ['git', 'https://github.com/other/ext.git', false, true],
+  ])('applies existing extension policy to loopback from %s / %s', (source, gitUrl, allowLocalExtensions, blocked) => {
+    // Given the administrator's Git allowlist and local-development choice.
+    const policy = { ...enterprise(['https://github.com/acme/ext']), allowLocalExtensions };
+    // When checking a loopback-only guest.
+    const refused = enterpriseBlockedCapabilities(withLoopback, { source, gitUrl }, policy);
+    // Then it receives exactly the service/network source policy.
+    expect(refused).toEqual(blocked ? ['loopback'] : []);
+  });
+
+  test('allows loopback when enterprise mode is off', () => {
+    // Given a ZIP guest outside enterprise mode.
+    const policy = { enterpriseMode: false };
+    // When checking its loopback declaration.
+    const refused = enterpriseBlockedCapabilities(withLoopback, { source: 'zip' }, policy);
+    // Then normal approval remains available.
+    expect(refused).toEqual([]);
+  });
   test('refuses nothing outside enterprise mode', () => {
     expect(enterpriseBlockedCapabilities({ origins: withOrigins.origins }, { source: 'zip' }, { enterpriseMode: false, allowedExtensions: [] })).toEqual([]);
   });
@@ -69,6 +93,27 @@ const writeGuest = async (root, id, contributes = {}) => {
 describe('extensions in enterprise mode', () => {
   afterEach(() => {
     delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+  });
+
+  test('removes effective loopback approval when policy changes with a warm catalog', async () => {
+    // Given an approved local install outside enterprise mode.
+    const dir = await fs.mkdtemp('/tmp/opencode/oc-loopback-enterprise-');
+    const persistPath = path.join(dir, 'extensions.json');
+    try {
+      await writeGuest(path.join(dir, 'local'), 'local-api', withLoopback);
+      await installGuestFromPath(path.join(dir, 'local'), persistPath);
+      const [installed] = await listInstalledGuests({ persistPath });
+      await setCapabilityGrants(installed.id, persistPath, ['loopback'], guestGrantScope(installed));
+      await listInstalledGuests({ persistPath });
+      // When the administrator enables enterprise restrictions.
+      process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+      const [guest] = await listInstalledGuests({ persistPath });
+      // Then stored approval no longer authorizes loopback.
+      expect(guest.enterpriseBlocked).toEqual(['loopback']);
+      expect(guest.capabilityGrants).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   test('refuses to install a package that could send data out, and installs one that cannot', async () => {

@@ -19,6 +19,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'settings.extensions.capability.loopback': '存取伺服器上的本機應用程式',
+  'settings.extensions.capability.loopback.detail': '僅連線至執行 OpenChamber 的機器上列出的路由，而非此瀏覽器所在的機器。此操作不會啟動應用程式。',
+  'settings.extensions.capability.loopback.target': '伺服器目標：{target}',
+  'settings.extensions.capability.loopback.defaultPort': '宣告的預設連接埠：{port}',
+  'settings.extensions.capability.loopback.environment': '伺服器環境變數：{env}。未設定或為空時使用連接埠 {port}。',
+  'settings.extensions.capability.loopback.routes': '允許的方法與路徑',
+  'settings.extensions.capability.loopback.invalid': '伺服器連接埠設定無效。請設定 1024 到 65535 之間的整數，或清空變數以使用預設值。修正前無法核准。',
   "opencodeCompatibility.bundled": "OpenCode 隨 OpenChamber 一起提供。請更新 OpenChamber 以取得 OpenCode v2。",
   "opencodeCompatibility.title": "需要 OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "請更新 OpenCode",

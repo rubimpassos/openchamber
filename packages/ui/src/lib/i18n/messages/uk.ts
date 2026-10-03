@@ -19,6 +19,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'settings.extensions.capability.loopback': 'Доступ до локального застосунку сервера',
+  'settings.extensions.capability.loopback.detail': 'Підключення лише до вказаних маршрутів на машині з OpenChamber, а не на машині цього браузера. Це не запускає застосунок.',
+  'settings.extensions.capability.loopback.target': 'Адреса на сервері: {target}',
+  'settings.extensions.capability.loopback.defaultPort': 'Оголошений типовий порт: {port}',
+  'settings.extensions.capability.loopback.environment': 'Змінна сервера: {env}. Якщо її не задано або вона порожня, використовується порт {port}.',
+  'settings.extensions.capability.loopback.routes': 'Дозволені методи та шляхи',
+  'settings.extensions.capability.loopback.invalid': 'Порт, заданий на сервері, недійсний. Вкажіть ціле число від 1024 до 65535 або очистіть змінну для типового значення. Схвалення буде доступне після виправлення.',
   "opencodeCompatibility.bundled": "OpenCode входить до складу OpenChamber. Оновіть OpenChamber, щоб отримати OpenCode v2.",
   "opencodeCompatibility.title": "Потрібен OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "Оновіть OpenCode",

@@ -16,6 +16,44 @@ const guest = {
   },
 };
 
+describe('loopback approval scope', () => {
+  const loopback = { port: 8123, routes: [{ path: '/state', methods: ['GET', 'HEAD'] }, { path: '/sessions/*', methods: ['POST'] }] };
+
+  test.each([
+    ['port', { ...loopback, port: 8124 }],
+    ['env', { ...loopback, env: 'OC_SCOPE_TEST_PORT' }],
+    ['path', { ...loopback, routes: [{ path: '/other', methods: ['GET'] }] }],
+    ['method', { ...loopback, routes: [{ path: '/state', methods: ['POST'] }] }],
+    ['removal', undefined],
+  ])('drops loopback when the %s changes', (_name, changed) => {
+    // Given an approval for a different target or allowlist.
+    const approved = guestGrantScope({ loopback });
+    // When evaluating the changed declaration.
+    const granted = effectiveGrants(['prompt', 'loopback'], approved, guestGrantScope({ loopback: changed }));
+    // Then unrelated grants survive, but loopback does not.
+    expect(granted).toEqual(['prompt']);
+  });
+
+  test('keeps loopback when only version and declaration order change', () => {
+    // Given the original target and permissions.
+    const approved = guestGrantScope({ loopback });
+    const reordered = { ...loopback, routes: [...loopback.routes].reverse().map((route) => ({ ...route, methods: [...route.methods].reverse() })) };
+    // When a newer version requests identical permissions.
+    const granted = effectiveGrants(['loopback'], approved, guestGrantScope({ version: '2.0.0', loopback: reordered }));
+    // Then approval still holds.
+    expect(granted).toEqual(['loopback']);
+  });
+
+  test('drops loopback when the stored approval has no scope', () => {
+    // Given a pre-scope approval.
+    const current = guestGrantScope({ loopback });
+    // When evaluating the old store.
+    const granted = effectiveGrants(['loopback'], undefined, current);
+    // Then no target has been approved.
+    expect(granted).toEqual([]);
+  });
+});
+
 describe('guestGrantScope', () => {
   test('captures sorted patterns, the API origin, and service permissions', () => {
     expect(guestGrantScope(guest)).toEqual({

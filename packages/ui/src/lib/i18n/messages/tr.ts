@@ -18,6 +18,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict = {
+  'settings.extensions.capability.loopback': 'Sunucudaki yerel bir uygulamaya eriş',
+  'settings.extensions.capability.loopback.detail': 'Bu tarayıcının makinesine değil, OpenChamber çalıştıran makinedeki yalnızca listelenen yollara bağlanır. Uygulamayı başlatmaz.',
+  'settings.extensions.capability.loopback.target': 'Sunucu hedefi: {target}',
+  'settings.extensions.capability.loopback.defaultPort': 'Bildirilen varsayılan port: {port}',
+  'settings.extensions.capability.loopback.environment': 'Sunucu değişkeni: {env}. Tanımlanmamışsa veya boşsa {port} portu kullanılır.',
+  'settings.extensions.capability.loopback.routes': 'İzin verilen yöntemler ve yollar',
+  'settings.extensions.capability.loopback.invalid': 'Sunucuda ayarlanan port geçersiz. 1024 ile 65535 arasında bir tam sayı girin veya varsayılanı kullanmak için değişkeni boşaltın. Düzeltilene kadar onay verilemez.',
   "opencodeCompatibility.bundled": "OpenCode, OpenChamber ile birlikte gelir. OpenCode v2 için OpenChamber’ı güncelleyin.",
   "opencodeCompatibility.title": "OpenCode v2 gerekli",
   "opencodeCompatibility.outdatedTitle": "OpenCode’u güncelleyin",

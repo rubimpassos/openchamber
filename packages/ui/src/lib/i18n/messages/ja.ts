@@ -19,6 +19,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'settings.extensions.capability.loopback': 'サーバー上のローカルアプリにアクセス',
+  'settings.extensions.capability.loopback.detail': 'このブラウザーの端末ではなく、OpenChamber が動作するマシンの指定されたルートにのみ接続します。アプリの起動は行いません。',
+  'settings.extensions.capability.loopback.target': 'サーバー上の接続先: {target}',
+  'settings.extensions.capability.loopback.defaultPort': '宣言された既定のポート: {port}',
+  'settings.extensions.capability.loopback.environment': 'サーバーの環境変数: {env}。未設定または空の場合はポート {port} を使用します。',
+  'settings.extensions.capability.loopback.routes': '許可されるメソッドとパス',
+  'settings.extensions.capability.loopback.invalid': 'サーバーのポート設定が無効です。1024〜65535 の整数を指定するか、環境変数を空にして既定値を使用してください。修正するまで承認できません。',
   "opencodeCompatibility.bundled": "OpenCode は OpenChamber に同梱されています。OpenCode v2 を利用するには OpenChamber を更新してください。",
   "opencodeCompatibility.title": "OpenCode v2 が必要です",
   "opencodeCompatibility.outdatedTitle": "OpenCode を更新してください",
