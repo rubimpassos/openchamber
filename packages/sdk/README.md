@@ -259,6 +259,10 @@ OpenChamber supplies thin, theme-aware native scrollbars inside extension docume
 
 The kit's look comes from the OpenChamber version that runs your extension: colours, borders, corner radii, and hover, selected and focus states follow the app after an update, with no rebuild on your side. Sizes and spacing stay the ones your bundle was built with, so a layout built around them doesn't shift; they change when you rebuild against a newer SDK. The app adds its look after your document, so to restyle a kit control, use a selector more specific than the kit's, such as `#root .oc-sdk-btn`. Custom rendering hosts can use `GUEST_UI_LOOK_CSS` from `@openchamber/sdk/ui`.
 
+## Loopback contract
+
+Matching host builds can approve `contributes.loopback` for declared paths on an existing server-local process. The SDK provides `host.loopbackUrl`, `host.loopbackRequest` and disposable `host.watchLoopback`, plus opt-in `background.start: "automatic"` and `panel.badge: "count"` declarations. Older manifests keep on-demand backgrounds and unread badges. These contracts require the host's approval, proxy, bridge and lifecycle implementation; upgrading the SDK alone does not add host support. See [Loopback requests and streams](./API.md#loopback-requests-and-streams) for signatures, limits and relay behavior.
+
 ## Schemas
 
 `@openchamber/sdk/schemas` exports the zod schemas for the manifest and the messages, for tools that validate extensions. The main entry has no zod dependency, so a page bundle stays small.

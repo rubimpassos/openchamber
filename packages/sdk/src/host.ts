@@ -1,4 +1,9 @@
+// allow: SIZE_OK — existing iframe RPC orchestration shares one pending-call lifetime; loopback mechanics live in loopback-client.ts and loopback-watch.ts.
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
+import { HostRequestError } from './host-errors.ts';
+import { createLoopbackClient, type LoopbackClient } from './loopback-client.ts';
+import type { LoopbackWatchRuntime } from './loopback-watch.ts';
+export { HostRequestError } from './host-errors.ts';
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageOptions, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import { isGuestStatusControls } from './status-controls.ts';
@@ -52,7 +57,6 @@ import {
   type GuestRequestResult,
   type GuestSettings,
   type HostReadyContext,
-  type HostRequestErrorCode,
   type HostResultPayload,
   type ResolveRequest,
   type ResolveResultPayload,
@@ -94,9 +98,11 @@ export type HostClientOptions = {
   acceptSource?: (source: MessageEvent['source']) => boolean;
   /** Test seam. Defaults to `GUEST_REQUEST_TIMEOUT_MS`. */
   requestTimeoutMs?: number;
+  /** Test seam for loopback streams. Defaults to browser EventSource and timers. */
+  readonly loopbackWatch?: LoopbackWatchRuntime;
 };
 
-export type HostClient = {
+export type HostClient = LoopbackClient & {
   listProjects: () => Promise<GuestProjectsSnapshot>;
   listWorktrees: (projectId: string) => Promise<GuestWorktreesSnapshot>;
   listSessions: (projectId: string) => Promise<GuestSessionsSnapshot>;
@@ -202,7 +208,7 @@ export type HostClient = {
    * failed is `MODEL_FAILED`. Waits up to `GUEST_GENERATE_TIMEOUT_MS`.
    */
   generate: (request: GenerateRequest) => Promise<GenerateResult>;
-  /** Number on this guest's rail icon (0 to `GUEST_BADGE_MAX`); `null` clears it. Opening the panel clears it too. */
+  /** Number on this guest's rail icon (0 to `GUEST_BADGE_MAX`); `null` clears it. Only unread mode clears on panel open. */
   setBadge: (count: number | null) => Promise<void>;
   /**
    * The height the guest's content needs, in CSS px. On the Work Status
@@ -243,16 +249,6 @@ const isKeyEvent = (event: Event): event is KeyboardEvent => 'key' in event && '
 const isSaveShortcut = (event: KeyboardEvent): boolean => (
   (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's'
 );
-
-export class HostRequestError extends Error {
-  readonly code: HostRequestErrorCode;
-
-  constructor(code: HostRequestErrorCode, message: string) {
-    super(message);
-    this.name = 'HostRequestError';
-    this.code = code;
-  }
-}
 
 type Pending = {
   resolve: (payload?: HostResultPayload) => void;
@@ -313,6 +309,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   const workspaceListeners = new Map<string, (snapshot: GuestWorkspaceSnapshot) => void>();
   const shellsListeners = new Map<string, (snapshot: GuestRunningShellsSnapshot) => void>();
   const fileWatchListeners = new Map<string, (paths: string[]) => void>();
+  const loopbackLifetime = new AbortController();
   let disposed = false;
   const ids = { value: 0 };
   let lastReady: HostReadyContext | null = null;
@@ -702,6 +699,10 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   target.addEventListener('blur', onPopoverBlur);
 
   return {
+    ...createLoopbackClient({
+      send: (message) => send({ ...envelope, ...message, id: nextId(ids) }),
+      signal: loopbackLifetime.signal,
+    }, options.loopbackWatch),
     onAction: (handler) => {
       actionHandler = handler;
       return () => { if (actionHandler === handler) actionHandler = null; };
@@ -1164,6 +1165,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     requestFileSave,
     reportFileUnsupported: () => notify({ ...envelope, type: 'file-unsupported' }),
     dispose: () => {
+      loopbackLifetime.abort();
       for (const subscriptionId of workspaceListeners.keys()) {
         post({ ...envelope, type: 'workspace-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
       }

@@ -1,7 +1,9 @@
+// allow: SIZE_OK — existing manifest schema/error registry; loopback validation is isolated in loopback-schemas.ts.
 import { z } from 'zod';
 
 import { OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
 import { OPENCHAMBER_ENGINE_PATTERN } from './host-version.ts';
+import { loopbackContributionSchema } from './loopback-schemas.ts';
 import {
   DECLARED_GUEST_CAPABILITIES,
   GUEST_ACTIONS_MAX,
@@ -116,6 +118,7 @@ const panelSchema = z.object({
   icon: z.string().trim().refine(isPanelIcon),
   entry: z.string().trim().refine(isSafeAssetPath).optional(),
   dock: z.enum(GUEST_SURFACE_DOCKS).optional(),
+  badge: z.enum(['unread', 'count']).optional(),
   size: z.number().int().min(GUEST_SURFACE_DOCK_SIZE_MIN).max(GUEST_SURFACE_DOCK_SIZE_MAX).optional(),
 });
 
@@ -312,6 +315,7 @@ const contributesSchema = z.object({
   panel: panelSchema,
   background: z.object({
     entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')),
+    start: z.enum(['on-demand', 'automatic']).optional(),
   }).optional(),
   attach: attachSchema.optional(),
   page: z.union([z.literal(true), z.object({
@@ -328,6 +332,7 @@ const contributesSchema = z.object({
   capabilities: z.array(z.enum(DECLARED_GUEST_CAPABILITIES)).max(8).optional(),
   integration: integrationSchema.optional(),
   service: serviceSchema.optional(),
+  loopback: loopbackContributionSchema.optional(),
   filesystem: z.array(
     z.string().max(GUEST_FILESYSTEM_PATTERN_MAX).refine(isGuestFilesystemPattern),
   ).min(1).max(GUEST_FILESYSTEM_PATTERNS_MAX).optional(),
@@ -357,6 +362,7 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
   if (contributes.origins !== undefined) declared.push('origins');
+  if (contributes.loopback !== undefined) declared.push('loopback');
   if (contributes.actions !== undefined) declared.push('actions');
   if (contributes.commands !== undefined) declared.push('commands');
   return declared;
@@ -488,6 +494,8 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
         : `panel.dock is one of ${GUEST_SURFACE_DOCKS.join(', ')}.`);
     case 'contributes.panel.size':
       return fail('invalid-panel', `panel.size is a whole number of CSS pixels from ${GUEST_SURFACE_DOCK_SIZE_MIN} to ${GUEST_SURFACE_DOCK_SIZE_MAX}.`);
+    case 'contributes.panel.badge':
+      return fail('invalid-panel', 'panel.badge must be "unread" or "count".');
     case 'contributes.capabilities':
       return fail('invalid-capabilities', 'contributes.capabilities may list "prompt", "sessions", and "files".');
     default:
@@ -569,6 +577,9 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   }
   if (path.startsWith('contributes.service')) {
     return fail('invalid-service', 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser"), and optional surface (true).');
+  }
+  if (path.startsWith('contributes.loopback')) {
+    return fail('invalid-loopback', 'contributes.loopback needs a port from 1024 to 65535, optional uppercase env name, and 1 to 32 unique safe routes with GET, HEAD or POST methods.');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

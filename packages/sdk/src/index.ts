@@ -1,6 +1,19 @@
 export { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL, OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
 export { GUEST_SCROLLBAR_CSS, GUEST_SCROLLBAR_SCRIPT } from './scrollbar-style.ts';
 export { guestFramePolicy } from './frame-policy.ts';
+export {
+  GUEST_LOOPBACK_METHODS, GUEST_LOOPBACK_PORT_MIN, GUEST_LOOPBACK_PORT_MAX,
+  GUEST_LOOPBACK_ENV, GUEST_LOOPBACK_ENV_MAX, GUEST_LOOPBACK_ROUTES_MAX,
+  GUEST_LOOPBACK_PATH_MAX, GUEST_LOOPBACK_QUERY_BYTES, GUEST_LOOPBACK_BODY_BYTES,
+  GUEST_LOOPBACK_RESPONSE_BYTES, canonicalizeLoopbackPath, canonicalizeLoopbackRoutePath,
+  matchLoopbackRoute, isLoopbackContribution, isLoopbackQuery, isLoopbackBody,
+  isLoopbackUrlResult, isLoopbackRequestResult,
+} from './loopback.ts';
+export type {
+  LoopbackContribution, LoopbackRoute, LoopbackMethod, LoopbackUrlRequest,
+  LoopbackUrlResult, LoopbackRequest, LoopbackRequestResult,
+} from './loopback.ts';
+export type { LoopbackWatchEvent, LoopbackWatchRuntime, LoopbackEventSource } from './loopback-watch.ts';
 export type { GuestLoadState, GuestProject, GuestWorktree, GuestSessionActivity, GuestSessionRecord, GuestDirectoryCoverage, GuestProjectsSnapshot, GuestWorktreesSnapshot, GuestSessionsSnapshot, GuestWorkspaceSnapshot, GuestWorkspaceQuery, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestStorageRequest, GuestStorageResult, GuestStorageOptions, GuestStorageScope, GuestSessionWorktree } from './workspace.ts';
 export { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_TOTAL_BYTES, GUEST_DEVICE_STORAGE_TOTAL_BYTES } from './workspace.ts';
 export type {
@@ -292,6 +305,8 @@ export type {
   GuestOpenUrlMessage,
   GuestRequest,
   GuestRequestMessage,
+  GuestLoopbackUrlMessage,
+  GuestLoopbackRequestMessage,
   GuestRequestMethod,
   GuestPromptMessage,
   GuestSessionLinkMessage,
