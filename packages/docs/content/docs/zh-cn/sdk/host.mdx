@@ -58,6 +58,9 @@ const host = connectHost();
 | `request({ method, path, query?, body? })` | 调用你的集成的 `apiOrigin`，并附上用户的令牌 |
 | `serviceRequest({ method, path, query?, body? })` | 调用你的扩展的本地服务（见 `GUEST_SERVICES.md`） |
 | `serviceStatus()` | `stopped`、`starting`、`ready` 或 `failed` |
+| `loopbackUrl({ path, query? })` | 指向某条 `contributes.loopback` 路由的短期、仅限本访客的 GET URL |
+| `loopbackRequest({ method, path, query?, body? })` | 经由 OpenChamber 对某条 `contributes.loopback` 路由发起 GET、HEAD 或 POST |
+| `watchLoopback({ path, query? }, listener)` | 订阅一条 `text/event-stream` 路由。返回取消订阅函数 |
 | `readFile(path)` | 读取文本文件。返回 `{ content }`。 |
 | `writeFile(path, content)` | 原子地写入文本文件，并创建父文件夹。返回 `{ written: true }`。 |
 | `listDir(path)` | 列出文件夹。返回 `{ entries: [{ name, kind }] }`，`kind` 为 `file`、`directory` 或 `other`。 |
@@ -186,6 +189,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` 遵循与 `request` 相同的规则。声明本地服务会把 `service` 加入用户在安装时批准的能力；在批准之前，每次 `serviceRequest` 都是 `NO_SERVICE`。完整约定见包内文件 `GUEST_SERVICES.md`。
 
+## 回环请求与流
+
+当清单声明了 `contributes.loopback` 时，你的页面可以经由 OpenChamber 调用已经在 `127.0.0.1` 上运行的自有进程，而完全不需要知道它的端口：
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` 返回 `{ url, expiresAt }`，`expiresAt` 为 Unix 毫秒。该 URL 携带一个短期、仅限本访客的 GET 令牌；用它打开的正常流不会因为令牌过期而被重新加载。`loopbackRequest` 接受 `method: "GET" | "HEAD" | "POST"`。只有 `POST` 可以带 `body`，给 GET/HEAD 传入会被拒绝。结果为 `{ status, body }`（`body` 是文本，JSON 需要自己解析）。`watchLoopback` 对已声明的路由打开 `EventSource`，在流连接中、已连通或断开时向监听器传入 `{ type: "connection", state }`，每个事件传入 `{ type: "data", text }`。调用返回的函数即可停止。
+
+`path` 与已声明的路由都会先规范化再匹配。清单中字面量 `*` 段在调用时恰好匹配路径中的一个段。调用清单未声明的路径或方法，与调用用户未批准的能力一样，返回 `NOT_GRANTED`。
+
+只有直连的 Web 与桌面 host 能打开实时流。经由中继连接的 host 对 `watchLoopback` 返回 `UNSUPPORTED`，此时请改为用 `loopbackRequest` 轮询同一路由。VS Code 与移动端不通过这些方法提供任何回环支持。
+
+请像对待 bearer 令牌一样对待 `loopbackUrl` 返回的 URL，绝不要记录或保存它。清单格式见[构建扩展](/sdk/#contributesloopback)，企业模式下的限制见[安全](/security/#enterprise-mode)。
+
 ## 文件
 
 相对路径位于打开的项目中，需要 `files` 能力。以 `/` 或 `~/` 开头的路径必须匹配已声明的 `contributes.filesystem` 模式，需要 `filesystem` 能力。规则见[构建扩展](/sdk/#文件)。
@@ -231,7 +254,7 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `DENIED` | 操作系统拒绝了该文件操作 |
 | `NO_MODEL` | 没有可用的 Small Model 时调用 `generate` |
 | `MODEL_FAILED` | Small Model 返回了错误 |
-| `UNSUPPORTED` | 这个 OpenChamber 无法执行该调用，例如在没有 Diff 视图的地方调用 `openCommit` |
+| `UNSUPPORTED` | 经由中继连接的 host 上的 `watchLoopback`，或这个 OpenChamber 无法执行的其他调用，例如在没有 Diff 视图的地方调用 `openCommit` |
 
 ## 相关页面
 

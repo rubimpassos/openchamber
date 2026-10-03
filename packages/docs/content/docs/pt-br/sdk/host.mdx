@@ -58,6 +58,9 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | `request({ method, path, query?, body? })` | chama o `apiOrigin` da sua integração com o token do usuário anexado |
 | `serviceRequest({ method, path, query?, body? })` | chama o serviço local da sua extensão (veja `GUEST_SERVICES.md`) |
 | `serviceStatus()` | `stopped`, `starting`, `ready` ou `failed` |
+| `loopbackUrl({ path, query? })` | uma URL GET de curta duração, com escopo da extensão, para uma rota em `contributes.loopback` |
+| `loopbackRequest({ method, path, query?, body? })` | GET, HEAD ou POST em uma rota de `contributes.loopback` através do OpenChamber |
+| `watchLoopback({ path, query? }, listener)` | assina uma rota `text/event-stream`; retorna uma função para cancelar a assinatura |
 | `readFile(path)` | lê um arquivo de texto. Devolve `{ content }`. |
 | `writeFile(path, content)` | escreve um arquivo de texto de forma atômica, criando as pastas acima. Devolve `{ written: true }`. |
 | `listDir(path)` | lista uma pasta. Devolve `{ entries: [{ name, kind }] }`, `kind` é `file`, `directory` ou `other`. |
@@ -186,6 +189,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` segue as mesmas regras de `request`. Declarar um serviço local adiciona `service` às capacidades que o usuário aprova na instalação; até lá, todo `serviceRequest` é `NO_SERVICE`. O contrato completo está no arquivo `GUEST_SERVICES.md` do pacote.
 
+## Requisições e streams de loopback
+
+Quando o manifesto declara `contributes.loopback`, a sua página pode chamar o próprio processo que já está rodando em `127.0.0.1`, através do OpenChamber, sem nunca saber a porta:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` retorna `{ url, expiresAt }`, com `expiresAt` em milissegundos Unix. A URL carrega um token GET de curta duração com escopo da extensão; um stream saudável aberto com ela não é recarregado só porque o token expirou. `loopbackRequest` adiciona `method: "GET" | "HEAD" | "POST"`; só `POST` aceita `body`, GET/HEAD recusam um. O resultado é `{ status, body }` (`body` é texto; faça o parse do JSON você mesmo). `watchLoopback` abre um `EventSource` contra uma rota declarada e chama o listener com `{ type: "connection", state }` conforme o stream conecta, fica ativo ou cai, e `{ type: "data", text }` para cada evento; chame a função retornada para pará-lo.
+
+Tanto `path` quanto as rotas declaradas são comparados após canonização; um segmento de rota que é um `*` literal no manifesto casa com exatamente um segmento do caminho na chamada. Uma chamada para um caminho ou método que o manifesto não declara é `NOT_GRANTED`, igual a uma capacidade que o usuário não aprovou.
+
+Só hosts web e desktop conectados diretamente conseguem abrir um stream ao vivo. Um host conectado por relay responde `watchLoopback` com `UNSUPPORTED`; use `loopbackRequest` em polling na mesma rota como alternativa. VS Code e mobile não têm nenhum suporte a loopback por essas chamadas.
+
+Nunca registre em log ou persista a URL de `loopbackUrl`: trate-a como um token de autenticação. Veja [Crie uma extensão](/sdk/#contributesloopback) para o formato do manifesto e [Segurança](/security/#modo-corporativo) para como ela é controlada no modo corporativo.
+
 ## Arquivos
 
 Um caminho relativo fica dentro do projeto aberto e precisa da capacidade `files`. Um caminho que começa com `/` ou `~/` precisa bater com um padrão declarado em `contributes.filesystem` e precisa da capacidade `filesystem`. Veja [Crie uma extensão](/sdk/#arquivos) para as regras.
@@ -223,6 +246,7 @@ Chamadas que falham lançam `HostRequestError`. `code` é um destes; `message` t
 | `SESSION_BUSY` | `prompt({ send: true })` enquanto a sessão estava ocupada |
 | `DISABLED` | o usuário pausou a extensão em Configurações → Extensões |
 | `NO_SERVICE` | nenhum serviço local declarado, não aprovado ou não está rodando |
+| `UNSUPPORTED` | `watchLoopback` num host conectado por relay, ou qualquer chamada que este OpenChamber não consegue fazer, por exemplo `openCommit` onde não há visualização Diff |
 | `NOT_GRANTED` | o usuário não aprovou a capacidade que esta chamada precisa |
 | `SERVICE_FAILED` | o serviço local travou ou nunca ficou pronto |
 | `NO_DIRECTORY` | um caminho de arquivo relativo foi usado sem projeto aberto, ou `openCommit` sem projeto aberto |
@@ -231,7 +255,7 @@ Chamadas que falham lançam `HostRequestError`. `code` é um destes; `message` t
 | `DENIED` | o sistema operacional recusou a operação no arquivo |
 | `NO_MODEL` | `generate` sem Small Model disponível |
 | `MODEL_FAILED` | o Small Model retornou um erro |
-| `UNSUPPORTED` | este OpenChamber não consegue fazer a chamada, por exemplo `openCommit` onde não há visualização Diff |
+
 
 ## Relacionado
 
