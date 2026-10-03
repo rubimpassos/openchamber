@@ -99,6 +99,24 @@ Para um quadro, use `host.storage` e as listas de projetos, worktrees e sessões
 
 `contributes.service` é opcional. Ele declara um serviço local (um processo que o OpenChamber inicia junto com a extensão) para coisas que uma página web não alcança, como um socket do Docker. Esse processo roda com o acesso completo do usuário e sem sandbox, por isso o diálogo de aprovação avisa sobre ele; declare um serviço desses só quando a página não conseguir fazer o trabalho. Veja o arquivo `GUEST_SERVICES.md` do pacote. Um serviço com `provides: ["browser"]` também pode substituir o navegador do agente: ele responde às ações `browser.*` no servidor, então os agentes navegam sem nenhum aplicativo de desktop aberto, e o usuário o escolhe em Configurações → Ferramentas do OpenChamber. Um serviço assim não precisa de painel.
 
+`contributes.loopback` é opcional. Ele declara que a sua extensão já roda o próprio processo em `127.0.0.1` (seu próprio plugin, daemon de CLI, ou qualquer outra coisa iniciada fora do OpenChamber) e pede ao OpenChamber para repassar rotas declaradas dele para a sua página:
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port` é um número inteiro de 1024 a 65535. `env` é um nome opcional de variável de ambiente em maiúsculas (até 128 caracteres) que o seu próprio processo pode ler para escolher outra porta; o OpenChamber resolve isso no servidor, sua página nunca vê o valor. `routes` tem de 1 a 32 entradas, cada uma com um `path` e um subconjunto não vazio de `GET`, `HEAD`, `POST`. Um segmento literal `*` casa com exatamente um segmento do caminho; declare `/` explicitamente se precisar dele. Declarar `loopback` já deriva a capacidade `loopback`; não a liste também em `capabilities`. Veja [loopbackUrl, loopbackRequest, watchLoopback](/pt-br/sdk/host/#requisicoes-e-streams-de-loopback) para as chamadas do host que o usam.
+
+Diferente de `contributes.service`, o OpenChamber nunca inicia ou encerra esse processo. Ele só repassa para o que já está escutando nessa porta, e só para as rotas exatas declaradas. Veja [Segurança](/pt-br/security/#modo-corporativo) para como `loopback` é controlado como `service` no modo corporativo.
+
 ## Capacidades
 
 Desenhar um painel e ler a sessão atual não exige permissão. Tudo que age em nome do usuário exige. Liste essas capacidades em `contributes.capabilities`:
@@ -110,7 +128,7 @@ Desenhar um painel e ler a sessão atual não exige permissão. Tudo que age em 
 | `files` | ler e escrever arquivos dentro do projeto aberto (`readFile`, `writeFile`, `listDir`, `stat` com um caminho relativo) |
 | `model` | geração de texto avulsa com o Small Model do usuário (`generate`), fora de qualquer sessão |
 
-Outras cinco são adicionadas por você automaticamente: `network` quando você declara uma `integration`, `service` quando declara um `service`, `filesystem` quando declara padrões `filesystem`, `origins` quando declara `origins`, e `conversation` quando uma ação de sessão pede as mensagens (veja [Ações, comandos e o selo](#ações-comandos-e-o-selo)).
+Outras seis são adicionadas por você automaticamente: `network` quando você declara uma `integration`, `service` quando declara um `service`, `loopback` quando declara `loopback`, `filesystem` quando declara padrões `filesystem`, `origins` quando declara `origins`, e `conversation` quando uma ação de sessão pede as mensagens (veja [Ações, comandos e o selo](#ações-comandos-e-o-selo)).
 
 O usuário vê a lista completa uma vez, ao instalar a extensão, e aprova ou remove a extensão. Se uma versão nova pedir mais, o diálogo aparece de novo. Uma chamada que precisa de uma capacidade que o usuário não aprovou falha com `NOT_GRANTED`.
 
@@ -282,6 +300,23 @@ host.onResolve(async ({ command, args }) => {
 Quando o usuário digita `/task ABC-12` na caixa de chat, o OpenChamber pede à sua extensão que o resolva e anexa o que você devolve como um chip, sem abrir nada. Devolva `null` para "nada encontrado". Se o seu painel estiver fechado, o OpenChamber o carrega em segundo plano para essa chamada. Um nome que o OpenChamber ou o OpenCode já usa é ignorado.
 
 **Selo no ícone da barra lateral.** `host.setBadge(3)` mostra um número no seu ícone, por exemplo tarefas abertas; `host.setBadge(null)` o limpa. Abrir o painel também o limpa.
+
+## Segundo plano e o modo do selo
+
+`contributes.background` roda uma página oculta que continua observando enquanto o seu painel está fechado, para que o selo fique sempre atualizado:
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry` é uma página HTML comum, com o mesmo sandbox e as mesmas permissões do seu painel. `start` é `"on-demand"` (o padrão, pode omitir) para montar a página só quando algo precisar dela, ou `"automatic"` para mantê-la montada em toda extensão ativa, o que exige uma versão do OpenChamber compatível. Use `automatic` só para uma página que chama `host.setBadge` ou que precisa rodar continuamente; `on-demand` basta para a maioria das extensões.
+
+`contributes.panel.badge` muda como o OpenChamber limpa o número que você define com `host.setBadge`:
+
+- omitido, ou `"unread"` (o padrão): abrir o painel limpa o selo, o comportamento usual de contagem de não lidos.
+- `"count"`: abrir o painel **não** limpa o selo por si só; você continua mostrando a contagem correta (por exemplo, o número de observações falhando), e o limpa você mesmo com `host.setBadge(null)` quando ela for de fato zero. O selo ainda é limpo quando o usuário desativa ou remove a extensão.
+
+As duas opções são compatíveis com versões antigas: um manifesto que as omite mantém o segundo plano sob demanda e o selo de não lidos de antes.
 
 ## Suas ferramentas no chat
 
