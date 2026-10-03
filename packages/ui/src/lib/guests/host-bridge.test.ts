@@ -1,3 +1,4 @@
+// allow: SIZE_OK — existing dispatch-contract suite; transport and lifecycle cases live in focused loopback/background tests.
 import { describe, expect, test } from 'bun:test';
 
 import { HostRequestError, OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestStatusControl, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
@@ -21,6 +22,8 @@ const toast: GuestMessage = {
 
 type BridgeEffects = Parameters<typeof answerGuestMessage>[1];
 const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
+  loopbackUrl: overrides.loopbackUrl ?? (async () => { throw new HostRequestError('UNSUPPORTED', 'No loopback URL transport.'); }),
+  loopbackRequest: overrides.loopbackRequest ?? (async () => { throw new HostRequestError('UNSUPPORTED', 'No loopback request transport.'); }),
   workspaceRead: overrides.workspaceRead ?? (() => ({ kind: 'projects', state: 'ready', projects: [] })),
   workspaceSubscribe: overrides.workspaceSubscribe ?? (() => {}),
   workspaceUnsubscribe: overrides.workspaceUnsubscribe ?? (() => {}),
@@ -71,6 +74,27 @@ describe('answerGuestMessage', () => {
       throw new HostRequestError('UNSUPPORTED', 'Only mounted status frames own header controls.');
     } }));
     expect(unsupported).toMatchObject({ type: 'result', ok: false, code: 'UNSUPPORTED' });
+  });
+
+  test('returns the loopback URL envelope when the bound handler admits it', async () => {
+    // Given
+    const result = { url: 'https://runtime.test/api/guests/fixture/loopback/state?oc_url_token=scoped', expiresAt: 100_000 };
+    const bridge = effects({ loopbackUrl: async () => result });
+    // When
+    const reply = await answerGuestMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'loopback-url', id: 'url', payload: { path: '/state' } }, bridge);
+    // Then
+    expect(reply).toMatchObject({ type: 'result', id: 'url', ok: true, payload: result });
+  });
+
+  test('returns the typed loopback failure when approval is revoked', async () => {
+    // Given
+    const bridge = effects({ loopbackRequest: async () => { throw new HostRequestError('NOT_GRANTED', 'Refused'); } });
+    // When
+    const reply = await answerGuestMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1,
+      type: 'loopback-request', id: 'request', payload: { method: 'GET', path: '/state' } }, bridge);
+    // Then
+    expect(reply).toMatchObject({ type: 'result', id: 'request', ok: false, code: 'NOT_GRANTED' });
   });
 
   test('forwards toast buttons and persistence to the host without awaiting a click', async () => {
