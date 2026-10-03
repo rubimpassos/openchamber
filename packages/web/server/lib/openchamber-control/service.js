@@ -311,14 +311,12 @@ export const createOpenChamberControlService = (dependencies) => {
   // session.send/fork default the directory to the caller's context directory,
   // which is wrong for sessions living in other worktrees: the prompt then
   // targets an instance that does not hold the session and the run dies with
-  // UnknownError. Resolve the target session's directory from the global
-  // session list when the caller did not scope explicitly.
+  // UnknownError. Resolve the target session's directory by ID: the global
+  // V2 list is paged and may not include an older session.
   const resolveSessionDirectory = async (sessionID) => {
     try {
       const client = await getClient();
-      const response = await client.session.list({});
-      const sessions = Array.isArray(response?.data) ? response.data : [];
-      const session = sessions.find((item) => item?.id === sessionID);
+      const session = await client.session.get({ sessionID });
       return asNonEmptyString(session?.location?.directory) || null;
     } catch {
       return null;
