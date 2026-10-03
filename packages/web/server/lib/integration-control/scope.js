@@ -41,8 +41,9 @@ export const createIntegrationScope = ({
     const projects = sanitizeProjects(settings?.projects || []) || [];
     const canonical = [];
     for (const project of projects) {
-      const validated = await validateCanonicalDirectory(project.path);
-      if (!validated.ok) deny('PROJECT_DENIED');
+      // An unavailable directory denies only that project, not healthy peers.
+      const validated = await validateCanonicalDirectory(project.path).catch(() => null);
+      if (!validated?.ok) continue;
       canonical.push({ ...project, path: validated.directory });
     }
     // An ambiguous registry is not an authorization decision.
@@ -103,7 +104,11 @@ export const createIntegrationScope = ({
     try {
       const projects = await readProjects();
       return projects.filter(({ id }) => credential.projectIds?.includes(id))
-        .map(({ id, label }) => ({ id, ...(label ? { label } : {}) }));
+        .map(({ id, label }) => {
+          const project = { id };
+          if (label) project.label = label;
+          return project;
+        });
     } catch {
       deny('PROJECT_DENIED');
     }
@@ -118,7 +123,9 @@ export const createIntegrationScope = ({
       try {
         // Do not trust a row's claimed directory/projectId or any plugin marker.
         await resolveSession(credential, { projectId: authorized.projectId, sessionId: session.id }, projects);
-        visible.push({ id: session.id, ...(session.title ? { title: session.title } : {}) });
+        const projected = { id: session.id };
+        if (session.title) projected.title = session.title;
+        visible.push(projected);
       } catch {
         continue;
       }
