@@ -1,3 +1,4 @@
+// allow: SIZE_OK — existing SDK dispatch registry; loopback authorization and transport live in loopback.ts.
 import {
   HostRequestError,
   type GuestStorageRequest,
@@ -41,10 +42,11 @@ import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files'
 import type { GuestGenerateProxyResult } from '@/lib/guests/generate';
 import type { GuestOpenCommitResult } from '@/lib/guests/open-commit';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
+import type { createGuestLoopback } from '@/lib/guests/loopback';
 
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 
-type HostBridgeEffects = {
+type HostBridgeEffects = ReturnType<typeof createGuestLoopback> & {
   workspaceRead: (query: GuestWorkspaceQuery) => GuestWorkspaceSnapshot;
   workspaceSubscribe: (subscription: GuestWorkspaceSubscription) => void;
   workspaceUnsubscribe: (subscriptionId: string) => void;
@@ -269,6 +271,8 @@ export const answerGuestMessage = async (
     case 'files-unwatch': effects.filesUnwatch(message.payload.subscriptionId); return okResult(message.id);
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'status-controls': effects.setStatusControls(message.payload.controls); return okResult(message.id);
+    case 'loopback-url': return okResult(message.id, await effects.loopbackUrl(message.payload));
+    case 'loopback-request': return okResult(message.id, await effects.loopbackRequest(message.payload));
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);
     // No answer: the pane handles these itself. File editor traffic belongs to
     // its file channel, not to a request/result pair.

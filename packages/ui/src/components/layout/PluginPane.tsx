@@ -1,3 +1,4 @@
+// allow: SIZE_OK — existing frame orchestration; new transport and background policy stay in focused guest modules.
 import React from 'react';
 import {
   HostRequestError,
@@ -42,6 +43,8 @@ import {
 } from '@/lib/guests/host-bridge';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
+import { createGuestLoopback } from '@/lib/guests/loopback';
+import { guestPackageIdentity } from '@/lib/guests/automatic-backgrounds';
 import { guestFileOperation } from '@/lib/guests/files';
 import { watchGuestFiles } from '@/lib/guests/file-watch';
 import { guestGenerate } from '@/lib/guests/generate';
@@ -211,7 +214,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [guestId, headless, itemProp, pendingItem, takePendingItem]);
   const item = headless ? null : itemProp !== undefined ? itemProp : railItem;
   // The user opened this guest's panel: whatever it counted is seen.
-  const clearBadge = useGuestBadgeStore((state) => state.clearBadge);
+  const clearBadge = useGuestBadgeStore((state) => state.panelOpened);
   React.useEffect(() => {
     if (surface === 'panel' && !headless) clearBadge(guestId);
   }, [clearBadge, guestId, headless, surface]);
@@ -298,7 +301,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     : null;
   // Origins the user approved for this list; the frame policy opens them.
   const approvedOrigins = guest?.capabilities.granted.includes('origins') ? guest.origins ?? [] : [];
-  const frameKey = `${guestId}:${guest?.storageId ?? ''}:${guest?.version ?? ''}:${guestEnabled}:grants-${guest?.capabilities.granted.join(',') ?? ''}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${guest?.pageEntry ?? ''}:${guest?.attachEntry ?? ''}:${fileEditorEntry ?? ''}:popover-${popoverHost?.context.id ?? popover?.id ?? ''}`;
+  const frameKey = `${guest ? guestPackageIdentity(guest) : guestId}:${guest?.storageId ?? ''}:${guest?.version ?? ''}:${guestEnabled}:grants-${guest?.capabilities.granted.join(',') ?? ''}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${guest?.pageEntry ?? ''}:${guest?.attachEntry ?? ''}:${fileEditorEntry ?? ''}:popover-${popoverHost?.context.id ?? popover?.id ?? ''}`;
 
   // Scoped auth is minted per mount/version/grant and renewed if an existing
   // iframe navigates after expiry. Healthy documents retain their local state.
@@ -517,6 +520,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     const installationAuthorization = authorizationSignature(installation);
     const ownerFrame = iframeRef.current;
+    const lifetime = new AbortController();
+    const packageIdentity = guestRef.current ? guestPackageIdentity(guestRef.current) : null;
     const currentGuest = () => useGuestsStore.getState().guests.find((entry) => entry.id === requestingGuestId) ?? null;
     const ownsFrame = () => {
       const catalog = useGuestsStore.getState();
@@ -536,7 +541,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     statusControlsRef.current = statusControls;
     const clearSubscriptions = () => { for (const unsubscribe of subscriptions.values()) unsubscribe(); subscriptions.clear(); };
-    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopOauthPoll(); });
+    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; lifetime.abort(); closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopOauthPoll(); });
     const requireSessions = () => {
       if (!guestMay(currentGuest(), 'sessions')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
     };
@@ -583,6 +588,15 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       }
 
       void answerGuestMessage(message, {
+        ...createGuestLoopback({
+          guestId: requestingGuestId, currentGuest, signal: lifetime.signal,
+          transport: srcDoc === undefined ? 'url' : 'document',
+          isCurrent: () => {
+            const current = currentGuest();
+            return !disposed && frame === iframeRef.current && current !== null
+              && guestPackageIdentity(current) === packageIdentity;
+          },
+        }),
         workspaceRead: (query) => { requireSessions(); return readGuestWorkspace(query, guestIdRef.current); },
         workspaceSubscribe: ({ subscriptionId, query }) => {
           requireSessions();
@@ -922,7 +936,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           }
         },
       }).then((reply) => {
-        if (reply && ownsFrame() && frame === iframeRef.current) postToGuest(reply);
+        const current = currentGuest();
+        if (reply && ownsFrame() && frame === iframeRef.current
+          && current && guestPackageIdentity(current) === packageIdentity) postToGuest(reply);
       });
     };
 
@@ -932,6 +948,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       if (!childPopover) closeActivePopover('owner');
       statusControls.dispose();
       if (statusControlsRef.current === statusControls) statusControlsRef.current = null;
+      lifetime.abort();
       clearSubscriptions();
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);

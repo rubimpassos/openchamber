@@ -272,7 +272,7 @@ export const ContextPanelRail: React.FC = () => {
 
   const guestSurfaces = useGuestSurfaces();
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
-  const clearGuestBadge = useGuestBadgeStore((state) => state.clearBadge);
+  const clearGuestBadge = useGuestBadgeStore((state) => state.panelOpened);
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
   const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
