@@ -58,6 +58,9 @@ const host = connectHost();
 | `request({ method, path, query?, body? })` | ユーザーのトークンを付けて連携の `apiOrigin` を呼ぶ |
 | `serviceRequest({ method, path, query?, body? })` | 拡張機能のローカルサービスを呼ぶ(`GUEST_SERVICES.md` を参照) |
 | `serviceStatus()` | `stopped`、`starting`、`ready`、`failed` のいずれか |
+| `loopbackUrl({ path, query? })` | `contributes.loopback` のルートに対する、短命でゲストに限定された GET 用 URL |
+| `loopbackRequest({ method, path, query?, body? })` | `contributes.loopback` のルートに GET、HEAD、POST を OpenChamber 経由で行う |
+| `watchLoopback({ path, query? }, listener)` | `text/event-stream` のルートを購読する。購読解除関数を返す |
 | `readFile(path)` | テキストファイルを読む。`{ content }` を返す。 |
 | `writeFile(path, content)` | テキストファイルをアトミックに書き、親フォルダも作成する。`{ written: true }` を返す。 |
 | `listDir(path)` | フォルダを一覧する。`{ entries: [{ name, kind }] }` を返し、`kind` は `file`、`directory`、`other` のいずれか。 |
@@ -186,6 +189,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` は `request` と同じ規則に従います。ローカルサービスを宣言すると、インストール時にユーザーが承認する権限に `service` が加わります。承認されるまで、すべての `serviceRequest` は `NO_SERVICE` です。完全な契約はパッケージ内のファイル `GUEST_SERVICES.md` にあります。
 
+## ループバックのリクエストとストリーム
+
+マニフェストが `contributes.loopback` を宣言すると、あなたのページは `127.0.0.1` ですでに動いている自分自身のプロセスを、ポート番号をまったく知ることなく OpenChamber 経由で呼び出せます:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` は `{ url, expiresAt }` を返し、`expiresAt` は Unix ミリ秒です。この URL は短命でゲストに限定された GET トークンを運びますが、それで開いた健全なストリームは、トークンが期限切れになったからといって再読み込みされることはありません。`loopbackRequest` は `method: "GET" | "HEAD" | "POST"` を取ります。`body` を取れるのは `POST` だけで、GET/HEAD に渡すと拒否されます。結果は `{ status, body }` です(`body` はテキストなので、JSON は自分でパースしてください)。`watchLoopback` は宣言済みのルートに対して `EventSource` を開き、ストリームが接続中・稼働中・切断したタイミングでリスナーに `{ type: "connection", state }` を、各イベントに `{ type: "data", text }` を渡します。返された関数を呼ぶと停止します。
+
+`path` と宣言済みのルートは、どちらも正規化したうえで照合されます。マニフェスト内のリテラルな `*` セグメントは、呼び出し時にパスの 1 セグメントにちょうど一致します。マニフェストが宣言していないパスやメソッドへの呼び出しは、ユーザーが承認していない権限と同じく `NOT_GRANTED` になります。
+
+ライブストリームを開けるのは、直接接続の Web とデスクトップの host だけです。リレー経由で接続した host は `watchLoopback` に `UNSUPPORTED` で応答するので、代わりに同じルートへ `loopbackRequest` でポーリングしてください。VS Code とモバイルは、これらのメソッドによるループバック対応を一切持ちません。
+
+`loopbackUrl` が返す URL は、ベアラートークンと同じように扱い、決してログに残したり保存したりしないでください。マニフェストの形については [拡張機能を作る](/sdk/#contributesloopback)を、エンタープライズモードでのゲートのされ方については[セキュリティ](/security/#enterprise-mode)を参照してください。
+
 ## ファイル
 
 相対パスは開いているプロジェクトの中を指し、`files` 権限が必要です。`/` または `~/` で始まるパスは、宣言済みの `contributes.filesystem` パターンに一致する必要があり、`filesystem` 権限が必要です。規則は [拡張機能を作る](/sdk/#ファイル) を参照してください。
@@ -223,6 +246,7 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `SESSION_BUSY` | セッションがビジー中の `prompt({ send: true })` |
 | `DISABLED` | ユーザーが 設定 → 拡張機能 で拡張機能を一時停止した |
 | `NO_SERVICE` | ローカルサービスが未宣言、未承認、または未起動 |
+| `UNSUPPORTED` | リレー経由で接続した host での `watchLoopback`、またはこの OpenChamber では実行できないその他の呼び出し。例: Diff ビューがない場所での `openCommit` |
 | `NOT_GRANTED` | この呼び出しに必要な権限をユーザーが承認していない |
 | `SERVICE_FAILED` | ローカルサービスがクラッシュした、または ready にならなかった |
 | `NO_DIRECTORY` | 開いているプロジェクトがない状態で相対ファイルパスを使った、または開いているプロジェクトがない状態で `openCommit` を呼んだ |
@@ -231,7 +255,6 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `DENIED` | オペレーティングシステムがファイル操作を拒否した |
 | `NO_MODEL` | 利用できる Small Model がない状態での `generate` |
 | `MODEL_FAILED` | Small Model がエラーを返した |
-| `UNSUPPORTED` | この OpenChamber では実行できない呼び出し。例: Diff ビューがない場所での `openCommit` |
 
 ## 関連
 

@@ -99,6 +99,24 @@ Pour un tableau, utilisez `host.storage` et les listes de projets, worktrees et 
 
 `contributes.service` est optionnel. Il déclare un service local (un processus qu'OpenChamber démarre à côté de l'extension) pour ce qu'une page web ne peut pas atteindre, comme un socket Docker. Ce processus s'exécute avec l'accès complet de l'utilisateur et sans sandbox, c'est pourquoi la boîte de dialogue d'approbation en avertit ; déclarez-en un seulement quand la page ne peut pas faire le travail. Voir le fichier `GUEST_SERVICES.md` du package. Un service avec `provides: ["browser"]` peut aussi remplacer le navigateur de l'agent : il répond aux actions `browser.*` sur le serveur, les agents naviguent donc sans application de bureau ouverte, et l'utilisateur le choisit dans Réglages → Outils OpenChamber. Un tel service n'a pas besoin de panneau.
 
+`contributes.loopback` est optionnel. Il déclare que votre extension fait déjà tourner son propre processus sur `127.0.0.1` (votre propre plugin, un démon CLI, ou n'importe quoi d'autre que vous avez démarré en dehors d'OpenChamber) et demande à OpenChamber de faire proxy des routes déclarées de ce processus vers votre page :
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port` est un entier de 1024 à 65535. `env` est un nom de variable d'environnement en majuscules optionnel (128 caractères maximum) que votre propre processus peut lire pour choisir un autre port ; OpenChamber le résout sur le serveur, votre page ne le voit jamais. `routes` compte de 1 à 32 entrées, chacune avec un `path` et un sous-ensemble non vide de `GET`, `HEAD`, `POST`. Un segment littéral `*` correspond exactement à un segment de chemin ; déclarez `/` explicitement si vous en avez besoin. Déclarer `loopback` dérive sa propre capacité `loopback` ; ne la listez pas aussi dans `capabilities`. Voir [loopbackUrl, loopbackRequest, watchLoopback](/sdk/host/#requêtes-et-flux-loopback) pour les appels de l'hôte qui l'utilisent.
+
+À la différence de `contributes.service`, OpenChamber ne démarre ni n'arrête jamais ce processus. Il fait seulement proxy vers ce qui écoute déjà sur ce port, et uniquement pour les routes exactement déclarées. Voir [Sécurité](/security/#mode-entreprise) pour la façon dont `loopback` est soumis aux mêmes restrictions que `service` en mode entreprise.
+
 ## Capacités
 
 Dessiner un panneau et lire la session en cours ne demandent aucune permission. Tout ce qui agit au nom de l'utilisateur en demande une. Listez ces actions dans `contributes.capabilities` :
@@ -110,7 +128,7 @@ Dessiner un panneau et lire la session en cours ne demandent aucune permission. 
 | `files` | lire et écrire des fichiers dans le projet ouvert (`readFile`, `writeFile`, `listDir`, `stat` avec un chemin relatif) |
 | `model` | génération de texte ponctuelle avec le Small Model de l'utilisateur (`generate`), en dehors de toute session |
 
-Cinq autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, `origins` quand vous déclarez `origins`, et `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)).
+Six autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `loopback` quand vous déclarez `loopback`, `filesystem` quand vous déclarez des motifs `filesystem`, `origins` quand vous déclarez `origins`, et `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)).
 
 L'utilisateur voit la liste complète une seule fois, à l'installation de l'extension, et l'approuve ou supprime l'extension. Si une nouvelle version demande davantage, la boîte de dialogue réapparaît. Un appel qui a besoin d'une capacité non approuvée par l'utilisateur échoue avec `NOT_GRANTED`.
 
@@ -282,6 +300,23 @@ host.onResolve(async ({ command, args }) => {
 Quand l'utilisateur tape `/task ABC-12` dans la zone de chat, OpenChamber demande à votre extension de le résoudre et attache ce que vous renvoyez sous forme de puce, sans rien ouvrir. Renvoyez `null` pour "rien trouvé". Si votre panneau est fermé, OpenChamber le charge en arrière-plan pour cet appel. Un nom déjà utilisé par OpenChamber ou OpenCode est ignoré.
 
 **Badge sur l'icône de la barre latérale.** `host.setBadge(3)` affiche un nombre sur votre icône, par exemple les tâches ouvertes ; `host.setBadge(null)` l'efface. Ouvrir le panneau l'efface aussi.
+
+## Arrière-plans et le mode du badge
+
+`contributes.background` fait tourner une page cachée qui continue de surveiller tant que votre panneau est fermé, pour que votre badge reste à jour :
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry` est une page HTML ordinaire, avec le même bac à sable et les mêmes permissions que votre panneau. `start` vaut `"on-demand"` (par défaut, à omettre) pour ne monter la page que lorsque quelque chose en a besoin, ou `"automatic"` pour la garder montée pour chaque invité actif, ce qui nécessite une version d'OpenChamber compatible. N'utilisez `automatic` que pour une page qui appelle `host.setBadge` ou qui a besoin de tourner en continu pour une autre raison ; `on-demand` suffit pour la plupart des extensions.
+
+`contributes.panel.badge` change la façon dont OpenChamber efface le nombre que vous avez défini avec `host.setBadge` :
+
+- omis, ou `"unread"` (par défaut) : ouvrir le panneau efface le badge, le comportement habituel de compteur de non-lus.
+- `"count"` : ouvrir le panneau n'efface **pas** le badge par lui-même ; vous continuez à afficher le compte exact (par exemple le nombre de surveillances en échec), et vous l'effacez vous-même avec `host.setBadge(null)` une fois qu'il est réellement à zéro. Le badge s'efface quand même quand l'utilisateur désactive ou supprime l'extension.
+
+Les deux options restent compatibles avec l'existant : un manifeste qui les omet garde l'ancien comportement d'arrière-plan à la demande et de badge de non-lus.
 
 ## Vos outils dans le chat
 

@@ -99,6 +99,24 @@ Tablica może używać `host.storage` oraz list projektów, worktree i sesji ze 
 
 `contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Ten proces działa z pełnym dostępem użytkownika i bez piaskownicy, dlatego okno zatwierdzania o nim ostrzega; deklaruj taką usługę tylko wtedy, gdy strona nie jest w stanie wykonać tego zadania. Zobacz plik `GUEST_SERVICES.md` w pakiecie. Usługa z `provides: ["browser"]` może też zastąpić przeglądarkę agenta: odpowiada na działania `browser.*` na serwerze, więc agenci przeglądają bez otwartej aplikacji desktopowej, a użytkownik wybiera ją w Ustawienia → Narzędzia OpenChamber. Taka usługa nie potrzebuje panelu.
 
+`contributes.loopback` jest opcjonalne. Deklaruje, że Twoje rozszerzenie już uruchamia własny proces na `127.0.0.1` (Twoją własną wtyczkę, demona CLI albo cokolwiek innego uruchomionego poza OpenChamber) i prosi OpenChamber o proxy zadeklarowanych tras tego procesu do Twojej strony:
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port` to liczba całkowita od 1024 do 65535. `env` to opcjonalna nazwa zmiennej środowiskowej wielkimi literami (maksymalnie 128 znaków), którą Twój własny proces może odczytać, żeby wybrać inny port; OpenChamber rozwiązuje ją po stronie serwera, Twoja strona nigdy jej nie widzi. `routes` to od 1 do 32 wpisów, każdy z `path` i niepustym podzbiorem `GET`, `HEAD`, `POST`. Dosłowny segment `*` pasuje dokładnie do jednego segmentu ścieżki; zadeklaruj `/` jawnie, jeśli go potrzebujesz. Zadeklarowanie `loopback` wyprowadza własne uprawnienie `loopback`; nie wymieniaj go dodatkowo w `capabilities`. Zobacz [loopbackUrl, loopbackRequest, watchLoopback](/sdk/host/#loopback-requests-and-streams) po wywołania hosta, które go używają.
+
+W odróżnieniu od `contributes.service` OpenChamber nigdy nie uruchamia ani nie zatrzymuje tego procesu. Robi tylko proxy do tego, co już nasłuchuje na tym porcie, i tylko dla dokładnie zadeklarowanych tras. Zobacz [Bezpieczeństwo](/security/#enterprise-mode) po to, jak `loopback` jest bramkowane tak samo jak `service` w trybie enterprise.
+
 ## Uprawnienia
 
 Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko, co działa w imieniu użytkownika, już tak. Wymień te rzeczy w `contributes.capabilities`:
@@ -110,7 +128,7 @@ Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko
 | `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
 | `model` | jednorazowe generowanie tekstu za pomocą Small Model użytkownika (`generate`), poza jakąkolwiek sesją |
 
-Pięć kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, oraz `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)).
+Sześć kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `loopback`, gdy deklarujesz `loopback`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, oraz `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)).
 
 Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
 
@@ -282,6 +300,23 @@ host.onResolve(async ({ command, args }) => {
 Gdy użytkownik wpisze `/task ABC-12` w polu czatu, OpenChamber prosi Twoje rozszerzenie o rozwiązanie go i dołącza to, co zwrócisz, jako chip, niczego nie otwierając. Zwróć `null` dla "nic nie znaleziono". Jeśli Twój panel jest zamknięty, OpenChamber ładuje go w tle na potrzeby tego wywołania. Nazwa, której OpenChamber lub OpenCode już używa, jest ignorowana.
 
 **Odznaka na ikonie na pasku bocznym.** `host.setBadge(3)` pokazuje liczbę na Twojej ikonie, na przykład otwarte zadania; `host.setBadge(null)` ją usuwa. Otwarcie panelu też ją usuwa.
+
+## Procesy w tle i tryb odznaki
+
+`contributes.background` uruchamia ukrytą stronę, która dalej obserwuje, gdy Twój panel jest zamknięty, dzięki czemu Twoja odznaka może pozostać aktualna:
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry` to zwykła strona HTML, z tym samym sandboxem i uprawnieniami co Twój panel. `start` to `"on-demand"` (domyślne, można pominąć), żeby zamontować stronę tylko wtedy, gdy ktoś jej potrzebuje, albo `"automatic"`, żeby trzymać ją zamontowaną dla każdego aktywnego gościa, co wymaga odpowiadającej jej wersji OpenChamber. Używaj `automatic` tylko dla strony, która wywołuje `host.setBadge` albo w inny sposób musi działać nieprzerwanie; `on-demand` wystarcza większości rozszerzeń.
+
+`contributes.panel.badge` zmienia sposób, w jaki OpenChamber czyści liczbę ustawioną przez `host.setBadge`:
+
+- pominięte albo `"unread"` (domyślne): otwarcie panelu czyści odznakę, zwykłe zachowanie licznika nieprzeczytanych.
+- `"count"`: otwarcie panelu **nie** czyści jej samo z siebie; pokazujesz dalej dokładną liczbę (na przykład liczbę nieudanych obserwacji) i czyścisz ją sam przez `host.setBadge(null)`, gdy faktycznie wynosi zero. Odznaka i tak czyści się, gdy użytkownik wyłączy lub usunie rozszerzenie.
+
+Obie opcje są wstecznie kompatybilne: manifest, który je pomija, zachowuje stare działanie na żądanie i odznakę jako licznik nieprzeczytanych.
 
 ## Twoje narzędzia w czacie
 

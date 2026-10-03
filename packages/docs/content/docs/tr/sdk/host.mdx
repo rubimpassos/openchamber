@@ -58,6 +58,9 @@ Erişim token'ları burada da, `request` sonucunda da asla görünmez.
 | `request({ method, path, query?, body? })` | entegrasyonunuzun `apiOrigin` adresini kullanıcının token'ı ekli olarak çağırır |
 | `serviceRequest({ method, path, query?, body? })` | eklentinizin yerel servisini çağırır (bkz. `GUEST_SERVICES.md`) |
 | `serviceStatus()` | `stopped`, `starting`, `ready` veya `failed` |
+| `loopbackUrl({ path, query? })` | `contributes.loopback` içindeki bir rota için kısa ömürlü, misafire özel bir GET URL'si |
+| `loopbackRequest({ method, path, query?, body? })` | `contributes.loopback` içindeki bir rotayı OpenChamber üzerinden GET, HEAD veya POST eder |
+| `watchLoopback({ path, query? }, listener)` | bir `text/event-stream` rotasına abone olur; abonelikten çıkış fonksiyonu döndürür |
 | `readFile(path)` | metin dosyası okur. `{ content }` döndürür. |
 | `writeFile(path, content)` | metin dosyasını atomik olarak yazar, üst klasörleri oluşturur. `{ written: true }` döndürür. |
 | `listDir(path)` | klasörü listeler. `{ entries: [{ name, kind }] }` döndürür, `kind` `file`, `directory` veya `other` olur. |
@@ -195,6 +198,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` için `request` ile aynı kurallar geçerlidir. Bir yerel servis tanımlamak, kullanıcının kurulumda onayladığı yeteneklere `service` ekler; o zamana kadar her `serviceRequest` `NO_SERVICE` olur. Tam sözleşme: paket dosyası `GUEST_SERVICES.md`.
 
+## Loopback istekleri ve akışları
+
+Manifest `contributes.loopback` tanımladığında sayfanız, portunu asla öğrenmeden, OpenChamber üzerinden kendi `127.0.0.1` üzerinde zaten çalışan sürecini çağırabilir:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl`, `{ url, expiresAt }` döndürür, `expiresAt` Unix milisaniyesidir. URL, kısa ömürlü, misafire özel bir GET token'ı taşır; bununla açılan sağlıklı bir akış, token süresi dolduğu için yeniden yüklenmez. `loopbackRequest`, `method: "GET" | "HEAD" | "POST"` ekler; yalnızca `POST` bir `body` alır, GET/HEAD böyle bir şeyi reddeder. Sonucu `{ status, body }` olur (`body` metindir; JSON'ı kendiniz ayrıştırın). `watchLoopback`, tanımlı bir rotaya karşı bir `EventSource` açar ve akış bağlanırken, canlı olurken veya kesilirken dinleyiciyi `{ type: "connection", state }` ile, her olay için `{ type: "data", text }` ile çağırır; durdurmak için döndürülen fonksiyonu çağırın.
+
+Hem `path` hem de tanımlanan rotalar kanonikleştirildikten sonra eşleştirilir; manifestteki tek başına bir `*` rota segmenti, çağrı anında tam olarak bir yol parçasıyla eşleşir. Manifestin tanımlamadığı bir yola veya metoda yapılan çağrı, kullanıcının onaylamadığı bir yetenekte olduğu gibi `NOT_GRANTED` olur.
+
+Yalnızca doğrudan web ve masaüstü host'ları canlı bir akış açabilir. Relay üzerinden bağlı bir host, `watchLoopback`'i `UNSUPPORTED` ile yanıtlar; bunun yerine aynı rotayı `loopbackRequest` ile yoklayın (polling). VS Code ve mobil, bu metodlar üzerinden hiç loopback desteği almaz.
+
+`loopbackUrl`'den gelen URL'yi hiçbir zaman loglamayın veya saklamayın: onu bir bearer token gibi ele alın. Manifest biçimi için bkz. [Eklenti oluşturma](/sdk/#contributesloopback), kurumsal modda nasıl sınırlandığı için bkz. [Güvenlik](/security/#enterprise-mode).
+
 ## Dosyalar
 
 Göreli bir yol açık projenin içindedir ve `files` yeteneği gerektirir. `/` veya `~/` ile başlayan bir yol, tanımlanmış bir `contributes.filesystem` deseniyle eşleşmeli ve `filesystem` yeteneği gerektirir. Kurallar için bkz. [Eklenti oluşturma](/sdk/#dosyalar).
@@ -232,6 +255,7 @@ Başarısız çağrılar `HostRequestError` fırlatır. `code` şunlardan biridi
 | `SESSION_BUSY` | oturum meşgulken `prompt({ send: true })` |
 | `DISABLED` | kullanıcı eklentiyi Ayarlar → Uzantılar içinde duraklattı |
 | `NO_SERVICE` | yerel servis tanımlanmamış, onaylanmamış veya çalışmıyor |
+| `UNSUPPORTED` | relay üzerinden bağlı bir host'ta `watchLoopback` ya da bu OpenChamber'ın yapamadığı herhangi bir çağrı, örneğin Diff görünümü olmayan yerde `openCommit` |
 | `NOT_GRANTED` | kullanıcı bu çağrının gerektirdiği yeteneği onaylamadı |
 | `SERVICE_FAILED` | yerel servis çöktü veya hiç hazır olmadı |
 | `NO_DIRECTORY` | açık proje yokken göreli bir dosya yolu kullanıldı ya da açık proje yokken `openCommit` çağrıldı |
@@ -240,7 +264,6 @@ Başarısız çağrılar `HostRequestError` fırlatır. `code` şunlardan biridi
 | `DENIED` | işletim sistemi dosya işlemini reddetti |
 | `NO_MODEL` | kullanılabilir Small Model olmadan `generate` |
 | `MODEL_FAILED` | Small Model bir hata döndürdü |
-| `UNSUPPORTED` | bu OpenChamber çağrıyı yapamaz, örneğin Diff görünümü olmayan yerde `openCommit` |
 
 ## İlgili sayfalar
 

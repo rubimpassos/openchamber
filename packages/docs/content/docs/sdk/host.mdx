@@ -58,6 +58,9 @@ Access tokens never appear here or in a `request` result.
 | `request({ method, path, query?, body? })` | call your integration's `apiOrigin` with the user's token attached |
 | `serviceRequest({ method, path, query?, body? })` | call your extension's local service (see `GUEST_SERVICES.md`) |
 | `serviceStatus()` | `stopped`, `starting`, `ready`, or `failed` |
+| `loopbackUrl({ path, query? })` | a short-lived, guest-scoped GET URL for a route in `contributes.loopback` |
+| `loopbackRequest({ method, path, query?, body? })` | GET, HEAD, or POST a route in `contributes.loopback` through OpenChamber |
+| `watchLoopback({ path, query? }, listener)` | subscribe to a `text/event-stream` route; returns an unsubscribe function |
 | `readFile(path)` | read a text file. Returns `{ content }`. |
 | `writeFile(path, content)` | write a text file atomically, creating parent folders. Returns `{ written: true }`. |
 | `listDir(path)` | list a folder. Returns `{ entries: [{ name, kind }] }`, `kind` is `file`, `directory`, or `other`. |
@@ -226,6 +229,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` follows the same rules as `request`. Declaring a service adds `service` to the capabilities the user approves at install; until then every `serviceRequest` is `NO_SERVICE`. Full contract: the package file `GUEST_SERVICES.md`.
 
+## Loopback requests and streams
+
+When the manifest declares `contributes.loopback`, your page can call its own already-running process on `127.0.0.1` through OpenChamber, without ever learning its port:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` returns `{ url, expiresAt }`, `expiresAt` in Unix milliseconds. The URL carries a short-lived, guest-scoped GET token; a healthy stream opened with it is not reloaded just because the token expires. `loopbackRequest` adds `method: "GET" | "HEAD" | "POST"`; only `POST` takes a `body`, and GET/HEAD reject one. Its result is `{ status, body }` (`body` is text; parse JSON yourself). `watchLoopback` opens an `EventSource` against a declared route and calls the listener with `{ type: "connection", state }` as the stream connects, goes live, or drops, and `{ type: "data", text }` for each event; call the returned function to stop it.
+
+Both `path` and the declared routes are matched after canonicalizing them; a route segment that is a literal `*` in the manifest matches exactly one path segment at call time. A call to a path or method the manifest does not declare is `NOT_GRANTED`, the same as a capability the user has not approved.
+
+Only direct web and desktop hosts can open a live stream. A relay-connected host answers `watchLoopback` with `UNSUPPORTED`; fall back to polling the same route with `loopbackRequest`. VS Code and mobile get no loopback support at all through these methods.
+
+Never log or persist the URL from `loopbackUrl`: treat it like a bearer token. See [Build an extension](/sdk/#contributesloopback) for the manifest shape and [Security](/security/#enterprise-mode) for how it is gated in enterprise mode.
+
 ## Files
 
 A relative path is inside the open project and needs the `files` capability. A path starting with `/` or `~/` must match a declared `contributes.filesystem` pattern and needs the `filesystem` capability. See [Build an extension](/sdk/#files) for the rules.
@@ -263,6 +286,7 @@ Failed calls throw `HostRequestError`. `code` is one of these; `message` says mo
 | `SESSION_BUSY` | `prompt({ send: true })` while the session was busy |
 | `DISABLED` | the user paused the extension in Settings → Extensions |
 | `NO_SERVICE` | no service declared, not approved, or not running |
+| `UNSUPPORTED` | `watchLoopback` on a relay-connected host, or any call this OpenChamber cannot do, for example `openCommit` where there is no Diff view |
 | `NOT_GRANTED` | the user has not approved the capability this call needs |
 | `SERVICE_FAILED` | the service crashed or never became ready |
 | `NO_DIRECTORY` | a relative file path was used with no open project, or `openCommit` with no open project |
@@ -271,7 +295,6 @@ Failed calls throw `HostRequestError`. `code` is one of these; `message` says mo
 | `DENIED` | the operating system refused the file operation |
 | `NO_MODEL` | `generate` with no Small Model available |
 | `MODEL_FAILED` | the Small Model returned an error |
-| `UNSUPPORTED` | this OpenChamber cannot do the call, for example `openCommit` where there is no Diff view |
 
 ## Related
 

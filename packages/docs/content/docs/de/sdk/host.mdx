@@ -58,6 +58,9 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | `request({ method, path, query?, body? })` | den `apiOrigin` deiner Integration mit dem Token des Nutzers aufrufen |
 | `serviceRequest({ method, path, query?, body? })` | den lokalen Dienst deiner Erweiterung aufrufen (siehe `GUEST_SERVICES.md`) |
 | `serviceStatus()` | `stopped`, `starting`, `ready` oder `failed` |
+| `loopbackUrl({ path, query? })` | eine kurzlebige, gast-gebundene GET-URL für eine Route in `contributes.loopback` |
+| `loopbackRequest({ method, path, query?, body? })` | GET, HEAD oder POST einer Route in `contributes.loopback` über OpenChamber |
+| `watchLoopback({ path, query? }, listener)` | eine `text/event-stream`-Route abonnieren; liefert eine Funktion zum Abmelden |
 | `readFile(path)` | eine Textdatei lesen. Liefert `{ content }`. |
 | `writeFile(path, content)` | eine Textdatei atomar schreiben, übergeordnete Ordner werden angelegt. Liefert `{ written: true }`. |
 | `listDir(path)` | einen Ordner auflisten. Liefert `{ entries: [{ name, kind }] }`, `kind` ist `file`, `directory` oder `other`. |
@@ -186,6 +189,26 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` folgt denselben Regeln wie bei `request`. Einen Dienst zu deklarieren fügt `service` zu den Berechtigungen hinzu, die der Nutzer bei der Installation bestätigt; bis dahin ist jeder `serviceRequest` ein `NO_SERVICE`. Vollständiger Vertrag: die Paketdatei `GUEST_SERVICES.md`.
 
+## Loopback-Aufrufe und Streams
+
+Deklariert das Manifest `contributes.loopback`, kann deine Seite über OpenChamber ihren eigenen, bereits laufenden Prozess auf `127.0.0.1` aufrufen, ohne jemals dessen Port zu erfahren:
+
+```ts
+const { url, expiresAt } = await host.loopbackUrl({ path: "/state" });
+const { status, body } = await host.loopbackRequest({ method: "GET", path: "/state" });
+const stop = host.watchLoopback({ path: "/events" }, (event) => {
+  if (event.type === "data") render(JSON.parse(event.text));
+});
+```
+
+`loopbackUrl` liefert `{ url, expiresAt }`, `expiresAt` in Unix-Millisekunden. Die URL trägt ein kurzlebiges, gast-gebundenes GET-Token; ein damit geöffneter, gesunder Stream wird nicht neu geladen, nur weil das Token abläuft. `loopbackRequest` fügt `method: "GET" | "HEAD" | "POST"` hinzu; nur `POST` nimmt einen `body`, GET/HEAD lehnen einen ab. Sein Ergebnis ist `{ status, body }` (`body` ist Text; JSON parst du selbst). `watchLoopback` öffnet eine `EventSource` gegen eine deklarierte Route und ruft den Listener mit `{ type: "connection", state }` auf, während der Stream sich verbindet, live geht oder abbricht, und mit `{ type: "data", text }` für jedes Ereignis; ruf die zurückgegebene Funktion auf, um ihn zu stoppen.
+
+Sowohl `path` als auch die deklarierten Routen werden nach der Kanonisierung verglichen; ein Routensegment, das im Manifest genau `*` ist, passt beim Aufruf auf exakt ein Pfadsegment. Ein Aufruf auf einen Pfad oder eine Methode, die das Manifest nicht deklariert, ist `NOT_GRANTED`, genau wie bei einer nicht bestätigten Berechtigung.
+
+Nur direkte Web- und Desktop-Hosts können einen Live-Stream öffnen. Ein über Relay verbundener Host beantwortet `watchLoopback` mit `UNSUPPORTED`; weiche auf Polling derselben Route mit `loopbackRequest` aus. VS Code und Mobile haben über diese Methoden gar keine Loopback-Unterstützung.
+
+Protokolliere oder speichere die URL aus `loopbackUrl` nie: behandle sie wie ein Bearer-Token. Siehe [Eine Erweiterung bauen](/sdk/#contributesloopback) für die Manifest-Form und [Sicherheit](/security/#enterprise-mode) dafür, wie sie im Enterprise-Modus abgeriegelt wird.
+
 ## Dateien
 
 Ein relativer Pfad liegt innerhalb des offenen Projekts und braucht die Berechtigung `files`. Ein Pfad, der mit `/` oder `~/` beginnt, muss zu einem deklarierten `contributes.filesystem`-Muster passen und braucht die Berechtigung `filesystem`. Die Regeln stehen unter [Eine Erweiterung bauen](/sdk/#dateien).
@@ -223,6 +246,7 @@ Fehlgeschlagene Aufrufe werfen `HostRequestError`. `code` ist einer der folgende
 | `SESSION_BUSY` | `prompt({ send: true })`, während die Session beschäftigt war |
 | `DISABLED` | der Nutzer hat die Erweiterung unter Einstellungen → Erweiterungen pausiert |
 | `NO_SERVICE` | kein Dienst deklariert, nicht bestätigt oder nicht gestartet |
+| `UNSUPPORTED` | `watchLoopback` auf einem über Relay verbundenen Host, oder jeder Aufruf, den dieses OpenChamber nicht ausführen kann, zum Beispiel `openCommit` ohne Diff-Ansicht |
 | `NOT_GRANTED` | der Nutzer hat die für diesen Aufruf nötige Berechtigung nicht bestätigt |
 | `SERVICE_FAILED` | der Dienst ist abgestürzt oder nie bereit geworden |
 | `NO_DIRECTORY` | ein relativer Dateipfad wurde ohne offenes Projekt verwendet, oder `openCommit` ohne offenes Projekt |
@@ -231,7 +255,6 @@ Fehlgeschlagene Aufrufe werfen `HostRequestError`. `code` ist einer der folgende
 | `DENIED` | das Betriebssystem hat die Dateioperation verweigert |
 | `NO_MODEL` | `generate` ohne verfügbares Small Model |
 | `MODEL_FAILED` | das Small Model hat einen Fehler zurückgegeben |
-| `UNSUPPORTED` | dieses OpenChamber kann den Aufruf nicht ausführen, zum Beispiel `openCommit` ohne Diff-Ansicht |
 
 ## Verwandt
 

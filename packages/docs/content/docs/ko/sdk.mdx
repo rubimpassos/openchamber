@@ -99,6 +99,24 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 
 `contributes.service`는 선택 사항입니다. Docker 소켓처럼 웹 페이지가 닿을 수 없는 것을 위해, OpenChamber가 확장 옆에서 시작하는 로컬 프로세스를 선언합니다. 그 프로세스는 사용자의 전체 권한으로, 샌드박스 없이 실행되므로 승인 대화상자가 이를 경고합니다. 페이지로 처리할 수 없을 때만 선언하세요. 패키지 파일 `GUEST_SERVICES.md`를 참고하세요. `provides: ["browser"]`를 가진 서비스는 에이전트의 브라우저를 대신할 수도 있습니다. 서버에서 `browser.*` 동작에 응답하므로 데스크톱 앱을 열지 않아도 에이전트가 탐색할 수 있고, 사용자는 설정 → OpenChamber 도구에서 선택합니다. 이런 서비스에는 패널이 필요 없습니다.
 
+`contributes.loopback`은 선택 사항입니다. 여러분의 확장이 `127.0.0.1`에서 이미 자체 프로세스(직접 만든 플러그인, CLI 데몬, 또는 OpenChamber 밖에서 시작한 그 밖의 무엇이든)를 실행하고 있음을 선언하고, 그중 선언된 경로를 OpenChamber가 페이지로 프록시해 달라고 요청합니다:
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port`는 1024에서 65535 사이의 정수입니다. `env`는 선택 사항인 대문자 환경 변수 이름(최대 128자)으로, 사용자 자신의 프로세스가 이를 읽어 다른 포트를 고를 수 있게 합니다. OpenChamber가 서버에서 이를 해석하므로 페이지는 절대 이를 보지 않습니다. `routes`는 1개에서 32개의 항목이며, 각각 `path`와 `GET`, `HEAD`, `POST` 중 비어 있지 않은 부분집합인 `methods`를 가집니다. 리터럴 `*` 세그먼트는 경로 세그먼트 정확히 하나와 일치합니다. `/`가 필요하면 명시적으로 선언하세요. `loopback`을 선언하면 그 자체로 `loopback` 권한이 파생되므로, `capabilities`에 따로 나열하지 마세요. 이를 쓰는 호스트 호출은 [loopbackUrl, loopbackRequest, watchLoopback](/sdk/host/#loopback-requests-and-streams)를 참고하세요.
+
+`contributes.service`와 달리 OpenChamber는 이 프로세스를 절대 시작하거나 멈추지 않습니다. 그 포트에서 이미 듣고 있는 무언가에게 프록시만 하며, 선언된 정확한 경로에만 그렇게 합니다. 엔터프라이즈 모드에서 `loopback`이 `service`와 같은 방식으로 제한되는 방법은 [Security](/security/#enterprise-mode)를 참고하세요.
+
 ## 권한
 
 패널을 그리는 것과 현재 세션을 읽는 것에는 권한이 필요 없습니다. 사용자를 대신해 무언가를 하는 것에는 필요합니다. 그런 것들을 `contributes.capabilities`에 나열하세요.
@@ -110,7 +128,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 | `files` | 열린 프로젝트 안의 파일 읽고 쓰기(상대 경로를 쓰는 `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | 세션 밖에서 사용자의 Small Model로 일회성 텍스트 생성(`generate`) |
 
-다섯 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`입니다([작업, 명령, 배지](#작업-명령-배지) 참고).
+여섯 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `loopback`을 선언하면 `loopback`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`입니다([작업, 명령, 배지](#작업-명령-배지) 참고).
 
 사용자는 확장을 설치할 때 전체 목록을 한 번 보고, 승인하거나 확장을 제거합니다. 새 버전이 더 많은 권한을 요구하면 대화상자가 다시 나타납니다. 사용자가 승인하지 않은 권한이 필요한 호출은 `NOT_GRANTED`로 실패합니다.
 
@@ -282,6 +300,23 @@ host.onResolve(async ({ command, args }) => {
 사용자가 채팅창에 `/task ABC-12`를 입력하면 OpenChamber는 확장에 해석을 요청하고, 돌려준 것을 아무것도 열지 않은 채 칩으로 첨부합니다. 찾은 것이 없으면 `null`을 반환하세요. 패널이 닫혀 있으면 OpenChamber가 이 호출을 위해 백그라운드에서 패널을 불러옵니다. OpenChamber나 OpenCode가 이미 쓰는 이름은 무시됩니다.
 
 **레일 아이콘의 배지.** `host.setBadge(3)`은 아이콘에 숫자(예: 열린 작업 수)를 표시하고, `host.setBadge(null)`은 지웁니다. 패널을 열어도 지워집니다.
+
+## 백그라운드와 배지 모드
+
+`contributes.background`는 패널이 닫혀 있는 동안에도 계속 지켜보는 숨겨진 페이지를 실행해서, 배지를 최신 상태로 유지할 수 있게 합니다:
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry`는 일반 HTML 페이지로, 패널과 같은 샌드박스와 권한을 가집니다. `start`는 `"on-demand"`(기본값, 생략 가능)이면 무언가가 필요할 때만 페이지를 마운트하고, `"automatic"`이면 활성화된 모든 게스트에 대해 계속 마운트된 상태로 유지하며, 이는 OpenChamber 빌드가 이를 지원해야 합니다. `automatic`은 `host.setBadge`를 호출하거나 그 밖에 계속 실행되어야 하는 페이지에만 쓰세요. 대부분의 확장에는 `on-demand`로 충분합니다.
+
+`contributes.panel.badge`는 `host.setBadge`로 설정한 숫자를 OpenChamber가 지우는 방식을 바꿉니다:
+
+- 생략하거나 `"unread"`(기본값): 패널을 열면 배지가 지워지는, 평소의 읽지 않음 개수 동작입니다.
+- `"count"`: 패널을 열어도 그 자체로는 지워지지 **않습니다**. 정확한 개수(예: 실패한 watch 수)를 계속 표시하고, 실제로 0이 되었을 때 `host.setBadge(null)`로 직접 지웁니다. 사용자가 확장을 끄거나 제거하면 배지는 그래도 지워집니다.
+
+두 옵션 모두 하위 호환됩니다. 이들을 생략한 매니페스트는 기존의 on-demand 백그라운드와 읽지 않음 배지를 그대로 유지합니다.
 
 ## 채팅에 표시되는 내 도구
 

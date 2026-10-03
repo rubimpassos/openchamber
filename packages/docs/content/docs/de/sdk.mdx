@@ -99,6 +99,24 @@ Für Boards gibt es `host.storage` sowie Projekt-, Worktree- und Sitzungslisten 
 
 `contributes.service` ist optional. Es deklariert einen lokalen Dienst (einen Prozess, den OpenChamber neben der Erweiterung startet) für Dinge, an die eine Webseite nicht herankommt, etwa einen Docker-Socket. Dieser Prozess läuft mit dem vollen Zugriff des Nutzers und ohne Sandbox, deshalb warnt der Bestätigungsdialog davor; deklariere einen nur, wenn die Seite die Aufgabe nicht selbst erledigen kann. Siehe die Paketdatei `GUEST_SERVICES.md`. Ein Service mit `provides: ["browser"]` kann außerdem den Browser des Agenten vertreten: Er beantwortet die `browser.*`-Aktionen auf dem Server, sodass Agenten ohne geöffnete Desktop-App browsen, und der Nutzer wählt ihn unter Einstellungen → OpenChamber-Werkzeuge. Ein solcher Service braucht kein Panel.
 
+`contributes.loopback` ist optional. Es erklärt, dass deine Erweiterung bereits ihren eigenen Prozess auf `127.0.0.1` ausführt (dein eigenes Plugin, ein CLI-Daemon oder irgendetwas anderes, das du außerhalb von OpenChamber gestartet hast) und bittet OpenChamber, deklarierte Routen davon an deine Seite weiterzuleiten:
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port` ist eine ganze Zahl von 1024 bis 65535. `env` ist ein optionaler Name einer Umgebungsvariable in Großbuchstaben (höchstens 128 Zeichen), den dein eigener Prozess lesen kann, um einen anderen Port zu wählen; OpenChamber löst ihn auf dem Server auf, deine Seite bekommt ihn nie zu sehen. `routes` hat 1 bis 32 Einträge, jeder mit einem `path` und einer nicht leeren Teilmenge aus `GET`, `HEAD`, `POST`. Ein Segment, das im Manifest genau `*` ist, passt auf exakt ein Pfadsegment; deklariere `/` ausdrücklich, falls du es brauchst. Die Deklaration von `loopback` leitet eine eigene `loopback`-Berechtigung ab; führe sie nicht zusätzlich in `capabilities` auf. Siehe [loopbackUrl, loopbackRequest, watchLoopback](/sdk/host/#loopback-requests-and-streams) für die Host-Aufrufe, die sie nutzen.
+
+Anders als `contributes.service` startet oder stoppt OpenChamber diesen Prozess nie. Es leitet nur an das weiter, was bereits auf diesem Port lauscht, und nur für die genau deklarierten Routen. Siehe [Sicherheit](/security/#enterprise-mode) dafür, wie `loopback` im Enterprise-Modus wie `service` abgeriegelt wird.
+
 ## Berechtigungen
 
 Ein Panel zeichnen und die aktuelle Session lesen braucht keine Berechtigung. Alles, was im Namen des Nutzers handelt, schon. Solche Dinge listest du in `contributes.capabilities` auf:
@@ -110,7 +128,7 @@ Ein Panel zeichnen und die aktuelle Session lesen braucht keine Berechtigung. Al
 | `files` | Dateien innerhalb des offenen Projekts lesen und schreiben (`readFile`, `writeFile`, `listDir`, `stat` mit einem relativen Pfad) |
 | `model` | einmalige Textgenerierung mit dem Small Model des Nutzers (`generate`), außerhalb jeder Session |
 
-Fünf weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, und `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)).
+Sechs weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `loopback`, wenn du `loopback` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, und `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)).
 
 Der Nutzer sieht die vollständige Liste einmal, bei der Installation der Erweiterung, und bestätigt sie oder entfernt die Erweiterung. Fordert eine neue Version mehr an, erscheint der Dialog erneut. Ein Aufruf, der eine nicht bestätigte Berechtigung braucht, schlägt mit `NOT_GRANTED` fehl.
 
@@ -282,6 +300,23 @@ host.onResolve(async ({ command, args }) => {
 Wenn der Nutzer `/task ABC-12` ins Chatfeld tippt, bittet OpenChamber deine Erweiterung, das aufzulösen, und hängt das Ergebnis als Chip an, ohne etwas zu öffnen. Gib `null` zurück für "nichts gefunden". Ist dein Panel geschlossen, lädt OpenChamber es für den Aufruf im Hintergrund. Ein Name, den OpenChamber oder OpenCode schon verwendet, wird ignoriert.
 
 **Badge auf dem Symbol in der Leiste.** `host.setBadge(3)` zeigt eine Zahl auf deinem Symbol, zum Beispiel offene Aufgaben; `host.setBadge(null)` entfernt sie. Das Öffnen des Panels entfernt sie ebenfalls.
+
+## Hintergrundseiten und der Badge-Modus
+
+`contributes.background` führt eine versteckte Seite aus, die weiter zuschaut, während dein Panel geschlossen ist, damit dein Badge aktuell bleiben kann:
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry` ist eine normale HTML-Seite, mit derselben Sandbox und denselben Berechtigungen wie dein Panel. `start` ist `"on-demand"` (Standard, lass es weg), um die Seite nur zu mounten, wenn sie gebraucht wird, oder `"automatic"`, um sie für jeden aktiven Gast dauerhaft gemountet zu halten, wofür ein passender OpenChamber-Build nötig ist. Nutze `automatic` nur für eine Seite, die `host.setBadge` aufruft oder sonst dauerhaft laufen muss; `on-demand` reicht für die meisten Erweiterungen.
+
+`contributes.panel.badge` ändert, wie OpenChamber die Zahl entfernt, die du mit `host.setBadge` gesetzt hast:
+
+- weggelassen oder `"unread"` (Standard): das Öffnen des Panels entfernt das Badge, das übliche Verhalten für ungelesene Zahlen.
+- `"count"`: das Öffnen des Panels entfernt es **nicht** von selbst; du zeigst weiter, welche Zahl gerade zutrifft (zum Beispiel die Anzahl fehlgeschlagener Watches), und entfernst es selbst mit `host.setBadge(null)`, sobald sie wirklich null ist. Das Badge wird trotzdem entfernt, wenn der Nutzer die Erweiterung deaktiviert oder entfernt.
+
+Beide Optionen sind rückwärtskompatibel: ein Manifest, das sie weglässt, behält die alte On-Demand-Hintergrundseite und das Unread-Badge.
 
 ## Deine Tools im Chat
 

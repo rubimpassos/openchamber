@@ -99,6 +99,24 @@ For a board, use `host.storage` for persistent JSON and the project/worktree/ses
 
 `contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel.
 
+`contributes.loopback` is optional. It declares that your extension already runs its own process on `127.0.0.1` (your own plugin, CLI daemon, or anything else you started outside OpenChamber) and asks OpenChamber to proxy declared routes of it to your page:
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port` is an integer from 1024 to 65535. `env` is an optional uppercase environment variable name (at most 128 characters) that the user's own process can read to pick a different port; OpenChamber resolves it on the server, your page never sees it. `routes` is 1 to 32 entries, each with a `path` and a nonempty subset of `GET`, `HEAD`, `POST`. A literal `*` segment matches exactly one path segment; declare `/` explicitly if you need it. Declaring `loopback` derives its own `loopback` capability; do not also list it in `capabilities`. See [loopbackUrl, loopbackRequest, watchLoopback](/sdk/host/#loopback-requests-and-streams) for the host calls that use it.
+
+Unlike `contributes.service`, OpenChamber never starts or stops this process. It only proxies to whatever is already listening on that port, and only for the exact routes declared. See [Security](/security/#enterprise-mode) for how `loopback` is gated like `service` in enterprise mode.
+
 ## Capabilities
 
 Drawing a panel and reading the current session need no permission. Anything that acts on the user's behalf does. List those in `contributes.capabilities`:
@@ -111,7 +129,7 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
 | `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
-Five more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, and `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)).
+Six more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `loopback` when you declare `loopback`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, and `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)).
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
 
@@ -284,6 +302,23 @@ host.onResolve(async ({ command, args }) => {
 When the user types `/task ABC-12` in the chat box, OpenChamber asks your extension to resolve it and attaches what you return as a chip, without opening anything. Return `null` for "nothing found". If your panel is closed, OpenChamber loads it in the background for the call. A name that OpenChamber or OpenCode already uses is ignored.
 
 **Badge on the rail icon.** `host.setBadge(3)` shows a number on your icon, for example open tasks; `host.setBadge(null)` clears it. Opening the panel clears it too.
+
+## Backgrounds and the badge mode
+
+`contributes.background` runs a hidden page that keeps watching while your panel is closed, so your badge can stay current:
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry` is a plain HTML page, same sandbox and permissions as your panel. `start` is `"on-demand"` (the default, omit it) to mount the page only when something needs it, or `"automatic"` to keep it mounted for every active guest, which needs a matching OpenChamber build. Use `automatic` only for a page that calls `host.setBadge` or otherwise needs to run continuously; `on-demand` is enough for most extensions.
+
+`contributes.panel.badge` changes how OpenChamber clears the number you set with `host.setBadge`:
+
+- omitted, or `"unread"` (the default): opening the panel clears the badge, the usual unread-count behavior.
+- `"count"`: opening the panel does **not** clear it by itself; you keep showing whatever count is accurate (for example, the number of failing watches), and clear it yourself with `host.setBadge(null)` once it is genuinely zero. The badge still clears when the user disables or removes the extension.
+
+Both options are backwards compatible: a manifest that omits them keeps the old on-demand background and unread badge.
 
 ## Your tools in the chat
 

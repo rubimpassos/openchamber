@@ -99,6 +99,24 @@ Panolar `host.storage` ile proje, worktree ve oturum listelerini ve canlı durum
 
 `contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur.
 
+`contributes.loopback` isteğe bağlıdır. Eklentinizin kendi `127.0.0.1` üzerinde zaten çalışan bir süreci (kendi eklentiniz, bir CLI daemon'u veya OpenChamber dışında başlattığınız başka bir şey) olduğunu belirtir ve OpenChamber'dan onun tanımlı rotalarını sayfanıza proxy'lemesini ister:
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port`, 1024 ile 65535 arası bir tamsayıdır. `env`, kullanıcının kendi sürecinin farklı bir port seçmek için okuyabileceği, en fazla 128 karakterlik isteğe bağlı büyük harfli bir ortam değişkeni adıdır; OpenChamber bunu sunucuda çözer, sayfanız onu asla görmez. `routes`, her biri bir `path` ve `GET`, `HEAD`, `POST`'un boş olmayan bir alt kümesini içeren 1 ile 32 arası girdidir. Tek başına bir `*` segmenti tam olarak bir yol parçasıyla eşleşir; `/`'e ihtiyacınız varsa açıkça tanımlayın. `loopback` tanımlamak kendi `loopback` yeteneğini türetir; bunu `capabilities` içinde ayrıca listemeyin. Bunu kullanan host çağrıları için bkz. [loopbackUrl, loopbackRequest, watchLoopback](/sdk/host/#loopback-requests-and-streams).
+
+`contributes.service`'in aksine OpenChamber bu süreci asla başlatmaz veya durdurmaz. Yalnızca o portta zaten dinleyen şeye, yalnızca tanımlanan tam rotalar için proxy yapar. Kurumsal modda `loopback`'in `service` gibi nasıl sınırlandığı için bkz. [Güvenlik](/security/#enterprise-mode).
+
 ## Yetenekler
 
 Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bir şey yapan her şey gerektirir. Bunları `contributes.capabilities` içinde listeleyin:
@@ -110,7 +128,7 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-Beş tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins` ve bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)).
+Altı tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, bir `loopback` tanımladığınızda `loopback`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins` ve bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
 
@@ -282,6 +300,23 @@ host.onResolve(async ({ command, args }) => {
 Kullanıcı sohbet kutusuna `/task ABC-12` yazdığında OpenChamber eklentinizden bunu çözmesini ister ve döndürdüğünüzü, hiçbir şey açmadan, etiket olarak iliştirir. "Bir şey bulunamadı" için `null` döndürün. Paneliniz kapalıysa OpenChamber bu çağrı için onu arka planda yükler. OpenChamber'ın veya OpenCode'un zaten kullandığı bir ad yok sayılır.
 
 **Şerit simgesindeki rozet.** `host.setBadge(3)` simgenizde bir sayı gösterir, örneğin açık görevler; `host.setBadge(null)` onu temizler. Paneli açmak da temizler.
+
+## Arka planlar ve rozet modu
+
+`contributes.background`, paneliniz kapalıyken izlemeye devam eden, böylece rozetinizi güncel tutabilen gizli bir sayfa çalıştırır:
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry`, paneliniz ile aynı sandbox ve izinlere sahip düz bir HTML sayfasıdır. `start`, sayfayı yalnızca bir şey ona ihtiyaç duyduğunda yüklemek için `"on-demand"` (varsayılan, atlayabilirsiniz) ya da her etkin misafir için yüklü tutmak için `"automatic"` olur; ikincisi eşleşen bir OpenChamber derlemesi gerektirir. `automatic`'i yalnızca `host.setBadge` çağıran veya sürekli çalışması gereken bir sayfa için kullanın; çoğu eklenti için `on-demand` yeterlidir.
+
+`contributes.panel.badge`, OpenChamber'ın `host.setBadge` ile ayarladığınız sayıyı nasıl temizlediğini değiştirir:
+
+- atlanmış veya `"unread"` (varsayılan): paneli açmak rozeti temizler, olağan okunmamış sayısı davranışı.
+- `"count"`: paneli açmak kendiliğinden temizlemez; doğru olan sayıyı göstermeye devam edersiniz (örneğin başarısız izleme sayısı) ve gerçekten sıfır olduğunda kendiniz `host.setBadge(null)` ile temizlersiniz. Kullanıcı eklentiyi devre dışı bıraktığında veya kaldırdığında rozet yine de temizlenir.
+
+Her iki seçenek de geriye uyumludur: bunları atlayan bir manifest eski on-demand arka plan ve okunmamış rozet davranışını korur.
 
 ## Sohbetteki araçlarınız
 

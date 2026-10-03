@@ -99,6 +99,24 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 `contributes.service` 可选。它声明一个由 OpenChamber 在扩展旁启动的本地进程，用于网页无法访问的东西，比如 Docker socket。该进程以用户的完整权限运行，且没有沙箱隔离，因此批准对话框会对此发出警告；只有当网页无法完成这项工作时才声明它。见包内文件 `GUEST_SERVICES.md`。 带有 `provides: ["browser"]` 的服务还可以替代智能体的浏览器：它在服务器上响应 `browser.*` 动作，因此智能体无需打开桌面应用即可浏览，用户在设置 → OpenChamber 工具中选择它。这样的服务不需要面板。
 
+`contributes.loopback` 可选。它声明你的扩展已经在 `127.0.0.1` 上运行自己的进程（你自己的插件、CLI 守护进程，或你在 OpenChamber 之外启动的任何其他东西），并要求 OpenChamber 把它声明的路由代理给你的页面：
+
+```json
+"loopback": {
+  "port": 4517,
+  "env": "ACME_PORT",
+  "routes": [
+    { "path": "/state", "methods": ["GET"] },
+    { "path": "/events", "methods": ["GET"] },
+    { "path": "/sessions/*", "methods": ["GET"] }
+  ]
+}
+```
+
+`port` 是 1024 到 65535 之间的整数。`env` 是一个可选的大写环境变量名（最多 128 个字符），用户自己的进程可以读取它来选用不同的端口；OpenChamber 在服务器端解析它，你的页面永远看不到它。`routes` 是 1 到 32 个条目，每个都有 `path` 和一个由 `GET`、`HEAD`、`POST` 组成的非空子集。字面量 `*` 路径段只匹配一个路径段；如果需要匹配 `/`，请显式声明它。声明 `loopback` 会派生出它自己的 `loopback` 能力；不要在 `capabilities` 中再次列出它。使用它的 host 调用见[loopbackUrl、loopbackRequest、watchLoopback](/zh-cn/sdk/host/#loopback-requests-and-streams)。
+
+与 `contributes.service` 不同，OpenChamber 永远不会启动或停止这个进程。它只是代理到已经在那个端口上监听的任何东西，并且只针对声明过的确切路由。企业模式下 `loopback` 和 `service` 一样受限，见[安全](/zh-cn/security/#enterprise-mode)。
+
 ## 能力
 
 绘制面板和读取当前会话无需任何权限。凡是代表用户执行操作的，都需要。把它们列在 `contributes.capabilities` 中：
@@ -110,7 +128,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 | `files` | 读写打开项目中的文件（使用相对路径的 `readFile`、`writeFile`、`listDir`、`stat`） |
 | `model` | 使用用户的 Small Model 进行一次性文本生成（`generate`），不在任何会话中 |
 
-另有五项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)）。
+另有六项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `loopback` 时加上 `loopback`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)）。
 
 用户在安装扩展时会看到完整列表一次，然后批准或移除扩展。如果新版本请求更多权限，对话框会再次出现。调用需要用户尚未批准的能力时，会以 `NOT_GRANTED` 失败。
 
@@ -282,6 +300,23 @@ host.onResolve(async ({ command, args }) => {
 当用户在聊天框中输入 `/task ABC-12` 时，OpenChamber 会请你的扩展解析它，并把你返回的内容作为标签附加上去，不打开任何东西。找不到时返回 `null`。如果你的面板是关闭的，OpenChamber 会为这次调用在后台加载它。OpenChamber 或 OpenCode 已经使用的名称会被忽略。
 
 **侧栏图标上的徽标。** `host.setBadge(3)` 在你的图标上显示一个数字，比如未完成任务数；`host.setBadge(null)` 清除它。打开面板也会清除它。
+
+## 后台与徽标模式
+
+`contributes.background` 运行一个隐藏页面，在你的面板关闭时持续监听，让你的徽标保持最新：
+
+```json
+"background": { "entry": "background/index.html", "start": "automatic" }
+```
+
+`entry` 是一个普通的 HTML 页面，沙箱和权限与你的面板相同。`start` 为 `"on-demand"`（默认，可以省略）时，只有在有东西需要它时才会挂载该页面；为 `"automatic"` 时会为每个活跃的客户端保持挂载，这需要匹配的 OpenChamber 构建版本。只有当页面需要调用 `host.setBadge` 或其他需要持续运行的操作时才使用 `automatic`；大多数扩展用 `on-demand` 就够了。
+
+`contributes.panel.badge` 改变 OpenChamber 清除你用 `host.setBadge` 设置的数字的方式：
+
+- 省略，或 `"unread"`（默认）：打开面板会清除徽标，这是常见的未读计数行为。
+- `"count"`：打开面板本身**不会**清除它；你持续显示准确的计数（例如失败的监视数量），并在它真正归零时自己调用 `host.setBadge(null)` 清除它。用户停用或移除扩展时，徽标仍会被清除。
+
+这两个选项都向后兼容：省略它们的清单会保持旧的按需后台和未读徽标行为。
 
 ## 你的工具在聊天中的样子
 
