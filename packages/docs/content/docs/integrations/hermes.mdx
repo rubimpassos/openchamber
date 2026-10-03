@@ -191,6 +191,14 @@ boundary to enforce total body size as well.
 
 ## Shared fixtures
 
+The server uses OpenCode 2.x while the Hermes wire contract stays at version 1.
+Session ownership comes from the V2 record's `location.directory`; running
+sessions project to `busy`, and inline message content projects to text only.
+The credential helper ships as `scripts/integration-credentials.mjs` inside
+the `@openchamber/web` package. Only the Hermes process should receive
+`HERMES_OC_TOKEN_*`; the managed OpenCode child receives neither those values
+nor `OPENCHAMBER_INTEGRATION_POLICY_FILE`.
+
 `server/lib/integration-control/fixtures/` contains synthetic protocol examples
 and error cases. Hermes stores independent copies under
 `tests/fixtures/protocol/`. `manifest.json` records `fixtureSetVersion: 1.0.0`,
@@ -198,4 +206,9 @@ schema version 1, and the SHA-256 of the exact bytes of each corpus file.
 The manifest does not hash itself. Update both copies and bump the fixture set
 version when the corpus changes. The contract test checks hashes, roundtrips,
 invalid cases, size boundaries, and byte-for-byte equality with the adjacent
-Hermes checkout. Tests use local files only.
+Hermes checkout. Set `HERMES_TEST_REPO` to the consumer checkout when it is not
+the default sibling `hermes-openchamber`. In the consumer, set
+`OPENCHAMBER_TEST_REPO` to this checkout for its native receiver tests.
+Tests use synthetic credentials and local HTTP fixtures, not a deployed server.
+Transport tests run under Node even when launched by `bun test`, because the
+shipped server uses Node's upgrade and disconnect events.
