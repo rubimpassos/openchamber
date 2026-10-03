@@ -1,5 +1,6 @@
 import type {
   AttachContribution,
+  BackgroundContribution,
   FileEditorContribution,
   GuestActionContribution,
   GuestCapability,
@@ -8,12 +9,20 @@ import type {
   GuestMessageContribution,
   GuestSurfaceDock,
   GuestToolContribution,
+  LoopbackContribution,
+  PanelContribution,
   PublicService,
   PublicGuestCapabilities,
   PublicIntegration,
 } from '@openchamber/sdk';
 
 export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
+
+/** Public server resolution. Invalid overrides never expose their raw value. */
+export type PublicLoopback = LoopbackContribution & (
+  | { readonly status: 'ready'; readonly resolvedPort: number }
+  | { readonly status: 'config-invalid'; readonly resolvedPort?: never }
+);
 
 export type InstalledGuest = {
   id: string;
@@ -26,8 +35,10 @@ export type InstalledGuest = {
   /** Edge and thickness of `entry` docked beside a shared surface (`PanelContribution.dock`/`size`). */
   entryDock?: GuestSurfaceDock;
   entrySize?: number;
+  readonly panelBadge?: PanelContribution['badge'];
   /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
   backgroundEntry?: string;
+  readonly backgroundStart?: BackgroundContribution['start'];
   /** npm package.json version when the package declared one. */
   version?: string;
   attach?: AttachContribution;
@@ -51,6 +62,7 @@ export type InstalledGuest = {
   /** Declared `contributes.origins`: the frame may exchange data with them once approved. */
   origins?: string[];
   service?: PublicService;
+  readonly loopback?: PublicLoopback;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */
