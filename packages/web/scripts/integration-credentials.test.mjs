@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkIntegrationToken, constantTimeHashEqual, hashIntegrationToken } from '../server/lib/integration-control/auth.js';
 
 const script = fileURLToPath(new URL('./integration-credentials.mjs', import.meta.url));
@@ -14,13 +14,15 @@ describe('offline integration credentials CLI', () => {
   let policyFile;
   let results;
   let tokens;
+  let previousPolicyFile;
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'oc-credentials-'));
     output = join(directory, 'token');
     policyFile = join(directory, 'policy.json');
     results = [];
     tokens = [];
-    vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', policyFile);
+    previousPolicyFile = process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+    process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = policyFile;
   });
   afterEach(async () => {
     try {
@@ -31,12 +33,13 @@ describe('offline integration credentials CLI', () => {
         }
       }
     } finally {
-      vi.unstubAllEnvs();
+      if (previousPolicyFile === undefined) delete process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+      else process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = previousPolicyFile;
       await rm(directory, { recursive: true, force: true });
     }
   });
   const run = (args) => {
-    const result = spawnSync(process.execPath, [script, ...args], {
+    const result = spawnSync('node', [script, ...args], {
       cwd: directory, encoding: 'utf8', timeout: 10_000,
       env: { PATH: process.env.PATH, HOME: directory, TMPDIR: directory },
     });

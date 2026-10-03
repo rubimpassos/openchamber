@@ -11,11 +11,13 @@ describe('integration authentication', () => {
   let file;
   let token;
   let policy;
+  let previousPolicyFile;
   const denied = { success: false, error: { code: 'UNAUTHORIZED', ...ERROR_DEFINITIONS.UNAUTHORIZED } };
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'oc-auth-'));
     file = join(directory, 'policy.json');
-    vi.stubEnv('OPENCHAMBER_INTEGRATION_POLICY_FILE', file);
+    previousPolicyFile = process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+    process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = file;
     token = `oc_integration_${randomBytes(32).toString('base64url')}`;
     policy = { schemaVersion: 1, domainId: 'test', credentials: [{
       id: 'fixture', domain: 'test', tokenHash: hashIntegrationToken(token),
@@ -23,8 +25,9 @@ describe('integration authentication', () => {
     }] };
   });
   afterEach(async () => {
-    vi.useRealTimers();
-    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    if (previousPolicyFile === undefined) delete process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE;
+    else process.env.OPENCHAMBER_INTEGRATION_POLICY_FILE = previousPolicyFile;
     await rm(directory, { recursive: true, force: true });
   });
   const save = async (file, policy) => writeFile(file, JSON.stringify(policy));
@@ -47,8 +50,7 @@ describe('integration authentication', () => {
   });
 
   it('rechecks expiry at authentication time, including the exact expiry instant', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2099-01-01T00:00:00Z'));
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2099-01-01T00:00:00Z'));
     expect(authenticateIntegrationToken(token, policy)).toEqual(denied);
   });
 
