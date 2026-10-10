@@ -56,6 +56,7 @@ describe('feature-routes-runtime', () => {
       upgradeOpenCodeCli: noop,
       getOpenCodeCompatibility: noop,
       installOpenCodeV2: noop,
+      resolveGitBinaryForSpawn: () => 'git',
       sanitizeProjects: noop,
       sanitizeSkillCatalogs: noop,
       isUnsafeSkillRelativePath: noop,
