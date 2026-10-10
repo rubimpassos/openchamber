@@ -109,7 +109,9 @@ describe('macOS startup service', () => {
       for (const key of Object.keys(theirs)) {
         expect(plist).toContain(`<key>${key}</key>`);
       }
-      expect(plist).toContain('<string>service-password</string>');
+      // The service keeps only a hash of its own password, never plaintext.
+      expect(plist).toContain('<key>OPENCHAMBER_UI_PASSWORD_HASH</key>');
+      expect(plist).not.toContain('service-password');
       expect(plist).not.toContain('desktop-password');
     } finally {
       vi.restoreAllMocks();
