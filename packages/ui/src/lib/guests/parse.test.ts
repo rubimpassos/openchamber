@@ -217,7 +217,7 @@ describe('parseGuestCatalogJson', () => {
     expect(browserProviderGuests(guest ? [guest] : [])).toHaveLength(1);
     // The Browser panel draws a provider's surface, so it gets no rail entry of its own.
     expect(enabledGuestSurfaces(guest ? [guest] : [], (path) => path)).toHaveLength(0);
-    const [other] = parseGuestCatalogJson(JSON.stringify({
+    const [other] = readGuests(JSON.stringify({
       guests: [{
         id: 'whiteboard', name: 'Whiteboard', icon: 'window', capabilities: { requested: ['service'], granted: ['service'] },
         service: { runtime: 'host', granted: true, surface: true },

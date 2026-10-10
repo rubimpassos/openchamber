@@ -67,8 +67,17 @@ export const createLoopbackRuntime = (persistPath, clock = LOOPBACK_CLOCK) => {
     return {
       signal: entry.controller.signal,
       async authorize() {
-        const version = revision;
-        const target = await authorizeLoopbackRequest(request, persistPath);
+        let version = revision;
+        let target = await authorizeLoopbackRequest(request, persistPath);
+        // A store write while authorizing is not proof the grant changed: the
+        // catalog read itself allocates storage ids on first sight. Read the
+        // authorization again and refuse only when its scope differs.
+        if (accepting && version !== revision && !entry.controller.signal.aborted) {
+          version = revision;
+          const current = await authorizeLoopbackRequest(request, persistPath);
+          if (JSON.stringify(current.scope) !== JSON.stringify(target.scope)) throw revoked();
+          target = current;
+        }
         if (!accepting || version !== revision || entry.controller.signal.aborted) throw revoked();
         entry.target = target;
         return target;

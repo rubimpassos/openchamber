@@ -12,7 +12,7 @@ test('keeps resolution and lifecycle fields when parsing a server catalog', () =
   // Given a server-resolved target, distinct from the declared default.
   const row = { ...guest, loopback: { ...declaration, status: 'ready', resolvedPort: 9123 }, panelBadge: 'count', backgroundEntry: 'index.html', backgroundStart: 'automatic' };
   // When parsing the network payload.
-  const parsed = parseGuestCatalogJson(JSON.stringify({ guests: [row] }));
+  const parsed = parseGuestCatalogJson(JSON.stringify({ guests: [row] }))?.guests;
   // Then approval and lifecycle consumers receive the authoritative values.
   expect(parsed).toEqual([row]);
 });
@@ -21,7 +21,7 @@ test('keeps invalid configuration visible and inactive when approval is required
   // Given an invalid server environment and no effective grant.
   const row = { ...guest, loopback: { ...declaration, status: 'config-invalid' } };
   // When the catalog is parsed for Settings.
-  const [parsed] = parseGuestCatalogJson(JSON.stringify({ guests: [row] })) ?? [];
+  const [parsed] = parseGuestCatalogJson(JSON.stringify({ guests: [row] }))?.guests ?? [];
   // Then the extension remains visible for review, not an active guest.
   expect(parsed).toEqual(row);
   if (!parsed) throw new Error('Expected an installed guest');
@@ -41,7 +41,8 @@ for (const loopback of [
     const json = JSON.stringify({ guests: [{ ...guest, loopback }] });
     // When parsing the trust boundary.
     const parsed = parseGuestCatalogJson(json);
-    // Then malformed data is not mistaken for an empty or approved catalog.
-    expect(parsed).toBeNull();
+    // Then the row is listed as unreadable, never as an installed guest.
+    expect(parsed?.guests).toEqual([]);
+    expect(parsed?.unreadable).toEqual([{ id: guest.id, name: guest.name, builtIn: false }]);
   });
 }

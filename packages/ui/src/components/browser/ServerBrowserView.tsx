@@ -265,7 +265,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         continue;
       }
       const url = scope.tabs.find((tab) => tab.id === chromeTabId)?.url ?? '';
-      const panelTabId = openAgentBrowserTab(directory, url === BLANK_URL ? '' : url);
+      const panelTabId = openAgentBrowserTab(directory, url === BLANK_URL ? '' : url, null);
       if (panelTabId) claim(scope.id, panelTabId, chromeTabId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

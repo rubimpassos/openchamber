@@ -12,7 +12,6 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 
 interface ToolRowProps {
   icon: IconName;
@@ -24,9 +23,6 @@ interface ToolRowProps {
   onChange: (checked: boolean) => void;
   settingsItem: string;
 }
-
-/** Icon column width plus gap, so a nested row lines up with the tool text. */
-const TOOL_ROW_TEXT_INSET_CLASS = 'pl-[3.75rem]';
 
 const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, info, ariaLabel, checked, onChange, settingsItem }) => (
   <div data-settings-item={settingsItem} className="flex items-center gap-3 px-4 py-3">

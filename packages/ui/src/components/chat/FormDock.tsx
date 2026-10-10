@@ -57,11 +57,15 @@ interface FormDockProps {
     sessionId: string | null;
     directory?: string;
     hidden: boolean;
-    orphanedQuestions: QuestionRequest[];
-    onOrphanedResolved: () => void;
+    /** Questions an OpenCode restart left unanswered; only the composer's dock offers them. */
+    orphanedQuestions?: QuestionRequest[];
+    onOrphanedResolved?: () => void;
 }
 
-const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, orphanedQuestions: questions, onOrphanedResolved }) => {
+const NO_ORPHANED_QUESTIONS: QuestionRequest[] = [];
+const ignoreOrphanedResolved = () => {};
+
+const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, orphanedQuestions: questions = NO_ORPHANED_QUESTIONS, onOrphanedResolved = ignoreOrphanedResolved }) => {
     const forms = useScopedBlockingForms(sessionId, directory);
     const orphanedQuestion = forms.length === 0 ? questions[0] : undefined;
     // The session's own forms come first; a location-scoped form (an MCP
