@@ -318,6 +318,65 @@ describe('OpenChamber foreground update route', () => {
     });
   });
 
+  it('installs inside a system unit and exits for its Restart= instead of reaching the user manager', async () => {
+    packageManager.getUpdateCommand.mockReturnValue("'npm' install -g 'https://example.test/openchamber-web-1.17.1.tgz'");
+    const handlers = {};
+    childProcess.spawn.mockReturnValue({ on: vi.fn((event, handler) => { handlers[event] = handler; }) });
+    const { app, dependencies } = createApp({
+      environment: {
+        INVOCATION_ID: 'systemd-invocation',
+        OPENCHAMBER_SYSTEMD_UNIT: 'openchamber.service',
+        OPENCHAMBER_SYSTEMD_SCOPE: 'system',
+      },
+    });
+    dependencies.fs.writeSync = vi.fn();
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(200, {
+        success: true,
+        message: 'Update installing; the service manager restarts OpenChamber afterwards',
+        version: '1.17.1',
+        packageManager: 'npm',
+        autoRestart: true,
+        restartManager: 'systemd',
+        logPath: '/tmp/openchamber/update-install.log',
+      });
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(409, { error: 'An update is already being installed' });
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+    expect(childProcess.spawn).toHaveBeenCalledWith(
+      '/bin/sh',
+      ['-c', "set -eu\n'npm' install -g 'https://example.test/openchamber-web-1.17.1.tgz'"],
+      { stdio: ['ignore', 7, 7], env: dependencies.process.env },
+    );
+    expect(dependencies.process.exit).not.toHaveBeenCalled();
+    handlers.exit(0);
+    expect(dependencies.process.exit).toHaveBeenCalledWith(0);
+  });
+
+  it('keeps serving and accepts a retry when the system-scope install fails', async () => {
+    const handlers = {};
+    childProcess.spawn.mockReturnValue({ on: vi.fn((event, handler) => { handlers[event] = handler; }) });
+    const { app, dependencies } = createApp({
+      environment: { INVOCATION_ID: 'systemd-invocation', OPENCHAMBER_SYSTEMD_SCOPE: 'system' },
+    });
+    dependencies.fs.writeSync = vi.fn();
+
+    await request(app).post('/api/openchamber/update-install').expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    handlers.exit(1);
+
+    expect(dependencies.process.exit).not.toHaveBeenCalled();
+    await request(app).post('/api/openchamber/update-install').expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(childProcess.spawn).toHaveBeenCalledTimes(2);
+  });
+
   it('installs a fork from its own release tarball, never the npm package', async () => {
     childProcess.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
     const tarball = 'https://github.com/fork/openchamber/releases/download/v1.17.1/openchamber-web-1.17.1.tgz';

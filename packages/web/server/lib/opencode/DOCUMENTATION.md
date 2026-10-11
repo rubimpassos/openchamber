@@ -864,6 +864,13 @@ within a ten-minute overall deadline.
     - Foreground servers running under a systemd user unit queue installation in
       a separate transient unit and restart the configured service afterwards.
       `OPENCHAMBER_SYSTEMD_UNIT` overrides the default `openchamber.service`.
+    - With `OPENCHAMBER_SYSTEMD_SCOPE=system` (a system unit, typically with
+      `User=` and a sandbox) the server never touches the user manager: a
+      transient user job would run outside the unit's sandbox. It runs the
+      install as its own child, inside the unit, logs to
+      `<data dir>/update-install.log`, and exits 0 on success so the unit's
+      `Restart=always` starts the new version. A failed install keeps the
+      server up; a second request while one runs gets 409.
     - Foreground servers running under a macOS launchd User LaunchAgent update the
       package and trigger a `launchctl kickstart` (with a `launchctl bootstrap`
       fallback, as `openchamber startup enable` uses) against

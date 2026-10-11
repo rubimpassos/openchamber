@@ -77,6 +77,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   } = dependencies;
 
   let desktopRestartError = null;
+  let systemScopeInstallRunning = false;
 
   /**
    * How this server was launched, read from its instance file. A foreground
@@ -288,6 +289,61 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           return res.status(409).json({
             error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
           });
+        }
+
+        // A system unit cannot be restarted from the user manager, and a
+        // sandboxed system unit must not reach it at all: a transient user job
+        // runs outside the sandbox. The install runs as this server's own child,
+        // inside its sandbox, and the server exits so the unit's Restart= brings
+        // up the new version.
+        if (systemdServiceUnit && (process.env.OPENCHAMBER_SYSTEMD_SCOPE || '').trim() === 'system') {
+          if (systemScopeInstallRunning) {
+            return res.status(409).json({ error: 'An update is already being installed' });
+          }
+          systemScopeInstallRunning = true;
+          const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
+          res.json({
+            success: true,
+            message: 'Update installing; the service manager restarts OpenChamber afterwards',
+            version: updateInfo.version,
+            packageManager: pm,
+            autoRestart: true,
+            restartManager: 'systemd',
+            logPath: updateLogPath,
+          });
+
+          setTimeout(() => {
+            let logFd = null;
+            try {
+              fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
+              logFd = fs.openSync(updateLogPath, 'a');
+              fs.writeSync(logFd, `\n=== OpenChamber update ${new Date().toISOString()} ${updateInfo.currentVersion || 'unknown'} -> ${updateInfo.version || 'unknown'} (${systemdServiceUnit}, system scope) ===\n${updateCmd}\n`);
+            } catch (logError) {
+              console.warn('Failed to open update log file, continuing without log capture:', logError);
+            }
+            console.log(`Installing update in-process for ${systemdServiceUnit}: ${updateCmd}`);
+            // Not detached: the install belongs to this unit's cgroup and finishes
+            // before the server exits.
+            const child = spawnChild('/bin/sh', ['-c', `set -eu\n${updateCmd}`], {
+              stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
+              env: process.env,
+            });
+            const finish = (code, error) => {
+              if (logFd !== null) {
+                try { fs.closeSync(logFd); } catch { }
+              }
+              if (code === 0) {
+                console.log('Update installed, exiting so the service manager restarts OpenChamber...');
+                process.exit(0);
+                return;
+              }
+              systemScopeInstallRunning = false;
+              console.error(`Update install failed (${error ? error.message : `exit ${code}`}); see ${updateLogPath}`);
+            };
+            child.on('error', (error) => finish(null, error));
+            child.on('exit', (code) => finish(code, null));
+          }, 500);
+          return;
         }
 
         if (systemdServiceUnit) {
