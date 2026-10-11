@@ -233,6 +233,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         getUpdateCommand,
         detectPackageManagerDetails,
         isUnmanagedInstall,
+        resolveUpdateTarget,
       } = await import('../package-manager.js');
 
       const updateInfo = await checkForUpdates();
@@ -247,9 +248,20 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         });
       }
 
+      // A fork installs the tarball from its own release, never the npm package.
+      let updateTarget;
+      try {
+        updateTarget = await resolveUpdateTarget();
+      } catch (error) {
+        return res.status(502).json({ error: error instanceof Error ? error.message : 'Could not resolve the update source' });
+      }
+
       const pmDetails = detectPackageManagerDetails();
       const pm = pmDetails.packageManager;
-      const updateCmd = getUpdateCommand(pm, { targetVersion: updateInfo.version });
+      const updateCmd = getUpdateCommand(pm, {
+        targetVersion: updateInfo.version,
+        ...(updateTarget.origin === 'fork' ? { target: updateTarget.target } : {}),
+      });
       const isContainer =
         fs.existsSync('/.dockerenv') ||
         Boolean(process.env.CONTAINER) ||
