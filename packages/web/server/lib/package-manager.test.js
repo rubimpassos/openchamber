@@ -420,6 +420,49 @@ describe('checkForUpdates', () => {
   });
 });
 
+describe('checkForUpdates on a fork', () => {
+  let originalFetch;
+  let previousRepo;
+  const release = {
+    tag_name: 'v2.2.2',
+    assets: [
+      { name: 'OpenChamber-2.2.2-11-android.aab', browser_download_url: 'https://downloads.example/OpenChamber-2.2.2-11-android.aab' },
+      { name: 'OpenChamber-2.2.2-11-android.apk', browser_download_url: 'https://downloads.example/OpenChamber-2.2.2-11-android.apk' },
+    ],
+  };
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    previousRepo = process.env.OPENCHAMBER_UPDATE_REPO;
+    process.env.OPENCHAMBER_UPDATE_REPO = 'fork/openchamber';
+    globalThis.fetch = createFetchMock().when('api.github.com/repos/fork/openchamber/releases/latest', {
+      ok: true,
+      json: async () => release,
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (previousRepo === undefined) delete process.env.OPENCHAMBER_UPDATE_REPO;
+    else process.env.OPENCHAMBER_UPDATE_REPO = previousRepo;
+  });
+
+  it('offers the Android app the APK of the fork release', async () => {
+    const result = await checkForUpdates({ appType: 'mobile-capacitor', platform: 'android', currentVersion: '2.2.1' });
+
+    expect(result.available).toBe(true);
+    expect(result.version).toBe('2.2.2');
+    expect(result.downloadUrl).toBe('https://downloads.example/OpenChamber-2.2.2-11-android.apk');
+  });
+
+  it('offers no APK to a web client or an app already on the release', async () => {
+    expect((await checkForUpdates({ appType: 'web', currentVersion: '2.2.1' })).downloadUrl).toBeUndefined();
+    const current = await checkForUpdates({ appType: 'mobile-capacitor', platform: 'android', currentVersion: '2.2.2' });
+    expect(current.available).toBe(false);
+    expect(current.downloadUrl).toBeUndefined();
+  });
+});
+
 describe('getCurrentVersion', () => {
   it('is exported for the CLI update command', () => {
     expect(typeof getCurrentVersion).toBe('function');

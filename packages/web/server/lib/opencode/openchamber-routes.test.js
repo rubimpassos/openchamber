@@ -12,6 +12,7 @@ vi.mock('../package-manager.js', () => ({
   checkForUpdates: vi.fn(),
   getUpdateCommand: vi.fn(),
   detectPackageManagerDetails: vi.fn(),
+  resolveUpdateTarget: vi.fn(),
 }));
 
 const childProcess = await import('child_process');
@@ -84,6 +85,7 @@ beforeEach(() => {
     packageManager: 'npm',
   });
   packageManager.getUpdateCommand.mockReturnValue('npm install -g @openchamber/web@latest');
+  packageManager.resolveUpdateTarget.mockResolvedValue({ target: '@openchamber/web@latest', origin: 'npm' });
 });
 
 afterEach(() => {
@@ -314,6 +316,32 @@ describe('OpenChamber foreground update route', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
     });
+  });
+
+  it('installs a fork from its own release tarball, never the npm package', async () => {
+    childProcess.spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+    const tarball = 'https://github.com/fork/openchamber/releases/download/v1.17.1/openchamber-web-1.17.1.tgz';
+    packageManager.resolveUpdateTarget.mockResolvedValue({ target: tarball, origin: 'fork' });
+    const { app } = createApp({
+      environment: { INVOCATION_ID: 'systemd-invocation', OPENCHAMBER_SYSTEMD_UNIT: 'openchamber.service' },
+    });
+
+    await request(app).post('/api/openchamber/update-install').expect(200);
+
+    expect(packageManager.getUpdateCommand).toHaveBeenCalledWith('npm', { targetVersion: '1.17.1', target: tarball });
+  });
+
+  it('refuses a fork update when its release carries no tarball', async () => {
+    packageManager.resolveUpdateTarget.mockRejectedValue(new Error('The fork/openchamber release carries no .tgz asset to install.'));
+    const { app } = createApp({
+      environment: { INVOCATION_ID: 'systemd-invocation', OPENCHAMBER_SYSTEMD_UNIT: 'openchamber.service' },
+    });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(502, { error: 'The fork/openchamber release carries no .tgz asset to install.' });
+
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
   });
 
   it('rejects foreground update on macOS when launchd plist does not exist', async () => {
