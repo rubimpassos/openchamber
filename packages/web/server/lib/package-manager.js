@@ -106,7 +106,7 @@ async function fetchForkRelease(source) {
   return response.json();
 }
 
-async function checkForkRelease(currentVersion, source) {
+async function checkForkRelease(currentVersion, source, { appType, platform } = {}) {
   const release = await fetchForkRelease(source);
   if (!release) return { available: false, currentVersion };
 
@@ -120,12 +120,17 @@ async function checkForkRelease(currentVersion, source) {
     // Versioned releases carry the version in the tag, so semver decides, and a
     // republished or rolled-back release cannot offer a build already installed.
     const remoteVersion = extractVersion(release?.tag_name) || extractVersion(release?.name);
+    const available = Boolean(remoteVersion) && compareVersions(remoteVersion, currentVersion) > 0;
     return {
-      available: Boolean(remoteVersion) && compareVersions(remoteVersion, currentVersion) > 0,
+      available,
       version: remoteVersion || undefined,
       currentVersion,
       body,
       releaseUrl,
+      // The Android app offers only the APK of this fork's own release.
+      downloadUrl: available && appType === 'mobile-capacitor' && platform === 'android'
+        ? pickAndroidApkUrl(release)
+        : undefined,
     };
   }
 
@@ -248,6 +253,18 @@ function normalizeArch(value) {
   return mapArch(process.arch);
 }
 
+function pickAndroidApkUrl(release) {
+  const apkAssets = Array.isArray(release?.assets)
+    ? release.assets.filter((asset) => (
+      typeof asset?.name === 'string'
+      && asset.name.toLowerCase().endsWith('.apk')
+      && typeof asset.browser_download_url === 'string'
+    ))
+    : [];
+  const canonicalAsset = apkAssets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name));
+  return (canonicalAsset || apkAssets[0])?.browser_download_url;
+}
+
 async function resolveAndroidApkUrl(version, candidateUrl) {
   if (typeof candidateUrl === 'string') {
     try {
@@ -267,16 +284,7 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
     });
     if (!response.ok) return undefined;
 
-    const release = await response.json();
-    const apkAssets = Array.isArray(release?.assets)
-      ? release.assets.filter((asset) => (
-        typeof asset?.name === 'string'
-        && asset.name.toLowerCase().endsWith('.apk')
-        && typeof asset.browser_download_url === 'string'
-      ))
-      : [];
-    const canonicalAsset = apkAssets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name));
-    return (canonicalAsset || apkAssets[0])?.browser_download_url;
+    return pickAndroidApkUrl(await response.json());
   } catch {
     return undefined;
   }
@@ -950,7 +958,7 @@ export async function checkForUpdates(options = {}) {
   const forkSource = getForkReleaseSource();
   if (forkSource) {
     try {
-      return { ...await checkForkRelease(currentVersion, forkSource), packageManager: pm };
+      return { ...await checkForkRelease(currentVersion, forkSource, { appType, platform }), packageManager: pm };
     } catch (error) {
       return {
         available: false,
