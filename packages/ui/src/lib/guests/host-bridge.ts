@@ -18,6 +18,7 @@ import {
   type AttachIssueRequest,
   type GuestItem,
   type GuestPopoverRequest,
+  type GuestTooltipRequest,
   type PromptRequest,
   type PromptResult,
   type SessionLifecycleEvent,
@@ -103,6 +104,8 @@ type HostBridgeEffects = ReturnType<typeof createGuestLoopback> & {
   openPopover?: (request: GuestPopoverRequest) => void;
   closePopover?: (id: string, reason: 'closed' | 'escape' | undefined) => void;
   setPopoverAnchorActive?: (id: string, active: boolean) => void;
+  /** Draw (or with `null`, hide) the frame's host tooltip. */
+  setTooltip?: (request: GuestTooltipRequest | null) => void;
 };
 
 export const buildReadyMessage = (payload: HostReadyContext): HostMessage => ({
@@ -415,6 +418,13 @@ export const answerGuestMessage = async (
     case 'popover-anchor':
       if (!effects.setPopoverAnchorActive) return errorResult(message.id, 'This host does not support popovers.', 'UNSUPPORTED');
       effects.setPopoverAnchorActive(message.payload.id, message.payload.active);
+      return okResult(message.id);
+    case 'tooltip-show':
+      if (!effects.setTooltip) return errorResult(message.id, 'This host does not draw tooltips.', 'UNSUPPORTED');
+      effects.setTooltip(message.payload);
+      return okResult(message.id);
+    case 'tooltip-hide':
+      effects.setTooltip?.(null);
       return okResult(message.id);
   }
   } catch (error) {

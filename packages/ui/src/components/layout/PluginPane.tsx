@@ -58,6 +58,8 @@ import type { GuestBackgroundAction } from '@/lib/guests/run-action';
 import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
 import { useGuestItemStore } from '@/lib/guests/item-store';
 import { isGuestFileMessage, type GuestFileChannel } from '@/lib/guests/file-editor-channel';
+import { GuestFrameTooltip } from './GuestFrameTooltip';
+import { placeGuestTooltip, type GuestFrameTooltipState } from '@/lib/guests/tooltip';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
 import { loadGuestServiceStatus, proxyGuestServiceRequest } from '@/lib/guests/service';
 import { getSurfaceViewerId } from '@/lib/guests/surface-viewers';
@@ -191,6 +193,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const [activePopover, setActivePopover] = React.useState<{ request: GuestPopoverRequest; position: GuestPopoverPosition; entry: string; directory: string; activation: GuestPopoverActivation } | null>(null);
   const activePopoverRef = React.useRef<typeof activePopover>(null);
+  const [guestTooltip, setGuestTooltip] = React.useState<GuestFrameTooltipState | null>(null);
   const popoverCloseTimerRef = React.useRef<number | null>(null);
   const popoverAnchorActiveRef = React.useRef(false);
   const popoverOverlayActiveRef = React.useRef(false);
@@ -242,6 +245,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     if (surface === 'status' && onStatusControls) features.statusControls = true;
     if (!popoverHost && !popover && !headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime()
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
+    if (!headless) features.tooltips = true;
     return {
     theme: {
       mode: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
@@ -933,6 +937,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
             schedulePopoverClose(activePopoverRef.current.activation, 'anchor');
           }
         },
+        setTooltip: (request) => {
+          const frame = iframeRef.current;
+          setGuestTooltip(request && frame ? placeGuestTooltip(request, frame) : null);
+        },
       }).then((reply) => {
         const current = currentGuest();
         if (reply && ownsFrame() && frame === iframeRef.current
@@ -1031,13 +1039,20 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       src={src || undefined}
       srcDoc={srcDoc}
       sandbox="allow-scripts"
-      style={frameZoom === 1 ? undefined : { zoom: frameZoom }}
+      // The frame's colour scheme must match the page's (applyHostReady sets it
+      // from the theme): when an ancestor's scheme differs, the browser paints
+      // the frame's canvas opaque, a white block on a transparent surface.
+      style={{ colorScheme: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light', ...(frameZoom === 1 ? {} : { zoom: frameZoom }) }}
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
         // The attach window and the Work Status card draw their own chrome behind the page.
         surface === 'dialog' || surface === 'status' || surface === 'popover' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
       )}
+      // The guest hides its tooltip on pointerleave; leaving the frame fast can
+      // skip that, so the host drops it too.
+      onPointerLeave={() => setGuestTooltip(null)}
       onLoad={() => {
+        setGuestTooltip(null);
         if (!popoverHost && !popover) closeActivePopover('owner');
         if (popoverHost?.focus && isActiveRef.current?.()) iframeRef.current?.focus();
         // A kept-alive iframe can navigate again after its scoped URL token
@@ -1050,6 +1065,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         sendBackgroundAction();
       }}
       />
+      {guestTooltip ? <GuestFrameTooltip tooltip={guestTooltip} /> : null}
       {activePopover ? (
         <GuestPopover
           position={activePopover.position}
