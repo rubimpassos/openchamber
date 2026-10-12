@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useChatSessionSelection } from './chatColumnSession';
 import { useSelectionStore } from '@/sync/selection-store';
-import { getAgentDisplayName } from './mobileControlsUtils';
+import { getAgentDisplayName, getShortAgentLabel } from './mobileControlsUtils';
 import { useAgentColors } from '@/hooks/useAgentColors';
 import { isAutoModel } from '@/lib/routing/autoModel';
 
@@ -98,7 +98,7 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
             title={agentLabel}
         >
             <span className="flex h-full w-full min-w-0 items-center">
-                <span className="truncate">{agentLabel}</span>
+                <span className="truncate">{getShortAgentLabel(agentLabel)}</span>
             </span>
         </button>
     );

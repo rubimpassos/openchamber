@@ -743,6 +743,27 @@ height floor and uses the existing fullscreen layout.
 none of them is verifiable outside a real device.** Change them only against
 hardware.
 
+The collapsed pill carries a handle on its top edge (`ui/MobileComposerHandle.tsx`)
+everywhere except the new-session draft screen. Dragging it down 24px or more
+folds the pill to the handle, dragging up unfolds it, and a tap or Enter/Space
+toggles. The fold lives in `state/mobileComposerFold.ts`, app-wide, so it
+survives the pill/composer swap and a session switch; the composer expanding
+for any reason clears it. Folded, everything below the handle stays mounted and
+hidden, so a draft, attachments or a dictation are kept. The floating slot's
+`ResizeObserver` sees the shorter box, so the transcript gains the space with no
+extra wiring.
+
+On a phone the top rows (worktree setup, space wait, goal, auto review,
+background commands, reverted, queue, done hint, suggestion) pass through
+`ui/MobileComposerTopRows.tsx`. Each row names itself with
+`useComposerStatusChip` (`state/composerStatusChips.ts`) while it renders. One
+row shows as it is; two or more fold into a single line of chips, and any chip
+opens a sheet with the rows themselves, buttons included. The rows render once
+through a portal into a node that moves between the composer and the sheet:
+rendering them in each place remounted them, which unregistered their chips and
+flipped the layout. Folded, the line shows only the chips' icons beside the
+handle. Desktop and tablets in the desktop layout render the rows unchanged.
+
 `state/mobileComposerMorph.ts` plays the pill ↔ composer swap as a FLIP morph
 in the native iOS shell only. The swap commits synchronously (`flushSync`); the box
 (`data-composer-box`) is then frozen at its old height and animated to the
