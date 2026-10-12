@@ -219,6 +219,8 @@ import { isDraftSendWaiting, subscribeDraftSendWaiting } from '@/lib/worktrees/p
 import { ComposerAutocompletePopups } from './composer/ui/ComposerAutocompletePopups';
 import { ComposerFooter } from './composer/ui/ComposerFooter';
 import { MobilePillComposer } from './composer/ui/MobilePillComposer';
+import { MobileComposerTopRows } from './composer/ui/MobileComposerTopRows';
+import { useMobileComposerFoldStore } from './composer/state/mobileComposerFold';
 import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
@@ -1073,6 +1075,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         },
     });
     const mobileComposerExpanded = mobileShell.expanded;
+    // Opening the keyboard, from a tap or from code, unfolds a folded composer.
+    React.useEffect(() => {
+        if (mobileComposerExpanded) useMobileComposerFoldStore.getState().setFolded(false);
+    }, [mobileComposerExpanded]);
     const mobileTextareaFocused = mobileShell.focused;
     // Issues, PRs and tracker items on the composer, in attach order.
     const [linkedReferences, setLinkedReferences] = React.useState<ComposerReference[]>([]);
@@ -3914,12 +3920,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const worktreeSetupDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
     const worktreeSetupPending = useWorktreeBootstrapPending(isBtwActive ? null : worktreeSetupDirectory);
     const worktreeSetupRow = worktreeSetupPending
-        ? <ComposerStatusStrip icon="loader-4" spin text={t('chat.worktreeSetup.running')} />
+        ? <ComposerStatusStrip chipId="worktree" icon="loader-4" spin text={t('chat.worktreeSetup.running')} chipLabel={t('chat.composerStatus.chip.worktree')} />
         : null;
     // A message sent while its space is still being made waits for it; the
     // composer is empty then, so this row is the only sign it was not lost.
     const spaceWaitRow = showDraftTargetSelectors && messageWaitsForSpace
-        ? <ComposerStatusStrip icon="time" text={t('spaces.draft.queued')} />
+        ? <ComposerStatusStrip chipId="space" icon="time" text={t('spaces.draft.queued')} chipLabel={t('chat.composerStatus.chip.space')} />
         : null;
     const autoReviewRow = !isBtwActive && !newSessionDraftOpen ? <AutoReviewStrip /> : null;
     // The session's goal, then what is still running, then what waits for it.
@@ -3944,7 +3950,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRows = worktreeSetupRow || spaceWaitRow || goalRow || autoReviewRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    const composerTopRowsContent = worktreeSetupRow || spaceWaitRow || goalRow || autoReviewRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {worktreeSetupRow}
             {spaceWaitRow}
@@ -3958,6 +3964,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             {suggestionRow}
         </>
     ) : null;
+    // A phone folds two or more rows into one line of chips.
+    const composerTopRows = composerTopRowsContent && isMobile
+        ? <MobileComposerTopRows rows={composerTopRowsContent} />
+        : composerTopRowsContent;
     const mobileModelAgentRow = isMobile && !isBtwActive ? (
         // px-3.5 lines the model logo and the agent label up with the attach
         // and mic icons above them; the buttons drop their own padding so the

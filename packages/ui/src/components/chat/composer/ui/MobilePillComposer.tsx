@@ -23,6 +23,8 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
+import { MobileComposerHandle } from './MobileComposerHandle';
+import { useMobileComposerFoldStore } from '../state/mobileComposerFold';
 
 export interface MobilePillComposerProps {
     message: string;
@@ -89,6 +91,9 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const [dictationSupported] = useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
     const showDictation = dictationEnabled && dictationSupported;
+    // The new-session draft screen has nothing to read, so it never folds.
+    const showHandle = !newSessionDraftOpen;
+    const folded = useMobileComposerFoldStore((state) => state.folded) && showHandle;
 
     return (
         <div className="flex flex-col">
@@ -97,7 +102,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
             <div
                 className={cn(
                     'flex min-w-0 flex-col shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
-                    topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
+                    topRow || bottomRow || showHandle ? 'rounded-[1.5rem]' : 'rounded-full',
                 )}
             >
             <div
@@ -106,10 +111,15 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 data-composer-box="true"
                 className={cn(
                     'oc-surface-floating flex min-w-0 flex-col border border-border/80',
-                    topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
+                    topRow || bottomRow || showHandle ? 'rounded-[1.5rem]' : 'rounded-full',
                 )}
             >
+            {showHandle ? <MobileComposerHandle /> : null}
+            {/* Folded, the top rows draw only their icons (MobileComposerTopRows)
+                and the rest stays mounted but hidden, so a draft, an
+                attachment or a running dictation survives the fold. */}
             {topRow}
+            <div className={cn('flex min-w-0 flex-col', folded && 'hidden')}>
             {attachments}
             {/* ps-1 puts the attach icon at the same inset the expanded
                 footer gives it, and h-12 is the expanded footer's height
@@ -214,6 +224,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 ) : null}
             </div>
             {bottomRow}
+            </div>
             </div>
             </div>
         </div>

@@ -53,6 +53,24 @@ export const getAgentDisplayName = (agents: Agent[], agentName?: string) => {
     return fallbackAgent ? capitalizeLabel(fallbackAgent.name) : 'Select agent';
 };
 
+/**
+ * The model name a phone composer fits beside the provider logo: a leading
+ * family word the logo already says ("Claude" in "Claude Opus 5.5") is
+ * dropped when a named tier follows it. Names whose next word is a version
+ * ("Gemini 2.5 Pro") or that are already two words keep every word.
+ */
+export const getShortModelLabel = (label: string): string => {
+    const words = label.trim().split(/\s+/);
+    if (words.length < 3 || !/^\p{L}+$/u.test(words[0]) || !/^\p{L}/u.test(words[1])) return label;
+    return words.slice(1).join(' ');
+};
+
+/** "Sisyphus - ultraworker" reads as "Sisyphus" in a phone composer; the picker shows the full name. */
+export const getShortAgentLabel = (label: string): string => {
+    const head = label.split(' - ')[0]?.trim();
+    return head ? head : label;
+};
+
 export const getModelDisplayName = (
     provider: DisplayProvider,
     modelId: string | undefined,

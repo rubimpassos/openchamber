@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import {
     DndContext,
     MouseSensor,
@@ -199,6 +200,10 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);
     }, [onSendMessage]);
+
+    useComposerStatusChip('queue', target && queuedMessages.length > 0
+        ? { icon: 'time', label: `${t('chat.queuedMessage.title')} ${queuedMessages.length}` }
+        : null);
 
     if (!target || queuedMessages.length === 0) return null;
 

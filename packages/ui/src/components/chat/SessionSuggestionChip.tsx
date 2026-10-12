@@ -1,4 +1,5 @@
 import React from 'react';
+import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -44,6 +45,8 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
       setDismissing(false);
     }
   }, [sessionId, dismissing]);
+
+  useComposerStatusChip('suggestion', suggestion && !hidden ? { icon: 'pencil-ai-2', label: suggestion } : null);
 
   if (!suggestion || hidden) {
     return null;
