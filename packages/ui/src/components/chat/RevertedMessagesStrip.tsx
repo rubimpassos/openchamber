@@ -1,4 +1,5 @@
 import React from 'react';
+import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import type { Part } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,10 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
             ? (record.message.description?.trim() || noTextContent)
             : getRevertedPreview(record.parts, noTextContent),
     })), [noTextContent, revertedState]);
+
+    useComposerStatusChip('revert', sessionId && revertedState.revertMessageID && items.length > 0
+        ? { icon: 'arrow-go-back', label: t('chat.revertPopover.staged', { count: items.length }) }
+        : null);
 
     if (!sessionId || !revertedState.revertMessageID || items.length === 0) return null;
 

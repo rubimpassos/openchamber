@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,10 @@ export const AutoReviewStrip = memo(() => {
   }, [currentSessionId]));
   const stopRun = useAutoReviewStore((state) => state.stopRun);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+
+  useComposerStatusChip('autoReview', currentSessionId && run?.status === 'running'
+    ? { icon: 'loader-4', label: t('chat.autoReview.title'), spin: true }
+    : null);
 
   if (!currentSessionId || !run || run.status !== 'running') {
     return null;

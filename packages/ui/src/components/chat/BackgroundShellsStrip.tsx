@@ -1,4 +1,5 @@
 import React from 'react';
+import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -128,6 +129,10 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
   const shells = useSessionTreeShells(sessionId ?? '');
   const [expanded, setExpanded] = React.useState(false);
   const listId = React.useId();
+
+  useComposerStatusChip('shells', sessionId && shells.length > 0
+    ? { icon: 'terminal-box', label: t('chat.backgroundShells.count', { count: shells.length }) }
+    : null);
 
   if (!sessionId || shells.length === 0) return null;
 
