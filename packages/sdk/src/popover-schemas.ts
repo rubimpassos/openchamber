@@ -10,6 +10,7 @@ import {
   GUEST_POPOVER_HEIGHT_MIN,
   GUEST_POPOVER_ID,
   GUEST_POPOVER_SIDES,
+  GUEST_TOOLTIP_TEXT_MAX,
   GUEST_POPOVER_WIDTH_MAX,
   GUEST_POPOVER_WIDTH_MIN,
 } from './popover.ts';
@@ -76,4 +77,15 @@ export const guestPopoverRequestSchema = z.object({
 export const guestPopoverClosedEventSchema = z.object({
   id: z.string().regex(GUEST_POPOVER_ID),
   reason: z.enum(GUEST_POPOVER_CLOSE_REASONS),
+}).strict();
+
+export const guestTooltipRequestSchema = z.object({
+  text: z.string().min(1).max(GUEST_TOOLTIP_TEXT_MAX),
+  anchor: z.object({
+    x: z.number().finite().min(-GUEST_POPOVER_COORDINATE_MAX).max(GUEST_POPOVER_COORDINATE_MAX),
+    y: z.number().finite().min(-GUEST_POPOVER_COORDINATE_MAX).max(GUEST_POPOVER_COORDINATE_MAX),
+    width: z.number().finite().positive().max(GUEST_POPOVER_COORDINATE_MAX),
+    height: z.number().finite().positive().max(GUEST_POPOVER_COORDINATE_MAX),
+  }).strict(),
+  side: z.enum(GUEST_POPOVER_SIDES).optional(),
 }).strict();

@@ -185,8 +185,12 @@ export const GUEST_MESSAGE_TONES = ['neutral', 'info', 'success', 'warning', 'er
 /** The colour of a message row's icon. */
 export type GuestMessageTone = (typeof GUEST_MESSAGE_TONES)[number];
 
-export const GUEST_MESSAGE_BODIES = ['markdown', 'text', 'none'] as const;
-/** What the expanded row shows: the message as markdown, as plain text, or nothing (header only). */
+export const GUEST_MESSAGE_BODIES = ['markdown', 'text', 'todos', 'none'] as const;
+/**
+ * What the expanded row shows: the message as markdown, as plain text, its
+ * `- [status] content` lines as a todo list (the same list a todo tool call
+ * shows; markdown when there are none), or nothing (header only).
+ */
 export type GuestMessageBody = (typeof GUEST_MESSAGE_BODIES)[number];
 
 /**

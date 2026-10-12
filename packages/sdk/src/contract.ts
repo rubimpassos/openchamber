@@ -5,7 +5,7 @@ import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOut
 import type { LoopbackRequest, LoopbackRequestResult, LoopbackUrlRequest, LoopbackUrlResult } from './loopback.ts';
 import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
-import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest } from './popover.ts';
+import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestTooltipRequest } from './popover.ts';
 
 export type HostThemeMode = 'light' | 'dark';
 
@@ -225,6 +225,8 @@ export type HostReadyContext = {
     deviceStorage?: true;
     statusControls?: true;
     popovers?: true;
+    /** `showTooltip` / `hideTooltip` draw host tooltips. */
+    tooltips?: true;
   };
 };
 
@@ -708,6 +710,8 @@ export type GuestMessage =
   | GuestCall<'files-unwatch', { subscriptionId: string }>
   | GuestCall<'storage', GuestStorageRequest>
   | GuestCall<'open-session', { sessionId: string }>
+  | GuestCall<'tooltip-show', GuestTooltipRequest>
+  | GuestCall<'tooltip-hide', Record<string, never>>
   | GuestHelloMessage
   | GuestToastMessage
   | GuestOpenUrlMessage

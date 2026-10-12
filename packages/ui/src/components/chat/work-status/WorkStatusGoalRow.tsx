@@ -56,6 +56,9 @@ export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => 
         label={driverName ? `${objective} · ${driverName}` : objective}
         onClick={() => setDialogOpen(true)}
         ariaLabel={t('chat.workStatus.goal.open')}
+        // The row truncates to one line; long objectives (plans, pasted specs)
+        // read here, cut at a dozen lines. The dialog has the whole text.
+        tooltip={<span className="line-clamp-12 whitespace-pre-line">{objective}</span>}
         value={canPause || canResume ? (
           <WorkStatusRowAction
             tone={canPause ? 'info' : 'warning'}

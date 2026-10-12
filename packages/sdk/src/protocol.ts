@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { loopbackRequestSchema, loopbackRequestResultSchema, loopbackUrlRequestSchema, loopbackUrlResultSchema } from './loopback-schemas.ts';
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
-import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
+import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema, guestTooltipRequestSchema } from './popover-schemas.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
@@ -257,6 +257,7 @@ const readyPayloadSchema = z.object({
     deviceStorage: z.literal(true).optional(),
     statusControls: z.literal(true).optional(),
     popovers: z.literal(true).optional(),
+    tooltips: z.literal(true).optional(),
   }).optional(),
 });
 
@@ -471,6 +472,8 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('popover-open'), id: z.string().min(1), payload: guestPopoverRequestSchema }),
   z.object({ ...envelope, type: z.literal('popover-close'), id: z.string().min(1), payload: z.object({ id: z.string().min(1).max(80), reason: z.enum(['closed', 'escape']).optional() }).strict() }),
   z.object({ ...envelope, type: z.literal('popover-anchor'), id: z.string().min(1), payload: z.object({ id: z.string().min(1).max(80), active: z.boolean() }).strict() }),
+  z.object({ ...envelope, type: z.literal('tooltip-show'), id: z.string().min(1), payload: guestTooltipRequestSchema }),
+  z.object({ ...envelope, type: z.literal('tooltip-hide'), id: z.string().min(1), payload: z.object({}).strict() }),
   z.object({ ...envelope, type: z.literal('open-session'), id: z.string().min(1), payload: z.object({ sessionId: z.string().min(1).max(1024) }) }),
   z.object({
     ...envelope,

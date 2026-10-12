@@ -165,6 +165,8 @@ Access tokens never appear in `ready` or in request results.
 | `openPopover` | `GuestPopoverRequest` | `Promise<void>` | Open a sandboxed frame outside this frame's bounds, anchored to a rectangle in its viewport. Requires `features.popovers` |
 | `closePopover` | `id, reason?: 'closed' \| 'escape'` | `Promise<void>` | Close this frame's matching opening, or the popover frame itself. A stale id cannot close a replacement |
 | `setPopoverAnchorActive` | `id, active: boolean` | `Promise<void>` | Report anchor pointer/focus activity so the host can allow travel between the anchor and popover |
+| `showTooltip` | `GuestTooltipRequest` (`text` up to 4000 characters, `anchor` rect in this frame's CSS px, `side?`) | `Promise<void>` | Draw `text` in the app's own tooltip next to `anchor`; line breaks are kept. One per frame: the next call replaces it, and the host hides it when the pointer leaves the frame. Requires `features.tooltips`; use `mountTooltip` from `@openchamber/sdk/ui`, which falls back to `title` |
+| `hideTooltip` | — | `Promise<void>` | Hide this frame's tooltip |
 | `generate`        | `{ prompt, system?, maxOutputTokens? }` | `Promise<{ text }>`      | One-off text from the user's Small Model (capability `model`). No session, no history; the host picks the model. Waits up to 90 s |
 | `reportFileChange` | `{ dirty, edited }`              | `void`                         | File editors only. `dirty` against the last saved version; `edited` when the document itself changed, which holds autosave back until edits stop |
 | `requestFileSave` | —                                 | `void`                         | File editors only. Save now, as Cmd/Ctrl+S does |
