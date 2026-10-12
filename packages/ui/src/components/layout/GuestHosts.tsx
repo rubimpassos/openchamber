@@ -24,7 +24,7 @@ export const GuestHosts: React.FC = () => {
   return (
     <>
       {backgrounds.map((background) => (
-        <div key={background.key} aria-hidden="true" inert className="pointer-events-none fixed top-0 -left-[9999px] h-px w-px overflow-hidden">
+        <div key={background.key} aria-hidden="true" inert className="pointer-events-none fixed top-0 -inset-s-[9999px] h-px w-px overflow-hidden">
           <React.Suspense fallback={null}>
             <PluginPane mode={pluginModeFromId(background.guestId)} surface="background" headless />
           </React.Suspense>

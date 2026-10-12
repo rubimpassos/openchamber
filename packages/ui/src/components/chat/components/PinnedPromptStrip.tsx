@@ -55,7 +55,7 @@ export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef,
             >
                 <button
                     type="button"
-                    className="flex min-h-9 min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
+                    className="flex min-h-9 min-w-0 flex-1 items-center gap-2 text-start focus-visible:outline-none"
                     aria-label={t('chat.pinnedPrompt.openAria')}
                     onClick={() => setSheetOpen(true)}
                     tabIndex={promptAbove ? 0 : -1}

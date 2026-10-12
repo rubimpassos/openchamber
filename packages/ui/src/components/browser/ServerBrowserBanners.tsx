@@ -28,7 +28,7 @@ const ControlBar: React.FC<{
     return (
       <div className="flex items-center gap-2 border-b border-border bg-[var(--surface-elevated)] px-3 py-1.5">
         <span className="typography-meta text-foreground">{t('contextPanel.browser.server.control.bar')}</span>
-        <Button size="xs" variant="outline" className="ml-auto" onClick={onHandBack}>
+        <Button size="xs" variant="outline" className="ms-auto" onClick={onHandBack}>
           {t('contextPanel.surface.handBack')}
         </Button>
       </div>
@@ -78,7 +78,7 @@ const HelpBanner: React.FC<{
         </span>
       </div>
       {help.kind === 'login' ? (
-        <div className="flex items-center justify-between gap-2 pl-5.5">
+        <div className="flex items-center justify-between gap-2 ps-5.5">
           <span className="typography-micro text-muted-foreground">{t('contextPanel.browser.server.help.loginHint')}</span>
           <Button size="xs" variant="outline" disabled={saving} onClick={onSaveSignIn}>
             <Icon name="save-3" className="size-3.5" aria-hidden="true" />
@@ -122,7 +122,7 @@ const ChromeStatusBanner: React.FC<{ chrome: ServerBrowserChromeStatus }> = ({ c
         <span className="typography-meta text-foreground">{title}</span>
       </div>
       {chrome.message ? (
-        <div className="flex items-center justify-between gap-2 pl-5.5">
+        <div className="flex items-center justify-between gap-2 ps-5.5">
           <span className="typography-micro whitespace-pre-wrap text-muted-foreground">{chrome.message}</span>
           {chrome.status === 'missing-libraries' ? (
             <Button size="xs" variant="outline" onClick={() => void copyCommand()}>

@@ -68,7 +68,7 @@ export function MobileComposerTopRows({ rows }: { rows: React.ReactNode }) {
             {folded && composerFolded ? (
                 <button
                     type="button"
-                    className="relative z-10 -mt-9 flex h-9 max-w-[40%] items-center gap-2 self-start pl-3.5 pr-2 text-muted-foreground"
+                    className="relative z-10 -mt-9 flex h-9 max-w-[40%] items-center gap-2 self-start ps-3.5 pe-2 text-muted-foreground"
                     aria-label={t('chat.composerStatus.openAria')}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => setSheetOpen(true)}
