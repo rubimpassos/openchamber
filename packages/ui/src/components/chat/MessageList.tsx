@@ -18,6 +18,7 @@ import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { FULL_MESSAGE_WINDOW, TurnMessageWindowContext, createTurnMessageWindowStore } from './lib/turns/turnMessageWindow';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
+import { useDeviceInfo } from '@/lib/device';
 import { useUIStore } from '@/stores/useUIStore';
 import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { useGuestMessagePresentation, userMessageText } from '@/lib/guests/message-presentation';
@@ -979,7 +980,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 }, ref) => {
     streamPerfMark('react.message_list_render');
     streamPerfCount('ui.message_list.render');
-    const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+    const { isMobile } = useDeviceInfo();
+    // Phones draw the sticky header as a one-line strip (PinnedPromptStrip).
+    const stickyUserHeader = useUIStore(state => state.stickyUserHeader) && !isMobile;
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
     const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);

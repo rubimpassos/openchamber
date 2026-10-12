@@ -153,15 +153,18 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }
 
     const providers = useConfigStore((state) => state.providers);
-    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
+    const { showReasoningTraces, stickyUserHeaderSetting, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
-            stickyUserHeader: state.stickyUserHeader,
+            stickyUserHeaderSetting: state.stickyUserHeader,
             chatRenderMode: state.chatRenderMode,
             showExpandedBashTools: state.showExpandedBashTools,
             showExpandedEditTools: state.showExpandedEditTools,
         }))
     );
+    // Phones draw the sticky header as a one-line strip over the timeline
+    // (PinnedPromptStrip); the bubble itself scrolls with the turn.
+    const stickyUserHeader = stickyUserHeaderSetting && !isMobile;
 
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [copiedMessage, setCopiedMessage] = React.useState(false);
@@ -774,7 +777,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             <div
                 className={cn(
                     'group w-full',
-                    isUser ? (isMobile ? 'pt-2' : 'pt-4') : assistantTopPaddingClass,
+isUser ? (isMobile ? 'pt-2' : 'pt-4') : assistantTopPaddingClass,
                     isUser ? 'pb-0' : (isFollowedByAssistant || nextIsHiddenUserMessage) ? 'pb-0' : 'pb-2'
                 )}
                 id={`message-${message.info.id}`}
