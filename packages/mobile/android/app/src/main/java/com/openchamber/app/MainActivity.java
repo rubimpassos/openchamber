@@ -12,6 +12,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ImagePastePlugin.class);
         registerPlugin(PushKeyPlugin.class);
         super.onCreate(savedInstanceState);
+        // The WebView scales all text by the system font size by default, which
+        // inflated every screen on phones with a larger system font. Text size is
+        // set inside the app (Settings > Appearance > Interface Font Size).
+        getBridge().getWebView().getSettings().setTextZoom(100);
     }
 
     @Override
