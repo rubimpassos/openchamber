@@ -1,4 +1,5 @@
 import React from 'react';
+import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -26,6 +27,10 @@ export const SessionDoneHintRow: React.FC<SessionDoneHintRowProps> = React.memo(
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const [pending, setPending] = React.useState(false);
   const isIdle = !status || status.type === 'idle';
+
+  useComposerStatusChip('done', sessionId && sessionWorkEnabled && isIdle && isDoneSuggested(session)
+    ? { icon: 'check', label: t('chat.work.doneHint.text') }
+    : null);
 
   if (!sessionId || !sessionWorkEnabled || !isIdle || !isDoneSuggested(session)) return null;
 

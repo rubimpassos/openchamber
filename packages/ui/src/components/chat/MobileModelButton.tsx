@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { getModelDisplayName } from './mobileControlsUtils';
+import { getModelDisplayName, getShortModelLabel } from './mobileControlsUtils';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
@@ -50,7 +50,7 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
                 {currentProviderId && !isAuto ? (
                     <ProviderLogo providerId={currentProviderId} className="size-4 flex-shrink-0" />
                 ) : null}
-                <span className="truncate">{modelLabel}</span>
+                <span className="truncate">{getShortModelLabel(modelLabel)}</span>
             </span>
         </button>
     );

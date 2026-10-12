@@ -1,4 +1,5 @@
 import React from 'react';
+import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import { Icon } from '@/components/icon/Icon';
 import { useSessionStatus } from '@/sync/sync-context';
 import { useGoalObjectiveContent, useSessionGoal } from '@/hooks/useSessionGoal';
@@ -41,6 +42,10 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       setBusy(false);
     }
   }, [sessionId, directory, busy, t]);
+
+  useComposerStatusChip('goal', sessionId && enabled && goal
+    ? { icon: 'target', label: objectiveContent || t('chat.goal.dialog.titleManage') }
+    : null);
 
   if (!sessionId || !enabled || !goal) {
     return null;
