@@ -60,6 +60,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   openPopover: overrides.openPopover ?? (() => {}),
   closePopover: overrides.closePopover ?? (() => {}),
   setPopoverAnchorActive: overrides.setPopoverAnchorActive ?? (() => {}),
+  setTooltip: overrides.setTooltip,
 });
 
 describe('answerGuestMessage', () => {
@@ -695,6 +696,24 @@ describe('badge and resolve-result', () => {
       },
     }, { ...effects(), openPopover: undefined });
     expect(reply).toMatchObject({ type: 'result', ok: false, code: 'UNSUPPORTED' });
+  });
+
+  test('tooltip-show and tooltip-hide reach the pane; a pane without tooltips refuses', async () => {
+    const seen: unknown[] = [];
+    const request = { text: 'Full text', anchor: { x: 4, y: 8, width: 120, height: 28 }, side: 'left' as const };
+    const shown = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'tooltip-show', id: 'tip-1', payload: request,
+    }, effects({ setTooltip: (next) => { seen.push(next); } }));
+    const hidden = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'tooltip-hide', id: 'tip-2', payload: {},
+    }, effects({ setTooltip: (next) => { seen.push(next); } }));
+    const refused = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'tooltip-show', id: 'tip-3', payload: request,
+    }, effects());
+    expect(seen).toEqual([request, null]);
+    expect(shown).toMatchObject({ type: 'result', id: 'tip-1', ok: true });
+    expect(hidden).toMatchObject({ type: 'result', id: 'tip-2', ok: true });
+    expect(refused).toMatchObject({ type: 'result', id: 'tip-3', ok: false, code: 'UNSUPPORTED' });
   });
 
   test('badge sets the count and answers ok', async () => {

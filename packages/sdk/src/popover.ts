@@ -67,3 +67,12 @@ export const isGuestPopoverRequest = (request: GuestPopoverRequest): boolean => 
     return false;
   }
 };
+
+/** Characters of a host-drawn tooltip; longer text is refused (the guest helper cuts it first). */
+export const GUEST_TOOLTIP_TEXT_MAX = 4_000;
+/**
+ * A tooltip the host draws over an element of the frame, in the app's own
+ * tooltip style. `anchor` is the element's rect in the frame's CSS pixels
+ * (`getBoundingClientRect()`); `text` keeps its line breaks.
+ */
+export type GuestTooltipRequest = { text: string; anchor: GuestPopoverAnchor; side?: GuestPopoverSide };

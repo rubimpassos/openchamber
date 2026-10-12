@@ -8,7 +8,7 @@ import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSna
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import { isGuestStatusControls } from './status-controls.ts';
 import type { JsonValue } from './contract.ts';
-import { isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest } from './popover.ts';
+import { GUEST_TOOLTIP_TEXT_MAX, isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest, type GuestTooltipRequest } from './popover.ts';
 import {
   GUEST_FILE_EDITOR_CONTENT_MAX,
   GUEST_FILE_EDITOR_VERSION_MAX,
@@ -139,6 +139,16 @@ export type HostClient = LoopbackClient & {
   openPopover: (request: GuestPopoverRequest) => Promise<void>;
   closePopover: (id: string, reason?: 'closed' | 'escape') => Promise<void>;
   setPopoverAnchorActive: (id: string, active: boolean) => Promise<void>;
+  /**
+   * Show `text` in the app's own tooltip next to `anchor` (a rect of this
+   * frame, in its CSS pixels). One tooltip per frame: a new one replaces the
+   * last. The host also hides it when the pointer leaves the frame. Rejects
+   * with `UNSUPPORTED` when `ready.features.tooltips` is absent; fall back to
+   * `title` then (`mountTooltip` in `@openchamber/sdk/ui` does both).
+   */
+  showTooltip: (request: GuestTooltipRequest) => Promise<void>;
+  /** Hide this frame's tooltip. A no-op when none is shown. */
+  hideTooltip: () => Promise<void>;
   /**
    * Answer the host when the user submits one of this package's
    * `contributes.commands`. Return the chip to attach, or `null` for nothing
@@ -861,6 +871,19 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     },
     closePopover,
     setPopoverAnchorActive,
+    showTooltip: (payload) => {
+      if (lastReady?.features?.tooltips !== true) {
+        return Promise.reject(new HostRequestError('UNSUPPORTED', 'This host does not draw tooltips.'));
+      }
+      const text = payload.text.length > GUEST_TOOLTIP_TEXT_MAX ? `${payload.text.slice(0, GUEST_TOOLTIP_TEXT_MAX - 1)}…` : payload.text;
+      if (!text || !(payload.anchor.width > 0) || !(payload.anchor.height > 0)) return Promise.resolve();
+      return request({ ...envelope, type: 'tooltip-show', id: nextId(ids), payload: { ...payload, text } });
+    },
+    hideTooltip: () => (
+      lastReady?.features?.tooltips !== true
+        ? Promise.resolve()
+        : request({ ...envelope, type: 'tooltip-hide', id: nextId(ids), payload: {} })
+    ),
     onResolve: (handler) => {
       resolveHandler = handler;
       return () => {

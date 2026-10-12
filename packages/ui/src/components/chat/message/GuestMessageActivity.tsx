@@ -7,6 +7,8 @@ import type { GuestMessagePresentation } from '@/lib/guests/message-presentation
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
+import { TodoListOutput } from './parts/TodoListOutput';
+import { parseTodoChecklist } from './parts/todoList';
 
 const TONE_COLOR: Record<string, string> = {
     neutral: 'var(--tools-icon)',
@@ -31,6 +33,9 @@ export const GuestMessageActivity: React.FC<{
     const { rule, title, subtitle, body } = presentation;
     const [expanded, setExpanded] = React.useState(false);
     const canExpand = rule.body !== 'none' && body.length > 0;
+    // `todos`: the message lists todos as `- [status] content` lines; draw them
+    // like a todo tool's result. A message without such lines falls back to markdown.
+    const todos = React.useMemo(() => (rule.body === 'todos' ? parseTodoChecklist(body) : null), [rule.body, body]);
     const guestIcon = resolveGuestToolIcon(rule.guestId, rule.icon, getRuntimeUrlResolver().authenticatedAsset);
     const iconColor = TONE_COLOR[rule.tone ?? 'neutral'];
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
@@ -64,10 +69,11 @@ export const GuestMessageActivity: React.FC<{
                                 : <Icon name="robot-2" className={iconClass} />}
                         </span>
                         {canExpand ? (
-                            <Icon
-                                name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-                                className={cn('absolute inset-0 h-3.5 w-3.5 transition-opacity', expanded ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')}
-                            />
+                            // Centred in the same box as the icon; a bare absolute icon
+                            // sits at the top of the 20px column, above the title.
+                            <span className={cn('absolute inset-0 flex items-center justify-center transition-opacity', expanded ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')}>
+                                <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="h-3.5 w-3.5" />
+                            </span>
                         ) : null}
                     </span>
                     <span className={cn('typography-meta flex-shrink-0 font-medium text-foreground', ROW_TEXT_CLASS)}>{title}</span>
@@ -77,7 +83,9 @@ export const GuestMessageActivity: React.FC<{
                 </div>
                 {expanded && canExpand ? (
                     <div className="mt-1 mb-2 ms-[7px] border-s border-border/60 ps-4 pe-2">
-                        {rule.body === 'text' ? (
+                        {todos ? (
+                            <TodoListOutput todos={todos} />
+                        ) : rule.body === 'text' ? (
                             <pre className="typography-code m-0 whitespace-pre-wrap break-words text-muted-foreground">{body}</pre>
                         ) : (
                             <SimpleMarkdownRenderer content={body} variant="tool" />

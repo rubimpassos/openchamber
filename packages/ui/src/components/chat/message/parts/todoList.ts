@@ -24,3 +24,19 @@ export const parseTodoList = (data: JsonValue): Todo[] | null => {
     }));
     return todos.length > 0 ? todos : null;
 };
+
+const CHECKLIST_LINE = /^\s*[-*]\s*\[(in_progress|pending|completed|cancelled)\]\s+(.+?)\s*$/;
+
+/**
+ * The todo items of a plain-text checklist, one `- [status] content` line per
+ * item (how plugins such as oh-my-openagent list remaining todos in a
+ * message). Other lines are ignored. `null` when no line matches.
+ */
+export const parseTodoChecklist = (text: string): Todo[] | null => {
+    const todos: Todo[] = [];
+    for (const line of text.split('\n')) {
+        const match = CHECKLIST_LINE.exec(line);
+        if (match) todos.push({ status: match[1], content: match[2] });
+    }
+    return todos.length > 0 ? todos : null;
+};
