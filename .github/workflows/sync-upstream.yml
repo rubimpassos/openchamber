@@ -1,16 +1,19 @@
 # Keeps this fork current with upstream, daily.
 #
 # `main` is the only branch: upstream's history with this fork's patches rebased
-# on top. A clean rebase bumps the patch version, tags it, and releases, so an
-# upstream release reaches users as an ordinary update in the app. A conflict
-# aborts and opens an issue, leaving `main` untouched.
+# on top. A clean rebase bumps the patch version, tags it, and the tag starts
+# the release, so an upstream release reaches users as an ordinary update in the
+# app. A conflict fails the run and leaves `main` untouched; the run summary
+# lists the files to resolve.
 #
 # Versioning: the fork keeps its own plain-semver line rather than upstream's
 # number with a suffix. A `-fork.N` prerelease would be skipped by
 # electron-updater (autoUpdater.allowPrerelease is false) and would compare equal
 # between two fork builds in compareVersions, which strips everything after `-`.
-# Colliding with an upstream version number is harmless: this fork only ever
-# reads its own releases.
+# The next version is one patch above the highest of the fork's version, its
+# latest tag and upstream's version, so it always increases and never falls
+# behind upstream's line. Colliding with an upstream version number is harmless:
+# this fork only ever reads its own releases.
 name: sync-upstream
 
 on:
@@ -18,11 +21,11 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
+# Pushes go through SYNC_PUSH_TOKEN; GITHUB_TOKEN only reads the repository
+# and, when issues are on, files the conflict issue.
 permissions:
-  contents: write
+  contents: read
   issues: write
-  # `gh workflow run` in the release step needs this.
-  actions: write
 
 concurrency:
   group: sync-upstream
@@ -32,19 +35,32 @@ env:
   UPSTREAM_REPO: https://github.com/openchamber/openchamber.git
   UPSTREAM_BRANCH: main
   BRANCH: main
-  RELEASE_WORKFLOW: release.yml
   # In a fork `gh` resolves the repo to the parent and returns 403; pinning it to
-  # this fork is what makes issue creation and workflow dispatch work.
+  # this fork is what makes the issue lookup work.
   GH_REPO: ${{ github.repository }}
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      # GITHUB_TOKEN can neither push a commit that changes a workflow, which
+      # upstream does several times a week, nor start a workflow with the tag it
+      # pushes. This fine-grained token (this repository only, Contents and
+      # Workflows read and write) does both.
+      - name: Require the push token
+        env:
+          SYNC_PUSH_TOKEN: ${{ secrets.SYNC_PUSH_TOKEN }}
+        run: |
+          if [ -z "$SYNC_PUSH_TOKEN" ]; then
+            echo "::error::Add the SYNC_PUSH_TOKEN repository secret: a fine-grained token for this repository with Contents and Workflows read and write."
+            exit 1
+          fi
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ secrets.SYNC_PUSH_TOKEN }}
 
       # bump-version.mjs refreshes the Bun lockfile, so the runner needs Bun.
       - name: Setup bun
@@ -55,10 +71,12 @@ jobs:
           git config user.name "fork-sync-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # No tags: a pushed v* tag starts a release here, so upstream's version
+      # tags must never reach this repository.
       - name: Fetch upstream
         run: |
           git remote add upstream "$UPSTREAM_REPO"
-          git fetch upstream "$UPSTREAM_BRANCH"
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
 
       - name: Rebase onto upstream
         id: rebase
@@ -71,65 +89,111 @@ jobs:
             exit 0
           fi
 
-          # Keep a restore point before rewriting the only branch this fork has.
-          git tag "sync-backup-$(date +%F-%H%M)"
-          git push --tags origin
+          # Read before the rebase, which drops the commits that carry it.
+          echo "fork_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-          if git rebase "upstream/$UPSTREAM_BRANCH"; then
+          # Keep a restore point before rewriting the only branch this fork has.
+          backup="sync-backup-$(date +%F-%H%M)"
+          git tag "$backup"
+          git push origin "refs/tags/$backup"
+
+          # A `release vX.Y.Z` commit only moves the version in the files
+          # bump-version.mjs writes. Replayed, it would conflict with every
+          # upstream version bump, so the rebase drops it and the next step
+          # bumps once on top. A commit with that subject that touches any other
+          # file is kept.
+          release_files="$RUNNER_TEMP/release-files"
+          node -e "import('./scripts/bump-version.mjs').then((m) => console.log([...m.RELEASE_PACKAGE_FILES, 'bun.lock'].join('\n')))" > "$release_files"
+          drop_release_commits="$RUNNER_TEMP/drop-release-commits.sh"
+          cat > "$drop_release_commits" <<'SH'
+          set -euo pipefail
+          while IFS= read -r line; do
+            if [[ $line =~ ^pick\ ([0-9a-f]+)\ (#\ )?release\ v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              files=$(git diff-tree --no-commit-id --name-only -r "${BASH_REMATCH[1]}")
+              if ! grep -qvxF -f "$RELEASE_FILES" <<<"$files"; then
+                continue
+              fi
+            fi
+            printf '%s\n' "$line"
+          done < "$1" > "$1.filtered"
+          mv "$1.filtered" "$1"
+          SH
+
+          if RELEASE_FILES="$release_files" GIT_SEQUENCE_EDITOR="bash $drop_release_commits" GIT_EDITOR=true \
+            git rebase --interactive --empty=drop "upstream/$UPSTREAM_BRANCH"; then
             echo "status=rebased" >> "$GITHUB_OUTPUT"
           else
-            git rebase --abort
             echo "status=conflict" >> "$GITHUB_OUTPUT"
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts" || true
+            git log -1 --format='%h %s' REBASE_HEAD > "$RUNNER_TEMP/stopped-at" || true
+            git rebase --abort || true
           fi
 
       - name: Bump the fork version
         id: version
         if: steps.rebase.outputs.status == 'rebased'
+        env:
+          FORK_VERSION: ${{ steps.rebase.outputs.fork_version }}
         run: |
           set -euo pipefail
-          current=$(node -p "require('./package.json').version")
-          next=$(node -p "const [a,b,c]=require('./package.json').version.split('.').map(Number); \`\${a}.\${b}.\${c+1}\`")
+          upstream_version=$(git show "upstream/$UPSTREAM_BRANCH:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          latest_tag=$(git for-each-ref --count=1 --sort=-version:refname --format='%(refname:short)' 'refs/tags/v[0-9]*.[0-9]*.[0-9]*')
+          next=$(node -e '
+            const versions = process.argv.slice(1).filter(Boolean)
+              .map((value) => value.replace(/^v/, "").split("-")[0].split(".").map(Number));
+            versions.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+            const [major, minor, patch] = versions.at(-1);
+            console.log([major, minor, patch + 1].join("."));
+          ' "$FORK_VERSION" "$upstream_version" "$latest_tag")
           node scripts/bump-version.mjs "$next"
           git add -A
           git commit -m "release v$next
 
           Upstream sync: rebased this fork's patches onto upstream/$UPSTREAM_BRANCH.
-          Previous fork version was $current."
+          Previous fork version was $FORK_VERSION; upstream is at $upstream_version."
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
+      # Pushed with SYNC_PUSH_TOKEN, so the tag starts release.yml by itself.
       - name: Push branch and tag
         if: steps.rebase.outputs.status == 'rebased'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           git push --force-with-lease origin "$BRANCH"
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
 
-      # A push made with GITHUB_TOKEN triggers no workflow, so the tag above will
-      # not start the release on its own. Without this dispatch the branch moves
-      # but the published installer stays old — the exact symptom this workflow
-      # exists to prevent. `workflow_dispatch` is one of the two events
-      # GITHUB_TOKEN is allowed to trigger.
-      - name: Release the updated build
-        if: steps.rebase.outputs.status == 'rebased'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh workflow run "$RELEASE_WORKFLOW" \
-            --ref "$BRANCH" \
-            -f version="${{ steps.version.outputs.version }}"
-
-      - name: Open conflict issue
+      - name: Report the conflict
         if: steps.rebase.outputs.status == 'conflict'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          existing=$(gh issue list --state open --label sync-conflict --json number --jq 'length')
-          if [ "$existing" -eq 0 ]; then
+          {
+            echo "### Upstream sync stopped on a conflict"
+            echo
+            echo "\`$BRANCH\` was left untouched. The rebase stopped at \`$(cat "$RUNNER_TEMP/stopped-at")\`, in:"
+            echo
+            while IFS= read -r file; do echo "- \`$file\`"; done < "$RUNNER_TEMP/conflicts"
+            echo
+            echo "Resolve it locally, dropping the \`release v*\` commits, then release the result:"
+            echo
+            echo '```bash'
+            echo "git fetch upstream $UPSTREAM_BRANCH"
+            echo "git rebase -i upstream/$UPSTREAM_BRANCH   # drop the release v* commits, resolve the conflicts"
+            echo "node scripts/bump-version.mjs <next version> && git commit -am 'release v<next version>'"
+            echo "git push --force-with-lease origin $BRANCH && git tag v<next version> && git push origin v<next version>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Issues are off in this fork today; the failed run and its summary are
+          # the notice then.
+          if [ "$(gh api "repos/$GH_REPO" --jq .has_issues)" = "true" ] \
+            && [ "$(gh issue list --state open --label sync-conflict --json number --jq 'length')" -eq 0 ]; then
             gh label create sync-conflict --color D93F0B --force
             gh issue create \
               --title "Upstream sync conflict ($(date +%F))" \
               --label sync-conflict \
-              --body "$(printf 'Rebasing `%s` onto `upstream/%s` failed. The branch was left untouched.\n\nResolve it locally:\n```bash\ngit fetch upstream\ngit checkout %s\ngit rebase upstream/%s   # resolve the conflicts\ngit push --force-with-lease origin %s\n```' "$BRANCH" "$UPSTREAM_BRANCH" "$BRANCH" "$UPSTREAM_BRANCH" "$BRANCH")"
+              --body-file "$GITHUB_STEP_SUMMARY"
           fi
           exit 1
