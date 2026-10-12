@@ -2,9 +2,11 @@
 
 /* General mobile improvements for all mobile devices */
 @media (max-width: 1024px) {
-  /* Override CSS custom properties for mobile */
+  /* Override CSS custom properties for mobile. The chat reads at 14px on phones, the desktop size: at 16px a phone screen
+     held about half as many lines of a reply. Interface Font Size in
+     Settings scales the root rem, so every size below follows it. */
   :root.mobile-pointer:not(.desktop-runtime) {
-    --text-markdown: 1rem;
+    --text-markdown: 0.875rem;
     --text-code: 0.875rem;
     --text-ui-header: 0.9375rem;
     --text-ui-label: 0.875rem;
@@ -15,7 +17,7 @@
 
   /* Force override with higher specificity */
   :root.mobile-pointer:not(.desktop-runtime) * {
-    --text-markdown: 1rem !important;
+    --text-markdown: 0.875rem !important;
     --text-code: 0.875rem !important;
     --text-ui-header: 0.9375rem !important;
     --text-ui-label: 0.875rem !important;
@@ -265,7 +267,7 @@
 
     /* Mobile typography improvements */
     .typography-markdown {
-      font-size: 1rem !important;
+      font-size: 0.875rem !important;
     }
 
     .typography-code {
