@@ -8,6 +8,7 @@ import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/session
 import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useGoalDriverName } from '@/lib/guests/goal-driver';
 
@@ -71,12 +72,20 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       role="group"
       className="flex h-10 min-w-0 items-center gap-2 border-b border-border/60 pl-3 pr-1.5"
       aria-label={t('chat.goal.row.aria')}
-      title={objectiveContent ?? undefined}
     >
       <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {objectiveContent || t('chat.goal.dialog.titleManage')}
-      </span>
+      {objectiveContent ? (
+        <Tooltip delayDuration={500}>
+          <TooltipTrigger asChild>
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{objectiveContent}</span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6} className="max-w-[min(480px,calc(100vw-24px))] whitespace-normal break-words text-left">
+            <span className="line-clamp-12 whitespace-pre-line">{objectiveContent}</span>
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{t('chat.goal.dialog.titleManage')}</span>
+      )}
       {driverName ? (
         <span
           className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[0.7rem] leading-none text-primary"

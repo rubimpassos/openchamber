@@ -51,3 +51,6 @@ export type { TextHandle, TextPart, TextProps } from './text.ts';
 
 export { mountPopoverAnchor } from './popover-anchor.ts';
 export type { PopoverAnchorHandle, PopoverAnchorOptions } from './popover-anchor.ts';
+
+export { mountTooltip } from './tooltip.ts';
+export type { TooltipHandle, TooltipOptions } from './tooltip.ts';

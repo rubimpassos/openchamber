@@ -186,9 +186,10 @@ export {
   GUEST_POPOVER_WIDTH_MAX,
   GUEST_POPOVER_WIDTH_MIN,
   GUEST_POPOVER_CLOSE_REASONS,
+  GUEST_TOOLTIP_TEXT_MAX,
   isGuestPopoverRequest,
 } from './popover.ts';
-export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide } from './popover.ts';
+export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide, GuestTooltipRequest } from './popover.ts';
 export {
   clampAttachRequest,
   clampBadgeCount,

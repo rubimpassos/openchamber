@@ -554,7 +554,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path.startsWith('contributes.messages')) {
     return fail(
       'invalid-messages',
-      'contributes.messages lists up to 32 entries with a match that compiles as a JavaScript regular expression (1 to 300 characters), a name (1 to 40), optional icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), tone "neutral" | "info" | "success" | "warning" | "error", and body "markdown" | "text" | "none".',
+      'contributes.messages lists up to 32 entries with a match that compiles as a JavaScript regular expression (1 to 300 characters), a name (1 to 40), optional icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), tone "neutral" | "info" | "success" | "warning" | "error", and body "markdown" | "text" | "todos" | "none".',
     );
   }
   if (path.startsWith('contributes.goal')) {
