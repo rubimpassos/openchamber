@@ -29,7 +29,6 @@ import {
   SettingsSection,
   SETTINGS_CALLOUT_TITLE_CLASS,
   SETTINGS_HELPER_CLASS,
-  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -447,7 +446,7 @@ const ProfileRow: React.FC<ProfileRowProps> = ({
                 onClick={onDelete}
                 className="text-destructive focus:text-destructive"
               >
-                <Icon name="delete-bin" className="h-4 w-4 mr-px" />
+                <Icon name="delete-bin" className="h-4 w-4 me-px" />
                 {t('settings.common.actions.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -483,7 +482,6 @@ const ProfileRow: React.FC<ProfileRowProps> = ({
             }}
           >
             <SelectTrigger
-              size={SETTINGS_SELECT_SIZE}
               className="h-6 min-h-0 w-fit max-w-[14ch] border-dashed px-1.5 typography-micro"
               aria-label={t('settings.browser.profiles.projects.bind.aria', { name: profile.name })}
             >

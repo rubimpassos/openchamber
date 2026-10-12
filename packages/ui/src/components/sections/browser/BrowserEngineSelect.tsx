@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { SETTINGS_SELECT_ROW_TRIGGER_CLASS, SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
+import { SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { BUILTIN_BROWSER_PROVIDER, browserProviderGuests } from '@/lib/guests/browser-providers';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -62,7 +62,6 @@ export const BrowserEngineSelect: React.FC<{ disabled?: boolean; className?: str
   return (
     <Select<string> value={value} onValueChange={handleChange} disabled={disabled}>
       <SelectTrigger
-        size={SETTINGS_SELECT_SIZE}
         className={className ?? SETTINGS_SELECT_ROW_TRIGGER_CLASS}
         aria-label={t('settings.openchamber.tools.browserProvider.aria')}
       >

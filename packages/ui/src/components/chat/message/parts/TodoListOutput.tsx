@@ -73,7 +73,7 @@ export const TodoListOutput: React.FC<{ todos: readonly Todo[] }> = ({ todos }) 
                         <div className="h-2 w-2 animate-pulse rounded-full" style={{ backgroundColor: 'var(--foreground)' }} />
                         <span className="typography-meta font-semibold uppercase tracking-wide text-foreground">{label.in_progress}</span>
                     </div>
-                    <div className="space-y-1.5 pl-4">
+                    <div className="space-y-1.5 ps-4">
                         {groups.in_progress.map((todo, index) => item(todo, index, <PriorityDot priority={todo.priority} />))}
                     </div>
                 </div>
@@ -85,7 +85,7 @@ export const TodoListOutput: React.FC<{ todos: readonly Todo[] }> = ({ todos }) 
                         <div className="h-2 w-2 rounded-full bg-muted-foreground/50" />
                         <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">{label.pending}</span>
                     </div>
-                    <div className="space-y-1.5 pl-4">
+                    <div className="space-y-1.5 ps-4">
                         {groups.pending.map((todo, index) => item(todo, index, <PriorityDot priority={todo.priority} />))}
                     </div>
                 </div>
@@ -97,7 +97,7 @@ export const TodoListOutput: React.FC<{ todos: readonly Todo[] }> = ({ todos }) 
                         <Icon name="check" className="h-3 w-3" style={{ color: 'var(--status-success)' }} />
                         <span className="typography-meta font-semibold uppercase tracking-wide" style={{ color: 'var(--status-success)' }}>{label.completed}</span>
                     </div>
-                    <div className="space-y-1.5 pl-4">
+                    <div className="space-y-1.5 ps-4">
                         {groups.completed.map((todo, index) => item(
                             todo,
                             index,
@@ -113,7 +113,7 @@ export const TodoListOutput: React.FC<{ todos: readonly Todo[] }> = ({ todos }) 
                         <span className="h-3 w-3 text-muted-foreground/50">×</span>
                         <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground/50">{label.cancelled}</span>
                     </div>
-                    <div className="space-y-1.5 pl-4">
+                    <div className="space-y-1.5 ps-4">
                         {groups.cancelled.map((todo, index) => item(
                             todo,
                             index,
