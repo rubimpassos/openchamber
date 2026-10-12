@@ -6,6 +6,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -701,6 +702,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'تضمين مهام الوكلاء الفرعيين',
   'sessions.sidebar.session.export.dialog.confirm': 'تصدير',
   'sessions.sidebar.session.status.active': 'الجلسة نشطة',
+  'sessions.sidebar.session.status.subagentsRunning': 'الوكلاء الفرعيون قيد التشغيل: {count}',
   'sessions.sidebar.session.status.unread': 'تحديثات غير مقروءة',
   'sessions.sidebar.session.status.backgroundSubagent': 'وكيل فرعي يعمل في الخلفية',
   'sessions.sidebar.session.status.backgroundCommand': 'أمر يعمل في الخلفية',
@@ -1829,6 +1831,14 @@ export const dict = {
   'diffView.reviewDialog.toast.noSessionDirectory': 'مجلد الجلسة غير متاح',
   'diffView.reviewDialog.toast.startFailed': 'تعذّر بدء عملية المراجعة',
   'chat.history.loadOlder': 'تحميل الرسائل الأقدم',
+  'chat.pinnedPrompt.openAria': 'قراءة رسالتك كاملة',
+  'chat.pinnedPrompt.sheetTitle': 'رسالتك',
+  'chat.composerStatus.sheetTitle': 'في هذه الجلسة',
+  'chat.composerStatus.openAria': 'إظهار ما يعمل في هذه الجلسة',
+  'chat.composerStatus.chip.worktree': 'جارٍ إعداد شجرة العمل',
+  'chat.composerStatus.chip.space': 'بانتظار المساحة',
+  'chat.composerHandle.foldAria': 'إخفاء مربع الكتابة للقراءة',
+  'chat.composerHandle.unfoldAria': 'إظهار مربع الكتابة',
   'chat.appLink.confirm.title': 'هل تريد فتح هذا الرابط في تطبيق آخر؟',
   'chat.appLink.confirm.description': 'يستخدم رابط المحادثة هذا البروتوكول {scheme} وسيُفتح في تطبيق آخر.',
   'chat.appLink.confirm.descriptionPlain': 'سيُفتح رابط المحادثة هذا في تطبيق آخر.',
@@ -1990,6 +2000,7 @@ export const dict = {
   'chat.goal.dialog.evaluationModelLabel': 'نموذج التقييم',
   'chat.goal.status.active': 'نشط',
   'chat.goal.status.evaluating': 'جارٍ التقييم…',
+  'chat.goal.driver.title': 'يشغّله {name}',
   'chat.goal.status.paused': 'متوقف مؤقتًا',
   'chat.goal.status.blocked': 'محظور',
   'chat.goal.status.budgetLimited': 'بلغ الميزانية',
@@ -2425,6 +2436,8 @@ export const dict = {
   'chat.questionCard.submitFailed': 'تعذّر إرسال الرد',
   'chat.questionCard.dismissFailed': 'تعذّر تجاهل السؤال',
   'chat.questionCard.noLongerPending': 'لم يعد هذا السؤال بانتظار رد.',
+  'chat.questionCard.orphanedBadge': 'تمت المقاطعة',
+  'chat.questionCard.orphanedNotice': 'أُعيد تشغيل الجلسة قبل الإجابة عن هذا السؤال. ستُرسل إجابتك إلى الوكيل كرسالة جديدة.',
   'chat.questionCard.tryAgain': 'حاول مرة أخرى بعد قليل.',
   'chat.textSelection.toast.noProject': 'لم يتم العثور على مشروع لهذه الجلسة',
   'chat.textSelection.toast.addToNotesFailed': 'تعذّرت الإضافة إلى الملاحظات',
@@ -3750,6 +3763,13 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'لهذه المهمة تشغيل قيد التنفيذ بالفعل',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'هذه المهمة في قائمة الانتظار بالفعل وستعمل عند توفر مكان',
   'chat.modelControls.agentFavoriteAdd': 'إضافة إلى المفضلة. عند وجود مفضلة، يتنقل Tab بينها فقط',
+  'settings.extensions.capability.loopback': 'الوصول إلى تطبيق محلي على الخادم',
+  'settings.extensions.capability.loopback.detail': 'الاتصال بالمسارات المدرجة فقط على الجهاز الذي يشغّل OpenChamber، وليس على جهاز هذا المتصفح. هذا لا يشغّل التطبيق.',
+  'settings.extensions.capability.loopback.target': 'وجهة الخادم: {target}',
+  'settings.extensions.capability.loopback.defaultPort': 'المنفذ الافتراضي المعلن: {port}',
+  'settings.extensions.capability.loopback.environment': 'متغير الخادم: {env}. إذا لم يكن مضبوطًا أو كان فارغًا، استخدم المنفذ {port}.',
+  'settings.extensions.capability.loopback.routes': 'الأساليب والمسارات المسموح بها',
+  'settings.extensions.capability.loopback.invalid': 'قيمة منفذ الخادم المحددة غير صالحة. اضبط عددًا صحيحًا من 1024 إلى 65535، أو امسح المتغير لاستخدام الافتراضي. الموافقة غير متاحة حتى يتم إصلاح ذلك.',
   ...settingsDict,
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
@@ -3758,6 +3778,7 @@ export const dict = {
   ...routingI18n.ar,
   ...pluginPanelI18n.ar,
   ...surfacePanelI18n.ar,
+  ...browserServerPanelI18n.ar,
   ...fileArtifactsI18n.ar,
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
