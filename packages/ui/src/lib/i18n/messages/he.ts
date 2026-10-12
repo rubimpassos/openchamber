@@ -6,6 +6,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -702,6 +703,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'כלול משימות של סוכני משנה',
   'sessions.sidebar.session.export.dialog.confirm': 'ייצא',
   'sessions.sidebar.session.status.active': 'ההפעלה פעילה',
+  'sessions.sidebar.session.status.subagentsRunning': 'תת-סוכנים פועלים: {count}',
   'sessions.sidebar.session.status.unread': 'עדכונים שלא נקראו',
   'sessions.sidebar.session.status.backgroundSubagent': 'סוכן משנה פועל ברקע',
   'sessions.sidebar.session.status.backgroundCommand': 'פקודה פועלת ברקע',
@@ -1830,6 +1832,14 @@ export const dict = {
   'diffView.reviewDialog.toast.noSessionDirectory': 'תיקיית ההפעלה אינה זמינה',
   'diffView.reviewDialog.toast.startFailed': 'לא ניתן היה להתחיל את תהליך הסקירה',
   'chat.history.loadOlder': 'טען הודעות ישנות יותר',
+  'chat.pinnedPrompt.openAria': 'קריאת ההודעה שלך במלואה',
+  'chat.pinnedPrompt.sheetTitle': 'ההודעה שלך',
+  'chat.composerStatus.sheetTitle': 'בהפעלה זו',
+  'chat.composerStatus.openAria': 'הצג מה פועל בהפעלה זו',
+  'chat.composerStatus.chip.worktree': 'מכין את עץ העבודה',
+  'chat.composerStatus.chip.space': 'ממתין למרחב',
+  'chat.composerHandle.foldAria': 'הסתר את תיבת הכתיבה כדי לקרוא',
+  'chat.composerHandle.unfoldAria': 'הצג את תיבת הכתיבה',
   'chat.appLink.confirm.title': 'לפתוח את הקישור הזה ביישום אחר?',
   'chat.appLink.confirm.description': 'קישור הצ\'אט הזה משתמש בפרוטוקול {scheme} וייפתח ביישום אחר.',
   'chat.appLink.confirm.descriptionPlain': 'קישור הצ\'אט הזה ייפתח ביישום אחר.',
@@ -1991,6 +2001,7 @@ export const dict = {
   'chat.goal.dialog.evaluationModelLabel': 'מודל הערכה',
   'chat.goal.status.active': 'פעיל',
   'chat.goal.status.evaluating': 'מעריך…',
+  'chat.goal.driver.title': 'מופעל על ידי {name}',
   'chat.goal.status.paused': 'מושהה',
   'chat.goal.status.blocked': 'חסום',
   'chat.goal.status.budgetLimited': 'התקציב נוצל',
@@ -2426,6 +2437,8 @@ export const dict = {
   'chat.questionCard.submitFailed': 'לא ניתן היה לשלוח את התגובה',
   'chat.questionCard.dismissFailed': 'לא ניתן היה לדלג על השאלה',
   'chat.questionCard.noLongerPending': 'השאלה הזו כבר לא ממתינה לתגובה.',
+  'chat.questionCard.orphanedBadge': 'הופסק',
+  'chat.questionCard.orphanedNotice': 'ההפעלה התחילה מחדש לפני שנענתה השאלה הזו. התשובה שלך תישלח לסוכן כהודעה חדשה.',
   'chat.questionCard.tryAgain': 'יש לנסות שוב בעוד רגע.',
   'chat.textSelection.toast.noProject': 'לא נמצא פרויקט עבור הפעלה זו',
   'chat.textSelection.toast.addToNotesFailed': 'לא ניתן היה להוסיף להערות',
@@ -3752,6 +3765,13 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'למשימה הזו כבר יש הרצה פעילה',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'המשימה הזו כבר ממתינה בתור ההמתנה ותרוץ כשיתפנה מקום',
   'chat.modelControls.agentFavoriteAdd': 'הוסף למועדפים. כשיש מועדפים, Tab עובר רק ביניהם',
+  'settings.extensions.capability.loopback': 'גישה לאפליקציה מקומית בשרת',
+  'settings.extensions.capability.loopback.detail': 'התחבר רק לנתיבים שברשימה במחשב שמריץ את OpenChamber, ולא במחשב של הדפדפן הזה. הפעולה הזו לא מפעילה את האפליקציה.',
+  'settings.extensions.capability.loopback.target': 'יעד בשרת: {target}',
+  'settings.extensions.capability.loopback.defaultPort': 'יציאת ברירת מחדל מוצהרת: {port}',
+  'settings.extensions.capability.loopback.environment': 'משתנה שרת: {env}. אם אינו מוגדר או ריק, השתמש ביציאה {port}.',
+  'settings.extensions.capability.loopback.routes': 'שיטות ונתיבים מותרים',
+  'settings.extensions.capability.loopback.invalid': 'היציאה שהוגדרה בשרת אינה תקינה. הגדר מספר שלם בין 1024 ל-65535, או נקה את המשתנה כדי להשתמש בברירת המחדל. האישור אינו זמין עד לתיקון.',
   ...settingsDict,
   ...linearIssuePickerI18n.he,
   ...referencePickerI18n.he,
@@ -3760,6 +3780,7 @@ export const dict = {
   ...routingI18n.he,
   ...pluginPanelI18n.he,
   ...surfacePanelI18n.he,
+  ...browserServerPanelI18n.he,
   ...fileArtifactsI18n.he,
   ...usageStatsI18n.he,
   ...webSearchI18n.he,
