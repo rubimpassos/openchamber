@@ -1,6 +1,8 @@
 import { registerFsRoutes } from '../fs/routes.js';
 import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
+import { createSystemStatsCollector } from '../system-stats/collect.js';
+import { registerSystemStatsRoutes } from '../system-stats/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
@@ -263,6 +265,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       routingRuntime,
       globalEventHub,
       openchamberVersion,
+      isOpenCodeRunning,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -400,6 +403,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
 
     registerQuotaRoutes(app, { getQuotaProviders });
+    registerSystemStatsRoutes(app, {
+      collector: createSystemStatsCollector({ os, fsPromises, process }),
+      openchamberVersion,
+      isOpenCodeRunning,
+    });
     registerSmallModelRoutes(app, { getSmallModelService });
     registerSessionGoalRoutes(app);
     const gitBinary = resolveGitBinaryForSpawn();
