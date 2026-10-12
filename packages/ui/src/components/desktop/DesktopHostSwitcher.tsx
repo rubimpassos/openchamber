@@ -52,6 +52,8 @@ import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import type { ServerMachineStatsState } from '@/hooks/useServerMachineStats';
+import { ServerMachineMiniBars } from '@/components/desktop/ServerMachineStats';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -240,6 +242,9 @@ type DesktopHostSwitcherDialogProps = {
   onOpenChange: (open: boolean) => void;
   embedded?: boolean;
   onHostSwitched?: () => void;
+  // Machine stats of the instance this window is connected to, shown under
+  // its row. Other instances are not polled.
+  currentMachineStats?: ServerMachineStatsState;
 };
 
 export function DesktopHostSwitcherDialog({
@@ -247,6 +252,7 @@ export function DesktopHostSwitcherDialog({
   onOpenChange,
   embedded = false,
   onHostSwitched,
+  currentMachineStats,
 }: DesktopHostSwitcherDialogProps) {
   const { t } = useI18n();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -998,6 +1004,7 @@ export function DesktopHostSwitcherDialog({
                             : ''}
                           {!isSsh && status?.via === 'relay' ? ` · ${t('settings.remoteInstances.clientAuth.state.viaRelay')}` : ''}
                         </div>
+                        {isActive && currentMachineStats ? <ServerMachineMiniBars state={currentMachineStats} /> : null}
                         <div className="typography-micro text-muted-foreground/70 truncate font-mono">
                           {displayUrl}
                         </div>
