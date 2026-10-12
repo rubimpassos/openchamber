@@ -7,8 +7,10 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
+import { ServerMachineChip, ServerMachinePanel, ServerMachineStatusLine } from '@/components/desktop/ServerMachineStats';
 import { Icon } from '@/components/icon/Icon';
 import { useKeybinds } from '@/hooks/useKeybind';
+import { useServerMachineStats } from '@/hooks/useServerMachineStats';
 import { isDesktopLocalOriginActive, isDesktopShell, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, redactSensitiveUrl } from '@/lib/desktopHosts';
 import {
@@ -39,6 +41,11 @@ export function DesktopInstanceMenu({ className }: Props): React.ReactNode {
   return <DesktopInstanceMenuContent className={className} />;
 }
 
+// Fast while the menu is open (live readout), slow otherwise so the button can
+// still flag a filling disk or a server that stopped answering.
+const MACHINE_STATS_OPEN_INTERVAL_MS = 5_000;
+const MACHINE_STATS_IDLE_INTERVAL_MS = 30_000;
+
 function DesktopInstanceMenuContent({ className }: Props): React.ReactNode {
   const { t } = useI18n();
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -49,6 +56,7 @@ function DesktopInstanceMenuContent({ className }: Props): React.ReactNode {
   const [remoteUpdateInfo, setRemoteUpdateInfo] = React.useState<UpdateInfo | null>(null);
   const [remoteUpdateChecking, setRemoteUpdateChecking] = React.useState(false);
   const [remoteUpdateError, setRemoteUpdateError] = React.useState<string | null>(null);
+  const machineStats = useServerMachineStats(true, open ? MACHINE_STATS_OPEN_INTERVAL_MS : MACHINE_STATS_IDLE_INTERVAL_MS);
 
   const refreshCurrentInstanceLabel = React.useCallback(async () => {
     try {
@@ -202,6 +210,7 @@ function DesktopInstanceMenuContent({ className }: Props): React.ReactNode {
               >
                 <Icon name="server" className="h-4 w-4 shrink-0" />
                 <span className="truncate typography-ui-label">{currentInstanceLabel}</span>
+                <ServerMachineChip state={machineStats} />
               </button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
@@ -212,6 +221,7 @@ function DesktopInstanceMenuContent({ className }: Props): React.ReactNode {
                 toggle: toggleShortcut,
               })}
             </p>
+            <ServerMachineStatusLine state={machineStats} />
           </TooltipContent>
         </Tooltip>
         <DropdownMenuContent
@@ -244,8 +254,10 @@ function DesktopInstanceMenuContent({ className }: Props): React.ReactNode {
               </div>
             </div>
           ) : null}
+          <ServerMachinePanel state={machineStats} refreshSeconds={MACHINE_STATS_OPEN_INTERVAL_MS / 1000} />
           <DesktopHostSwitcherDialog
             embedded
+            currentMachineStats={machineStats}
             open={open}
             onOpenChange={() => {}}
             onHostSwitched={() => setOpen(false)}
