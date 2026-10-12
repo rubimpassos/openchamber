@@ -43,7 +43,7 @@ export const GuestMessageActivity: React.FC<{
         <div className="w-full pt-1 pb-1" id={`message-${messageId}`} data-message-id={messageId} data-guest-message={rule.guestId}>
             <div className="chat-message-column relative">
                 <div
-                    className={cn('group/tool flex items-center gap-1.5 rounded-md py-0.5 pr-2', canExpand && 'cursor-pointer')}
+                    className={cn('group/tool flex items-center gap-1.5 rounded-md py-0.5 pe-2', canExpand && 'cursor-pointer')}
                     role={canExpand ? 'button' : undefined}
                     tabIndex={canExpand ? 0 : undefined}
                     aria-expanded={canExpand ? expanded : undefined}
@@ -76,7 +76,7 @@ export const GuestMessageActivity: React.FC<{
                     ) : null}
                 </div>
                 {expanded && canExpand ? (
-                    <div className="mt-1 mb-2 ml-[7px] border-l border-border/60 pl-4 pr-2">
+                    <div className="mt-1 mb-2 ms-[7px] border-s border-border/60 ps-4 pe-2">
                         {rule.body === 'text' ? (
                             <pre className="typography-code m-0 whitespace-pre-wrap break-words text-muted-foreground">{body}</pre>
                         ) : (

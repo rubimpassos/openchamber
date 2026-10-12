@@ -140,7 +140,7 @@ export const ServerBrowserInspector: React.FC<{
           type="button"
           variant="ghost"
           size="xs"
-          className="ml-auto w-6 shrink-0 rounded-full px-0 text-muted-foreground hover:text-foreground"
+          className="ms-auto w-6 shrink-0 rounded-full px-0 text-muted-foreground hover:text-foreground"
           onClick={handleClear}
           aria-label={t('contextPanel.browser.server.inspector.clear')}
         >
@@ -157,7 +157,7 @@ export const ServerBrowserInspector: React.FC<{
               consoleRows.map((row) => (
                 <div key={row.id} className={cn('border-b border-border/40 px-2 py-1', levelTone(row.level))}>
                   <span className="whitespace-pre-wrap break-words">{row.text}</span>
-                  {row.source ? <span className="ml-2 text-muted-foreground">{row.source}</span> : null}
+                  {row.source ? <span className="ms-2 text-muted-foreground">{row.source}</span> : null}
                 </div>
               ))
             )
@@ -170,7 +170,7 @@ export const ServerBrowserInspector: React.FC<{
                 type="button"
                 onClick={() => setSelectedEntryId(row.id)}
                 className={cn(
-                  'flex w-full items-center gap-2 border-b border-border/40 px-2 py-1 text-left hover:bg-[var(--interactive-hover)]',
+                  'flex w-full items-center gap-2 border-b border-border/40 px-2 py-1 text-start hover:bg-[var(--interactive-hover)]',
                   selectedEntryId === row.id && 'bg-[var(--interactive-selection)]',
                 )}
               >
@@ -186,7 +186,7 @@ export const ServerBrowserInspector: React.FC<{
         </div>
 
         {tab === 'network' && detail ? (
-          <div className="w-64 shrink-0 overflow-auto border-l border-border p-2 font-mono typography-micro">
+          <div className="w-64 shrink-0 overflow-auto border-s border-border p-2 font-mono typography-micro">
             <div className="mb-2 typography-meta font-sans text-foreground">{t('contextPanel.browser.server.inspector.requestDetails')}</div>
             <div className="mb-1 break-words text-muted-foreground">{detail.row.url}</div>
             <div className="mb-2 text-muted-foreground">{t('contextPanel.browser.server.inspector.redacted')}</div>
