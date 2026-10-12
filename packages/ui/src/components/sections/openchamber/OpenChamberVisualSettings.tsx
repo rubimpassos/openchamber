@@ -1324,9 +1324,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.visual.field.webFontsEnterprise')}</p>
                         ) : null}
 
-                        {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') || shouldShow('editorFontSize') ? (
+                        {shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') ? (
                             <SettingsTwoColumn>
-                                {shouldShow('fontSize') && !isMobile && (
+                                {shouldShow('fontSize') && (
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.interfaceFontSize')}
                                         controlClassName="w-full"
