@@ -1861,6 +1861,7 @@ export const dict = {
   'chat.history.loadOlder': 'Oudere berichten laden',
   'chat.pinnedPrompt.openAria': 'Je hele bericht lezen',
   'chat.pinnedPrompt.sheetTitle': 'Jouw bericht',
+  'chat.pinnedPrompt.goToMessage': 'Naar bericht',
   'chat.composerStatus.sheetTitle': 'In deze sessie',
   'chat.composerStatus.openAria': 'Tonen wat er in deze sessie draait',
   'chat.composerStatus.chip.worktree': 'Worktree wordt ingericht',

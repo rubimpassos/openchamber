@@ -1739,6 +1739,7 @@ export const dict = {
   'chat.history.loadOlder': 'Daha eski mesajları yükle',
   'chat.pinnedPrompt.openAria': 'Mesajının tamamını oku',
   'chat.pinnedPrompt.sheetTitle': 'Mesajın',
+  'chat.pinnedPrompt.goToMessage': 'Mesaja git',
   'chat.composerStatus.sheetTitle': 'Bu oturumda',
   'chat.composerStatus.openAria': 'Bu oturumda çalışanları göster',
   'chat.composerStatus.chip.worktree': 'Worktree hazırlanıyor',

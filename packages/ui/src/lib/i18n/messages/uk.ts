@@ -1836,6 +1836,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.history.loadOlder': 'Завантажити ще',
   'chat.pinnedPrompt.openAria': 'Прочитати повідомлення повністю',
   'chat.pinnedPrompt.sheetTitle': 'Ваше повідомлення',
+  'chat.pinnedPrompt.goToMessage': 'Перейти до повідомлення',
   'chat.composerStatus.sheetTitle': 'У цій сесії',
   'chat.composerStatus.openAria': 'Показати, що виконується в цій сесії',
   'chat.composerStatus.chip.worktree': 'Налаштування worktree',

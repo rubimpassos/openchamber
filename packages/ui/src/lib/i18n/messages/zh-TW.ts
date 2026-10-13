@@ -1851,6 +1851,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.history.loadOlder': '載入更早的訊息',
   'chat.pinnedPrompt.openAria': '閱讀完整訊息',
   'chat.pinnedPrompt.sheetTitle': '你的訊息',
+  'chat.pinnedPrompt.goToMessage': '跳至訊息',
   'chat.composerStatus.sheetTitle': '此工作階段中',
   'chat.composerStatus.openAria': '顯示此工作階段中正在執行的內容',
   'chat.composerStatus.chip.worktree': '正在設定 worktree',
