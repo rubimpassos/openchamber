@@ -1274,6 +1274,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showTurnChangedFiles': 'Pokaż zmienione pliki w ukończonych turach',
   'settings.openchamber.visual.field.showTurnChangedFilesAria': 'Pokaż zmienione pliki w ukończonych turach',
   'settings.openchamber.visual.field.spacingDensity': 'Gęstość odstępów',
+  'settings.openchamber.visual.field.stickyUserHeader': 'Przyklejony nagłówek użytkownika',
+  'settings.openchamber.visual.field.stickyUserHeaderAria': 'Przyklejony nagłówek użytkownika',
   'settings.openchamber.visual.field.promptNavigatorEnabledAria': 'Nawigator promptów',
   'settings.openchamber.visual.field.promptNavigatorEnabled': 'Nawigator promptów',
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'Autozapis plików',

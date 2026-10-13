@@ -302,7 +302,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'confirmFileTreeMove' | 'sessionTabs' | 'animatedActivityIndicators' | 'layoutAnimations' | 'fileTreeSide';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'confirmFileTreeMove' | 'sessionTabs' | 'animatedActivityIndicators' | 'layoutAnimations' | 'fileTreeSide';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -356,7 +356,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setUserMessageRenderingMode = useUIStore(state => state.setUserMessageRenderingMode);
     const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
     const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
+    const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
+    const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
     const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
     const setAutoSaveEnabled = useUIStore(state => state.setAutoSaveEnabled);
@@ -516,6 +518,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ userMessageRenderingMode: mode });
     }, [setUserMessageRenderingMode]);
 
+    const handleStickyUserHeaderChange = React.useCallback((enabled: boolean) => {
+        setStickyUserHeader(enabled);
+        void updateDesktopSettings({ stickyUserHeader: enabled });
+    }, [setStickyUserHeader]);
+
     const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
         setPromptNavigatorEnabled(enabled);
         void updateDesktopSettings({ promptNavigatorEnabled: enabled });
@@ -650,6 +657,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     const shouldShow = (setting: VisibleSetting): boolean => {
         if (setting === 'enterToSend' && isMobile) return false;
+        // Only a phone draws it, as a one-line strip over the chat (PinnedPromptStrip).
+        if (setting === 'stickyUserHeader' && !isMobile) return false;
         if (!visibleSettings) return true;
         return visibleSettings.includes(setting);
     };
@@ -669,6 +678,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('messageTransport')
         || shouldShow('activityRenderMode')
         || shouldShow('collapsibleUserMessages')
+        || shouldShow('stickyUserHeader')
         || shouldShow('promptNavigatorEnabled')
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
@@ -700,6 +710,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('subagentReadOnlyBanner')
         || shouldShow('collapsibleUserMessages')
+        || shouldShow('stickyUserHeader')
         || shouldShow('promptNavigatorEnabled')
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
@@ -1975,7 +1986,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     />
                                 </SettingsSection>
 
-                                {(shouldShow('collapsibleUserMessages') || shouldShow('promptNavigatorEnabled') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap') || shouldShow('tableCellWrap') || shouldShow('copyMessagesAsPlainText')) && (
+                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('promptNavigatorEnabled') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap') || shouldShow('tableCellWrap') || shouldShow('copyMessagesAsPlainText')) && (
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.messageAppearance')}
                                     settingsItem="chat.message-appearance"
@@ -1988,6 +1999,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
                                         ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
                                         settingsItem="chat.collapsible-user-messages"
+                                    />
+                                )}
+
+                                {shouldShow('stickyUserHeader') && (
+                                    <SettingsCheckboxRow
+                                        checked={stickyUserHeader}
+                                        onChange={handleStickyUserHeaderChange}
+                                        label={t('settings.openchamber.visual.field.stickyUserHeader')}
+                                        ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
+                                        settingsItem="chat.sticky-user-header"
                                     />
                                 )}
 
