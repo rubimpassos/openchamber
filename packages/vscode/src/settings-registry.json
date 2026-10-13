@@ -336,6 +336,10 @@
     "collapsibleUserMessages": {
       "scope": "profile"
     },
+    "stickyUserHeader": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "promptNavigatorEnabled": {
       "scope": "profile",
       "perSurface": true
