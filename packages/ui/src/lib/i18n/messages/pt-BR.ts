@@ -1852,6 +1852,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.history.loadOlder': 'Carregar mensagens anteriores',
   'chat.pinnedPrompt.openAria': 'Ler sua mensagem inteira',
   'chat.pinnedPrompt.sheetTitle': 'Sua mensagem',
+  'chat.pinnedPrompt.goToMessage': 'Ir para a mensagem',
   'chat.composerStatus.sheetTitle': 'Nesta sessão',
   'chat.composerStatus.openAria': 'Mostrar o que está rodando nesta sessão',
   'chat.composerStatus.chip.worktree': 'Configurando worktree',

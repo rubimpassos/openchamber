@@ -1834,6 +1834,7 @@ export const dict = {
   'chat.history.loadOlder': 'טען הודעות ישנות יותר',
   'chat.pinnedPrompt.openAria': 'קריאת ההודעה שלך במלואה',
   'chat.pinnedPrompt.sheetTitle': 'ההודעה שלך',
+  'chat.pinnedPrompt.goToMessage': 'מעבר להודעה',
   'chat.composerStatus.sheetTitle': 'בהפעלה זו',
   'chat.composerStatus.openAria': 'הצג מה פועל בהפעלה זו',
   'chat.composerStatus.chip.worktree': 'מכין את עץ העבודה',

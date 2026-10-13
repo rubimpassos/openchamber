@@ -2,7 +2,11 @@ import React from 'react';
 
 import type { Part } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MessageFilesDisplay } from '../FileAttachment';
+import UserTextPart from '../message/parts/UserTextPart';
+import { isEmptyTextPart } from '../message/partUtils';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getPromptPreviewText } from '../lib/messagePreview';
@@ -11,36 +15,48 @@ interface PinnedPromptStripProps {
     scrollRef: React.RefObject<HTMLElement | null>;
     turnId: string;
     promptParts: Part[];
+    /** Scrolls the timeline to the prompt itself. */
+    onGoToPrompt: (turnId: string) => void;
 }
+
+const noop = () => {};
 
 /**
  * The phone's sticky user header: one line naming the prompt of the turn on
  * screen, shown once that prompt has scrolled above the viewport. A full
  * sticky bubble took a quarter of a phone screen.
  */
-export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef, turnId, promptParts }) => {
+export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef, turnId, promptParts, onGoToPrompt }) => {
     const { t } = useI18n();
     const [promptAbove, setPromptAbove] = React.useState(false);
     const [sheetOpen, setSheetOpen] = React.useState(false);
 
-    // An observer instead of a scroll handler: it reports only when the
-    // prompt crosses the top edge, so scrolling reads no layout.
+    // The list is virtualized and recycles row nodes, so the prompt node is
+    // looked up again on each check. Checks run at most once per frame, and
+    // read one rect.
     React.useEffect(() => {
         const root = scrollRef.current;
-        const prompt = root?.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`)?.firstElementChild;
-        if (!root || !prompt) {
-            setPromptAbove(false);
-            return;
-        }
-        const observer = new IntersectionObserver(([entry]) => {
-            const rootTop = entry.rootBounds?.top;
-            setPromptAbove(!entry.isIntersecting && rootTop !== undefined && entry.boundingClientRect.top < rootTop);
-        }, { root });
-        observer.observe(prompt);
-        return () => observer.disconnect();
+        if (!root) return;
+        let frame = 0;
+        const check = () => {
+            frame = 0;
+            const prompt = root.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`)?.firstElementChild;
+            setPromptAbove(prompt ? prompt.getBoundingClientRect().bottom < root.getBoundingClientRect().top : false);
+        };
+        const schedule = () => { if (!frame) frame = requestAnimationFrame(check); };
+        check();
+        root.addEventListener('scroll', schedule, { passive: true });
+        return () => {
+            root.removeEventListener('scroll', schedule);
+            if (frame) cancelAnimationFrame(frame);
+        };
     }, [scrollRef, turnId]);
 
     const text = React.useMemo(() => getPromptPreviewText(promptParts, t), [promptParts, t]);
+    const textParts = React.useMemo(() => promptParts.filter((part) => part.type === 'text' && !isEmptyTextPart(part)), [promptParts]);
+    const attachmentFilenames = React.useMemo(() => promptParts.flatMap((part) => (
+        part.type === 'file' && part.filename ? [part.filename] : []
+    )), [promptParts]);
 
     if (!text) return null;
 
@@ -68,8 +84,38 @@ export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef,
                 open={sheetOpen}
                 onClose={() => setSheetOpen(false)}
                 title={t('chat.pinnedPrompt.sheetTitle')}
+                footer={(
+                    <Button
+                        variant="secondary"
+                        className="w-full normal-case"
+                        onClick={() => {
+                            setSheetOpen(false);
+                            onGoToPrompt(turnId);
+                        }}
+                    >
+                        <Icon name="arrow-up" className="size-4" aria-hidden="true" />
+                        {t('chat.pinnedPrompt.goToMessage')}
+                    </Button>
+                )}
             >
-                <div dir="auto" className="whitespace-pre-wrap break-words px-3 pb-3 typography-markdown text-foreground">{text}</div>
+                {/* The same parts the bubble draws: attachments first, then the
+                    text, always expanded. */}
+                <div className="px-3 pb-3 leading-relaxed text-foreground/90">
+                    <MessageFilesDisplay files={promptParts} compact className={textParts.length > 0 ? 'mb-2' : 'mt-0'} />
+                    {textParts.map((part, index) => (
+                        <UserTextPart
+                            key={`pinned-${index}`}
+                            part={part}
+                            messageId={turnId}
+                            isMobile
+                            messageExpanded
+                            onExpandMessage={noop}
+                            partIndex={index}
+                            onTruncationChange={noop}
+                            attachmentFilenames={attachmentFilenames}
+                        />
+                    ))}
+                </div>
             </MobileOverlayPanel>
         </>
     );
