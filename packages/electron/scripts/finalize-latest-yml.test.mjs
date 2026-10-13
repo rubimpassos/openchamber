@@ -90,3 +90,17 @@ test('fails instead of publishing a Mac manifest without the arm64 build', (cont
   assert.match(result.stderr, /Both x64 and arm64 macOS update manifests are required/);
   assert.equal(fs.existsSync(path.join(fixture.output, 'latest-mac.yml')), false);
 });
+
+test('a Windows-only release writes the Windows channels and no Mac manifest', (context) => {
+  const fixture = createFixture();
+  context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  for (const target of ['x86_64-apple-darwin', 'aarch64-apple-darwin']) {
+    fs.rmSync(path.join(fixture.artifacts, `latest-yml-${target}`), { recursive: true, force: true });
+  }
+
+  execFileSync(process.execPath, [script], { env: { ...environment(fixture), WINDOWS_ONLY: '1' } });
+
+  assert.match(fs.readFileSync(path.join(fixture.output, 'latest.yml'), 'utf8'), /win-x64\.exe/);
+  assert.match(fs.readFileSync(path.join(fixture.output, 'latest-arm64.yml'), 'utf8'), /win-arm64\.exe/);
+  assert.equal(fs.existsSync(path.join(fixture.output, 'latest-mac.yml')), false);
+});
