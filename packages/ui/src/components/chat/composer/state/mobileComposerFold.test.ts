@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { FOLD_DRAG_THRESHOLD_PX, resolveFoldGesture, useMobileComposerFoldStore } from './mobileComposerFold';
+import { FOLD_DRAG_THRESHOLD_PX, FOLD_ON_SCROLL_UP_PX, resolveFoldGesture, resolveScrollFold, useMobileComposerFoldStore } from './mobileComposerFold';
 
 describe('resolveFoldGesture', () => {
     test('a press without travel toggles', () => {
@@ -28,5 +28,25 @@ describe('useMobileComposerFoldStore', () => {
         store.getState().setFolded(true);
         expect(store.getState().folded).toBe(true);
         store.getState().setFolded(false);
+    });
+});
+
+describe('resolveScrollFold', () => {
+    test('upward travel folds once it passes the threshold', () => {
+        const first = resolveScrollFold(0, -(FOLD_ON_SCROLL_UP_PX - 10), 500, false);
+        expect(first.action).toBeNull();
+        expect(resolveScrollFold(first.travelUp, -10, 500, false).action).toBe('fold');
+    });
+
+    test('a downward step resets the travel', () => {
+        const up = resolveScrollFold(0, -30, 500, false);
+        const down = resolveScrollFold(up.travelUp, 5, 500, false);
+        expect(down.travelUp).toBe(0);
+        expect(resolveScrollFold(down.travelUp, -30, 500, false).action).toBeNull();
+    });
+
+    test('reaching the end unfolds; scrolling down elsewhere does not', () => {
+        expect(resolveScrollFold(0, 40, 300, true).action).toBeNull();
+        expect(resolveScrollFold(0, 40, 4, true).action).toBe('unfold');
     });
 });
