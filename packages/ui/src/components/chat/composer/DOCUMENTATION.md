@@ -768,6 +768,13 @@ for any reason clears it. Folded, everything below the handle stays mounted and
 hidden, so a draft, attachments or a dictation are kept. The floating slot's
 `ResizeObserver` sees the shorter box, so the transcript gains the space with no
 extra wiring.
+Scrolling back through the transcript folds it too, and scrolling down to the
+end unfolds it (`useFoldComposerOnScroll`, mounted by `ChatContainer` on phones).
+Only scrolls the reader drives count: a touch, its momentum for 900ms after the
+finger lifts, or a wheel. Following a live reply, loading history and keyboard
+moves never fold it, and nothing folds while the keyboard is open. The fold and
+unfold tween the glass box height on the keyboard's hide timing (WAAPI, skipped
+under reduced motion).
 
 On a phone the top rows (worktree setup, space wait, goal, auto review,
 background commands, reverted, queue, done hint, suggestion) pass through

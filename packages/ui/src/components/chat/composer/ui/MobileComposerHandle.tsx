@@ -35,7 +35,7 @@ export function MobileComposerHandle() {
             aria-expanded={!folded}
             className={cn(
                 'relative flex w-full shrink-0 cursor-grab touch-none select-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-                folded ? 'h-9' : 'h-5',
+                folded ? 'h-9' : 'h-3.5',
             )}
             // Keep the tap from moving focus: on a phone that would dismiss the keyboard.
             onMouseDown={(event) => event.preventDefault()}
@@ -55,7 +55,7 @@ export function MobileComposerHandle() {
                 setFolded(!folded);
             }}
         >
-            <span aria-hidden="true" className="h-1 w-9 rounded-full bg-border" />
+            <span aria-hidden="true" className={cn('h-1 w-8 rounded-full bg-border', !folded && 'mt-1.5')} />
         </div>
     );
 }
