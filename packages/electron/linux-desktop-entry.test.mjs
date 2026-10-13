@@ -12,7 +12,7 @@ const makeLab = async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-desktop-entry-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const appDir = path.join(root, 'mount');
-  const iconSource = path.join(appDir, 'usr/share/icons/hicolor/512x512/apps/openchamber.png');
+  const iconSource = path.join(appDir, 'usr/share/icons/hicolor/512x512/apps/openchamber-turbo2.png');
   await fs.mkdir(path.dirname(iconSource), { recursive: true });
   await fs.writeFile(iconSource, ICON);
   const dataHome = path.join(root, 'data');
@@ -26,9 +26,9 @@ const makeLab = async (t) => {
   return {
     env,
     homeDir: root,
-    desktopPath: path.join(dataHome, 'applications', 'openchamber.desktop'),
-    iconPath: path.join(dataHome, 'icons/hicolor/512x512/apps/openchamber.png'),
-    packageEntryPath: path.join(systemData, 'applications', 'openchamber.desktop'),
+    desktopPath: path.join(dataHome, 'applications', 'openchamber-turbo2.desktop'),
+    iconPath: path.join(dataHome, 'icons/hicolor/512x512/apps/openchamber-turbo2.png'),
+    packageEntryPath: path.join(systemData, 'applications', 'openchamber-turbo2.desktop'),
   };
 };
 
@@ -44,7 +44,7 @@ test('a first AppImage launch writes a visible launcher entry and its icon', asy
   assert.deepEqual(result, { status: 'integrated', changed: true, desktopPath: lab.desktopPath });
   assert.deepEqual(await fs.readFile(lab.iconPath), ICON);
   const entry = await fs.readFile(lab.desktopPath, 'utf8');
-  assert.match(entry, /^StartupWMClass=openchamber$/m);
+  assert.match(entry, /^StartupWMClass=openchamber-turbo2$/m);
   assert.match(entry, new RegExp(`^TryExec=${lab.env.APPIMAGE}$`, 'm'));
   assert.match(entry, new RegExp(`^Icon=${lab.iconPath}$`, 'm'));
   assert.doesNotMatch(entry, /NoDisplay/);
@@ -80,7 +80,7 @@ test('a moved AppImage rewrites Exec and TryExec', async (t) => {
 
 test('an entry written by Gear Lever under the same name is left alone', async (t) => {
   const lab = await makeLab(t);
-  const gearLever = '[Desktop Entry]\nName=OpenChamber (2.3.0)\nExec=env DESKTOPINTEGRATION=1 /home/u/AppImages/openchamber.appimage --no-sandbox %U\nStartupWMClass=openchamber\n';
+  const gearLever = '[Desktop Entry]\nName=OpenChamber (2.3.0)\nExec=env DESKTOPINTEGRATION=1 /home/u/AppImages/openchamber.appimage --no-sandbox %U\nStartupWMClass=openchamber-turbo2\n';
   await writeEntry(lab.desktopPath, gearLever);
 
   const result = await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
@@ -102,7 +102,7 @@ test('another entry claiming the window class withdraws ours', async (t) => {
   const lab = await makeLab(t);
   await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
   await writeEntry(path.join(path.dirname(lab.desktopPath), 'appimagekit_abc-OpenChamber.desktop'),
-    '[Desktop Entry]\nName=OpenChamber\nExec=/opt/x.AppImage\nStartupWMClass=openchamber\n');
+    '[Desktop Entry]\nName=OpenChamber\nExec=/opt/x.AppImage\nStartupWMClass=openchamber-turbo2\n');
 
   const result = await reconcileAppImageDesktopEntry({ env: lab.env, homeDir: lab.homeDir });
   assert.deepEqual(result, { status: 'external', removed: true });

@@ -17,7 +17,7 @@ test('a release reaches updaters only once desktop, server and Android are all a
 
   assert.ok(finalize.needs.includes('mobile-release'));
   const verify = stepOf('finalize-release', 'Verify desktop, server and Android release assets');
-  for (const asset of ['-win-x64.exe', '-win-arm64.exe', '-linux-x86_64.AppImage', '-linux-arm64.AppImage', 'openchamber-web-', 'openchamber-sdk-', '-android.apk']) {
+  for (const asset of ['-win-x64.exe', '-win-arm64.exe', '-linux-x86_64.AppImage', '-linux-arm64.AppImage', '-linux-amd64.deb', '-linux-x86_64.rpm', '-linux-arm64.deb', '-linux-aarch64.rpm', 'openchamber-web-', 'openchamber-sdk-', '-android.apk']) {
     assert.ok(verify.run.includes(asset), `finalize-release must check for ${asset}`);
   }
 

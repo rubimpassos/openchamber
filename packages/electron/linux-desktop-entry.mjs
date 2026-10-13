@@ -10,11 +10,11 @@ import path from 'node:path';
 // GNOME re-matches open windows when the file appears, so the first launch
 // gets the icon a few seconds after this runs.
 
-const DESKTOP_FILE_NAME = 'openchamber.desktop';
-const WM_CLASS = 'openchamber';
+const DESKTOP_FILE_NAME = 'openchamber-turbo2.desktop';
+const WM_CLASS = 'openchamber-turbo2';
 const MANAGED_KEY = 'X-OpenChamber-Managed';
-const ICON_RELATIVE_PATH = path.join('icons', 'hicolor', '512x512', 'apps', 'openchamber.png');
-const APPDIR_ICON_RELATIVE_PATH = path.join('usr', 'share', 'icons', 'hicolor', '512x512', 'apps', 'openchamber.png');
+const ICON_RELATIVE_PATH = path.join('icons', 'hicolor', '512x512', 'apps', 'openchamber-turbo2.png');
+const APPDIR_ICON_RELATIVE_PATH = path.join('usr', 'share', 'icons', 'hicolor', '512x512', 'apps', 'openchamber-turbo2.png');
 
 const resolveDataHome = (env, homeDir) => {
   const value = (env.XDG_DATA_HOME ?? '').trim();
@@ -29,7 +29,7 @@ const quoteExecArgument = (value) => `"${value.replace(/(["`$\\])/g, '\\$1')}"`.
 export const buildAppImageDesktopEntry = ({ appImagePath, iconPath }) => [
   '[Desktop Entry]',
   'Type=Application',
-  'Name=OpenChamber',
+  'Name=OpenChamber Turbo 2',
   'Comment=Desktop runtime for OpenChamber',
   `Exec=${escapeDesktopString(quoteExecArgument(appImagePath))} %U`,
   `TryExec=${escapeDesktopString(appImagePath)}`,
@@ -147,7 +147,7 @@ export const reconcileAppImageDesktopEntry = async ({
   const appImagePath = (env.APPIMAGE ?? '').trim();
   const appDir = (env.APPDIR ?? '').trim();
   if (!path.isAbsolute(appImagePath) || !path.isAbsolute(appDir) || /[\r\n]/.test(appImagePath)) {
-    // An installed .deb or .rpm ships its own openchamber.desktop, which an
+    // An installed .deb or .rpm ships its own openchamber-turbo2.desktop, which an
     // entry left by an earlier AppImage run would hide: ours takes precedence.
     // An extracted AppImage also runs without APPIMAGE; it keeps the entry.
     const installed = await findInstalledPackageEntry(env, desktopPath);

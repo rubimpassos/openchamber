@@ -146,24 +146,29 @@
       "vendor": "OpenChamber",
       "synopsis": "Desktop runtime for OpenChamber",
       "icon": "resources/icons/app-icon.png",
-      "executableName": "openchamber",
+      "executableName": "openchamber-turbo2",
       "artifactName": "OpenChamber-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
-          "Name": "OpenChamber",
+          "Name": "OpenChamber Turbo 2",
           "Comment": "Desktop runtime for OpenChamber",
-          "Icon": "openchamber",
-          "StartupWMClass": "openchamber"
+          "Icon": "openchamber-turbo2",
+          "StartupWMClass": "openchamber-turbo2"
         }
       }
     },
     "deb": {
+      "packageName": "openchamber-turbo2",
       "afterInstall": "resources/linux/after-install.tpl",
       "afterRemove": "resources/linux/after-remove.tpl"
     },
     "rpm": {
+      "packageName": "openchamber-turbo2",
       "afterInstall": "resources/linux/after-install.tpl",
-      "afterRemove": "resources/linux/after-remove.tpl"
+      "afterRemove": "resources/linux/after-remove.tpl",
+      "fpm": [
+        "--rpm-rpmbuild-define=_build_id_links none"
+      ]
     },
     "nsis": {
       "oneClick": true,

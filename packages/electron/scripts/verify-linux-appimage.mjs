@@ -65,7 +65,7 @@ const collectFiles = (root, predicate) => {
   return matches;
 };
 
-// Launchers resolve `Icon=openchamber` through the hicolor theme, which only
+// Launchers resolve `Icon=openchamber-turbo2` through the hicolor theme, which only
 // reads `<size>/apps/` directories it declares: `scalable` and square sizes up
 // to 512. A file one level up, or at 1024x1024, is never found (#4766, #2934).
 const isHicolorAppsDirectory = (sizeName) => {
@@ -78,11 +78,11 @@ const assertThemeIcon = (root) => {
   const hicolorRoot = path.join(root, 'usr', 'share', 'icons', 'hicolor');
   const sizeNames = fs.existsSync(hicolorRoot) ? fs.readdirSync(hicolorRoot) : [];
   const themeIcon = sizeNames.filter(isHicolorAppsDirectory).some((sizeName) => (
-    ['openchamber.png', 'openchamber.svg'].some((fileName) => (
+    ['openchamber-turbo2.png', 'openchamber-turbo2.svg'].some((fileName) => (
       fs.existsSync(path.join(hicolorRoot, sizeName, 'apps', fileName))
     ))
   ));
-  if (!themeIcon) throw new Error('Missing theme icon: no openchamber icon under usr/share/icons/hicolor/<size>/apps');
+  if (!themeIcon) throw new Error('Missing theme icon: no openchamber-turbo2 icon under usr/share/icons/hicolor/<size>/apps');
   if (!fs.existsSync(path.join(root, '.DirIcon'))) throw new Error('Missing AppImage icon: .DirIcon does not resolve');
 };
 
@@ -102,16 +102,16 @@ export const verifyExtractedPayload = ({
   expectedOpenCodeVersion,
   runCliVersion = defaultCliVersion,
 }) => {
-  const desktopPath = path.join(root, 'openchamber.desktop');
+  const desktopPath = path.join(root, 'openchamber-turbo2.desktop');
   if (!fs.existsSync(desktopPath)) throw new Error(`Missing desktop entry: ${desktopPath}`);
   const desktop = fs.readFileSync(desktopPath, 'utf8');
-  for (const entry of ['Name=OpenChamber', 'Icon=openchamber', 'StartupWMClass=openchamber']) {
+  for (const entry of ['Name=OpenChamber Turbo 2', 'Icon=openchamber-turbo2', 'StartupWMClass=openchamber-turbo2']) {
     if (!desktop.split(/\r?\n/).includes(entry)) throw new Error(`Desktop identity mismatch: missing ${entry}`);
   }
   if (!/^Exec=AppRun(?:\s|$)/m.test(desktop)) throw new Error('Desktop identity mismatch: expected AppImage AppRun entrypoint');
   assertThemeIcon(root);
 
-  assertElfArchitecture(path.join(root, 'openchamber'), targetArchitecture, 'Electron executable');
+  assertElfArchitecture(path.join(root, 'openchamber-turbo2'), targetArchitecture, 'Electron executable');
   const cliPath = path.join(root, 'resources', 'opencode-cli', 'opencode');
   assertElfArchitecture(cliPath, targetArchitecture, 'OpenCode CLI');
   const actualVersion = runCliVersion(cliPath);
