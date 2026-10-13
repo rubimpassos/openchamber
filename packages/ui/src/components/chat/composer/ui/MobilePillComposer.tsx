@@ -13,6 +13,7 @@
  */
 
 import React, { useState } from 'react';
+import { KEYBOARD_EASING_CSS, KEYBOARD_HIDE_MS } from '@/lib/mobileKeyboardTiming';
 import type { SourceControlProvider } from '@/lib/api/types';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
@@ -58,6 +59,46 @@ export interface MobilePillComposerProps {
     onAbort: () => void;
 }
 
+/**
+ * Folding swaps the pill's contents in one commit; this tweens the glass box
+ * from its last measured height to the new one, the way the pill/composer
+ * morph does, and fades the revealed rows in. The height is kept fresh by a
+ * ResizeObserver, so the effect that runs right after the fold commits still
+ * holds the height from before it.
+ */
+function useFoldTween(boxRef: React.RefObject<HTMLDivElement | null>, folded: boolean) {
+    const lastHeightRef = React.useRef<number | null>(null);
+    const firstRunRef = React.useRef(true);
+    React.useLayoutEffect(() => {
+        const box = boxRef.current;
+        if (!box) return;
+        const observer = new ResizeObserver(() => { lastHeightRef.current = box.offsetHeight; });
+        observer.observe(box);
+        lastHeightRef.current = box.offsetHeight;
+        return () => observer.disconnect();
+    }, [boxRef]);
+    React.useLayoutEffect(() => {
+        if (firstRunRef.current) {
+            firstRunRef.current = false;
+            return;
+        }
+        const box = boxRef.current;
+        const from = lastHeightRef.current;
+        if (!box || from === null || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+        const to = box.offsetHeight;
+        if (Math.abs(to - from) < 2) return;
+        const timing = { duration: KEYBOARD_HIDE_MS, easing: KEYBOARD_EASING_CSS };
+        box.style.overflow = 'hidden';
+        const tween = box.animate([{ height: `${from}px` }, { height: `${to}px` }], timing);
+        const release = () => { box.style.overflow = ''; };
+        tween.onfinish = release;
+        tween.oncancel = release;
+        if (!folded) {
+            box.querySelector<HTMLElement>('[data-composer-fold-body]')?.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+        }
+    }, [boxRef, folded]);
+}
+
 export function MobilePillComposer(props: MobilePillComposerProps) {
     const { t } = useI18n();
     const {
@@ -94,6 +135,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
     // The new-session draft screen has nothing to read, so it never folds.
     const showHandle = !newSessionDraftOpen;
     const folded = useMobileComposerFoldStore((state) => state.folded) && showHandle;
+    const boxRef = React.useRef<HTMLDivElement | null>(null);
+    useFoldTween(boxRef, folded);
 
     return (
         <div className="flex flex-col">
@@ -110,6 +153,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 data-mobile-composer-pill="true"
                 // The morph measures and animates this box (see mobileComposerMorph).
                 data-composer-box="true"
+                ref={boxRef}
                 className={cn(
                     'oc-glass-composer flex min-w-0 flex-col border border-border/80',
                     topRow || bottomRow || showHandle ? 'rounded-[1.5rem]' : 'rounded-full',
@@ -120,7 +164,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 and the rest stays mounted but hidden, so a draft, an
                 attachment or a running dictation survives the fold. */}
             {topRow}
-            <div className={cn('flex min-w-0 flex-col', folded && 'hidden')}>
+            <div data-composer-fold-body="true" className={cn('flex min-w-0 flex-col', folded && 'hidden')}>
             {attachments}
             {/* pl-1 puts the attach icon at the same inset the expanded
                 footer gives it, and h-12 is the expanded footer's height

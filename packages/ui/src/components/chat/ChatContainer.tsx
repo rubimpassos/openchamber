@@ -59,6 +59,7 @@ import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { PinnedPromptStrip } from './components/PinnedPromptStrip';
+import { useFoldComposerOnScroll } from './composer/state/mobileComposerFold';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useScrollShadow } from '@/components/ui/useScrollShadow';
 import { useChatTimelineScroll, type LinkedMessageState, type TimelineListHandle } from '@/hooks/useChatTimelineScroll';
@@ -584,6 +585,7 @@ const ChatViewport = React.memo(({
                         scrollRef={scrollRef}
                         turnId={railActiveTurnId}
                         promptParts={promptPreviewsByTurnId.get(railActiveTurnId) ?? []}
+                        onGoToPrompt={onSelectTurn}
                     />
                 ) : null}
             </div>
@@ -1609,6 +1611,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // The list owns the scroll element, so the shadows and the load-older
     // trigger bind to its node rather than to a wrapper we render.
     const scrollNodeRef = React.useMemo(() => ({ current: scrollNode }), [scrollNode]);
+    useFoldComposerOnScroll(scrollNode, isMobile && floatingComposer);
     useScrollShadow(scrollNodeRef, {
         observeMutations: false,
         // The glass composer is the visible end of the transcript.
