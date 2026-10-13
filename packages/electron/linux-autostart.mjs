@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const AUTOSTART_FILE_NAME = 'openchamber.desktop';
+const AUTOSTART_FILE_NAME = 'openchamber-turbo2.desktop';
 
 const resolveLinuxAutostartDirectory = ({
   env = process.env,
@@ -56,7 +56,7 @@ export const buildLinuxAutostartDesktopEntry = ({
     `Exec=${args.join(' ')}`,
     'Terminal=false',
     'X-GNOME-Autostart-enabled=true',
-    'StartupWMClass=openchamber',
+    'StartupWMClass=openchamber-turbo2',
     '',
   ].join('\n');
 };

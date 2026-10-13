@@ -35,7 +35,7 @@ recordEarlyStartupMark('electron.entry');
 app.setName('OpenChamber Turbo 2');
 process.env.OPENCHAMBER_UPDATE_REPO = 'rubimpassos/openchamber';
 if (process.platform === 'linux') {
-  app.setDesktopName('openchamber.desktop');
+  app.setDesktopName('openchamber-turbo2.desktop');
 }
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
