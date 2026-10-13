@@ -418,6 +418,8 @@ jobs:
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
           OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}
+          # No macOS build in this fork, so there are no Mac manifests to merge.
+          WINDOWS_ONLY: '1'
         run: node packages/electron/scripts/finalize-latest-yml.mjs
 
       - name: Upload combined manifests to release

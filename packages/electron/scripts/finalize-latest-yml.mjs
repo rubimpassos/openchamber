@@ -77,6 +77,8 @@ const output = {};
 // Finishing a published release rebuilds macOS only; its Windows manifests
 // are already on the release and stay untouched.
 const macOnly = process.env.MAC_ONLY === '1';
+// This fork builds no macOS app, so its releases carry only the Windows channels.
+const windowsOnly = process.env.WINDOWS_ONLY === '1';
 
 if (!macOnly) {
   const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest.yml');
@@ -93,14 +95,16 @@ if (!macOnly) {
 // moves Apple Silicon users onto the Intel build under Rosetta.
 const macX64 = await read('latest-yml-x86_64-apple-darwin', 'latest-mac.yml');
 const macArm64 = await read('latest-yml-aarch64-apple-darwin', 'latest-mac.yml');
-if (!macX64 || !macArm64) {
+if (!windowsOnly && (!macX64 || !macArm64)) {
   throw new Error('Both x64 and arm64 macOS update manifests are required');
 }
-output['latest-mac.yml'] = serialize({
-  version: macArm64.version,
-  files: [...macArm64.files, ...macX64.files],
-  releaseDate: macArm64.releaseDate,
-});
+if (!windowsOnly) {
+  output['latest-mac.yml'] = serialize({
+    version: macArm64.version,
+    files: [...macArm64.files, ...macX64.files],
+    releaseDate: macArm64.releaseDate,
+  });
+}
 
 const tag = `v${version}`;
 const tmp = process.env.RUNNER_TEMP || '/tmp';
