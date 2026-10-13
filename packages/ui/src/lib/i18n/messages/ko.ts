@@ -1897,6 +1897,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.history.loadOlder': '이전 메시지 불러오기',
   'chat.pinnedPrompt.openAria': '메시지 전체 읽기',
   'chat.pinnedPrompt.sheetTitle': '내 메시지',
+  'chat.pinnedPrompt.goToMessage': '메시지로 이동',
   'chat.composerStatus.sheetTitle': '이 세션',
   'chat.composerStatus.openAria': '이 세션에서 실행 중인 항목 보기',
   'chat.composerStatus.chip.worktree': 'worktree 설정 중',

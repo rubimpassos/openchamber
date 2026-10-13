@@ -1640,6 +1640,7 @@ export const dict = {
   'chat.history.loadOlder': 'Charger les messages précédents',
   'chat.pinnedPrompt.openAria': 'Lire votre message en entier',
   'chat.pinnedPrompt.sheetTitle': 'Votre message',
+  'chat.pinnedPrompt.goToMessage': 'Aller au message',
   'chat.composerStatus.sheetTitle': 'Dans cette session',
   'chat.composerStatus.openAria': 'Afficher ce qui tourne dans cette session',
   'chat.composerStatus.chip.worktree': 'Configuration du worktree',

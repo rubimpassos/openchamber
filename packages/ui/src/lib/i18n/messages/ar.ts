@@ -1842,6 +1842,7 @@ export const dict = {
   'chat.history.loadOlder': 'تحميل الرسائل الأقدم',
   'chat.pinnedPrompt.openAria': 'قراءة رسالتك كاملة',
   'chat.pinnedPrompt.sheetTitle': 'رسالتك',
+  'chat.pinnedPrompt.goToMessage': 'الانتقال إلى الرسالة',
   'chat.composerStatus.sheetTitle': 'في هذه الجلسة',
   'chat.composerStatus.openAria': 'إظهار ما يعمل في هذه الجلسة',
   'chat.composerStatus.chip.worktree': 'جارٍ إعداد شجرة العمل',
