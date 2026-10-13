@@ -59,6 +59,7 @@ import {
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
+import { PinnedPromptStrip } from './components/PinnedPromptStrip';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useScrollShadow } from '@/components/ui/useScrollShadow';
 import { useChatTimelineScroll, type LinkedMessageState, type TimelineListHandle } from '@/hooks/useChatTimelineScroll';
@@ -241,6 +242,8 @@ type ChatViewportProps = {
     activeTurnId: string | null;
     onSelectTurn: (turnId: string) => void;
     showPromptNavigator: boolean;
+    /** Phones: the sticky user header setting draws a one-line strip instead. */
+    showPinnedPrompt: boolean;
     canLoadEarlierPrompts: boolean;
     isLoadingOlderPrompts: boolean;
     onLoadEarlierPrompts: () => void;
@@ -278,6 +281,7 @@ const ChatViewport = React.memo(({
     activeTurnId,
     onSelectTurn,
     showPromptNavigator,
+    showPinnedPrompt,
     canLoadEarlierPrompts,
     isLoadingOlderPrompts,
     onLoadEarlierPrompts,
@@ -597,6 +601,13 @@ const ChatViewport = React.memo(({
                         onLoadEarlier={onLoadEarlierPrompts}
                     />
                 ) : null}
+                {showPinnedPrompt && railActiveTurnId ? (
+                    <PinnedPromptStrip
+                        scrollRef={scrollRef}
+                        turnId={railActiveTurnId}
+                        promptParts={promptPreviewsByTurnId.get(railActiveTurnId) ?? []}
+                    />
+                ) : null}
             </div>
         </div>
     );
@@ -629,6 +640,7 @@ const ChatViewport = React.memo(({
         && prev.activeTurnId === next.activeTurnId
         && prev.onSelectTurn === next.onSelectTurn
         && prev.showPromptNavigator === next.showPromptNavigator
+        && prev.showPinnedPrompt === next.showPinnedPrompt
         && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
         && prev.isLoadingOlderPrompts === next.isLoadingOlderPrompts
         && prev.onLoadEarlierPrompts === next.onLoadEarlierPrompts;
@@ -890,6 +902,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         [pinned, pinnedExpandedInput],
     );
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
+    const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
     // The timeline dialog of the main chat is app state (a global shortcut
     // opens it); a pinned column keeps its own.
@@ -1759,6 +1772,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 activeTurnId={timelineController.activeTurnId}
                 onSelectTurn={handlePromptNavigatorSelect}
                 showPromptNavigator={showPromptNavigator}
+                showPinnedPrompt={isMobile && stickyUserHeader}
                 canLoadEarlierPrompts={canLoadEarlierPrompts}
                 isLoadingOlderPrompts={timelineController.isLoadingOlder}
                 onLoadEarlierPrompts={handleLoadOlderClick}
