@@ -180,6 +180,18 @@ function localePrefixesForLanguage(language) {
 }
 
 /**
+ * BCP-47 tag of the most common locale for a detected language (`pt` →
+ * `pt-BR`), for speech APIs that take a language code. Null when the table
+ * has no regional locale for it.
+ * @param {string} language
+ * @returns {string | null}
+ */
+export function speechLanguageCode(language) {
+  const regional = localePrefixesForLanguage(language).find((prefix) => prefix.includes('_'));
+  return regional ? regional.replace('_', '-') : null;
+}
+
+/**
  * Choose a voice for a language from a `say`-style voice list.
  * Prefers an enhanced/premium variant of a matching voice, then any voice of
  * the exact locale, then any voice of the language. Returns null when the
