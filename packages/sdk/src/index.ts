@@ -35,6 +35,8 @@ export {
 } from './shells.ts';
 export { GUEST_STATUS_CONTROLS_MAX, GUEST_STATUS_CONTROL_ID, GUEST_STATUS_CONTROL_LABEL_MAX, GUEST_STATUS_CONTROL_OPTIONS_MAX, GUEST_STATUS_CONTROL_VALUE_MAX } from './status-controls.ts';
 export type { GuestStatusControl, GuestStatusControlEvent, GuestStatusControlOption } from './status-controls.ts';
+export { GUEST_STATUS_SUMMARY_ICON, GUEST_STATUS_SUMMARY_ITEMS_MAX, GUEST_STATUS_SUMMARY_LABEL_MAX, GUEST_STATUS_SUMMARY_TEXT_MAX, GUEST_STATUS_SUMMARY_TONES } from './status-summary.ts';
+export type { GuestStatusSummaryItem, GuestStatusSummaryTone } from './status-summary.ts';
 export type { OpenChamberManifestApiVersion } from './api-version.ts';
 export {
   compareOpenChamberVersions,
@@ -236,6 +238,7 @@ export type {
   GuestResizeMessage,
   GuestOpenCommitMessage,
   GuestStatusControlsMessage,
+  GuestStatusSummaryMessage,
   GuestPopoverAnchorMessage,
   GuestPopoverCloseMessage,
   GuestPopoverOpenMessage,

@@ -264,8 +264,8 @@ describe('parseGuestCatalogJson', () => {
     const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
     const storageId = '123e4567-e89b-12d3-a456-426614174000';
     expect(readGuests(JSON.stringify({
-      guests: [{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }],
-    }))).toEqual([{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }]);
+      guests: [{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true, statusKeepAlive: true }],
+    }))).toEqual([{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true, statusKeepAlive: true }]);
     expect(readGuests(JSON.stringify({ guests: [{ ...row, storageId: 'not-an-installation-id' }] }))).toBeNull();
   });
 

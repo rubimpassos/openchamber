@@ -117,9 +117,9 @@ test('a status frame keeps subscriptions and storage alive while project changes
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const renderSection = (directory: string) => (
+  const renderSection = (directory: string, sectionGuest: InstalledGuest = guest) => (
     <I18nProvider><ThemeSystemContext.Provider value={activeThemeContext}>
-      <SyncProvider sdk={sdk} directory={directory}><WorkStatusExtensionSection guest={guest} directory={directory} /></SyncProvider>
+      <SyncProvider sdk={sdk} directory={directory}><WorkStatusExtensionSection guest={sectionGuest} directory={directory} /></SyncProvider>
     </ThemeSystemContext.Provider></I18nProvider>
   );
   try {
@@ -150,7 +150,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
     expect(messages.find((message) => message.type === 'ready')).toMatchObject({
       payload: {
         surface: 'status', item: null,
-        features: { deviceStorage: true, statusControls: true },
+        features: { deviceStorage: true, statusControls: true, statusSummary: true },
         theme: { tokens: { syntaxKeyword: theme.colors.syntax.base.keyword, syntaxString: theme.colors.syntax.base.string } },
       },
     });
@@ -266,6 +266,16 @@ test('a status frame keeps subscriptions and storage alive while project changes
     await act(async () => { send(controls); await Promise.resolve(); });
     expect(container.querySelector('[data-work-status-control="refresh"]')).not.toBeNull();
 
+    const summary: GuestMessage = {
+      channel: 'openchamber.sdk', v: 1, type: 'status-summary', id: 'summary-1',
+      payload: { items: [{ text: '2/5', icon: 'list-check-2', label: '2 of 5 todos done' }] },
+    };
+    const shownSummary = () => container.querySelector('[data-guest-status-summary]');
+    await act(async () => { send(summary); await Promise.resolve(); });
+    expect(shownSummary()?.textContent).toBe('2/5');
+    expect(shownSummary()?.querySelector('[aria-label="2 of 5 todos done"]')).not.toBeNull();
+    expect(messages.find((message) => message.type === 'result' && message.id === 'summary-1')).toMatchObject({ ok: true });
+
     await act(async () => {
       frame.focus();
       send({
@@ -289,6 +299,8 @@ test('a status frame keeps subscriptions and storage alive while project changes
     await act(async () => root.render(renderSection('/other')));
     expect(container.querySelector('iframe')).toBe(frame);
     expect(container.querySelector('[data-work-status-control="refresh"]')).toBeNull();
+    // The count was the previous project's; the guest publishes again from onDirectory.
+    expect(shownSummary()).toBeNull();
     expect(document.querySelector('[data-guest-popover-overlay]')).toBeNull();
     // The retired child source cannot mutate the composer after its owner
     // changes directory. Owner subscriptions and the pending storage request
@@ -334,13 +346,45 @@ test('a status frame keeps subscriptions and storage alive while project changes
     // Status-only: the catalog has no panel entry, and that must not tear the section down.
     expect(container.querySelector('iframe')).not.toBeNull();
 
+    await act(async () => { send({ ...summary, id: 'summary-2' }); await Promise.resolve(); });
+    expect(shownSummary()?.textContent).toBe('2/5');
     const header = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
     if (!header) throw new Error('Section header missing');
     await act(async () => header.click());
     expect(container.querySelector('iframe')).toBeNull();
+    // Folded without keepAlive there is no frame, so no summary that could go stale.
+    expect(shownSummary()).toBeNull();
     // Reopening starts at the height the page last asked for, not the manifest default.
     await act(async () => header.click());
     expect(container.querySelector('iframe')?.parentElement?.style.height).toBe('320px');
+
+    // keepAlive: folding keeps the same frame, hidden and inert, and its summary stays live.
+    const keptAlive: InstalledGuest = { ...guest, statusKeepAlive: true };
+    await act(async () => {
+      useGuestsStore.getState().replaceCatalog([keptAlive], runtimeKey);
+      root.render(renderSection('/other', keptAlive));
+    });
+    const keptFrame = container.querySelector<HTMLIFrameElement>('iframe');
+    if (!keptFrame?.contentWindow) throw new Error('Kept frame missing');
+    await act(async () => header.click());
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+    // Identity checks as booleans: a failing DOM diff never finishes printing.
+    expect(container.querySelector('iframe') === keptFrame).toBe(true);
+    const hiddenBox = container.querySelector('[data-guest-status-frame]');
+    expect(hiddenBox?.hasAttribute('inert')).toBe(true);
+    expect(hiddenBox?.getAttribute('aria-hidden')).toBe('true');
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { source: keptFrame.contentWindow, data: { ...summary, id: 'summary-folded' } }));
+      await Promise.resolve();
+    });
+    expect(shownSummary()?.textContent).toBe('2/5');
+    await act(async () => header.click());
+    expect(container.querySelector('iframe') === keptFrame).toBe(true);
+    expect(container.querySelector('[data-guest-status-frame]')?.hasAttribute('inert')).toBe(false);
+    await act(async () => {
+      useGuestsStore.getState().replaceCatalog([guest], runtimeKey);
+      root.render(renderSection('/other'));
+    });
 
     // Changing either installation identity or approved origins replaces the
     // frame, so stale header bindings cannot address the new installation.

@@ -74,6 +74,12 @@ export type StatusSectionContribution = true | {
   height?: number;
   defaultExpanded?: boolean;
   requiresProject?: boolean;
+  /**
+   * Keep the frame running, hidden, while the section is folded, so the
+   * header summary stays current and unfolding shows the page at once. The
+   * frame still stops when the section or the panel is not shown.
+   */
+  keepAlive?: boolean;
 };
 
 /** Characters in a status section title. */

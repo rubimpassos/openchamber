@@ -328,6 +328,7 @@ const contributesSchema = z.object({
     height: z.number().int().min(GUEST_STATUS_SECTION_HEIGHT_MIN).max(GUEST_STATUS_SECTION_HEIGHT_MAX).optional(),
     defaultExpanded: z.boolean().optional(),
     requiresProject: z.boolean().optional(),
+    keepAlive: z.boolean().optional(),
   })]).optional(),
   capabilities: z.array(z.enum(DECLARED_GUEST_CAPABILITIES)).max(8).optional(),
   integration: integrationSchema.optional(),

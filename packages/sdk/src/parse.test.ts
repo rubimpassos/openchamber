@@ -59,12 +59,14 @@ describe('parseManifest', () => {
           entry: 'status/index.html',
           defaultExpanded: false,
           requiresProject: true,
+          keepAlive: true,
         },
       },
     });
     expect(result).toMatchObject({ ok: true, manifest: { contributes: { statusSection: {
-      entry: 'status/index.html', defaultExpanded: false, requiresProject: true,
+      entry: 'status/index.html', defaultExpanded: false, requiresProject: true, keepAlive: true,
     } } } });
+    expect(parseManifest({ ...validBlock, contributes: { ...validBlock.contributes, statusSection: { entry: 'status/index.html', keepAlive: 'yes' } } })).toMatchObject({ ok: false, code: 'invalid-status-section' });
     expect(parseManifest({ ...validBlock, contributes: { ...validBlock.contributes, statusSection: { entry: 'status/index.html', defaultExpanded: 'no' } } })).toMatchObject({ ok: false, code: 'invalid-status-section' });
   });
 

@@ -7,6 +7,13 @@ import {
   GUEST_STATUS_CONTROL_VALUE_MAX,
   GUEST_STATUS_CONTROLS_MAX,
 } from './status-controls.ts';
+import {
+  GUEST_STATUS_SUMMARY_ICON,
+  GUEST_STATUS_SUMMARY_ITEMS_MAX,
+  GUEST_STATUS_SUMMARY_LABEL_MAX,
+  GUEST_STATUS_SUMMARY_TEXT_MAX,
+  GUEST_STATUS_SUMMARY_TONES,
+} from './status-summary.ts';
 
 const idSchema = z.string().regex(GUEST_STATUS_CONTROL_ID);
 const labelSchema = z.string().min(1).max(GUEST_STATUS_CONTROL_LABEL_MAX);
@@ -48,3 +55,10 @@ export const guestStatusControlEventSchema = z.object({
   id: idSchema,
   value: z.string().min(1).max(GUEST_STATUS_CONTROL_VALUE_MAX).optional(),
 }).strict();
+
+export const guestStatusSummarySchema = z.array(z.object({
+  text: z.string().min(1).max(GUEST_STATUS_SUMMARY_TEXT_MAX),
+  icon: z.string().regex(GUEST_STATUS_SUMMARY_ICON).optional(),
+  label: z.string().min(1).max(GUEST_STATUS_SUMMARY_LABEL_MAX).optional(),
+  tone: z.enum(GUEST_STATUS_SUMMARY_TONES).optional(),
+}).strict()).max(GUEST_STATUS_SUMMARY_ITEMS_MAX);
