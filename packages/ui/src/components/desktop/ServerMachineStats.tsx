@@ -311,7 +311,7 @@ const samplePercent = (sample: ServerMachineSample, resource: MachineResource): 
   return sample.disk?.usedPercent ?? null;
 };
 
-/** One-line CPU / RAM / disk readout for an instance row in the host list. */
+/** One-line CPU / RAM / disk readout for another instance in the host list. */
 export function ServerMachineMiniBars({ state }: { state: ServerMachineStatsState }) {
   const { t } = useI18n();
   if (state.kind !== 'ready') return null;
@@ -321,9 +321,9 @@ export function ServerMachineMiniBars({ state }: { state: ServerMachineStatsStat
         const percent = samplePercent(state.sample, resource);
         if (percent === null) return null;
         return (
-          <span key={resource} className="inline-flex items-center gap-1">
+          <span key={resource} className="inline-flex items-center gap-1 tabular-nums">
             {t(labelKey)}
-            <UsageBar percent={percent} level={machineLevel(resource, percent)} className="w-8" />
+            <UsageBar percent={percent} level={machineLevel(resource, percent)} className="w-10 shrink-0 bg-foreground/10" />
             {Math.round(percent)}%
           </span>
         );

@@ -52,7 +52,7 @@ import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
-import type { ServerMachineStatsState } from '@/hooks/useServerMachineStats';
+import { useOtherHostsMachineStats } from '@/hooks/useServerMachineStats';
 import { ServerMachineMiniBars } from '@/components/desktop/ServerMachineStats';
 import {
   desktopSshConnect,
@@ -90,6 +90,10 @@ const getLocalClientToken = async (): Promise<string> => {
   if (!isElectronShell()) return '';
   return desktopLocalClientTokenGet().catch(() => '');
 };
+
+// Other instances change slowly enough for a comparison; the connected one
+// refreshes every 5 s in the Machine block.
+const OTHER_HOSTS_STATS_INTERVAL_MS = 60_000;
 
 const statusDotClass = (status: HostDisplayStatus): string => {
   if (status === 'ok') return 'bg-status-success';
@@ -242,9 +246,6 @@ type DesktopHostSwitcherDialogProps = {
   onOpenChange: (open: boolean) => void;
   embedded?: boolean;
   onHostSwitched?: () => void;
-  // Machine stats of the instance this window is connected to, shown under
-  // its row. Other instances are not polled.
-  currentMachineStats?: ServerMachineStatsState;
 };
 
 export function DesktopHostSwitcherDialog({
@@ -252,7 +253,6 @@ export function DesktopHostSwitcherDialog({
   onOpenChange,
   embedded = false,
   onHostSwitched,
-  currentMachineStats,
 }: DesktopHostSwitcherDialogProps) {
   const { t } = useI18n();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -318,6 +318,16 @@ export function DesktopHostSwitcherDialog({
     void runtimeEndpointEpoch;
     return resolveCurrentDesktopHost(allHosts);
   }, [allHosts, runtimeEndpointEpoch]);
+  // The connected instance is detailed in the Machine block above the list,
+  // so only the others are read here: reachable ones, while the list is open.
+  const machineStatsHostIds = React.useMemo(() => allHosts
+    .filter((host) => host.id !== current.id)
+    .filter((host) => (sshHostIds[host.id]
+      ? sshPhaseToHostStatus(sshStatusesById[host.id]?.phase) === 'ok'
+      : statusById[host.id]?.status === 'ok'))
+    .map((host) => host.id), [allHosts, current.id, sshHostIds, sshStatusesById, statusById]);
+  const otherHostsMachineStats = useOtherHostsMachineStats(open, machineStatsHostIds, OTHER_HOSTS_STATS_INTERVAL_MS);
+
   const currentDefaultLabel = React.useMemo(() => {
     const id = defaultHostId || LOCAL_HOST_ID;
     return allHosts.find((h) => h.id === id)?.label || t('desktopHostSwitcher.instance.local');
@@ -1004,7 +1014,7 @@ export function DesktopHostSwitcherDialog({
                             : ''}
                           {!isSsh && status?.via === 'relay' ? ` · ${t('settings.remoteInstances.clientAuth.state.viaRelay')}` : ''}
                         </div>
-                        {isActive && currentMachineStats ? <ServerMachineMiniBars state={currentMachineStats} /> : null}
+                        {!isActive && otherHostsMachineStats[host.id] ? <ServerMachineMiniBars state={otherHostsMachineStats[host.id]} /> : null}
                         <div className="typography-micro text-muted-foreground/70 truncate font-mono">
                           {displayUrl}
                         </div>

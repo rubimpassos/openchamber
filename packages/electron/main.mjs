@@ -66,6 +66,7 @@ import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { requestRemoteHostUpdate } from './remote-host-update.mjs';
+import { fetchRemoteHostStats } from './remote-host-stats.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
@@ -5151,6 +5152,30 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const url = normalizeHostUrl(host?.apiUrl || host?.url || '');
       if (!host || !url) return { status: 'failed', error: null };
       return requestRemoteHostUpdate({
+        url,
+        clientToken: sanitizeClientTokenForStorage(host.clientToken) || '',
+        requestHeaders: host.requestHeaders || {},
+        chromiumFetch: (requestUrl, options) => electronNet.fetch(requestUrl, options),
+      });
+    }
+
+    // Machine stats of another saved host for the instance list. Like the
+    // update route above, the address and token come from the hosts file (or
+    // the local server), never from the caller. Not in COMMANDS_SAFE_FOR_REMOTE:
+    // a page served by one remote must not read the user's other machines.
+    case 'desktop_host_stats': {
+      const hostId = String(args.hostId || '');
+      if (hostId === LOCAL_HOST_ID) {
+        return fetchRemoteHostStats({
+          url: state.localOrigin || state.sidecarUrl || '',
+          clientToken: readDesktopLocalClientToken(),
+          chromiumFetch: (requestUrl, options) => electronNet.fetch(requestUrl, options),
+        });
+      }
+      const host = (readDesktopHostsConfig().hosts || []).find((entry) => entry?.id === hostId);
+      const url = normalizeHostUrl(host?.apiUrl || host?.url || '');
+      if (!host || !url) return { status: 'failed' };
+      return fetchRemoteHostStats({
         url,
         clientToken: sanitizeClientTokenForStorage(host.clientToken) || '',
         requestHeaders: host.requestHeaders || {},
