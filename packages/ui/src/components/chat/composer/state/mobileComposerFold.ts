@@ -29,96 +29,67 @@ export function resolveFoldGesture(deltaY: number, moved: boolean): FoldGesture 
     return null;
 }
 
+/** Upward travel of a reader's scroll before the composer folds away. */
+export const FOLD_ON_SCROLL_UP_PX = 48;
+/** Within this distance of the end, reaching it again brings the composer back. */
+const UNFOLD_AT_END_PX = 8;
 /** Momentum after the finger lifts still counts as the reader's scroll. */
 const GESTURE_TAIL_MS = 900;
-/** After the scroll stops, a half-hidden composer settles to the nearer end. */
-const SETTLE_DELAY_MS = 140;
-const SETTLE_MS = 180;
-/** The part of the composer that stays on screen when scrolled away: its handle row. */
-const VISIBLE_WHEN_HIDDEN_PX = 22;
+
+export type ScrollFoldStep = { travelUp: number; action: 'fold' | 'unfold' | null };
 
 /**
- * How far the composer sits below its place after a scroll step. Scrolling
- * back through the reply pushes it down by exactly the distance scrolled, and
- * scrolling forward pulls it back the same way, so it moves with the text.
+ * What one scroll event means for the fold. `travelUp` accumulates upward
+ * movement and resets on any downward step, so a slow drift up does not
+ * fold, only a deliberate scroll back through the reply.
  */
-export function resolveScrollOffset(offset: number, delta: number, max: number): number {
-    return Math.min(max, Math.max(0, offset - delta));
-}
-
-/** Where a half-hidden composer settles once the scroll stops. */
-export function resolveSettledOffset(offset: number, max: number, distanceFromEnd: number): number {
-    if (distanceFromEnd <= 8) return 0;
-    return offset > max / 2 ? max : 0;
-}
-
-let revealHidden: (() => boolean) | null = null;
-
-/** Brings a scrolled-away composer back. Returns false when it was not away. */
-export function revealScrollHiddenComposer(): boolean {
-    return revealHidden ? revealHidden() : false;
+export function resolveScrollFold(previousTravelUp: number, delta: number, distanceFromEnd: number, folded: boolean): ScrollFoldStep {
+    if (delta > 0) {
+        return { travelUp: 0, action: folded && distanceFromEnd <= UNFOLD_AT_END_PX ? 'unfold' : null };
+    }
+    const travelUp = previousTravelUp - delta;
+    if (!folded && travelUp >= FOLD_ON_SCROLL_UP_PX) return { travelUp: 0, action: 'fold' };
+    return { travelUp, action: null };
 }
 
 /**
- * Phones: the composer is tied to the reader's scroll. Reading back through
- * the transcript slides it down with the text until only its handle shows;
- * reading forward slides it back. It moves through the individual `translate`
- * property on the pill box, so the transcript inset and the keyboard
- * choreography (which own `transform` and the box height) are untouched.
- * Only scrolls the reader drives count (a touch, its momentum, a wheel), and
- * nothing moves while the keyboard is open.
+ * Phones: scrolling back through the transcript folds the composer, scrolling
+ * down to the end unfolds it. Only scrolls the reader drives count (a touch,
+ * its momentum, or a wheel), so following a live reply, loading history or
+ * the keyboard moving the view never fold it. The open keyboard always wins.
  */
 export function useFoldComposerOnScroll(scrollNode: HTMLElement | null, enabled: boolean): void {
     React.useEffect(() => {
         if (!enabled || !scrollNode) return;
-        const root = scrollNode.ownerDocument.documentElement;
         let lastTop = scrollNode.scrollTop;
-        let offset = 0;
+        let travelUp = 0;
         let touching = false;
         let gestureUntil = 0;
-        let settleTimer: ReturnType<typeof setTimeout> | null = null;
-        // The pill's shadow wrapper moves, so the shadow travels with the glass.
-        const box = () => scrollNode.ownerDocument.querySelector<HTMLElement>('[data-mobile-composer-pill="true"]')?.parentElement ?? null;
-        const apply = (next: number, animate: boolean) => {
-            offset = next;
-            const el = box();
-            if (!el) return;
-            el.style.transition = animate ? `translate ${SETTLE_MS}ms ease-out` : 'none';
-            el.style.translate = offset > 0 ? `0 ${offset}px` : '';
-        };
-        const maxOffset = () => Math.max(0, (box()?.offsetHeight ?? 0) - VISIBLE_WHEN_HIDDEN_PX);
-        const settle = () => {
-            settleTimer = null;
-            if (touching) return;
-            const target = resolveSettledOffset(offset, maxOffset(), scrollNode.scrollHeight - scrollNode.clientHeight - scrollNode.scrollTop);
-            if (target !== offset) apply(target, true);
-        };
         const readerDriven = () => touching || performance.now() < gestureUntil;
         const onTouchStart = () => { touching = true; };
-        const onTouchEnd = () => {
-            touching = false;
-            gestureUntil = performance.now() + GESTURE_TAIL_MS;
-            if (!settleTimer) settleTimer = setTimeout(settle, SETTLE_DELAY_MS);
-        };
+        const onTouchEnd = () => { touching = false; gestureUntil = performance.now() + GESTURE_TAIL_MS; };
         const onWheel = () => { gestureUntil = performance.now() + GESTURE_TAIL_MS; };
         const onScroll = () => {
             const top = scrollNode.scrollTop;
             const delta = top - lastTop;
             lastTop = top;
-            if (root.classList.contains('oc-composer-expanded')) {
-                if (offset) apply(0, false);
+            if (document.documentElement.classList.contains('oc-composer-expanded')) {
+                travelUp = 0;
                 return;
             }
-            if (!readerDriven()) return;
-            const next = resolveScrollOffset(offset, delta, maxOffset());
-            if (next !== offset) apply(next, false);
-            if (settleTimer) clearTimeout(settleTimer);
-            settleTimer = setTimeout(settle, SETTLE_DELAY_MS);
-        };
-        revealHidden = () => {
-            if (offset === 0) return false;
-            apply(0, true);
-            return true;
+            const store = useMobileComposerFoldStore.getState();
+            const distanceFromEnd = scrollNode.scrollHeight - scrollNode.clientHeight - top;
+            // Arriving at the end unfolds in the same frame, whoever drove the
+            // scroll: a fling's momentum can outlast the gesture window, and
+            // waiting for it left the composer late by a varying amount.
+            if (!readerDriven()) {
+                travelUp = 0;
+                if (store.folded && delta > 0 && distanceFromEnd <= UNFOLD_AT_END_PX) store.setFolded(false);
+                return;
+            }
+            const step = resolveScrollFold(travelUp, delta, distanceFromEnd, store.folded);
+            travelUp = step.travelUp;
+            if (step.action) store.setFolded(step.action === 'fold');
         };
         scrollNode.addEventListener('touchstart', onTouchStart, { passive: true });
         scrollNode.addEventListener('touchend', onTouchEnd, { passive: true });
@@ -131,9 +102,6 @@ export function useFoldComposerOnScroll(scrollNode: HTMLElement | null, enabled:
             scrollNode.removeEventListener('touchcancel', onTouchEnd);
             scrollNode.removeEventListener('wheel', onWheel);
             scrollNode.removeEventListener('scroll', onScroll);
-            if (settleTimer) clearTimeout(settleTimer);
-            revealHidden = null;
-            apply(0, false);
         };
     }, [enabled, scrollNode]);
 }
