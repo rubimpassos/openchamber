@@ -21,6 +21,13 @@ interface PinnedPromptStripProps {
 
 const noop = () => {};
 
+/** Scroll distance over which the leaving bubble turns into the strip. */
+const MORPH_DISTANCE_PX = 72;
+/** The user bubble's text inset (px-5 py-3) and the strip's (px-3), for the text's start point. */
+const BUBBLE_PADDING_X = 20;
+const BUBBLE_PADDING_Y = 12;
+const STRIP_PADDING_X = 12;
+
 /**
  * The phone's sticky user header: one line naming the prompt of the turn on
  * screen, shown once that prompt has scrolled above the viewport. A full
@@ -31,17 +38,60 @@ export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef,
     const [promptAbove, setPromptAbove] = React.useState(false);
     const [sheetOpen, setSheetOpen] = React.useState(false);
 
-    // The list is virtualized and recycles row nodes, so the prompt node is
-    // looked up again on each check. Checks run at most once per frame, and
-    // read one rect.
+    const stripRef = React.useRef<HTMLDivElement | null>(null);
+    const surfaceRef = React.useRef<HTMLDivElement | null>(null);
+    const contentRef = React.useRef<HTMLDivElement | null>(null);
+
+    // The bubble turns into the strip as it scrolls away: over the last
+    // MORPH_DISTANCE_PX before it leaves, the strip is drawn at a rect
+    // interpolated between the bubble and its own place, while the bubble
+    // fades, so the two read as one element. Driven by the scroll itself, at
+    // most once per frame, with styles written straight to the DOM. The list
+    // recycles row nodes, so the bubble is looked up again on each frame.
     React.useEffect(() => {
         const root = scrollRef.current;
-        if (!root) return;
+        const strip = stripRef.current;
+        const surface = surfaceRef.current;
+        const content = contentRef.current;
+        if (!root || !strip || !surface || !content) return;
         let frame = 0;
+        let fadedBubble: HTMLElement | null = null;
+        const fadeBubble = (bubble: HTMLElement | null, opacity: number) => {
+            if (fadedBubble && fadedBubble !== bubble) fadedBubble.style.opacity = '';
+            fadedBubble = bubble;
+            if (bubble) bubble.style.opacity = opacity >= 1 ? '' : String(opacity);
+        };
         const check = () => {
             frame = 0;
-            const prompt = root.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`)?.firstElementChild;
-            setPromptAbove(prompt ? prompt.getBoundingClientRect().bottom < root.getBoundingClientRect().top : false);
+            const turn = root.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(turnId)}"]`);
+            const bubble = turn?.querySelector<HTMLElement>('[data-user-message-bubble]') ?? null;
+            const rootTop = root.getBoundingClientRect().top;
+            const parent = (strip.offsetParent ?? root).getBoundingClientRect();
+            const target = { left: parent.left + strip.offsetLeft, top: parent.top + strip.offsetTop, width: strip.offsetWidth, height: strip.offsetHeight };
+            if (target.width === 0 || target.height === 0) return;
+            let progress: number;
+            let from = target;
+            if (bubble) {
+                const rect = bubble.getBoundingClientRect();
+                from = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+                progress = Math.min(1, Math.max(0, (target.top + target.height + MORPH_DISTANCE_PX - rect.bottom) / MORPH_DISTANCE_PX));
+            } else {
+                progress = turn && turn.getBoundingClientRect().top < rootTop ? 1 : 0;
+            }
+            const lerp = (a: number, b: number) => a + (b - a) * progress;
+            const width = lerp(from.width, target.width);
+            const height = lerp(from.height, target.height);
+            const dx = lerp(from.left, target.left) - target.left;
+            const dy = lerp(from.top, target.top) - target.top;
+            // The surface stretches between the two shapes; the text only
+            // travels, from the bubble's first line, so it never distorts.
+            surface.style.transform = progress >= 1 ? '' : `translate(${dx}px, ${dy}px) scale(${width / target.width}, ${height / target.height})`;
+            surface.style.opacity = String(Math.min(1, progress * 2));
+            content.style.transform = progress >= 1 ? '' : `translate(${dx + lerp(BUBBLE_PADDING_X - STRIP_PADDING_X, 0)}px, ${dy + lerp(BUBBLE_PADDING_Y, 0)}px)`;
+            content.style.opacity = String(Math.max(0, progress * 2 - 1));
+            fadeBubble(bubble, 1 - progress);
+            const above = progress >= 1;
+            setPromptAbove((current) => (current === above ? current : above));
         };
         const schedule = () => { if (!frame) frame = requestAnimationFrame(check); };
         check();
@@ -49,6 +99,7 @@ export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef,
         return () => {
             root.removeEventListener('scroll', schedule);
             if (frame) cancelAnimationFrame(frame);
+            fadeBubble(null, 1);
         };
     }, [scrollRef, turnId]);
 
@@ -58,17 +109,24 @@ export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef,
         part.type === 'file' && part.filename ? [part.filename] : []
     )), [promptParts]);
 
-    if (!text) return null;
 
     return (
         <>
             <div
-                className={cn(
-                    'absolute inset-x-2.5 top-1.5 z-20 flex items-center gap-1 rounded-xl border border-border/60 bg-background/90 px-3 shadow-sm backdrop-blur transition-[opacity,transform] duration-150',
-                    promptAbove ? 'opacity-100' : 'pointer-events-none -translate-y-2 opacity-0',
-                )}
+                ref={stripRef}
+                // Same surface as the user bubble, so the morph reads as one element.
+                className={cn('absolute inset-x-2.5 top-1.5 z-20', !promptAbove && 'pointer-events-none')}
                 aria-hidden={!promptAbove}
+                hidden={!text}
             >
+                {/* Same surface as the user bubble, so the morph reads as one element. */}
+                <div
+                    ref={surfaceRef}
+                    aria-hidden="true"
+                    className="absolute inset-0 origin-top-left rounded-xl border border-primary/5 opacity-0 shadow-sm"
+                    style={{ backgroundColor: 'var(--chat-user-message-bg)' }}
+                />
+                <div ref={contentRef} className="relative flex items-center gap-1 px-3 opacity-0">
                 <button
                     type="button"
                     className="flex min-h-9 min-w-0 flex-1 items-center gap-2 text-start focus-visible:outline-none"
@@ -79,6 +137,7 @@ export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef,
                     <Icon name="pushpin-2" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <span dir="auto" className="min-w-0 flex-1 truncate typography-meta text-foreground">{text.replace(/\n/g, ' ')}</span>
                 </button>
+                </div>
             </div>
             <MobileOverlayPanel
                 open={sheetOpen}
