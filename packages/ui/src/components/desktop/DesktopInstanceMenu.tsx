@@ -257,7 +257,6 @@ function DesktopInstanceMenuContent({ className }: Props): React.ReactNode {
           <ServerMachinePanel state={machineStats} refreshSeconds={MACHINE_STATS_OPEN_INTERVAL_MS / 1000} />
           <DesktopHostSwitcherDialog
             embedded
-            currentMachineStats={machineStats}
             open={open}
             onOpenChange={() => {}}
             onHostSwitched={() => setOpen(false)}
