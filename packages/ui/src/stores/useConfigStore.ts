@@ -71,6 +71,8 @@ interface OpenChamberDefaults {
 const OPENCHAMBER_DEFAULTS_FRESH_MS = 15_000;
 type ConfigRuntimeContext = { runtimeKey: string; generation: number };
 
+type VoiceProvider = 'browser' | 'local' | 'openai' | 'openai-compatible' | 'gemini' | 'say';
+
 let configRuntimeGeneration = 0;
 
 const captureConfigRuntimeContext = (): ConfigRuntimeContext => ({
@@ -1453,9 +1455,8 @@ interface ConfigStore {
     settingsDefaultFileViewerPreview: boolean;
     settingsZenModel: string | undefined;
     settingsMessageStreamTransport: 'auto' | 'ws' | 'sse';
-    // Voice provider preference ('browser', 'openai', 'openai-compatible', or 'say' for macOS)
-    voiceProvider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say';
-    setVoiceProvider: (provider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say') => void;
+    voiceProvider: VoiceProvider;
+    setVoiceProvider: (provider: VoiceProvider) => void;
     // TTS settings
     speechRate: number;
     speechPitch: number;
@@ -1468,6 +1469,8 @@ interface ConfigStore {
     /** Local and macOS voices follow the language of the text being read. */
     ttsFollowTextLanguage: boolean;
     openaiVoice: string;
+    geminiVoice: string;
+    setGeminiVoice: (voice: string) => void;
     /** Which voice API keys the server holds; the keys never reach the browser. */
     voiceApiKeys: VoiceApiKeyState;
     openaiCompatibleUrl: string;
@@ -1747,7 +1750,7 @@ export const useConfigStore = create<ConfigStore>()(
                 voiceProvider: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('voiceProvider');
-                        if (saved === 'openai' || saved === 'browser' || saved === 'local' || saved === 'say' || saved === 'openai-compatible') return saved;
+                        if (saved === 'openai' || saved === 'browser' || saved === 'local' || saved === 'say' || saved === 'openai-compatible' || saved === 'gemini') return saved;
                     }
                     return 'browser';
                 })(),
@@ -1832,6 +1835,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'nova';
                 })(),
+                geminiVoice: globalThis.localStorage?.getItem('geminiVoice') || 'Kore',
                 voiceApiKeys: EMPTY_VOICE_API_KEYS,
                 // OpenAI-compatible custom server URL
                 openaiCompatibleUrl: (() => {
@@ -3783,7 +3787,7 @@ export const useConfigStore = create<ConfigStore>()(
                     });
                 },
 
-                setVoiceProvider: (provider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say') => {
+                setVoiceProvider: (provider: VoiceProvider) => {
                     set({ voiceProvider: provider });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('voiceProvider', provider);
@@ -3854,6 +3858,11 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('openaiVoice', voice);
                     }
+                },
+
+                setGeminiVoice: (voice: string) => {
+                    set({ geminiVoice: voice });
+                    globalThis.localStorage?.setItem('geminiVoice', voice);
                 },
 
                 setVoiceApiKey: async (kind, apiKey) => {

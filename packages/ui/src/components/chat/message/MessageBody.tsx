@@ -1010,7 +1010,9 @@ const AssistantMessageActionButtons = React.memo(({
                 ? 'OpenAI'
                 : voiceProvider === 'openai-compatible'
                     ? 'Custom'
-                    : 'Say';
+                    : voiceProvider === 'gemini'
+                        ? 'Gemini'
+                        : 'Say';
         return t('chat.messageBody.tts.readAloudWithProvider', { provider: providerLabel });
     }, [isTTSPlaying, t, voiceProvider]);
 

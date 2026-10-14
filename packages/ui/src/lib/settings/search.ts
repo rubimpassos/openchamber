@@ -1352,7 +1352,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'voice.playback',
     page: 'voice',
     titleKey: 'settings.voice.page.section.playbackAndSummary',
-    keywords: ['tts', 'read aloud', 'voice', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'tts input mode', 'markdown'],
+    keywords: ['tts', 'read aloud', 'voice', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'tts input mode', 'markdown', 'gemini', 'google'],
   },
   {
     id: 'voice.speech-recognition',

@@ -1,14 +1,22 @@
 import express from 'express';
+import { z } from 'zod';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
-import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
+import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage, speechLanguageCode } from './language-detect.js';
+import { GeminiSpeechError, synthesizeGeminiSpeech } from './gemini.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
 
 // HTTP header values must be printable latin1; macOS voice names can be localized
 // (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
 // outright. Percent-encode so the X-Speech-Voice header is always safe.
+const geminiSpeakBodySchema = z.object({
+  text: z.string().trim().min(1),
+  voice: z.string().optional().catch(undefined),
+  languageSample: z.string().optional().catch(undefined),
+});
+
 export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
 }
@@ -140,6 +148,46 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       }
   });
 
+  // Gemini read-aloud: one request per reading, the key stored in Settings,
+  // the language detected here so Gemini reads mixed text with the right
+  // accent. Failures keep Gemini's status and a stable `code` so the UI can
+  // fall back to a local voice and say why.
+  app.post('/api/tts/gemini/speak', async (req, res) => {
+    const body = geminiSpeakBodySchema.safeParse(req.body ?? {});
+    if (!body.success) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+    const { text, voice, languageSample } = body.data;
+    if (isEnterpriseMode()) {
+      return res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' });
+    }
+    const apiKey = readVoiceKey('gemini');
+    if (!apiKey) {
+      return res.status(503).json({ error: 'Add a Gemini API key in Voice settings.', code: 'key_missing' });
+    }
+    const sample = languageSample?.trim() ? languageSample.slice(0, 4000) : text;
+    const languageCode = speechLanguageCode(detectTextLanguage(sample).language) ?? undefined;
+    try {
+      const result = await synthesizeGeminiSpeech({
+        text,
+        apiKey,
+        voice,
+        languageCode,
+      });
+      res.setHeader('Content-Type', result.contentType);
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Content-Length', result.buffer.length);
+      res.send(result.buffer);
+    } catch (error) {
+      if (error instanceof GeminiSpeechError) {
+        console.warn('[TTS-Gemini]', error.status, error.code);
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
+      console.error('[TTS-Gemini] Error:', error);
+      res.status(502).json({ error: 'Gemini speech failed', code: 'upstream_error' });
+    }
+  });
+
   app.post('/api/text/summarize', async (req, res) => {
     try {
       const { text, threshold = 200, maxLength = 500, mode } = req.body || {};
@@ -213,7 +261,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       if (language === 'auto') {
         const capability = await sayTTSCapability;
         const voices = Array.isArray(capability?.voices) ? capability.voices : [];
-        const sample = typeof languageSample === 'string' && languageSample.trim() ? languageSample.slice(0, 4000) : text;
+        const sample = languageSample?.trim() ? languageSample.slice(0, 4000) : text;
         resolvedLanguage = detectTextLanguage(sample).language;
         const chosen = voices.find((entry) => entry.name === voice);
         if (languageOfLocale(chosen?.locale) !== resolvedLanguage) {

@@ -10,6 +10,9 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
+import { GEMINI_FAILURE_MESSAGE_KEYS, useGeminiTTS } from './useGeminiTTS';
+import { toast } from '@/components/ui';
+import { useI18n } from '@/lib/i18n';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { ensureLineTerminalPunctuation, sanitizeForTTS } from '@/lib/voice/summarize';
 import { requestSmallModel } from '@/lib/smallModelRequest';
@@ -25,6 +28,8 @@ import {
 // Below this length the reply is comfortable to listen to as-is; summarizing
 // would only add latency.
 const TTS_SUMMARIZE_MIN_CHARS = 600;
+// Enough of the reply for the server to judge its language.
+const LANGUAGE_SAMPLE_CHARS = 2000;
 
 const SUMMARIZE_SYSTEM_PROMPT = 'Summarize the assistant reply for text-to-speech listening. Reply with 2-4 sentences of plain spoken prose in the same language as the reply. No markdown, no lists, no code — mention code changes briefly in words instead.';
 
@@ -86,6 +91,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
     const ttsFollowTextLanguage = useConfigStore((state) => state.ttsFollowTextLanguage);
     const browserVoice = useConfigStore((state) => state.browserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
+    const geminiVoice = useConfigStore((state) => state.geminiVoice);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
@@ -104,13 +110,16 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         enabled: shouldCheckSayAvailability,
     });
     const { speak: speakLocalTTS, stop: stopLocalTTS } = useLocalTTS();
+    const { speak: speakGeminiTTS, stop: stopGeminiTTS } = useGeminiTTS();
+    const { t } = useI18n();
     
     const stopPlayback = useCallback(() => {
         stopServerTTS();
         stopSayTTS();
         stopLocalTTS();
+        stopGeminiTTS();
         browserVoiceService.cancelSpeech();
-    }, [stopServerTTS, stopSayTTS, stopLocalTTS]);
+    }, [stopServerTTS, stopSayTTS, stopLocalTTS, stopGeminiTTS]);
 
     const stop = useCallback(() => stopReadingUnderKey(key), [key]);
 
@@ -170,6 +179,29 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     onEnd: finish,
                     onError: finish,
                 });
+            } else if (voiceProvider === 'gemini') {
+                const result = await speakGeminiTTS(sanitizedText, {
+                    voice: geminiVoice,
+                    languageSample: text.slice(0, LANGUAGE_SAMPLE_CHARS),
+                    pitch: speechPitch,
+                    volume: speechVolume,
+                });
+                if (result.status !== 'failed') {
+                    finish();
+                    return;
+                }
+                if (!isCurrentReading(token)) return;
+                // The day's free quota, a missing key or an outage must not
+                // leave the button silent: read with the local voice instead.
+                toast.info(t(GEMINI_FAILURE_MESSAGE_KEYS[result.code]));
+                await speakLocalTTS(sanitizedText, {
+                    model: localTtsModelId,
+                    speakerId: localTtsVoiceId,
+                    speed: speechRate,
+                    language: 'auto',
+                    onEnd: finish,
+                    onError: finish,
+                });
             } else if (voiceProvider === 'local') {
                 await speakLocalTTS(sanitizedText, {
                     model: localTtsModelId,
@@ -218,6 +250,9 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         sayVoice,
         browserVoice,
         openaiVoice,
+        geminiVoice,
+        speakGeminiTTS,
+        t,
         openaiCompatibleVoice,
         openaiCompatibleUrl,
         openaiCompatibleTtsModel,
