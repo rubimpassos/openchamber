@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { FOLD_DRAG_THRESHOLD_PX, resolveFoldGesture, resolveScrollOffset, resolveSettledOffset, useMobileComposerFoldStore } from './mobileComposerFold';
+import { FOLD_DRAG_THRESHOLD_PX, FOLD_ON_SCROLL_UP_PX, resolveFoldGesture, resolveScrollFold, useMobileComposerFoldStore } from './mobileComposerFold';
 
 describe('resolveFoldGesture', () => {
     test('a press without travel toggles', () => {
@@ -31,22 +31,22 @@ describe('useMobileComposerFoldStore', () => {
     });
 });
 
-describe('resolveScrollOffset', () => {
-    test('scrolling back pushes the composer down by the distance scrolled', () => {
-        expect(resolveScrollOffset(0, -30, 120)).toBe(30);
-        expect(resolveScrollOffset(30, -200, 120)).toBe(120);
+describe('resolveScrollFold', () => {
+    test('upward travel folds once it passes the threshold', () => {
+        const first = resolveScrollFold(0, -(FOLD_ON_SCROLL_UP_PX - 10), 500, false);
+        expect(first.action).toBeNull();
+        expect(resolveScrollFold(first.travelUp, -10, 500, false).action).toBe('fold');
     });
 
-    test('scrolling forward pulls it back, never past its place', () => {
-        expect(resolveScrollOffset(120, 50, 120)).toBe(70);
-        expect(resolveScrollOffset(20, 50, 120)).toBe(0);
+    test('a downward step resets the travel', () => {
+        const up = resolveScrollFold(0, -30, 500, false);
+        const down = resolveScrollFold(up.travelUp, 5, 500, false);
+        expect(down.travelUp).toBe(0);
+        expect(resolveScrollFold(down.travelUp, -30, 500, false).action).toBeNull();
     });
-});
 
-describe('resolveSettledOffset', () => {
-    test('settles to the nearer end, and back in place at the end of the transcript', () => {
-        expect(resolveSettledOffset(70, 120, 400)).toBe(120);
-        expect(resolveSettledOffset(50, 120, 400)).toBe(0);
-        expect(resolveSettledOffset(120, 120, 2)).toBe(0);
+    test('reaching the end unfolds; scrolling down elsewhere does not', () => {
+        expect(resolveScrollFold(0, 40, 300, true).action).toBeNull();
+        expect(resolveScrollFold(0, 40, 4, true).action).toBe('unfold');
     });
 });

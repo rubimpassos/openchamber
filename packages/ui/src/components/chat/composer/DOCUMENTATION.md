@@ -752,20 +752,14 @@ for any reason clears it. Folded, everything below the handle stays mounted and
 hidden, so a draft, attachments or a dictation are kept. The floating slot's
 `ResizeObserver` sees the shorter box, so the transcript gains the space with no
 extra wiring.
-Scrolling is tied to the composer (`useFoldComposerOnScroll`, mounted by
-`ChatContainer` on phones): reading back through the transcript slides the
-pill down by exactly the distance scrolled, until only its handle row shows,
-and reading forward slides it back. It moves through the individual
-`translate` property on the pill's shadow wrapper, so the transcript inset and
-the keyboard choreography, which own the box height and `transform`, are
-untouched. When the scroll stops, a half-hidden pill settles to the nearer end,
-and it is back in place at the end of the transcript. Only scrolls the reader
-drives count: a touch, its momentum for 900ms after the finger lifts, or a
-wheel; following a live reply, loading history and keyboard moves never move
-it, and nothing moves while the keyboard is open. A tap or upward drag on the
-handle of a scrolled-away pill brings it back before it toggles the fold.
-Folding from the handle tweens the glass box height on the keyboard's hide
-timing (WAAPI, skipped under reduced motion).
+Scrolling back through the transcript folds it too, and scrolling down to the
+end unfolds it (`useFoldComposerOnScroll`, mounted by `ChatContainer` on phones).
+Only scrolls the reader drives count: a touch, its momentum for 900ms after the
+finger lifts, or a wheel. Reaching the end unfolds it in the same scroll
+event whoever drove it, so a long fling's momentum does not leave it late. Following a live reply, loading history and keyboard
+moves never fold it, and nothing folds while the keyboard is open. The fold and
+unfold tween the glass box height on the keyboard's hide timing (WAAPI, skipped
+under reduced motion).
 
 On a phone the top rows (worktree setup, space wait, goal, auto review,
 background commands, reverted, queue, done hint, suggestion) pass through

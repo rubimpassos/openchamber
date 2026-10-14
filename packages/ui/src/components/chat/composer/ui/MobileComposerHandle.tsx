@@ -2,7 +2,7 @@ import React from 'react';
 
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { revealScrollHiddenComposer, resolveFoldGesture, useMobileComposerFoldStore } from '../state/mobileComposerFold';
+import { resolveFoldGesture, useMobileComposerFoldStore } from '../state/mobileComposerFold';
 
 const DRAG_START_PX = 6;
 
@@ -22,8 +22,6 @@ export function MobileComposerHandle() {
         dragRef.current = null;
         if (!drag) return;
         const gesture = resolveFoldGesture(clientY - drag.startY, drag.moved);
-        // Pushed down by a scroll, the composer comes back up first.
-        if ((gesture === 'toggle' || gesture === 'unfold') && revealScrollHiddenComposer()) return;
         if (gesture === 'toggle') setFolded(!folded);
         else if (gesture === 'fold') setFolded(true);
         else if (gesture === 'unfold') setFolded(false);
@@ -57,7 +55,6 @@ export function MobileComposerHandle() {
             onKeyDown={(event) => {
                 if (event.key !== 'Enter' && event.key !== ' ') return;
                 event.preventDefault();
-                if (revealScrollHiddenComposer()) return;
                 setFolded(!folded);
             }}
         >
