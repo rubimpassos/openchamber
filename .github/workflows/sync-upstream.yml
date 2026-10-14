@@ -1,10 +1,16 @@
 # Keeps this fork current with upstream, daily.
 #
 # `main` is the only branch: upstream's history with this fork's patches rebased
-# on top. A clean rebase bumps the patch version, tags it, and the tag starts
-# the release, so an upstream release reaches users as an ordinary update in the
-# app. A conflict fails the run and leaves `main` untouched; the run summary
-# lists the files to resolve.
+# on top. A rebase that finishes bumps the patch version, tags it, and the tag
+# starts the release, so an upstream release reaches users as an ordinary update
+# in the app.
+#
+# When the rebase stops on a conflict, Copilot CLI resolves it in place and the
+# rebase continues, so the resolution lives in the rewritten fork commit and the
+# same conflict does not come back on the next sync. A resolved rebase must pass
+# type-check and the web build before it is pushed. If Copilot cannot resolve a
+# stop, or the checks fail, the run fails and leaves `main` untouched; the run
+# summary lists the files to resolve by hand.
 #
 # Versioning: the fork keeps its own plain-semver line rather than upstream's
 # number with a suffix. A `-fork.N` prerelease would be skipped by
@@ -38,6 +44,9 @@ env:
   # In a fork `gh` resolves the repo to the parent and returns 403; pinning it to
   # this fork is what makes the issue lookup work.
   GH_REPO: ${{ github.repository }}
+  COPILOT_CLI_VERSION: 1.0.97
+  # Upper bound on rebase stops handed to Copilot in one run.
+  MAX_RESOLVE_STOPS: 30
 
 jobs:
   sync:
@@ -56,20 +65,25 @@ jobs:
             exit 1
           fi
 
+      # The push token is configured only in the push step. Copilot, bun install
+      # and the checks run upstream code before that and never see it.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.SYNC_PUSH_TOKEN }}
+          persist-credentials: false
 
       # bump-version.mjs refreshes the Bun lockfile, so the runner needs Bun.
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
-      - name: Configure git identity
+      # zdiff3 puts the common ancestor in each conflict, which Copilot needs to
+      # tell what each side changed.
+      - name: Configure git
         run: |
           git config user.name "fork-sync-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config merge.conflictStyle zdiff3
 
       # No tags: a pushed v* tag starts a release here, so upstream's version
       # tags must never reach this repository.
@@ -78,8 +92,13 @@ jobs:
           git remote add upstream "$UPSTREAM_REPO"
           git fetch --no-tags upstream "$UPSTREAM_BRANCH"
 
+      # COPILOT_GITHUB_TOKEN is a fine-grained token owned by a personal account
+      # with only the "Copilot Requests" account permission. Copilot Free is
+      # enough. Without it a conflict fails the run as before.
       - name: Rebase onto upstream
         id: rebase
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -92,10 +111,11 @@ jobs:
           # Read before the rebase, which drops the commits that carry it.
           echo "fork_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-          # Keep a restore point before rewriting the only branch this fork has.
+          # Restore point before rewriting the only branch this fork has. The
+          # push step publishes it before it moves `main`.
           backup="sync-backup-$(date +%F-%H%M)"
           git tag "$backup"
-          git push origin "refs/tags/$backup"
+          echo "backup=$backup" >> "$GITHUB_OUTPUT"
 
           # A `release vX.Y.Z` commit only moves the version in the files
           # bump-version.mjs writes. Replayed, it would conflict with every
@@ -122,11 +142,140 @@ jobs:
           if RELEASE_FILES="$release_files" GIT_SEQUENCE_EDITOR="bash $drop_release_commits" GIT_EDITOR=true \
             git rebase --interactive --empty=drop "upstream/$UPSTREAM_BRANCH"; then
             echo "status=rebased" >> "$GITHUB_OUTPUT"
-          else
+            exit 0
+          fi
+
+          conflicts="$RUNNER_TEMP/conflicts"
+          stopped_at="$RUNNER_TEMP/stopped-at"
+          resolved="$RUNNER_TEMP/resolved"
+          : > "$resolved"
+
+          record_stop() {
+            git diff --name-only --diff-filter=U > "$conflicts" || true
+            git log -1 --format='%h %s' REBASE_HEAD > "$stopped_at" || true
+          }
+          give_up() {
+            echo "::error::$1"
             echo "status=conflict" >> "$GITHUB_OUTPUT"
-            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts" || true
-            git log -1 --format='%h %s' REBASE_HEAD > "$RUNNER_TEMP/stopped-at" || true
             git rebase --abort || true
+            exit 0
+          }
+
+          # From here on, any unexpected failure aborts the rebase and falls back
+          # to the manual conflict report.
+          trap 'give_up "Resolving the conflict failed at line $LINENO."' ERR
+
+          record_stop
+          if [ -z "${COPILOT_GITHUB_TOKEN:-}" ]; then
+            give_up "The rebase stopped on a conflict and the COPILOT_GITHUB_TOKEN secret is not set, so nothing resolved it."
+          fi
+          npm install --global --silent "@github/copilot@$COPILOT_CLI_VERSION"
+
+          stops=0
+          while [ -d .git/rebase-merge ]; do
+            stops=$((stops + 1))
+            if [ "$stops" -gt "$MAX_RESOLVE_STOPS" ]; then
+              give_up "The rebase stopped more than $MAX_RESOLVE_STOPS times."
+            fi
+            record_stop
+            mapfile -t files < "$conflicts"
+
+            if [ "${#files[@]}" -gt 0 ]; then
+              # Copilot only resolves text conflicts with both sides present.
+              # In a modify/delete or binary conflict git leaves one side in the
+              # tree without markers, and adding it would silently drop the
+              # other side.
+              sources=()
+              for file in "${files[@]}"; do
+                [ "$file" = bun.lock ] && continue
+                stages=$(git ls-files -u -- "$file" | awk '{print $3}' | sort -u | tr -d '\n')
+                if [[ $stages != *2*3* ]] || ! grep -qE '^<<<<<<<( |$)' -- "$file"; then
+                  give_up "\`$file\` has a conflict Copilot cannot resolve (deleted on one side, or binary)."
+                fi
+                sources+=("$file")
+              done
+
+              if [ "${#sources[@]}" -gt 0 ]; then
+                prompt="You are finishing a git rebase that replays this fork's patches onto upstream.
+          The rebase stopped while applying the fork commit REBASE_HEAD ($(cat "$stopped_at")), with conflicts in:
+          $(printf -- '- %s\n' "${sources[@]}")
+
+          In each conflict, the part between <<<<<<< and ||||||| is upstream, the part between ||||||| and ======= is the common ancestor, and the part between ======= and >>>>>>> is the fork commit.
+          Run \`git show REBASE_HEAD\` to see what the fork commit changes and why.
+
+          Resolve every conflict in those files. Keep upstream's code and reapply the fork commit's change on top of it, so both survive. Where upstream already makes the fork's change, keep upstream's version. Remove every conflict marker.
+          Edit only the files listed above. Do not create files, and do not run git commands that change the index, the history or the working tree."
+
+                copilot -p "$prompt" -s --no-ask-user \
+                  --allow-tool=write \
+                  --allow-tool='shell(git show:*)' \
+                  --allow-tool='shell(git diff:*)' \
+                  --allow-tool='shell(git log:*)' \
+                  || give_up "Copilot CLI failed on $(cat "$stopped_at")."
+
+                stray=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | grep -vxF -f "$conflicts" || true)
+                if [ -n "$stray" ]; then
+                  give_up "Copilot changed files outside the conflict: $(tr '\n' ' ' <<<"$stray")"
+                fi
+                if grep -nE '^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)( |$)' -- "${sources[@]}"; then
+                  give_up "Conflict markers remain after Copilot on $(cat "$stopped_at")."
+                fi
+                git add -- "${sources[@]}"
+              fi
+
+              # The lockfile is regenerated from upstream's lockfile and the
+              # resolved manifests. During a rebase, --ours is upstream.
+              if printf '%s\n' "${files[@]}" | grep -qxF bun.lock; then
+                git checkout --ours -- bun.lock
+                bun install --lockfile-only
+                git add bun.lock
+              fi
+
+              echo "- \`$(cat "$stopped_at")\`: $(printf '`%s` ' "${files[@]}")" >> "$resolved"
+            fi
+
+            # A resolution that matches upstream leaves the fork commit empty.
+            if git diff --cached --quiet; then
+              git rebase --skip || true
+            else
+              GIT_EDITOR=true git rebase --continue || true
+            fi
+          done
+
+          echo "status=rebased" >> "$GITHUB_OUTPUT"
+          echo "resolved=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Copilot resolved upstream sync conflicts"
+            echo
+            cat "$resolved"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Node.js
+        if: steps.rebase.outputs.resolved == 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+
+      # Only Copilot's work is checked here; a clean rebase releases as before.
+      - name: Check the resolved code
+        if: steps.rebase.outputs.resolved == 'true'
+        run: |
+          set -uo pipefail
+          if ! { bun install --frozen-lockfile && bun run type-check && bun run build:web; }; then
+            {
+              echo
+              echo "### The resolved code failed the checks"
+              echo
+              echo "\`$BRANCH\` was left untouched and nothing was released. Resolve the conflicts above by hand:"
+              echo
+              echo '```bash'
+              echo "git fetch upstream $UPSTREAM_BRANCH"
+              echo "git rebase -i upstream/$UPSTREAM_BRANCH   # drop the release v* commits, resolve the conflicts"
+              echo "node scripts/bump-version.mjs <next version> && git commit -am 'release v<next version>'"
+              echo "git push --force-with-lease origin $BRANCH && git tag v<next version> && git push origin v<next version>"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
       - name: Bump the fork version
@@ -158,11 +307,20 @@ jobs:
         if: steps.rebase.outputs.status == 'rebased'
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          BACKUP: ${{ steps.rebase.outputs.backup }}
+          SYNC_PUSH_TOKEN: ${{ secrets.SYNC_PUSH_TOKEN }}
         run: |
           set -euo pipefail
-          git push --force-with-lease origin "$BRANCH"
+          echo "::add-mask::$(printf 'x-access-token:%s' "$SYNC_PUSH_TOKEN" | base64 -w0)"
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SYNC_PUSH_TOKEN" | base64 -w0)"
+          # Earlier steps ran upstream code that could have written hooks into
+          # .git; none of them may run while the token is configured.
+          push() { git -c core.hooksPath=/dev/null -c core.fsmonitor=false push "$@"; }
+          push origin "refs/tags/$BACKUP"
+          push --force-with-lease origin "$BRANCH"
           git tag "v$VERSION"
-          git push origin "v$VERSION"
+          push origin "v$VERSION"
 
       - name: Report the conflict
         if: steps.rebase.outputs.status == 'conflict'
@@ -172,7 +330,7 @@ jobs:
           {
             echo "### Upstream sync stopped on a conflict"
             echo
-            echo "\`$BRANCH\` was left untouched. The rebase stopped at \`$(cat "$RUNNER_TEMP/stopped-at")\`, in:"
+            echo "Copilot did not resolve it, and \`$BRANCH\` was left untouched. The rebase stopped at \`$(cat "$RUNNER_TEMP/stopped-at")\`, in:"
             echo
             while IFS= read -r file; do echo "- \`$file\`"; done < "$RUNNER_TEMP/conflicts"
             echo
