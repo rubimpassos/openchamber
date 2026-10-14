@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { desktopHostMachineStats } from '@/lib/desktopHosts';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { parseServerMachineSample, type ServerMachineSample } from '@/lib/serverMachineStats';
@@ -122,4 +123,53 @@ export const useServerMachineStats = (enabled: boolean, intervalMs: number): Ser
   }, [enabled, intervalMs, unsupported, endpointEpoch]);
 
   return state;
+};
+
+/**
+ * Machine stats of other saved instances for the host list: read once when
+ * `enabled` turns on (the menu opens) and every `intervalMs` while it stays
+ * on. Nothing runs while it is off. Readings are kept per host so a host that
+ * stops answering keeps its last values, dimmed.
+ */
+export const useOtherHostsMachineStats = (
+  enabled: boolean,
+  hostIds: readonly string[],
+  intervalMs: number,
+): Record<string, ServerMachineStatsState> => {
+  const [states, setStates] = React.useState<Record<string, ServerMachineStatsState>>({});
+  const idsKey = hostIds.join('\n');
+
+  React.useEffect(() => {
+    const ids = idsKey ? idsKey.split('\n') : [];
+    if (!enabled || ids.length === 0) return;
+
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      if (document.visibilityState === 'visible') {
+        await Promise.all(ids.map(async (hostId) => {
+          const result = await desktopHostMachineStats(hostId);
+          if (cancelled) return;
+          const outcome = result.kind === 'sample'
+            ? { kind: 'sample' as const, sample: result.sample, latencyMs: 0 }
+            : result;
+          setStates((prev) => ({
+            ...prev,
+            [hostId]: nextMachineStatsState(prev[hostId] ?? { kind: 'loading' }, outcome, Date.now()),
+          }));
+        }));
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), intervalMs);
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [enabled, idsKey, intervalMs]);
+
+  return states;
 };

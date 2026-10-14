@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // Response of the server's authenticated GET /api/system/stats.
-const sampleSchema = z.object({
+export const serverMachineSampleSchema = z.object({
   collectedAt: z.string(),
   hostname: z.string(),
   osName: z.string(),
@@ -34,10 +34,10 @@ const sampleSchema = z.object({
   }),
 });
 
-export type ServerMachineSample = z.infer<typeof sampleSchema>;
+export type ServerMachineSample = z.infer<typeof serverMachineSampleSchema>;
 
-export const parseServerMachineSample = (payload: z.input<typeof sampleSchema>): ServerMachineSample | null => {
-  const parsed = sampleSchema.safeParse(payload);
+export const parseServerMachineSample = (payload: z.input<typeof serverMachineSampleSchema>): ServerMachineSample | null => {
+  const parsed = serverMachineSampleSchema.safeParse(payload);
   return parsed.success ? parsed.data : null;
 };
 
