@@ -5,6 +5,7 @@ import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOut
 import type { LoopbackRequest, LoopbackRequestResult, LoopbackUrlRequest, LoopbackUrlResult } from './loopback.ts';
 import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
+import type { GuestStatusSummaryItem } from './status-summary.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestTooltipRequest } from './popover.ts';
 
 export type HostThemeMode = 'light' | 'dark';
@@ -224,6 +225,8 @@ export type HostReadyContext = {
   features?: {
     deviceStorage?: true;
     statusControls?: true;
+    /** `setStatusSummary` draws readouts on the status section header. */
+    statusSummary?: true;
     popovers?: true;
     /** `showTooltip` / `hideTooltip` draw host tooltips. */
     tooltips?: true;
@@ -677,6 +680,7 @@ export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
 export type GuestResizeMessage = GuestCall<'resize', ResizeRequest>;
 export type GuestOpenCommitMessage = GuestCall<'open-commit', OpenCommitRequest>;
 export type GuestStatusControlsMessage = GuestCall<'status-controls', { controls: GuestStatusControl[] }>;
+export type GuestStatusSummaryMessage = GuestCall<'status-summary', { items: GuestStatusSummaryItem[] }>;
 export type GuestPopoverOpenMessage = GuestCall<'popover-open', GuestPopoverRequest>;
 export type GuestPopoverCloseMessage = GuestCall<'popover-close', { id: string; reason?: 'closed' | 'escape' }>;
 export type GuestPopoverAnchorMessage = GuestCall<'popover-anchor', { id: string; active: boolean }>;
@@ -739,6 +743,7 @@ export type GuestMessage =
   | GuestResizeMessage
   | GuestOpenCommitMessage
   | GuestStatusControlsMessage
+  | GuestStatusSummaryMessage
   | GuestPopoverOpenMessage
   | GuestPopoverCloseMessage
   | GuestPopoverAnchorMessage

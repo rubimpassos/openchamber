@@ -331,7 +331,11 @@ guest-scoped token, context, grants and pause gates as a rail panel.
 
 Cost is bounded by mounting. The frame exists only while the panel's content is
 mounted, the section is visible, and the section is expanded; the collapsible
-drops its children when folded. `PluginPane` itself is lazy-loaded, so a panel
+drops its children when folded. The exception is a row with `statusKeepAlive`
+(`statusSection.keepAlive`): its frame stays mounted while folded, in a
+zero-height, `inert`, `aria-hidden` box at the section's width, so the page keeps
+its layout and state and unfolds without loading again. Hiding the section or
+closing the card still drops it. `PluginPane` itself is lazy-loaded, so a panel
 without extension sections never loads it. The frame's height starts at the
 manifest `height` (default 120px) and follows the guest's `setHeight`, clamped
 to 24..320px; taller content scrolls inside the frame, never the host. The last
@@ -348,6 +352,13 @@ the guest republishes them from `onDirectory`. Workspace subscriptions and other
 in-flight requests survive that project change. One or two controls use the header action
 slot; three or four use a two-column row below the title. Folding removes the
 controls with the frame rather than retaining a hidden controller.
+
+The guest's header readouts (`setStatusSummary`) are the section's `summary`,
+drawn like a built-in section's count: an optional sprite icon, then the text,
+with the guest's `label` as tooltip and accessible name. They belong to the frame
+that sent them: `PluginPane` reports `[]` when the frame is disposed, the
+project changes, or the runtime switches, so a folded section without
+`keepAlive` shows none rather than a stale count.
 
 An expanded extension can also open a sandboxed anchored popover outside its
 body iframe. The host positions the card and loads the same approved entry

@@ -244,6 +244,27 @@ describe('connectHost', () => {
     host.dispose();
   });
 
+  test('publishes the status summary only to supporting hosts and checks it locally', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    await expect(host.setStatusSummary([])).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    frame.dispatch(new MessageEvent('message', { data: {
+      ...ready,
+      payload: { ...ready.payload, features: { statusSummary: true } },
+    } }));
+    const posted = frame.posted.length;
+    await expect(host.setStatusSummary([{ text: 'x'.repeat(17) }])).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    expect(frame.posted).toHaveLength(posted);
+    const items = [{ text: '2/5', icon: 'list-check-2', label: '2 of 5 todos done' }];
+    const pending = host.setStatusSummary(items);
+    const request = frame.posted.at(-1);
+    if (!request || request.type !== 'status-summary') throw new Error('Expected status summary request');
+    expect(request.payload).toEqual({ items });
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: request.id, ok: true } }));
+    await pending;
+    host.dispose();
+  });
+
   const action: HostMessage = {
     channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'action', id: 'action-1',
     payload: { kind: 'message', action: 'count', sessionId: 's1', sessionTitle: 'Session', directory: '/repo', messageId: 'm1', role: 'assistant', text: 'Hello' },

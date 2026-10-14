@@ -1,7 +1,7 @@
 // allow: SIZE_OK — existing dispatch-contract suite; transport and lifecycle cases live in focused loopback/background tests.
 import { describe, expect, test } from 'bun:test';
 
-import { HostRequestError, OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestStatusControl, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
+import { HostRequestError, OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestStatusControl, type GuestStatusSummaryItem, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
 import type { GuestFileProxyResult, GuestFileRequest } from './files.ts';
 import type { GuestGenerateProxyResult } from './generate.ts';
 
@@ -35,6 +35,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   filesUnwatch: overrides.filesUnwatch ?? (() => {}),
   storage: overrides.storage ?? (async () => ({ storage: true, op: 'keys', keys: [] })),
   setStatusControls: overrides.setStatusControls ?? (() => {}),
+  setStatusSummary: overrides.setStatusSummary ?? (() => {}),
   openSession: overrides.openSession ?? (() => {}),
   toast: overrides.toast ?? (() => {}),
   openUrl: overrides.openUrl ?? (async () => true),
@@ -73,6 +74,19 @@ describe('answerGuestMessage', () => {
     expect(result).toMatchObject({ type: 'result', id: 'header-1', ok: true });
     const unsupported = await answerGuestMessage(message, effects({ setStatusControls: () => {
       throw new HostRequestError('UNSUPPORTED', 'Only mounted status frames own header controls.');
+    } }));
+    expect(unsupported).toMatchObject({ type: 'result', ok: false, code: 'UNSUPPORTED' });
+  });
+
+  test('publishes the status summary through the frame owner and reports unsupported owners', async () => {
+    const items: GuestStatusSummaryItem[] = [{ text: '2/5', icon: 'list-check-2', label: '2 of 5 todos done' }];
+    const seen: GuestStatusSummaryItem[][] = [];
+    const message: GuestMessage = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'status-summary', id: 'summary-1', payload: { items } };
+    const result = await answerGuestMessage(message, effects({ setStatusSummary: (next) => { seen.push(next); } }));
+    expect(seen).toEqual([items]);
+    expect(result).toMatchObject({ type: 'result', id: 'summary-1', ok: true });
+    const unsupported = await answerGuestMessage(message, effects({ setStatusSummary: () => {
+      throw new HostRequestError('UNSUPPORTED', 'Only status frames own a header summary.');
     } }));
     expect(unsupported).toMatchObject({ type: 'result', ok: false, code: 'UNSUPPORTED' });
   });

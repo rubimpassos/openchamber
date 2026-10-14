@@ -4,6 +4,7 @@ import {
   type GuestStorageRequest,
   type GuestStorageResult,
   type GuestStatusControl,
+  type GuestStatusSummaryItem,
   type GuestWorkspaceQuery,
   type GuestWorkspaceSnapshot,
   type GuestWorkspaceSubscription,
@@ -60,6 +61,7 @@ type HostBridgeEffects = ReturnType<typeof createGuestLoopback> & {
   filesUnwatch: (subscriptionId: string) => void;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
   setStatusControls: (controls: GuestStatusControl[]) => void;
+  setStatusSummary: (items: GuestStatusSummaryItem[]) => void;
   openSession: (sessionId: string) => void;
   toast: (request: ToastRequest) => void;
   openUrl: (url: string) => Promise<boolean>;
@@ -274,6 +276,7 @@ export const answerGuestMessage = async (
     case 'files-unwatch': effects.filesUnwatch(message.payload.subscriptionId); return okResult(message.id);
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'status-controls': effects.setStatusControls(message.payload.controls); return okResult(message.id);
+    case 'status-summary': effects.setStatusSummary(message.payload.items); return okResult(message.id);
     case 'loopback-url': return okResult(message.id, await effects.loopbackUrl(message.payload));
     case 'loopback-request': return okResult(message.id, await effects.loopbackRequest(message.payload));
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);

@@ -1,9 +1,10 @@
 import React from 'react';
-import { GUEST_STATUS_SECTION_HEIGHT_DEFAULT, clampStatusSectionHeight } from '@openchamber/sdk';
+import { GUEST_STATUS_SECTION_HEIGHT_DEFAULT, clampStatusSectionHeight, type GuestStatusSummaryItem } from '@openchamber/sdk';
 
+import { Icon } from '@/components/icon/Icon';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { guestPackageIconSrc, isGuestIconName, resolveGuestIconName } from '@/lib/guests/icon';
 import { useI18n } from '@/lib/i18n';
 import type { InstalledGuest } from '@/lib/guests/types';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -26,13 +27,47 @@ const PluginPane = React.lazy(() => import('@/components/layout/PluginPane').the
  */
 const rememberedHeights = new Map<string, number>();
 
+const SUMMARY_TONE_COLOR = {
+  muted: undefined,
+  info: 'var(--status-info)',
+  success: 'var(--status-success)',
+  warning: 'var(--status-warning)',
+  error: 'var(--status-error)',
+} satisfies Record<NonNullable<GuestStatusSummaryItem['tone']>, string | undefined>;
+
+/** The guest's header readouts: an icon for what is counted, then the value. Unknown icon names draw text only. */
+const StatusSummary: React.FC<{ items: GuestStatusSummaryItem[] }> = ({ items }) => (
+  <span data-guest-status-summary className="inline-flex items-center gap-2.5">
+    {items.map((item, index) => (
+      <span
+        // The guest sends a whole list each time; position is its identity.
+        key={index}
+        title={item.label}
+        aria-label={item.label}
+        className="inline-flex items-center gap-1"
+        style={item.tone ? { color: SUMMARY_TONE_COLOR[item.tone] } : undefined}
+      >
+        {item.icon && isGuestIconName(item.icon) ? <Icon name={item.icon} className="size-3.5 shrink-0" aria-hidden /> : null}
+        <span>{item.text}</span>
+      </span>
+    ))}
+  </span>
+);
+
+const sameSummary = (left: GuestStatusSummaryItem[], right: GuestStatusSummaryItem[]): boolean => (
+  JSON.stringify(left) === JSON.stringify(right)
+);
+
 /**
  * An extension's own section (`contributes.statusSection`): the host draws the
  * header from the extension's title and icon, the body is its sandboxed page.
  *
  * The frame exists only while the section is expanded — the collapsible drops
  * its children when folded, and the panel drops the section when it is hidden
- * or the panel itself is — so a folded section costs nothing. Its height is
+ * or the panel itself is — so a folded section costs nothing. A section that
+ * declares `keepAlive` keeps its frame while folded, laid out at full width
+ * inside a zero-height, inert box, so its header summary stays current and
+ * unfolding shows the page without loading it again. Its height is
  * what the guest last asked for through `setHeight`, clamped by the SDK range
  * and remembered for the session; taller content scrolls inside the frame.
  */
@@ -60,23 +95,22 @@ export const WorkStatusExtensionSection: React.FC<{
   const iconSrc = guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset);
   const [statusControls, setStatusControls] = React.useState<GuestStatusControlBinding | null>(null);
   const actionLayout = statusControls && statusControls.controls.length >= 3 ? 'below' : 'inline';
+  const [summary, setSummary] = React.useState<GuestStatusSummaryItem[]>([]);
+  const handleSummary = React.useCallback((items: GuestStatusSummaryItem[]) => {
+    setSummary((current) => (sameSummary(current, items) ? current : items));
+  }, []);
+  const keepAlive = guest.statusKeepAlive === true;
 
   if (!visible) return null;
 
-  return (
-    <WorkStatusCollapsibleSection
-      id={sectionId}
-      title={guest.statusTitle ?? guest.name}
-      iconNode={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-4 shrink-0 text-muted-foreground" />}
-      defaultExpanded={guest.statusDefaultExpanded ?? true}
-      actionLayout={actionLayout}
-      action={expanded && statusControls ? (
-        <StatusHeaderControls
-          controls={statusControls.controls}
-          layout={actionLayout}
-          onActivate={(id, value) => statusControls.dispatch(value === undefined ? { id } : { id, value })}
-        />
-      ) : undefined}
+  const body = (
+    <div
+      data-guest-status-frame={guest.id}
+      // Folded and kept alive: still laid out at the section's width, so the
+      // page measures the same and unfolds at its real height, but takes no room.
+      className={expanded ? undefined : 'h-0 overflow-hidden'}
+      aria-hidden={expanded ? undefined : true}
+      inert={expanded ? undefined : true}
     >
       <div data-guest-status-body={guest.id} className="mx-1 overflow-hidden rounded-md" style={{ height }}>
         <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
@@ -88,10 +122,32 @@ export const WorkStatusExtensionSection: React.FC<{
               onResize={handleResize}
               statusDirectory={directory}
               onStatusControls={setStatusControls}
+              onStatusSummary={handleSummary}
             />
           </React.Suspense>
         </ErrorBoundary>
       </div>
+    </div>
+  );
+
+  return (
+    <WorkStatusCollapsibleSection
+      id={sectionId}
+      title={guest.statusTitle ?? guest.name}
+      iconNode={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-4 shrink-0 text-muted-foreground" />}
+      defaultExpanded={guest.statusDefaultExpanded ?? true}
+      summary={summary.length > 0 ? <StatusSummary items={summary} /> : undefined}
+      actionLayout={actionLayout}
+      action={expanded && statusControls ? (
+        <StatusHeaderControls
+          controls={statusControls.controls}
+          layout={actionLayout}
+          onActivate={(id, value) => statusControls.dispatch(value === undefined ? { id } : { id, value })}
+        />
+      ) : undefined}
+      collapsedContent={keepAlive ? body : undefined}
+    >
+      {body}
     </WorkStatusCollapsibleSection>
   );
 };

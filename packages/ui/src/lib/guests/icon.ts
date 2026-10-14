@@ -15,7 +15,7 @@ const HOST_PRODUCT_ICONS = new Set([
   'openchamber',
 ]);
 
-const isGuestIconName = (name: string): name is IconName => (
+export const isGuestIconName = (name: string): name is IconName => (
   Object.hasOwn(iconSpriteData, name) && !HOST_PRODUCT_ICONS.has(name)
 );
 

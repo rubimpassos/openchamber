@@ -56,6 +56,8 @@ export type InstalledGuest = {
   statusDefaultExpanded?: boolean;
   /** Whether this status section needs the Work Status directory. */
   statusRequiresProject?: boolean;
+  /** Keep the status frame running, hidden, while the section is folded. */
+  statusKeepAlive?: true;
   integration?: PublicIntegration;
   /** Declared `contributes.filesystem` patterns, shown on the approval dialog. */
   filesystem?: string[];
