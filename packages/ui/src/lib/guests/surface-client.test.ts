@@ -74,6 +74,43 @@ describe('surface client', () => {
     client.dispose();
   });
 
+  test('hands the pane one frame at a time, the newest that arrived while it drew', async () => {
+    const { client, sockets, frames } = createClient();
+    client.start();
+    await tick();
+    const socket = sockets[0];
+    socket.open();
+    const frame = (seq: number) => {
+      socket.text({ type: 'frame', seq, width: 320, height: 200, mime: 'image/png', bytes: 1, agentActive: false });
+      socket.binary(new Uint8Array([seq]));
+    };
+
+    frame(1);
+    frame(2);
+    frame(3);
+    expect(frames.map((f) => f.seq)).toEqual([1]);
+    // An ack for a frame the pane is not drawing changes nothing.
+    client.ack(2);
+    expect(socket.sent).toEqual([]);
+
+    client.ack(1);
+    expect(frames.map((f) => f.seq)).toEqual([1, 3]);
+    client.ack(3);
+    expect(socket.sent.map((raw) => JSON.parse(raw))).toEqual([{ type: 'ack', seq: 1 }, { type: 'ack', seq: 3 }]);
+
+    // A new connection forgets the frame being drawn: its first frame is drawn at once.
+    frame(4);
+    socket.text({ type: 'ended', reason: 'service-stopped' });
+    socket.close();
+    client.retry();
+    await tick();
+    sockets[1].open();
+    sockets[1].text({ type: 'frame', seq: 1, width: 320, height: 200, mime: 'image/png', bytes: 1, agentActive: false });
+    sockets[1].binary(new Uint8Array([1]));
+    expect(frames.map((f) => f.seq)).toEqual([1, 3, 4, 1]);
+    client.dispose();
+  });
+
   test('mirrors control, clipboard, and input; ignores messages that are not the contract', async () => {
     const { client, sockets, controls, clipboard } = createClient();
     client.start();
