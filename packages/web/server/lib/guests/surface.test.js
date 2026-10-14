@@ -99,8 +99,8 @@ const listen = (server) => new Promise((resolve) => {
   server.listen(0, '127.0.0.1', () => resolve(server.address().port));
 });
 
-const openViewer = (port, guestId = 'sim') => new Promise((resolve, reject) => {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/api/guests/${guestId}/surface/ws`);
+const openViewer = (port, guestId = 'sim', query = '') => new Promise((resolve, reject) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/api/guests/${guestId}/surface/ws${query}`);
   ws.binaryType = 'arraybuffer';
   const inbox = [];
   const waiting = [];
@@ -205,6 +205,40 @@ describe('guest surface runtime', () => {
     await settle();
     expect(holds[0].released).toBe(true);
     expect(service.callsTo(SURFACE_FRAME_PATH)[0].query).toEqual({ after: '0', wait: '25000' });
+  });
+
+  test('a viewer that asks for a window gets that many frames unacknowledged; an ack covers earlier ones', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port, 'sim', '?frames=2');
+    await viewer.next();
+    await viewer.next();
+    const nextFrame = async () => {
+      const meta = await viewer.next();
+      await viewer.next();
+      return meta.seq;
+    };
+
+    service.pushFrame({ seq: 1, bytes: Buffer.from('frame-1') });
+    expect(await nextFrame()).toBe(1);
+    service.pushFrame({ seq: 2, bytes: Buffer.from('frame-2') });
+    expect(await nextFrame()).toBe(2);
+    // Two in flight: the third waits for an ack.
+    service.pushFrame({ seq: 3, bytes: Buffer.from('frame-3') });
+    await settle();
+    service.pushFrame({ seq: 4, bytes: Buffer.from('frame-4') });
+    await settle();
+    // Acknowledging 2 acknowledges the skipped 1 too: both slots open, and the newest is sent.
+    viewer.send({ type: 'ack', seq: 2 });
+    expect(await nextFrame()).toBe(4);
+    // An ack for a frame no longer in flight changes nothing.
+    viewer.send({ type: 'ack', seq: 1 });
+
+    const click = { type: 'pointer', action: 'down', x: 1, y: 1, button: 0, buttons: 1, modifiers: { alt: false, ctrl: false, meta: false, shift: false } };
+    viewer.send({ type: 'input', events: [click] });
+    await viewer.next();
+    await settle();
+    // Input is stamped with the frame the viewer last drew, not the one still in flight.
+    expect(service.callsTo(SURFACE_INPUT_PATH)[0].headers['x-surface-frame-seq']).toBe('2');
   });
 
   test('the first input takes control, is forwarded, and tells the service; release hands it back', async () => {

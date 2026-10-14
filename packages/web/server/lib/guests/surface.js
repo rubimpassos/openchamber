@@ -5,9 +5,11 @@
  * One session per extension while at least one viewer is attached. A pump
  * pulls frames from the service (`GET /surface/frame?after=<seq>`, held by
  * the service until something changed) and hands each viewer the newest
- * frame it has not seen, one at a time: a viewer gets the next frame only
- * after acknowledging the previous one, so a slow connection skips frames
- * instead of queueing them. The service is held running for the life of the
+ * frame it has not seen. A viewer has at most `frames` unacknowledged
+ * frames in flight (a socket query it chooses, 1 when absent, at most
+ * `MAX_FRAMES_IN_FLIGHT`), so a slow connection skips frames instead of
+ * queueing them, and a long round trip does not cap the frame rate at one
+ * frame per round trip. The service is held running for the life of the
  * session and returns to its idle window when the last viewer leaves.
  *
  * Control is owned here, not by the service or the panel. The user takes
@@ -60,6 +62,13 @@ const SURFACE_WS_PATH = /^\/api\/guests\/([a-z][a-z0-9-]*)\/surface\/ws$/;
 const VIEWER_MESSAGE_MAX_BYTES = 256 * 1024;
 const QUICK_REQUEST_TIMEOUT_MS = 10_000;
 const FRAME_MIMES = new Set(SURFACE_FRAME_MIMES);
+const MAX_FRAMES_IN_FLIGHT = 3;
+
+/** The viewer's `frames` query: how many unacknowledged frames it can take. Viewers that predate it get one. */
+const readFramesInFlight = (searchParams) => {
+  const value = Number(searchParams.get('frames'));
+  return Number.isInteger(value) && value > 0 ? Math.min(value, MAX_FRAMES_IN_FLIGHT) : 1;
+};
 
 /** Whether this catalog row can show a surface right now. */
 export const isSurfaceGuest = (guest) => (
@@ -117,9 +126,9 @@ export const createGuestSurfaceRuntime = ({
    *   id: string,
    *   ws: import('ws').WebSocket,
    *   sentSeq: number,
-   *   sentServiceSeq: number,
    *   shownServiceSeq: number,
-   *   awaitingAck: boolean,
+   *   framesInFlight: number,
+   *   inFlight: Array<{ seq: number, serviceSeq: number }>,
    * }} Viewer
    * @typedef {{
    *   guestId: string,
@@ -216,10 +225,9 @@ export const createGuestSurfaceRuntime = ({
 
   const deliverLatest = (session, viewer) => {
     const frame = session.latest;
-    if (!frame || viewer.awaitingAck || viewer.sentSeq >= frame.seq || viewer.ws.readyState !== 1) return;
-    viewer.awaitingAck = true;
+    if (!frame || viewer.inFlight.length >= viewer.framesInFlight || viewer.sentSeq >= frame.seq || viewer.ws.readyState !== 1) return;
+    viewer.inFlight.push({ seq: frame.seq, serviceSeq: frame.serviceSeq });
     viewer.sentSeq = frame.seq;
-    viewer.sentServiceSeq = frame.serviceSeq;
     const meta = {
       type: 'frame',
       seq: frame.seq,
@@ -481,14 +489,18 @@ export const createGuestSurfaceRuntime = ({
     }
     const message = parsed.data;
     switch (message.type) {
-      case 'ack':
-        if (message.seq === viewer.sentSeq) {
-          viewer.awaitingAck = false;
-          // Acknowledged after drawing: this is the picture its next input is made on.
-          viewer.shownServiceSeq = viewer.sentServiceSeq;
-          deliverLatest(session, viewer);
-        }
+      case 'ack': {
+        // Cumulative: an ack covers every earlier frame still in flight, which
+        // the viewer skipped for this newer one. An ack for a frame no longer
+        // in flight (it arrived after a newer one's) changes nothing.
+        const acked = viewer.inFlight.findIndex((sent) => sent.seq === message.seq);
+        if (acked === -1) return;
+        // Acknowledged after drawing: this is the picture its next input is made on.
+        viewer.shownServiceSeq = viewer.inFlight[acked].serviceSeq;
+        viewer.inFlight.splice(0, acked + 1);
+        deliverLatest(session, viewer);
         return;
+      }
       case 'input': {
         const handoff = session.handoffs;
         // Read on arrival, not when the queue reaches the batch: the socket
@@ -514,9 +526,9 @@ export const createGuestSurfaceRuntime = ({
     }
   };
 
-  const attachViewer = (guestId, guest, ws) => {
+  const attachViewer = (guestId, guest, ws, framesInFlight) => {
     const session = ensureSession(guestId, guest);
-    const viewer = { id: createViewerId(), ws, sentSeq: 0, sentServiceSeq: 0, shownServiceSeq: 0, awaitingAck: false, gone: false };
+    const viewer = { id: createViewerId(), ws, sentSeq: 0, shownServiceSeq: 0, framesInFlight, inFlight: [], gone: false };
     session.viewers.set(viewer.id, viewer);
     // Started with the first viewer in place: the pump's loop condition is
     // the viewer count, and it is checked before the first await.
@@ -569,12 +581,13 @@ export const createGuestSurfaceRuntime = ({
   const wsServer = new WebSocketServer({ noServer: true, maxPayload: VIEWER_MESSAGE_MAX_BYTES });
 
   const upgradeHandler = (req, socket, head) => {
-    let pathname = '';
+    let url;
     try {
-      pathname = new URL(req.url || '/', 'http://localhost').pathname;
+      url = new URL(req.url || '/', 'http://localhost');
     } catch {
       return;
     }
+    const { pathname } = url;
     const match = SURFACE_WS_PATH.exec(pathname);
     if (!match) return;
     const guestId = match[1];
@@ -606,7 +619,7 @@ export const createGuestSurfaceRuntime = ({
           return;
         }
         wsServer.handleUpgrade(req, socket, head, (ws) => {
-          attachViewer(guestId, guest, ws);
+          attachViewer(guestId, guest, ws, readFramesInFlight(url.searchParams));
         });
       } catch {
         rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');
