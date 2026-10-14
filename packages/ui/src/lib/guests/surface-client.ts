@@ -4,9 +4,12 @@
  *
  * The host sends a `frame` text message followed by one binary message with
  * the image; the client pairs them, hands the bytes to the pane, and
- * acknowledges the sequence once the pane has drawn it. That ack is what
- * lets the host send the next frame, so a pane that draws slowly sees fewer
- * frames rather than a growing queue. The socket goes through the runtime
+ * acknowledges the sequence once the pane has drawn it. The host keeps up to
+ * `FRAMES_IN_FLIGHT` frames unacknowledged, so frames keep coming during a
+ * round trip; the pane gets one frame at a time, the newest that arrived
+ * while it drew the previous one, and the ack for it covers the frames
+ * skipped. A pane that draws slowly sees fewer frames rather than a growing
+ * queue. The socket goes through the runtime
  * transport so it works over the relay too, and reconnects with backoff
  * while the pane is open.
  */
@@ -62,11 +65,13 @@ type SurfaceClientDependencies = {
 const SOCKET_OPEN = 1;
 const MAX_BACKOFF_MS = 8_000;
 const SLOW_BACKOFF_MS = 60_000;
+/** Unacknowledged frames the host may send this viewer; the host caps it at 3. */
+const FRAMES_IN_FLIGHT = 3;
 
 const defaultDependencies: SurfaceClientDependencies = {
   refreshAuth: refreshRuntimeUrlAuthToken,
   clearUrlAuthToken: clearRuntimeUrlAuthToken,
-  openSocket: (guestId) => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(`/api/guests/${guestId}/surface/ws`)),
+  openSocket: (guestId) => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(`/api/guests/${guestId}/surface/ws`, { frames: FRAMES_IN_FLIGHT })),
   isPaused: () => document.visibilityState === 'hidden' || !navigator.onLine,
   onWake: (wake) => {
     window.addEventListener('online', wake);
@@ -81,6 +86,10 @@ const defaultDependencies: SurfaceClientDependencies = {
 export class SurfaceClient {
   private socket: RelayTunnelWebSocket | null = null;
   private pendingFrame: Omit<SurfaceFrame, 'bytes'> | null = null;
+  /** The frame the pane is drawing, until it acknowledges it. */
+  private drawingSeq: number | null = null;
+  /** The newest frame that arrived while the pane was drawing. */
+  private nextFrame: SurfaceFrame | null = null;
   private lastSize: { width: number; height: number } | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wakeCleanup: (() => void) | null = null;
@@ -115,9 +124,30 @@ export class SurfaceClient {
     }
   }
 
-  /** Called by the pane once a frame is on screen; unlocks the next one. */
+  /** Called by the pane once a frame is on screen; hands it the next one. */
   ack(seq: number): void {
+    // A frame of an earlier connection: its ack means nothing to this one.
+    if (seq !== this.drawingSeq) return;
     this.send({ type: 'ack', seq });
+    this.drawingSeq = null;
+    const next = this.nextFrame;
+    this.nextFrame = null;
+    if (next) this.draw(next);
+  }
+
+  private draw(frame: SurfaceFrame): void {
+    if (this.drawingSeq !== null) {
+      this.nextFrame = frame;
+      return;
+    }
+    this.drawingSeq = frame.seq;
+    this.handlers.onFrame(frame);
+  }
+
+  private resetFrames(): void {
+    this.pendingFrame = null;
+    this.drawingSeq = null;
+    this.nextFrame = null;
   }
 
   sendInput(events: SurfaceInputEvent[]): boolean {
@@ -177,7 +207,7 @@ export class SurfaceClient {
       if (this.socket !== socket) return;
       opened = true;
       this.failures = 0;
-      this.pendingFrame = null;
+      this.resetFrames();
       if (this.lastSize) this.send({ type: 'resize', ...this.lastSize });
       this.handlers.onConnection({ status: 'open' });
     };
@@ -191,7 +221,7 @@ export class SurfaceClient {
     socket.onclose = () => {
       if (this.socket !== socket) return;
       this.socket = null;
-      this.pendingFrame = null;
+      this.resetFrames();
       if (this.disposed || this.ended) return;
       // A refusal before open is most often an expired URL token: mint a
       // fresh one on the next attempt instead of retrying the same refusal.
@@ -205,7 +235,7 @@ export class SurfaceClient {
       const meta = this.pendingFrame;
       this.pendingFrame = null;
       if (!meta) return;
-      this.handlers.onFrame({ ...meta, bytes: data });
+      this.draw({ ...meta, bytes: data });
       return;
     }
     let message: SurfaceHostMessage;
