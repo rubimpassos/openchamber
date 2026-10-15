@@ -17,6 +17,7 @@ const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
 const WAIT_POLL_INTERVAL_MS = 500;
 const BROWSER_REQUEST_HELP_REASON_MAX = 300;
+const BROWSER_DIALOG_PROMPT_TEXT_MAX = 10_000;
 // The provider owns its own `timeoutSeconds` deadline and must answer
 // `{ outcome: 'timeout' }` before this; the extra 15s only covers its own
 // bookkeeping around that deadline, never more time to wait for the person.
@@ -616,6 +617,19 @@ export const createOpenChamberControlService = (dependencies) => {
     if (action === 'browser.capture') {
       const label = asNonEmptyString(input.label);
       if (label) parameters.label = label;
+    }
+
+    if (action === 'browser.dialog') {
+      if (typeof input.accept !== 'boolean') {
+        throw new OpenChamberControlError('accept is required for browser.dialog: true presses OK, false presses Cancel', 400);
+      }
+      parameters.accept = input.accept;
+      if (input.promptText !== undefined && input.promptText !== null) {
+        if (typeof input.promptText !== 'string' || input.promptText.length > BROWSER_DIALOG_PROMPT_TEXT_MAX) {
+          throw new OpenChamberControlError(`promptText must be text of at most ${BROWSER_DIALOG_PROMPT_TEXT_MAX} characters`, 400);
+        }
+        parameters.promptText = input.promptText;
+      }
     }
 
     if (action === 'browser.open') {

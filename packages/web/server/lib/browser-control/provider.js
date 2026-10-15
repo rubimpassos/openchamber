@@ -55,6 +55,8 @@ const BROWSER_REQUEST_HELP_NO_SURFACE_ERROR = 'Asking for help needs a browser p
 
 /** The in-app browser has one shared, un-copied session; there is no saved profile to write. */
 const BROWSER_SAVE_PROFILE_NO_PROVIDER_ERROR = 'Saving a browser profile needs the Server Browser extension (Settings → OpenChamber Tools → Browser provider).';
+// The in-app view answers a page's dialogs itself, so it never has one waiting.
+const BROWSER_DIALOG_NO_PROVIDER_ERROR = 'No dialog is waiting in the in-app browser: its pages answer their own dialogs. browser.dialog is for the Server Browser extension (Settings → OpenChamber Tools → Browser provider).';
 
 /**
  * Whether this catalog row can answer browser actions right now. Mirrors what
@@ -221,6 +223,9 @@ export const createBrowserControlRouter = ({
         if (action === 'browser.saveProfile') {
           throw new BrowserControlError(BROWSER_SAVE_PROFILE_NO_PROVIDER_ERROR, 400);
         }
+        if (action === 'browser.dialog') {
+          throw new BrowserControlError(BROWSER_DIALOG_NO_PROVIDER_ERROR, 400);
+        }
         return broker.request(action, parameters, options);
       }
       let guest;
@@ -241,6 +246,9 @@ export const createBrowserControlRouter = ({
         }
         if (action === 'browser.saveProfile') {
           throw new BrowserControlError(BROWSER_SAVE_PROFILE_NO_PROVIDER_ERROR, 400);
+        }
+        if (action === 'browser.dialog') {
+          throw new BrowserControlError(BROWSER_DIALOG_NO_PROVIDER_ERROR, 400);
         }
         return broker.request(action, parameters, options);
       }
