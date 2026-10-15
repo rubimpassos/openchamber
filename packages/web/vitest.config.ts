@@ -32,15 +32,16 @@ export default defineConfig({
     // UI integration fixtures with Vite asset imports cannot execute in Bun's
     // raw TS loader. Keep them beside their UI owner and run them here.
     // The server-browser built-in is not a Bun workspace member (per
-    // packages/extensions/README.md), so its two suites that import
-    // `@openchamber/sdk` (service.js, browser-runtime.js) need this file's
-    // alias to resolve it; `scripts/run-isolated-tests.mjs` keeps routing
-    // its other, SDK-free suites straight to `node --test`.
+    // packages/extensions/README.md), so its suites that import
+    // `@openchamber/sdk` (service.js, browser-runtime.js, tab-audio.js) need
+    // this file's alias to resolve it; `scripts/run-isolated-tests.mjs` keeps
+    // routing its other, SDK-free suites straight to `node --test`.
     include: [
       ...configDefaults.include,
       '../ui/src/**/*.vitest.tsx',
       '../extensions/server-browser/test/service.test.js',
       '../extensions/server-browser/test/browser-integration.test.js',
+      '../extensions/server-browser/test/tab-audio.test.js',
     ],
     // The Git suites drive a real `git` binary against temporary repositories.
     // Those subprocess round-trips routinely pass the 5s default, and which
