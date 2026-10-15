@@ -2,7 +2,10 @@
 // already requires) instead of the 'ws' package: a built-in ships with the
 // app, not as an installable package with its own node_modules, so it keeps
 // no runtime dependency beyond @openchamber/sdk.
-const commandError = (method, reason) => new Error(`CDP command ${method} failed: ${reason}`);
+// `code` says why: 'protocol' when Chrome answered with an error, 'timeout'
+// when it gave no answer in time (it may still carry the command out), and
+// 'closed' when the connection is gone.
+const commandError = (method, reason, code) => Object.assign(new Error(`CDP command ${method} failed: ${reason}`), { code });
 
 export const connectCdp = async (webSocketDebuggerUrl, {
   commandTimeoutMs = 30_000,
@@ -18,7 +21,7 @@ export const connectCdp = async (webSocketDebuggerUrl, {
   const rejectPending = (reason) => {
     for (const entry of pending.values()) {
       clearTimeout(entry.timeout);
-      entry.reject(commandError(entry.method, reason));
+      entry.reject(commandError(entry.method, reason, 'closed'));
     }
     pending.clear();
   };
@@ -36,13 +39,13 @@ export const connectCdp = async (webSocketDebuggerUrl, {
 
   const sendCommand = (method, params = {}, sessionId) => {
     if (!open || socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(commandError(method, 'connection is closed'));
+      return Promise.reject(commandError(method, 'connection is closed', 'closed'));
     }
     const id = nextId++;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         pending.delete(id);
-        reject(commandError(method, `timed out after ${commandTimeoutMs}ms`));
+        reject(commandError(method, `timed out after ${commandTimeoutMs}ms`, 'timeout'));
       }, commandTimeoutMs);
       timeout.unref?.();
       pending.set(id, { method, sessionId, resolve, reject, timeout });
@@ -51,7 +54,7 @@ export const connectCdp = async (webSocketDebuggerUrl, {
       } catch (error) {
         clearTimeout(timeout);
         pending.delete(id);
-        reject(commandError(method, error instanceof Error ? error.message : String(error)));
+        reject(commandError(method, error instanceof Error ? error.message : String(error), 'closed'));
       }
     });
   };
@@ -69,7 +72,7 @@ export const connectCdp = async (webSocketDebuggerUrl, {
       if (!entry || entry.sessionId !== message.sessionId) return;
       pending.delete(message.id);
       clearTimeout(entry.timeout);
-      if (message.error) entry.reject(commandError(entry.method, message.error.message || 'protocol error'));
+      if (message.error) entry.reject(commandError(entry.method, message.error.message || 'protocol error', 'protocol'));
       else entry.resolve(message.result ?? {});
       return;
     }
