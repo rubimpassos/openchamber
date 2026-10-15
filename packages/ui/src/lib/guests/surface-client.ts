@@ -20,6 +20,8 @@ import type { SurfaceController, SurfaceInputEvent } from '@openchamber/sdk';
 
 import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
+
+import type { SurfaceAudioBatch } from './surface-audio';
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 
@@ -34,6 +36,7 @@ export type SurfaceFrame = {
 };
 
 export type SurfaceControlState = { controller: SurfaceController; mine: boolean };
+
 
 export type SurfaceConnectionState =
   | { status: 'connecting' }
@@ -50,6 +53,10 @@ export type SurfaceClientHandlers = {
   onError?: (code: string, message: string) => void;
   /** The host-issued id of this connection; a new one after every reconnect. */
   onViewer?: (viewerId: string) => void;
+  /** Sound while it is on; see `setAudio`. */
+  onAudio?: (audio: SurfaceAudioBatch) => void;
+  /** `false` when the extension has no sound to send, `true` when it sends again. */
+  onAudioState?: (available: boolean) => void;
 };
 
 type SurfaceClientDependencies = {
@@ -86,6 +93,9 @@ const defaultDependencies: SurfaceClientDependencies = {
 export class SurfaceClient {
   private socket: RelayTunnelWebSocket | null = null;
   private pendingFrame: Omit<SurfaceFrame, 'bytes'> | null = null;
+  private pendingAudio: Omit<SurfaceAudioBatch, 'bytes'> | null = null;
+  /** Kept so a reconnect asks for sound again. */
+  private audio = false;
   /** The frame the pane is drawing, until it acknowledges it. */
   private drawingSeq: number | null = null;
   /** The newest frame that arrived while the pane was drawing. */
@@ -146,6 +156,7 @@ export class SurfaceClient {
 
   private resetFrames(): void {
     this.pendingFrame = null;
+    this.pendingAudio = null;
     this.drawingSeq = null;
     this.nextFrame = null;
   }
@@ -168,6 +179,12 @@ export class SurfaceClient {
 
   requestClipboard(id: string): void {
     this.send({ type: 'clipboard-read', id });
+  }
+
+  /** Sound on or off for this viewer; nothing is sent until it is on. */
+  setAudio(enabled: boolean): void {
+    this.audio = enabled;
+    this.send({ type: 'audio', enabled });
   }
 
   private send(message: SurfaceViewerMessage): boolean {
@@ -209,6 +226,7 @@ export class SurfaceClient {
       this.failures = 0;
       this.resetFrames();
       if (this.lastSize) this.send({ type: 'resize', ...this.lastSize });
+      if (this.audio) this.send({ type: 'audio', enabled: true });
       this.handlers.onConnection({ status: 'open' });
     };
     socket.onmessage = (event) => {
@@ -232,6 +250,12 @@ export class SurfaceClient {
 
   private handleMessage(data: string | ArrayBuffer): void {
     if (data instanceof ArrayBuffer) {
+      const audio = this.pendingAudio;
+      this.pendingAudio = null;
+      if (audio) {
+        this.handlers.onAudio?.({ ...audio, bytes: data });
+        return;
+      }
       const meta = this.pendingFrame;
       this.pendingFrame = null;
       if (!meta) return;
@@ -249,6 +273,12 @@ export class SurfaceClient {
     switch (message.type) {
       case 'hello':
         this.handlers.onViewer?.(message.viewerId);
+        return;
+      case 'audio':
+        this.pendingAudio = { codec: message.codec, sampleRate: message.sampleRate, channels: message.channels };
+        return;
+      case 'audio-state':
+        this.handlers.onAudioState?.(message.available);
         return;
       case 'frame':
         this.pendingFrame = {
