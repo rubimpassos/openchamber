@@ -47,6 +47,8 @@ Bu masaüstü uygulamasını gerektirir. Bir web tarayıcı sekmesinde gösteril
 
 Burada masaüstü uygulamasının yerini bir uzantı alabilir. Tarayıcı sağlayıcısı bildiren bir uzantı kendi tarayıcısını OpenChamber sunucusunda çalıştırır ve aynı eylemleri yanıtlar; böylece bir ajan, örneğin uzak bir sunucuda, açık bir masaüstü uygulaması olmadan gezinebilir. **Ayarlar → Genel → OpenChamber Araçları → Tarayıcı sağlayıcısı** altından seçin; böyle bir uzantı yüklü değilse açılır liste yalnızca "OpenChamber Web" gösterir ve devre dışıdır. Seçim bir sonraki tarayıcı eyleminden itibaren geçerlidir. Bu uzantı duraklatılır veya kaldırılırsa yeniden OpenChamber Web kullanılır ve bir bildirim size bunu söyler. Uzantı yazarları: SDK paketindeki `GUEST_SERVICES.md` dosyasına bakın.
 
+OpenChamber'ın yerleşik Server Browser'ı bir sayfanın sizden istediklerini de size getirir. Sayfanın alert, confirm veya prompt penceresi görüntünün üzerinde açılır ve ajan da yanıtlayabilir. Tıkladığınız bir dosya alanı, kendi cihazınızdan dosya seçmenizi sağlar. Bir sayfanın indirdiği dosyalar ajan için projenizdeki `.openchamber/downloads/` içinde tutulur; bildirim veya ⋯ menüsü onları cihazınıza kaydeder. Hoparlör düğmesi sayfanın sesini çalar; siz açana kadar kapalıdır ve `localhost` dışındaki bir yerden düz `http` ile sunulan sayfaların sesi yoktur.
+
 ## Boyut ve görünüm
 
 Cihaz çubuğunu açmak için telefon düğmesine basın. Bir hazır ayar seçin ya da genişlik ve yükseklik girin. Sayfa o boyutta yerleşir. Panelden büyükse sığacak şekilde küçültülür, ama yine de sizden istediğiniz boyutta ölçüm yapar.
