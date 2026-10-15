@@ -11,12 +11,42 @@
 
 export type ServerBrowserController = 'none' | 'agent' | 'user';
 
+/** A JavaScript dialog the page opened; the page is paused until it is answered. */
+export type ServerBrowserDialog = {
+  readonly id: number;
+  readonly type: 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+  readonly message: string;
+  readonly defaultPrompt?: string;
+};
+
+/** A file input the person clicked; the files go to `directory` on the server first. */
+export type ServerBrowserFileChooser = {
+  readonly id: number;
+  readonly multiple: boolean;
+  readonly accept: string;
+  readonly directory: string;
+};
+
 export type ServerBrowserTab = {
   readonly id: string;
   readonly url: string;
   readonly title: string;
   readonly isLoading: boolean;
   readonly active: boolean;
+  /** Older services do not report these. */
+  readonly dialog?: ServerBrowserDialog | null;
+  readonly fileChooser?: ServerBrowserFileChooser | null;
+};
+
+/** A file a page downloaded, kept on the server; `path` is set once it is complete. */
+export type ServerBrowserDownload = {
+  readonly id: string;
+  readonly name: string;
+  readonly url: string;
+  readonly state: 'downloading' | 'complete' | 'canceled' | 'failed';
+  readonly receivedBytes: number;
+  readonly totalBytes: number | null;
+  readonly path: string | null;
 };
 
 export type ServerBrowserViewportState = {
@@ -72,6 +102,10 @@ export type ServerBrowserScope = {
   readonly zoomLevel: number;
   /** Older services do not report it. */
   readonly colorScheme?: 'system' | 'light' | 'dark';
+  /** Newest first; older services do not report it. */
+  readonly downloads?: readonly ServerBrowserDownload[];
+  /** The page in front gives no sound (an insecure page cannot be captured). */
+  readonly audioUnavailable?: boolean;
 };
 
 export type ServerBrowserState = {

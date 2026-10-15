@@ -14,6 +14,8 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 import {
+  answerServerBrowserDialog,
+  answerServerBrowserFileChooser,
   captureServerBrowserPage,
   clearServerBrowserData,
   closeServerBrowserScope,
@@ -66,6 +68,9 @@ export type ServerBrowserConnection = {
   readonly closeScope: (scopeId: string) => Promise<ServerBrowserState | null>;
   readonly evaluate: (expression: string, userGesture?: boolean) => Promise<unknown>;
   readonly capture: () => Promise<ServerBrowserCapture | null>;
+  /** Resolve to null when the answer was refused (the dialog or request is gone, someone else is in control). */
+  readonly answerDialog: (answer: { tabId: string; dialogId: number; accept: boolean; promptText?: string }) => Promise<ServerBrowserState | null>;
+  readonly answerFileChooser: (answer: { tabId: string; chooserId: number; files: readonly string[] | null }) => Promise<ServerBrowserState | null>;
 };
 
 export const useServerBrowserConnection = (
@@ -236,5 +241,12 @@ export const useServerBrowserConnection = (
       const result = await captureServerBrowserPage(guestId, viewerId, { generation: generationRef.current });
       return result.ok ? result.data : null;
     },
+    // A dialog or file request is named by its own ids, so these need no generation.
+    answerDialog: (answer) => act(() => answerServerBrowserDialog(guestId, viewerId, answer)),
+    answerFileChooser: ({ tabId, chooserId, files }) => act(() => answerServerBrowserFileChooser(
+      guestId,
+      viewerId,
+      files === null ? { tabId, chooserId, cancel: true } : { tabId, chooserId, files },
+    )),
   };
 };
