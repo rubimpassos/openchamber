@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 import {
+  SURFACE_AUDIO_CHANNELS_MAX,
+  SURFACE_AUDIO_CODECS,
+  SURFACE_AUDIO_SAMPLE_RATE_MAX,
+  SURFACE_AUDIO_SAMPLE_RATE_MIN,
   SURFACE_CONTROLLERS,
   SURFACE_DIMENSION_MAX,
   SURFACE_FRAME_MIMES,
@@ -43,6 +47,8 @@ export const surfaceViewerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('release') }),
   z.object({ type: z.literal('resize'), width: dimension, height: dimension }),
   z.object({ type: z.literal('clipboard-read'), id: z.string().min(1).max(64) }),
+  /** Sound on or off for this viewer; off until it asks. */
+  z.object({ type: z.literal('audio'), enabled: z.boolean() }),
 ]);
 export type SurfaceViewerMessage = z.infer<typeof surfaceViewerMessageSchema>;
 
@@ -50,7 +56,11 @@ export const surfaceControllerSchema = z.enum(SURFACE_CONTROLLERS);
 
 /**
  * What the host sends a viewer. A `frame` text message is followed by one
- * binary message carrying exactly `bytes` bytes of the image.
+ * binary message carrying exactly `bytes` bytes of the image, and an `audio`
+ * one by one binary message with that many bytes of length-prefixed Opus
+ * packets (see `SURFACE_AUDIO_PATH`). `audio-state` with `available: false`
+ * says the extension has no sound to send, or stopped sending it, and with
+ * `available: true` that it sends again.
  */
 export const surfaceHostMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hello'), viewerId: z.string().min(1) }),
@@ -69,6 +79,15 @@ export const surfaceHostMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('clipboard'), id: z.string().min(1).max(64), text: z.string().max(SURFACE_TEXT_MAX) }),
   z.object({ type: z.literal('error'), code: z.string().min(1).max(64), message: z.string().min(1).max(500) }),
   z.object({ type: z.literal('ended'), reason: z.enum(['service-stopped', 'extension-unavailable', 'host-shutdown']) }),
+  z.object({
+    type: z.literal('audio'),
+    seq: z.number().int().min(0),
+    codec: z.enum(SURFACE_AUDIO_CODECS),
+    sampleRate: z.number().int().min(SURFACE_AUDIO_SAMPLE_RATE_MIN).max(SURFACE_AUDIO_SAMPLE_RATE_MAX),
+    channels: z.number().int().min(1).max(SURFACE_AUDIO_CHANNELS_MAX),
+    bytes: z.number().int().min(1),
+  }),
+  z.object({ type: z.literal('audio-state'), available: z.boolean() }),
 ]);
 export type SurfaceHostMessage = z.infer<typeof surfaceHostMessageSchema>;
 

@@ -133,7 +133,8 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.capture",
   "browser.resize",
   "browser.requestHelp",
-  "browser.saveProfile"
+  "browser.saveProfile",
+  "browser.dialog"
 ];
 var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
 var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
@@ -422,6 +423,8 @@ Name: ${page.fields.get("#name") ?? ""}`,
       copyTakenAtVersion.set(caller, profileVersion);
       return { ok: true, data: { saved: true, profile: PROFILE_NAME, version: profileVersion, reopenedTabs: 0 } };
     }
+    case "browser.dialog":
+      return { ok: false, error: "No dialog is open on this page; there is nothing to answer." };
   }
 };
 var surface = {
