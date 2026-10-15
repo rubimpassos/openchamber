@@ -213,7 +213,7 @@ Parameters the host sends and `data` the service answers; types are exported fro
 | Action | Parameters | `data` |
 |---|---|---|
 | `browser.open` | `url` (absolute http/https), `viewport?` | `url`, `title`, `opened: true`, `settled` (`false` = still loading, not a failure), `viewport` |
-| `browser.snapshot` | `selector?` (scope) | `url`, `title`, `scope`, `scrollY`, `maxScrollY`, `text`, `elements[]`, `viewport`, optional `textTruncated`/`textTotalChars`, `elementsTruncated`/`interactiveElementsOnPage`, `consoleProblems[]` |
+| `browser.snapshot` | `selector?` (scope) | `url`, `title`, `scope`, `scrollY`, `maxScrollY`, `text`, `elements[]`, `viewport`, optional `textTruncated`/`textTotalChars`, `elementsTruncated`/`interactiveElementsOnPage`, `consoleProblems[]`, `downloads[]` (`name`, `path` once `state` is `complete`, `receivedBytes`, `totalBytes`, `url`) |
 | `browser.click` | `selector?` or `text?` (visible label) | `clicked` (selector), `label`, `url` |
 | `browser.type` | `selector`, `value`, `submit` | `selector`, `url` |
 | `browser.scroll` | `direction?` (`up`/`down`/`top`/`bottom`) or `selector?` | `scrollY`, `maxScrollY`, `atTop`, `atBottom`, optional `scrolledTo`/`direction` |
@@ -223,6 +223,7 @@ Parameters the host sends and `data` the service answers; types are exported fro
 | `browser.resize` | `viewport` (`mobile`/`tablet`/`desktop`/`fill`) | `viewport` |
 | `browser.requestHelp` | `reason` (1-300 chars, what the person must do), `timeoutSeconds` (30-900, host default 300), `kind?` (`login`/`page`, default `page`) | `outcome` (`handed-back`/`signed-in`/`timeout`), `url`, `title`, `waitedSeconds` |
 | `browser.saveProfile` | none beyond `tabId` | `saved: true`, `profile`, `version`, `reopenedTabs` |
+| `browser.dialog` | `accept` (OK or Leave when `true`, Cancel or Stay when `false`), `promptText?` | `answered` (`{ type, message, defaultPrompt? }`), `accepted`, `url`, `title`, `tabId?`, `dialog?` (the next one, when the page opened another right away) |
 
 Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your snapshot listed (`[{ id, title, url, active }]`, `active` being the tab the user sees), passed through from the agent untouched. Without it, act on the tab the user sees, except `browser.open`: without `tabId` it opens a new background tab and answers its id as `tabId` (`BrowserOpenData`), so the agent never replaces the user's page. Refuse an id you did not issue with `ok: false`; never act on another tab instead. A provider with one page lists no tabs and refuses every id.
 
@@ -246,6 +247,10 @@ Writes the chat's disposable browser copy (cookies, storage, logins) back into t
 
 Track a version counter per profile, handed to the chat's copy when it was taken. Answer `ok: false` when this chat's version no longer matches the saved profile's current version — another chat saved first — with an error telling the agent to take a fresh copy and redo its change, not silently overwrite the other chat's save. On success, bump the version, answer `{ saved: true, profile, version, reopenedTabs }`, and restart the chat's browser onto a fresh copy of what you just saved, reopening the tabs it had (`reopenedTabs` is how many); the agent's later actions land on the fresh copy, not the pre-save one. A provider with no profile store — one shared browser, nothing to copy — refuses this action; there is nothing to write back.
 
+### `browser.dialog`
+
+A page that opens `alert`, `confirm`, `prompt`, or a "leave this page?" dialog is paused until someone answers it. A browser with no window to show the dialog keeps it on the tab instead, answers every other action on that tab with `ok: false` naming the dialog and saying how to answer it, and lets the agent answer with this action. An action that opens a dialog while it runs ends at once with the same kind of error, so the agent never waits on a paused page. `type` is `alert`, `confirm`, `prompt`, or `beforeunload`; a prompt answered with `accept: true` and no `promptText` submits `defaultPrompt`. Answer `ok: false` when the tab has no dialog open. The host refuses this action itself when no provider is selected: the in-app browser answers its pages' dialogs on its own.
+
 `examples/browser-provider-stub` is a checked-in provider with no browser: one in-memory page that answers every action, including a stub profile version counter and `requestHelp`'s `kind: 'login'` → `signed-in` path. Install it to see the dropdown, the routing, and the idle stop before writing a real one.
 
 ## Shared surface (`surface: true`)
@@ -265,6 +270,7 @@ Plain HTTP on the service loopback, same bearer as everything else:
 | `POST /surface/control` | `{ controller: "none" \| "agent" \| "user", viewer? }` whenever control changes; `viewer` is the controlling viewer's id when `controller` is `user`. Parse with `readSurfaceControlNotice`. Advisory. |
 | `POST /surface/resize` | `{ width, height }` the panel can show, in device pixels. Answer `{ width, height }` you settled on, or 400 to keep your size. Parse with `readSurfaceResizeRequest`. |
 | `GET /surface/clipboard` | `{ text }`: what the user copied inside the surface. The host asks after a copy chord and puts it on the user's clipboard. |
+| `GET /surface/audio?after=<seq>&wait=<ms>` | Optional. The surface's sound while a viewer has it on: 200 with `application/octet-stream` holding the Opus packets newer than `seq`, each a 2-byte big-endian length and that many bytes, headers `x-surface-seq` (the last packet's number), `x-surface-audio-codec: opus`, `x-surface-audio-sample-rate` (the rate the sound was captured at; Opus decodes at 48 kHz whatever it is), `x-surface-audio-channels` (1 or 2); 204 when nothing newer came within `wait` ms; 404 from a service without sound. One answer is at most `SURFACE_AUDIO_MAX_BYTES` (256 KB). The host asks only while a viewer listens and hands every batch to every listener, so stop capturing when the requests stop. A 404 or a broken answer tells the listeners there is no sound, and the host asks again 30 seconds later; the next good batch tells them it is back. |
 
 Input, control notices, resizes, and clipboard reads reach the service one at a time, in the order the viewer sent them, so a batch never overtakes the one before it. Copy and paste: the host sends `Ctrl/Cmd+C` as a `key` event and then, behind it, reads `/surface/clipboard`; it never sends the paste chord, it sends a `text` event with the pasted text instead. Every other key reaches you as pressed, including the host's own shortcuts, which stand down while the surface has focus.
 
