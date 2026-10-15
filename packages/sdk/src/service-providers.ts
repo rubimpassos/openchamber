@@ -25,6 +25,7 @@ export const BROWSER_CONTROL_ACTIONS = [
   'browser.resize',
   'browser.requestHelp',
   'browser.saveProfile',
+  'browser.dialog',
 ] as const;
 export type BrowserControlAction = (typeof BROWSER_CONTROL_ACTIONS)[number];
 
@@ -88,6 +89,19 @@ export type BrowserRequestHelpKind = (typeof BROWSER_REQUEST_HELP_KINDS)[number]
 export type BrowserRequestHelpParameters = BrowserTabTarget & { reason: string; timeoutSeconds: number; kind?: BrowserRequestHelpKind };
 export type BrowserSaveProfileParameters = BrowserTabTarget;
 
+export type BrowserDialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+/**
+ * A JavaScript dialog a page opened. The page is paused until it is answered:
+ * a provider answers other actions on that tab with `ok: false`, naming the
+ * dialog, rather than waiting on a page that cannot run.
+ */
+export type BrowserPageDialog = { type: BrowserDialogType; message: string; defaultPrompt?: string };
+/**
+ * `accept` presses OK (Leave, for `beforeunload`) or Cancel; `promptText` is
+ * the answer to a `prompt` and is ignored for the other types.
+ */
+export type BrowserDialogParameters = BrowserTabTarget & { accept: boolean; promptText?: string };
+
 /**
  * Where an action came from: the project the agent works in and the chat it
  * runs in. Filled by the host from the tool call, never typed by the model.
@@ -114,6 +128,7 @@ export type BrowserProviderRequest = ProviderRequestEnvelope & (
   | { action: 'browser.resize'; parameters: BrowserResizeParameters }
   | { action: 'browser.requestHelp'; parameters: BrowserRequestHelpParameters }
   | { action: 'browser.saveProfile'; parameters: BrowserSaveProfileParameters }
+  | { action: 'browser.dialog'; parameters: BrowserDialogParameters }
 );
 
 export type BrowserViewportSummary = {
@@ -165,6 +180,21 @@ export type BrowserSnapshotData = {
   consoleProblems?: BrowserConsoleProblem[];
   /** Every open tab, so the agent can name one with `tabId`; `active` is the one the user sees. */
   tabs?: BrowserTab[];
+  /** Files this browser downloaded, newest first; absent when none. */
+  downloads?: BrowserDownload[];
+};
+
+/**
+ * A file a page downloaded. `path` is where it is on the machine the
+ * provider runs on, set once `state` is `complete`.
+ */
+export type BrowserDownload = {
+  name: string;
+  path: string | null;
+  state: 'downloading' | 'complete' | 'canceled' | 'failed';
+  receivedBytes: number;
+  totalBytes: number | null;
+  url: string;
 };
 
 export type BrowserTab = { id: string; title: string; url: string; active: boolean };
@@ -235,6 +265,20 @@ export type BrowserRequestHelpData = {
  */
 export type BrowserSaveProfileData = { saved: true; profile: string; version: number; reopenedTabs: number };
 
+/**
+ * The dialog that was answered and the page as it stands. `dialog` is set
+ * when the page opened another one right away (a chain of alerts, for
+ * instance); answer that one too before anything else on this tab.
+ */
+export type BrowserDialogData = {
+  answered: BrowserPageDialog;
+  accepted: boolean;
+  tabId?: string;
+  url: string;
+  title: string;
+  dialog?: BrowserPageDialog;
+};
+
 export type BrowserProviderData =
   | BrowserOpenData
   | BrowserSnapshotData
@@ -246,7 +290,8 @@ export type BrowserProviderData =
   | BrowserCaptureData
   | BrowserResizeData
   | BrowserRequestHelpData
-  | BrowserSaveProfileData;
+  | BrowserSaveProfileData
+  | BrowserDialogData;
 
 /**
  * What the service answers. `error` is read by the agent, so it should say

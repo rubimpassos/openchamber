@@ -194,6 +194,9 @@ const handle = async (request: BrowserProviderRequest): Promise<BrowserProviderR
       copyTakenAtVersion.set(caller, profileVersion);
       return { ok: true, data: { saved: true, profile: PROFILE_NAME, version: profileVersion, reopenedTabs: 0 } };
     }
+    case 'browser.dialog':
+      // The painted page never opens an alert, confirm, or prompt.
+      return { ok: false, error: 'No dialog is open on this page; there is nothing to answer.' };
   }
 };
 

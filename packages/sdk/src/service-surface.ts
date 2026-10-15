@@ -32,6 +32,16 @@
  *   service answers the size it settled on, or 400 to keep its own.
  * - `GET /surface/clipboard`: `{ text }`, what the user copied inside the
  *   surface; the host puts it on their clipboard.
+ * - `GET /surface/audio?after=<seq>&wait=<ms>`: optional; the sound the
+ *   surface plays, while a viewer listens. 200 with `application/octet-stream`:
+ *   the Opus packets newer than `seq`, each a 2-byte big-endian length followed
+ *   by that many bytes, all with the channel count and the rate the sound was
+ *   captured at in the `x-surface-audio-*` headers (Opus decodes at 48 kHz
+ *   whatever that rate is), and `x-surface-seq` naming the last one.
+ *   204 when nothing newer arrived within `wait` (at most
+ *   `SURFACE_FRAME_WAIT_MS`); 404 from a service without sound. The host asks
+ *   only while a viewer has sound on, so a service can stop capturing when
+ *   the requests stop.
  */
 
 export const SURFACE_FRAME_PATH = '/surface/frame';
@@ -39,6 +49,7 @@ export const SURFACE_INPUT_PATH = '/surface/input';
 export const SURFACE_CONTROL_PATH = '/surface/control';
 export const SURFACE_RESIZE_PATH = '/surface/resize';
 export const SURFACE_CLIPBOARD_PATH = '/surface/clipboard';
+export const SURFACE_AUDIO_PATH = '/surface/audio';
 
 export const SURFACE_SEQ_HEADER = 'x-surface-seq';
 export const SURFACE_WIDTH_HEADER = 'x-surface-width';
@@ -52,6 +63,16 @@ export const SURFACE_VIEWER_HEADER = 'x-surface-viewer';
 export const SURFACE_FRAME_SEQ_HEADER = 'x-surface-frame-seq';
 /** Host → service, on page `serviceRequest`s only: `1` while that viewer holds control, else `0`. */
 export const SURFACE_VIEWER_CONTROLS_HEADER = 'x-surface-viewer-controls';
+export const SURFACE_AUDIO_CODEC_HEADER = 'x-surface-audio-codec';
+export const SURFACE_AUDIO_SAMPLE_RATE_HEADER = 'x-surface-audio-sample-rate';
+export const SURFACE_AUDIO_CHANNELS_HEADER = 'x-surface-audio-channels';
+export const SURFACE_AUDIO_CODECS = ['opus'] as const;
+export type SurfaceAudioCodec = (typeof SURFACE_AUDIO_CODECS)[number];
+/** One `GET /surface/audio` answer, a few seconds of Opus at most. */
+export const SURFACE_AUDIO_MAX_BYTES = 256_000;
+export const SURFACE_AUDIO_SAMPLE_RATE_MIN = 8_000;
+export const SURFACE_AUDIO_SAMPLE_RATE_MAX = 96_000;
+export const SURFACE_AUDIO_CHANNELS_MAX = 2;
 
 export const SURFACE_FRAME_MIMES = ['image/jpeg', 'image/png'] as const;
 export type SurfaceFrameMime = (typeof SURFACE_FRAME_MIMES)[number];
