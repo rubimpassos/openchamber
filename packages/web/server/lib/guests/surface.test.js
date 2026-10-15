@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import http from 'node:http';
 
-import { SURFACE_FRAME_PATH, SURFACE_INPUT_PATH, SURFACE_CONTROL_PATH, SURFACE_RESIZE_PATH, SURFACE_CLIPBOARD_PATH } from '@openchamber/sdk';
+import { SURFACE_AUDIO_PATH, SURFACE_FRAME_PATH, SURFACE_INPUT_PATH, SURFACE_CONTROL_PATH, SURFACE_RESIZE_PATH, SURFACE_CLIPBOARD_PATH } from '@openchamber/sdk';
 import WebSocket from 'ws';
 
 import { GuestServiceError } from './service.js';
@@ -34,6 +34,14 @@ const createFakeService = () => {
     for (const wake of waiters.splice(0)) wake();
   };
   const nextFrameAfter = (seq) => frames.find((frame) => frame.seq > seq) ?? null;
+  const sounds = [];
+  const soundWaiters = [];
+  // Test hook: what GET /surface/audio answers with no batch: 204, or 404 for a service without sound.
+  let silentStatus = 204;
+  const pushSound = (sound) => {
+    sounds.push(sound);
+    for (const wake of soundWaiters.splice(0)) wake();
+  };
   const completed = [];
   let inputStatus = 204;
   const openServiceRequest = async ({ path, method, body, query, headers, signal }) => {
@@ -72,6 +80,30 @@ const createFakeService = () => {
           },
         })
         : new Response(null, { status: 204 });
+    } else if (path === SURFACE_AUDIO_PATH) {
+      const after = Number(query.after);
+      let sound = sounds.find((entry) => entry.seq > after) ?? null;
+      if (!sound && silentStatus === 204) {
+        await new Promise((resolve) => {
+          soundWaiters.push(resolve);
+          signal?.addEventListener('abort', () => resolve(), { once: true });
+          setTimeout(resolve, 300);
+        });
+        sound = sounds.find((entry) => entry.seq > after) ?? null;
+      }
+      if (signal?.aborted) throw new GuestServiceError('cancelled', 'CANCELLED');
+      response = sound
+        ? new Response(sound.bytes, {
+          status: 200,
+          headers: {
+            'content-type': 'application/octet-stream',
+            'x-surface-seq': String(sound.seq),
+            'x-surface-audio-codec': 'opus',
+            'x-surface-audio-sample-rate': '48000',
+            'x-surface-audio-channels': '2',
+          },
+        })
+        : new Response(null, { status: silentStatus });
     } else if (path === SURFACE_RESIZE_PATH) {
       response = Response.json({ width: 640, height: 400 });
     } else if (path === SURFACE_CLIPBOARD_PATH) {
@@ -87,6 +119,8 @@ const createFakeService = () => {
     calls,
     completed,
     pushFrame,
+    pushSound,
+    answerSilenceWith: (status) => { silentStatus = status; },
     gateNextInput: (promise) => { inputGate = promise; },
     answerInputWith: (status) => { inputStatus = status; },
     fail: (error) => { failWith = error; for (const wake of waiters.splice(0)) wake(); },
@@ -125,7 +159,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-const createHarness = async ({ guest = surfaceGuest(), rejectUpgradeAuth = false } = {}) => {
+const createHarness = async ({ guest = surfaceGuest(), rejectUpgradeAuth = false, setTimer } = {}) => {
   const server = http.createServer((_req, res) => { res.statusCode = 404; res.end(); });
   const service = createFakeService();
   const holds = [];
@@ -148,6 +182,7 @@ const createHarness = async ({ guest = surfaceGuest(), rejectUpgradeAuth = false
       return () => { entry.released = true; };
     },
     createViewerId: (() => { let n = 0; return () => `viewer-${++n}`; })(),
+    ...(setTimer ? { setTimer } : {}),
   });
   const port = await listen(server);
   cleanups.push(async () => {
@@ -239,6 +274,113 @@ describe('guest surface runtime', () => {
     await settle();
     // Input is stamped with the frame the viewer last drew, not the one still in flight.
     expect(service.callsTo(SURFACE_INPUT_PATH)[0].headers['x-surface-frame-seq']).toBe('2');
+  });
+
+  test('asks the service for sound only while a viewer listens and gives it only to listeners', async () => {
+    // Given two viewers, one of which turns sound on.
+    const { port, service } = await createHarness();
+    const listener = await openViewer(port);
+    const other = await openViewer(port);
+    for (const viewer of [listener, other]) {
+      await viewer.next();
+      await viewer.next();
+    }
+    await settle();
+    expect(service.callsTo(SURFACE_AUDIO_PATH)).toHaveLength(0);
+    listener.send({ type: 'audio', enabled: true });
+    await settle();
+
+    // When the service has a batch, then the listener gets its format and the packets, and the other viewer nothing.
+    const packets = Buffer.from([0, 2, 7, 8, 0, 1, 9]);
+    service.pushSound({ seq: 5, bytes: packets });
+    expect(await listener.next()).toEqual({ type: 'audio', seq: 5, codec: 'opus', sampleRate: 48000, channels: 2, bytes: 7 });
+    expect((await listener.next()).binary).toEqual(packets);
+    expect(service.callsTo(SURFACE_AUDIO_PATH)[0].query).toEqual({ after: '0', wait: '25000' });
+
+    // When the listener turns sound off, then the host stops asking.
+    listener.send({ type: 'audio', enabled: false });
+    await settle();
+    const asked = service.callsTo(SURFACE_AUDIO_PATH).length;
+    service.pushSound({ seq: 6, bytes: packets });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(service.callsTo(SURFACE_AUDIO_PATH)).toHaveLength(asked);
+
+    // Then the viewer without sound was sent nothing at all meanwhile.
+    service.pushFrame({ seq: 1, bytes: Buffer.from('frame-1') });
+    expect(await other.next()).toMatchObject({ type: 'frame', seq: 1 });
+  });
+
+  test('tells listeners when the extension has no sound, and a broken batch never reaches them', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next();
+    await viewer.next();
+
+    // When a service without sound answers 404, then the listener is told once and the session goes on.
+    service.answerSilenceWith(404);
+    viewer.send({ type: 'audio', enabled: true });
+    expect(await viewer.next()).toEqual({ type: 'audio-state', available: false });
+    service.pushFrame({ seq: 1, bytes: Buffer.from('frame-1') });
+    expect(await viewer.next()).toMatchObject({ type: 'frame', seq: 1 });
+  });
+
+  test('says when sound comes back after a failure, and a broken batch never reaches a listener', async () => {
+    // Given a host whose wait before asking a failing service again is immediate.
+    const retries = [];
+    const setTimer = (callback, ms) => {
+      if (ms === 30_000) retries.push(ms);
+      return setTimeout(callback, ms === 30_000 ? 0 : ms);
+    };
+    const { port, service } = await createHarness({ setTimer });
+    const viewer = await openViewer(port);
+    await viewer.next();
+    await viewer.next();
+
+    // When the service first answers with packets whose lengths do not add up.
+    service.pushSound({ seq: 1, bytes: Buffer.from([0, 9, 1]) });
+    viewer.send({ type: 'audio', enabled: true });
+
+    // Then the listener is told there is no sound, and gets no part of that batch.
+    expect(await viewer.next()).toEqual({ type: 'audio-state', available: false });
+
+    // When the service then has a good batch, then the listener is told the sound is back, and gets it.
+    const packets = Buffer.from([0, 2, 7, 8]);
+    service.pushSound({ seq: 2, bytes: packets });
+    expect(await viewer.next()).toEqual({ type: 'audio-state', available: true });
+    expect(await viewer.next()).toEqual({ type: 'audio', seq: 2, codec: 'opus', sampleRate: 48000, channels: 2, bytes: 4 });
+    expect((await viewer.next()).binary).toEqual(packets);
+    expect(retries.length).toBeGreaterThan(0);
+  });
+
+  test('sends no more sound to a listener that stopped reading until it catches up', async () => {
+    // Given a listener whose connection stops reading (a phone that locked), and a talkative service.
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next();
+    await viewer.next();
+    viewer.send({ type: 'audio', enabled: true });
+    await settle();
+    viewer.ws.pause();
+
+    // When the service keeps sending big batches for a while.
+    const packet = Buffer.alloc(60_000, 1);
+    const batch = Buffer.concat([Buffer.from([packet.length >> 8, packet.length & 0xff]), packet]);
+    for (let seq = 1; seq <= 120; seq += 1) {
+      service.pushSound({ seq, bytes: batch });
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    await settle();
+
+    // Then far fewer than all of them were queued for it.
+    viewer.ws.resume();
+    const received = [];
+    for (;;) {
+      const next = await Promise.race([viewer.next(), new Promise((resolve) => setTimeout(() => resolve(null), 500))]);
+      if (!next) break;
+      if (next.type === 'audio') received.push(next.seq);
+    }
+    expect(received.length).toBeGreaterThan(0);
+    expect(received.length).toBeLessThan(100);
   });
 
   test('the first input takes control, is forwarded, and tells the service; release hands it back', async () => {

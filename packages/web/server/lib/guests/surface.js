@@ -30,6 +30,15 @@ import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../sec
 import {
   SURFACE_AGENT_ACTIVE_HEADER,
   SURFACE_AGENT_HOLD_MS,
+  SURFACE_AUDIO_CHANNELS_HEADER,
+  SURFACE_AUDIO_CHANNELS_MAX,
+  SURFACE_AUDIO_CODEC_HEADER,
+  SURFACE_AUDIO_CODECS,
+  SURFACE_AUDIO_MAX_BYTES,
+  SURFACE_AUDIO_PATH,
+  SURFACE_AUDIO_SAMPLE_RATE_HEADER,
+  SURFACE_AUDIO_SAMPLE_RATE_MAX,
+  SURFACE_AUDIO_SAMPLE_RATE_MIN,
   SURFACE_CLIPBOARD_PATH,
   SURFACE_CONTROL_PATH,
   SURFACE_FRAME_MAX_BYTES,
@@ -129,6 +138,7 @@ export const createGuestSurfaceRuntime = ({
    *   shownServiceSeq: number,
    *   framesInFlight: number,
    *   inFlight: Array<{ seq: number, serviceSeq: number }>,
+   *   audio: boolean,
    * }} Viewer
    * @typedef {{
    *   guestId: string,
@@ -138,6 +148,8 @@ export const createGuestSurfaceRuntime = ({
    *   controller: 'none' | 'agent' | string,
    *   agentTimer: ReturnType<typeof setTimeout> | null,
    *   pumpAbort: AbortController | null,
+   *   audioAbort: AbortController | null,
+   *   audioUnavailable: boolean,
    *   releaseHold: (() => void) | null,
    *   ended: boolean,
    * }} Session
@@ -253,6 +265,8 @@ export const createGuestSurfaceRuntime = ({
     clearAgentTimer(session);
     session.pumpAbort?.abort();
     session.pumpAbort = null;
+    session.audioAbort?.abort();
+    session.audioAbort = null;
     session.releaseHold?.();
     session.releaseHold = null;
     for (const viewer of session.viewers.values()) {
@@ -346,6 +360,147 @@ export const createGuestSurfaceRuntime = ({
     }
   };
 
+  const AUDIO_CODECS = new Set(SURFACE_AUDIO_CODECS);
+  // A service that does not answer sound requests is asked again only this
+  // much later, so an extension without sound costs no steady traffic.
+  const AUDIO_RETRY_MS = 30_000;
+  // A listener whose socket holds this much unsent gets no more sound until
+  // it catches up: a viewer that stopped reading (a locked phone) would
+  // otherwise pile up sound in memory, and get it all at once when it wakes.
+  const AUDIO_SEND_BUFFER_MAX = 1_000_000;
+
+  const readAudio = async (response) => {
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > SURFACE_AUDIO_MAX_BYTES) return null;
+    const seq = readDimension(response.headers.get(SURFACE_SEQ_HEADER));
+    const codec = (response.headers.get(SURFACE_AUDIO_CODEC_HEADER) || '').trim();
+    const sampleRate = readDimension(response.headers.get(SURFACE_AUDIO_SAMPLE_RATE_HEADER));
+    const channels = readDimension(response.headers.get(SURFACE_AUDIO_CHANNELS_HEADER));
+    if (seq === null || !AUDIO_CODECS.has(codec) || sampleRate === null || channels === null) return null;
+    if (sampleRate < SURFACE_AUDIO_SAMPLE_RATE_MIN || sampleRate > SURFACE_AUDIO_SAMPLE_RATE_MAX || channels > SURFACE_AUDIO_CHANNELS_MAX) return null;
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > SURFACE_AUDIO_MAX_BYTES) return null;
+    // Whole packets only: a viewer decodes them one by one.
+    let offset = 0;
+    while (offset < bytes.length) {
+      if (offset + 2 > bytes.length) return null;
+      const length = bytes.readUInt16BE(offset);
+      if (length === 0 || offset + 2 + length > bytes.length) return null;
+      offset += 2 + length;
+    }
+    return { seq, codec, sampleRate, channels, bytes };
+  };
+
+  const listening = (session) => [...session.viewers.values()].some((viewer) => viewer.audio);
+
+  const setAudioAvailable = (session, available) => {
+    if (session.audioUnavailable === !available) return;
+    session.audioUnavailable = !available;
+    for (const viewer of session.viewers.values()) {
+      if (viewer.audio) send(viewer, { type: 'audio-state', available });
+    }
+  };
+
+  /**
+   * Asks the service for sound while at least one viewer listens, and hands
+   * each listening viewer every batch, with no acks: sound is a few kilobytes
+   * a second. A viewer whose socket is backed up gets none until it catches
+   * up (`AUDIO_SEND_BUFFER_MAX`); its player drops what arrives too late. A
+   * service without sound (404, or any other failure) is told once to the
+   * listeners and asked again later, and the first batch after that says the
+   * sound is back; sound never ends the session.
+   */
+  const runAudioPump = async (session) => {
+    const abort = new AbortController();
+    session.audioAbort = abort;
+    session.audioUnavailable = false;
+    let after = 0;
+    const pause = (ms) => new Promise((resolve) => {
+      const onAbort = () => {
+        clearTimer(timer);
+        resolve();
+      };
+      const timer = setTimer(() => {
+        abort.signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      abort.signal.addEventListener('abort', onAbort, { once: true });
+    });
+    while (!abort.signal.aborted && !session.ended && listening(session)) {
+      let opened;
+      try {
+        opened = await serviceRequest(session, {
+          method: 'GET',
+          path: SURFACE_AUDIO_PATH,
+          query: { after: String(after), wait: String(SURFACE_FRAME_WAIT_MS) },
+          accept: 'application/octet-stream',
+          timeoutMs: SURFACE_FRAME_WAIT_MS + QUICK_REQUEST_TIMEOUT_MS,
+          signal: abort.signal,
+        });
+      } catch {
+        if (abort.signal.aborted) break;
+        setAudioAvailable(session, false);
+        await pause(AUDIO_RETRY_MS);
+        continue;
+      }
+      const { response, finished } = opened;
+      if (response.status === 204) {
+        await response.arrayBuffer().catch(() => undefined);
+        finished();
+        continue;
+      }
+      let batch = null;
+      // A broken batch that still says which packet it ends at is skipped, so
+      // the next request does not get the same one back.
+      const brokenSeq = readDimension(response.headers.get(SURFACE_SEQ_HEADER));
+      if (response.status === 200) {
+        try {
+          batch = await readAudio(response);
+        } catch {
+          batch = null;
+        }
+      } else {
+        await response.arrayBuffer().catch(() => undefined);
+      }
+      finished();
+      if (abort.signal.aborted) break;
+      if (!batch) {
+        if (response.status === 200 && brokenSeq !== null && brokenSeq > after) after = brokenSeq;
+        setAudioAvailable(session, false);
+        await pause(AUDIO_RETRY_MS);
+        continue;
+      }
+      after = batch.seq;
+      setAudioAvailable(session, true);
+      const meta = { type: 'audio', seq: batch.seq, codec: batch.codec, sampleRate: batch.sampleRate, channels: batch.channels, bytes: batch.bytes.length };
+      for (const viewer of session.viewers.values()) {
+        if (!viewer.audio || viewer.ws.readyState !== 1) continue;
+        if ((typeof viewer.ws.bufferedAmount === 'number' ? viewer.ws.bufferedAmount : 0) > AUDIO_SEND_BUFFER_MAX) continue;
+        send(viewer, meta);
+        try {
+          viewer.ws.send(batch.bytes, { binary: true });
+        } catch {
+          // close handler cleans up
+        }
+      }
+    }
+    if (session.audioAbort === abort) session.audioAbort = null;
+  };
+
+  const setViewerAudio = (session, viewer, enabled) => {
+    viewer.audio = enabled;
+    if (enabled) {
+      if (!session.audioAbort) void runAudioPump(session);
+      // Joining a pump that already found no sound: say so now, not at its next try.
+      else if (session.audioUnavailable) send(viewer, { type: 'audio-state', available: false });
+      return;
+    }
+    if (!listening(session)) {
+      session.audioAbort?.abort();
+      session.audioAbort = null;
+    }
+  };
+
   const ensureSession = (guestId, guest) => {
     let session = sessions.get(guestId);
     if (session) {
@@ -360,6 +515,8 @@ export const createGuestSurfaceRuntime = ({
       controller: 'none',
       agentTimer: null,
       pumpAbort: null,
+      audioAbort: null,
+      audioUnavailable: false,
       releaseHold: holdService(guestId),
       ended: false,
       queue: Promise.resolve(),
@@ -523,12 +680,15 @@ export const createGuestSurfaceRuntime = ({
         // already handled the copy when it is asked what was copied.
         void enqueue(session, () => handleClipboardRead(session, viewer, message.id));
         return;
+      case 'audio':
+        setViewerAudio(session, viewer, message.enabled);
+        return;
     }
   };
 
   const attachViewer = (guestId, guest, ws, framesInFlight) => {
     const session = ensureSession(guestId, guest);
-    const viewer = { id: createViewerId(), ws, sentSeq: 0, shownServiceSeq: 0, framesInFlight, inFlight: [], gone: false };
+    const viewer = { id: createViewerId(), ws, sentSeq: 0, shownServiceSeq: 0, framesInFlight, inFlight: [], audio: false, gone: false };
     session.viewers.set(viewer.id, viewer);
     // Started with the first viewer in place: the pump's loop condition is
     // the viewer count, and it is checked before the first await.
@@ -548,6 +708,7 @@ export const createGuestSurfaceRuntime = ({
       // must not talk to the service again: that would start it back up
       // with the authorization this session was opened under.
       if (session.ended) return;
+      if (viewer.audio) setViewerAudio(session, viewer, false);
       const held = session.controller === viewer.id;
       if (held) {
         session.handoffs += 1;
