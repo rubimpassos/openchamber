@@ -4,6 +4,7 @@ import type { SurfaceInputEvent, SurfaceModifiers } from '@openchamber/sdk';
 
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { SurfaceAudioPlayer } from '@/lib/guests/surface-audio';
 import { clearSurfaceViewerId, setSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import { SurfaceClient, type SurfaceConnectionState, type SurfaceControlState, type SurfaceFrame } from '@/lib/guests/surface-client';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,8 @@ const isPasteChord = (event: React.KeyboardEvent): boolean => (event.metaKey || 
 
 export type ServerBrowserCanvasHandle = {
   readonly release: () => void;
+  /** Call from the click that turns sound on: browsers start audio only in answer to the person. */
+  readonly setAudio: (enabled: boolean) => void;
 };
 
 /**
@@ -50,7 +53,9 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
   onControl: (control: SurfaceControlState) => void;
   onConnection: (connection: SurfaceConnectionState) => void;
   onFocusChange?: (focused: boolean) => void;
-}>(({ guestId, onViewer, onControl, onConnection, onFocusChange }, forwardedRef) => {
+  /** `false` once the extension says it has no sound to send. */
+  onAudioState?: (available: boolean) => void;
+}>(({ guestId, onViewer, onControl, onConnection, onFocusChange, onAudioState }, forwardedRef) => {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -61,13 +66,32 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
   const clipboardRequestsRef = React.useRef(0);
   const clipboardAfterFlushRef = React.useRef(false);
   const controlRef = React.useRef<SurfaceControlState>({ controller: 'none', mine: false });
+  const playerRef = React.useRef<SurfaceAudioPlayer | null>(null);
+  const onAudioStateRef = React.useRef(onAudioState);
+  onAudioStateRef.current = onAudioState;
 
   const [hasFrame, setHasFrame] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
 
   React.useImperativeHandle(forwardedRef, () => ({
     release: () => clientRef.current?.release(),
+    setAudio: (enabled) => {
+      if (enabled) {
+        playerRef.current ??= new SurfaceAudioPlayer();
+        playerRef.current.resume();
+      } else {
+        // Closing the output silences what was already scheduled at once.
+        playerRef.current?.dispose();
+        playerRef.current = null;
+      }
+      clientRef.current?.setAudio(enabled);
+    },
   }), []);
+
+  React.useEffect(() => () => {
+    playerRef.current?.dispose();
+    playerRef.current = null;
+  }, []);
 
   const drawFrame = React.useCallback(async (frame: SurfaceFrame) => {
     const canvas = canvasRef.current;
@@ -111,8 +135,12 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
       onControl: (next) => { controlRef.current = next; onControl(next); },
       onConnection,
       onClipboard: (_id, text) => { void copyTextToClipboard(text); },
+      onAudio: (batch) => playerRef.current?.play(batch),
+      onAudioState: (available) => onAudioStateRef.current?.(available),
     });
     clientRef.current = client;
+    // Sound that was on stays on for this extension's new connection.
+    if (playerRef.current) client.setAudio(true);
     client.start();
     return () => {
       if (viewerId) clearSurfaceViewerId(guestId, viewerId);

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { BLANK_URL, normalizeBrowserUrl } from '@/lib/browser/url';
@@ -31,7 +32,13 @@ import {
   useServerBrowserPanelTabs,
   useServerBrowserSignIn,
 } from '@/lib/browser/serverBrowser/panelTabs';
-import { findSelectedScope, type ServerBrowserState } from '@/lib/browser/serverBrowser/types';
+import {
+  findSelectedScope,
+  type ServerBrowserDownload,
+  type ServerBrowserScope,
+  type ServerBrowserState,
+} from '@/lib/browser/serverBrowser/types';
+import { supportsSurfaceAudio } from '@/lib/guests/surface-audio';
 import { useUIStore } from '@/stores/useUIStore';
 import { getSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import { useServerBrowserConnection } from '@/lib/browser/serverBrowser/useServerBrowserConnection';
@@ -44,6 +51,7 @@ import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotation
 import { ServerBrowserCanvas, type ServerBrowserCanvasHandle } from './ServerBrowserCanvas';
 import { ServerBrowserBanners } from './ServerBrowserBanners';
 import { ServerBrowserInspector } from './ServerBrowserInspector';
+import { ServerBrowserDialogCard, ServerBrowserFileChooserCard } from './ServerBrowserPageRequests';
 
 export type ServerBrowserViewProps = {
   guestId: string;
@@ -180,6 +188,78 @@ ${expression}
 const activeChromeTabOf = (state: ServerBrowserState | null): string | null => (
   findSelectedScope(state)?.tabs.find((tab) => tab.active)?.id ?? null
 );
+
+const joinServerPath = (directory: string, name: string): string => `${directory.replace(/[\\/]+$/, '')}/${name}`;
+
+/** Recent downloads shown in the ⋯ menu. */
+const DOWNLOADS_IN_MENU = 5;
+
+/**
+ * Files the chat's pages download stay on the server, where the agent finds
+ * them; each one that finishes is offered to the person to save on this
+ * device, and the recent ones stay in the ⋯ menu.
+ */
+const useServerBrowserDownloads = (scope: ServerBrowserScope | null) => {
+  const { t } = useI18n();
+  const { files } = useRuntimeAPIs();
+  const downloads = scope?.downloads;
+  const directory = scope?.directory;
+  const save = React.useCallback((download: ServerBrowserDownload) => {
+    if (!download.path || !files.downloadFile) return;
+    // A browser with no project (signing into a profile) keeps its downloads outside every workspace.
+    void files.downloadFile(download.path, { directory, allowOutsideWorkspace: true }).catch(() => {
+      toast.error(t('contextPanel.browser.server.downloads.saveFailed', { name: download.name }));
+    });
+  }, [directory, files, t]);
+
+  // Only what finishes while the panel is open is announced, not what was there before.
+  const announcedRef = React.useRef<{ scopeId: string; ids: Set<string> } | null>(null);
+  React.useEffect(() => {
+    if (!scope || !downloads) return;
+    const complete = downloads.filter((download) => download.state === 'complete' && download.path);
+    if (announcedRef.current?.scopeId !== scope.id) {
+      announcedRef.current = { scopeId: scope.id, ids: new Set(complete.map((download) => download.id)) };
+      return;
+    }
+    const announced = announcedRef.current.ids;
+    for (const download of complete) {
+      if (announced.has(download.id)) continue;
+      announced.add(download.id);
+      toast.success(t('contextPanel.browser.server.downloads.done', { name: download.name }), {
+        action: files.downloadFile
+          ? { label: t('contextPanel.browser.server.downloads.save'), onClick: () => save(download) }
+          : undefined,
+      });
+    }
+  }, [downloads, files.downloadFile, save, scope, t]);
+
+  return React.useMemo(() => (downloads ?? [])
+    .filter((download) => download.state === 'complete' || download.state === 'downloading')
+    .slice(0, DOWNLOADS_IN_MENU)
+    .map((download) => {
+      if (download.state === 'complete') {
+        return {
+          kind: 'item' as const,
+          id: `download-${download.id}`,
+          icon: 'download' as const,
+          label: t('contextPanel.browser.server.downloads.saveItem', { name: download.name }),
+          onSelect: () => save(download),
+          disabled: !files.downloadFile || !download.path,
+        };
+      }
+      const percent = download.totalBytes ? Math.min(99, Math.floor((download.receivedBytes / download.totalBytes) * 100)) : null;
+      return {
+        kind: 'item' as const,
+        id: `download-${download.id}`,
+        icon: 'download' as const,
+        label: percent === null
+          ? t('contextPanel.browser.server.downloads.downloading', { name: download.name })
+          : t('contextPanel.browser.server.downloads.progress', { name: download.name, percent }),
+        onSelect: () => undefined,
+        disabled: true,
+      };
+    }), [downloads, files.downloadFile, save, t]);
+};
 
 const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, tabID }) => {
   const { t } = useI18n();
@@ -410,6 +490,59 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
 
   const loaded = Boolean(showingMine && scope && scope.url && scope.url !== BLANK_URL);
 
+  // ---- what the page in front asks of the person ---------------------------
+  const { files } = useRuntimeAPIs();
+  const shownTab = showingMine ? scope?.tabs.find((tab) => tab.active) ?? null : null;
+  // Someone else holds control: only they can answer the page.
+  const answerLocked = control.controller === 'user' && !control.mine;
+  const answerDialog = React.useCallback(async (accept: boolean, promptText?: string) => {
+    const dialog = shownTab?.dialog;
+    if (!shownTab || !dialog) return;
+    const answered = await serverBrowser.answerDialog({ tabId: shownTab.id, dialogId: dialog.id, accept, ...(promptText === undefined ? {} : { promptText }) });
+    if (!answered) toast.error(t('contextPanel.browser.server.dialog.failed'));
+  }, [serverBrowser, shownTab, t]);
+  const chooseFiles = React.useCallback(async (picked: File[]) => {
+    const chooser = shownTab?.fileChooser;
+    if (!shownTab || !chooser || !scope || !files.uploadFile) return;
+    try {
+      // The folder is this request's own: a second try after a failure
+      // replaces what the first one got through.
+      for (const file of picked) {
+        await files.uploadFile(joinServerPath(chooser.directory, file.name), file, { directory: scope.directory, overwrite: true });
+      }
+    } catch {
+      toast.error(t('contextPanel.browser.server.files.failed'));
+      return;
+    }
+    const given = await serverBrowser.answerFileChooser({ tabId: shownTab.id, chooserId: chooser.id, files: picked.map((file) => file.name) });
+    if (!given) toast.error(t('contextPanel.browser.server.files.failed'));
+  }, [files, scope, serverBrowser, shownTab, t]);
+  const cancelFiles = React.useCallback(async () => {
+    const chooser = shownTab?.fileChooser;
+    if (!shownTab || !chooser) return;
+    await serverBrowser.answerFileChooser({ tabId: shownTab.id, chooserId: chooser.id, files: null });
+  }, [serverBrowser, shownTab]);
+
+  const downloadMenuItems = useServerBrowserDownloads(scope);
+
+  // ---- sound: off until the person turns it on ----------------------------
+  const [soundSupported, setSoundSupported] = React.useState(false);
+  const [soundOn, setSoundOn] = React.useState(false);
+  const [soundMissing, setSoundMissing] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    void supportsSurfaceAudio().then((supported) => { if (!cancelled) setSoundSupported(supported); });
+    return () => { cancelled = true; };
+  }, []);
+  React.useEffect(() => { setSoundMissing(false); }, [scope?.url]);
+  const toggleSound = React.useCallback(() => {
+    const next = !soundOn;
+    setSoundOn(next);
+    setSoundMissing(false);
+    // In the click itself: browsers start audio only in answer to the person.
+    canvasHandleRef.current?.setAudio(next);
+  }, [soundOn]);
+
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
       {isSignInScope && scope ? (
@@ -454,6 +587,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         onZoomReset={() => void serverBrowser.setZoom(0)}
         zoomPercent={zoomPercent}
         menuItems={[
+          ...downloadMenuItems,
+          ...(downloadMenuItems.length > 0 ? [{ kind: 'separator' as const, id: 'sep-downloads' }] : []),
           { kind: 'item', id: 'cookies', icon: 'delete-bin', label: t('contextPanel.browser.clearCookies'), onSelect: () => setClearConfirm('cookies') },
           { kind: 'item', id: 'cache', icon: 'database-2', label: t('contextPanel.browser.clearCache'), onSelect: () => setClearConfirm('cache') },
           { kind: 'item', id: 'external', icon: 'external-link', label: t('contextPanel.browser.openExternal'), onSelect: () => void openExternalUrl(scope?.url || address), disabled: !loaded },
@@ -462,6 +597,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         ]}
         onToggleDeviceBar={() => setShowDeviceBar((current) => !current)}
         isDeviceBarOpen={showDeviceBar}
+        onToggleSound={soundSupported ? toggleSound : undefined}
+        isSoundOn={soundOn}
+        isSoundUnavailable={soundMissing || scope?.audioUnavailable === true}
       />
       {showDeviceBar ? (
         <BrowserDeviceBar
@@ -491,7 +629,20 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
           onControl={setControl}
           onConnection={setConnection}
           onFocusChange={setCanvasFocused}
+          onAudioState={(available) => setSoundMissing(!available)}
         />
+        {shownTab?.dialog ? (
+          <ServerBrowserDialogCard key={shownTab.dialog.id} dialog={shownTab.dialog} url={shownTab.url} disabled={answerLocked} onAnswer={answerDialog} />
+        ) : shownTab?.fileChooser ? (
+          <ServerBrowserFileChooserCard
+            key={shownTab.fileChooser.id}
+            chooser={shownTab.fileChooser}
+            disabled={answerLocked}
+            canUpload={Boolean(files.uploadFile)}
+            onChoose={chooseFiles}
+            onCancel={cancelFiles}
+          />
+        ) : null}
         {!loaded && (showingMine || !serverBrowser.loading) ? (
           <div className="absolute inset-0">
             <BrowserEmptyState onOpen={(url) => void serverBrowser.navigate(normalizeBrowserUrl(url))} directory={directory} />

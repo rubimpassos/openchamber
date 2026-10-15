@@ -86,6 +86,11 @@ type BrowserToolbarProps = {
   onClearCache?: () => void;
   onToggleDeviceBar?: () => void;
   isDeviceBarOpen?: boolean;
+  /** The page's sound, for a browser that streams it; hidden without a handler. */
+  onToggleSound?: () => void;
+  isSoundOn?: boolean;
+  /** Sound is on but the page sends none. */
+  isSoundUnavailable?: boolean;
   /**
    * Rarely used actions behind a ⋯ button at the end of the bar. When given,
    * "open in external browser" lives here instead of as its own button.
@@ -123,8 +128,12 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   menuItems,
   onToggleDeviceBar,
   isDeviceBarOpen,
+  onToggleSound,
+  isSoundOn,
+  isSoundUnavailable,
 }) => {
   const { t } = useI18n();
+  const soundIconName: IconName = isSoundOn ? 'volume-up' : 'volume-mute';
   const [isAddressFocused, setIsAddressFocused] = React.useState(false);
   const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const visibleSuggestions = isAddressFocused ? suggestions : [];
@@ -253,6 +262,16 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       ) : null}
       {onClearCache ? (
         <ToolbarButton icon="database-2" label={t('contextPanel.browser.clearCache')} onClick={onClearCache} />
+      ) : null}
+      {onToggleSound ? (
+        <ToolbarButton
+          icon={soundIconName}
+          label={isSoundOn
+            ? (isSoundUnavailable ? t('contextPanel.browser.server.sound.unavailable') : t('contextPanel.browser.server.sound.off'))
+            : t('contextPanel.browser.server.sound.on')}
+          onClick={onToggleSound}
+          pressed={isSoundOn}
+        />
       ) : null}
       {onToggleDeviceBar ? (
         <ToolbarButton
