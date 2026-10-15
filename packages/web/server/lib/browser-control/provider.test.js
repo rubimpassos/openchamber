@@ -357,6 +357,14 @@ describe('browser control router', () => {
     expect(persisted).toHaveLength(0);
   });
 
+  test('browser.dialog refuses with a clear 400 when the in-app browser would answer', async () => {
+    const { router, brokerCalls, proxied } = createRouter({ settings: { browserProvider: 'builtin' } });
+    await expect(router.request('browser.dialog', { accept: true }))
+      .rejects.toMatchObject({ status: 400, message: expect.stringContaining('answer their own dialogs') });
+    expect(brokerCalls).toHaveLength(0);
+    expect(proxied).toHaveLength(0);
+  });
+
   test('browser.saveProfile refuses with a clear 400 when the in-app browser would answer', async () => {
     const { router, brokerCalls, proxied } = createRouter({ settings: {} });
     await expect(router.request('browser.saveProfile', {}))

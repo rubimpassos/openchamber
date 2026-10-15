@@ -148,6 +148,10 @@ other.
   zero is a 503, never a claimed success. Paths outside the workspace are
   allowed on purpose: screenshots and recordings often land in a temp
   directory, and the viewer already reads such files.
+- `browser.dialog` requires `accept` as a boolean (OK or Leave when `true`)
+  and takes an optional `promptText` of at most 10,000 characters for a
+  prompt; anything else is a 400 the agent can correct, before any browser
+  is reached.
 - `browser.capture` writes its image on the server, into
   `.openchamber/screenshots/` under the scoped project directory, and returns
   the project-relative path rather than the image bytes. The client that took

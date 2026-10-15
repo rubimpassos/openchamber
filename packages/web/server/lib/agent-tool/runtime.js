@@ -44,7 +44,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
  * in the other tool's schema, which is both misleading and paid for in context
  * on every call.
  */
-const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'reason', 'timeoutSeconds', 'kind'];
+const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'reason', 'timeoutSeconds', 'kind', 'accept', 'promptText'];
 // `title` is shared with the control tool, so it is not listed here — only the
 // names memory alone introduces are kept out of the other schemas.
 const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
@@ -120,6 +120,8 @@ const ALL_PARAMETER_PROPERTIES = {
   reason: { type: 'string', description: 'For browser.requestHelp: exactly what the person needs to do (sign in, solve a CAPTCHA, enter a one-time code). Never a password or code itself' },
   timeoutSeconds: { type: 'integer', minimum: BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S, maximum: BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S, description: 'For browser.requestHelp: how long to wait for the person, in seconds (default 300)' },
   kind: { type: 'string', enum: [...BROWSER_REQUEST_HELP_KINDS], description: "For browser.requestHelp: login when the site needs an account login (the person signs in and the chat continues with a fresh saved-profile copy), page (default) for a CAPTCHA, one-time code, or confirmation scoped to this page only" },
+  accept: { type: 'boolean', description: 'For browser.dialog: true presses OK (Leave for a "leave this page?" dialog), false presses Cancel (Stay)' },
+  promptText: { type: 'string', description: 'For browser.dialog on a prompt: the text to submit; omit to submit what the page proposed' },
   body: { type: 'string', description: 'Full text of the memory, at most 2000 characters; a longer body is rejected rather than trimmed. State it so it still makes sense in a session that has none of this conversation' },
   scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global is about the user and applies everywhere; project is about this codebase. both is only valid for memory.list' },
   memoryId: { type: 'string', description: 'Memory ID from a memory.list or memory.read result' },

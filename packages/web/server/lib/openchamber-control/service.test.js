@@ -818,6 +818,28 @@ describe('browser requestHelp validation', () => {
   });
 });
 
+describe('browser dialog', () => {
+  const createBrowserService = () => {
+    const request = vi.fn(async () => ({ answered: { type: 'confirm', message: 'Delete?' }, accepted: true, url: 'http://a/', title: 'A' }));
+    const { service } = createService({ browserControl: { request } });
+    return { service, request };
+  };
+
+  it('requires accept as a boolean before waking any browser', async () => {
+    const { service, request } = createBrowserService();
+    await expect(service.execute('browser.dialog', {}, '/repo')).rejects.toThrow(/accept is required/);
+    await expect(service.execute('browser.dialog', { accept: 'yes' }, '/repo')).rejects.toThrow(/accept is required/);
+    await expect(service.execute('browser.dialog', { accept: true, promptText: 5 }, '/repo')).rejects.toThrow(/promptText must be text/);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('passes the answer, prompt text, and tab with the quick action timeout', async () => {
+    const { service, request } = createBrowserService();
+    await service.execute('browser.dialog', { accept: false, promptText: '', tabId: ' tab-2 ' }, '/repo');
+    expect(request).toHaveBeenCalledWith('browser.dialog', { tabId: 'tab-2', accept: false, promptText: '' }, expect.objectContaining({ timeoutMs: 20_000 }));
+  });
+});
+
 describe('browser saveProfile', () => {
   const createBrowserService = (answer = { saved: true, profile: 'default', version: 2, reopenedTabs: 1 }) => {
     const request = vi.fn(async () => answer);

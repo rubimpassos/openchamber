@@ -81,6 +81,11 @@ itself; it can only ask and wait.
   shares `browser.open`'s 45s timeout (`../openchamber-control/service.js`)
   because a real provider restarts the chat's browser onto the freshly saved
   copy before answering.
+- `browser.dialog` answers a JavaScript dialog a provider's page is paused on
+  (alert, confirm, prompt, "leave this page?"). The in-app view answers its
+  pages' dialogs itself, so the builtin path refuses it with "No dialog is
+  waiting in the in-app browser"; any selected provider runs it, surface or
+  not, with the quick 20s timeout.
 - `../openchamber-control/service.js` is the only caller. It maps the
   `browser.*` actions of the `openchamber_web` tool onto the router's
   `request()` (same signature as the broker) and owns their parameter
