@@ -111,6 +111,54 @@ describe('surface client', () => {
     client.dispose();
   });
 
+  test('asks for sound again after a reconnect and pairs each audio header with its packets', async () => {
+    const audio: Array<{ sampleRate: number; channels: number; bytes: number[] }> = [];
+    const states: boolean[] = [];
+    const sockets: FakeSocket[] = [];
+    const frames: SurfaceFrame[] = [];
+    const client = new SurfaceClient('sim', {
+      onFrame: (frame) => frames.push(frame),
+      onControl: () => undefined,
+      onConnection: () => undefined,
+      onAudio: (batch) => audio.push({ sampleRate: batch.sampleRate, channels: batch.channels, bytes: [...new Uint8Array(batch.bytes)] }),
+      onAudioState: (available) => states.push(available),
+    }, {
+      refreshAuth: async () => 'token',
+      clearUrlAuthToken: () => undefined,
+      openSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      isPaused: () => false,
+      onWake: () => () => undefined,
+    });
+    client.start();
+    await tick();
+    sockets[0].open();
+
+    // When sound is turned on, then the host is asked, and audio and frames keep their own bytes.
+    client.setAudio(true);
+    expect(sockets[0].sent.map((raw) => JSON.parse(raw))).toEqual([{ type: 'audio', enabled: true }]);
+    sockets[0].text({ type: 'audio', seq: 1, codec: 'opus', sampleRate: 48000, channels: 2, bytes: 3 });
+    sockets[0].binary(new Uint8Array([0, 1, 7]));
+    sockets[0].text({ type: 'frame', seq: 1, width: 320, height: 200, mime: 'image/png', bytes: 1, agentActive: false });
+    sockets[0].binary(new Uint8Array([9]));
+    sockets[0].text({ type: 'audio-state', available: false });
+    expect(audio).toEqual([{ sampleRate: 48000, channels: 2, bytes: [0, 1, 7] }]);
+    expect(frames.map((frame) => [...new Uint8Array(frame.bytes)])).toEqual([[9]]);
+    expect(states).toEqual([false]);
+
+    // When the connection drops and comes back, then the new one asks for sound by itself.
+    sockets[0].text({ type: 'ended', reason: 'service-stopped' });
+    sockets[0].close();
+    client.retry();
+    await tick();
+    sockets[1].open();
+    expect(sockets[1].sent.map((raw) => JSON.parse(raw))).toEqual([{ type: 'audio', enabled: true }]);
+    client.dispose();
+  });
+
   test('mirrors control, clipboard, and input; ignores messages that are not the contract', async () => {
     const { client, sockets, controls, clipboard } = createClient();
     client.start();
