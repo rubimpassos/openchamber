@@ -55,6 +55,8 @@ This needs the desktop app: a page shown in a web browser tab cannot be driven.
 
 An extension can stand in for the desktop app here. One that declares a browser provider runs its own browser on the OpenChamber server and answers the same actions, so an agent can browse when no desktop app is open, for instance on a remote server. Pick it under **Settings → General → OpenChamber Tools → Browser provider**; with no such extension installed the dropdown shows only "OpenChamber Web" and is disabled. The choice applies to the next browser action. If that extension is paused or removed, OpenChamber Web is used again and a toast tells you. Extension authors: see `GUEST_SERVICES.md` in the SDK package.
 
+OpenChamber's built-in Server Browser also brings you what a page asks for. A page's alert, confirm, or prompt appears over the picture, and the agent can answer it too. A file input you click lets you pick files on your device. Files a page downloads are kept in `.openchamber/downloads/` in your project for the agent, and the notification or the ⋯ menu saves them on your device. The speaker button plays the page's sound; it is off until you turn it on, and pages served over plain `http` from anywhere but `localhost` have none.
+
 ## Size and appearance
 
 Press the phone button to open the device bar. Pick a preset or type a width and
