@@ -192,6 +192,19 @@ export const setServerBrowserZoom = (
   body: { generation: number; level: number },
 ): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/page/zoom', body);
 
+export const answerServerBrowserDialog = (
+  guestId: string,
+  viewerId: string | undefined,
+  body: { tabId: string; dialogId: number; accept: boolean; promptText?: string },
+): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/page/dialog', body);
+
+/** `files` are names already uploaded to the chooser's directory; `cancel` gives the page none. */
+export const answerServerBrowserFileChooser = (
+  guestId: string,
+  viewerId: string | undefined,
+  body: { tabId: string; chooserId: number; files: readonly string[] } | { tabId: string; chooserId: number; cancel: true },
+): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/page/file-chooser', body);
+
 export const clearServerBrowserData = (
   guestId: string,
   viewerId: string | undefined,
