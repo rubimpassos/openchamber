@@ -1,15 +1,19 @@
 import crypto from 'node:crypto';
 import { GUEST_CLIPBOARD_TEXT_MAX } from '@openchamber/sdk';
 import { createBrowserActions } from './browser-actions.js';
+import { installCaptureGuard } from './capture-guard.js';
 import { connectCdp } from './cdp-client.js';
 import fs from 'node:fs';
 import { createChromeProcess, visibleUserAgent } from './chrome-process.js';
 import { MENU_BINDING, MENU_WORLD, createContextMenu } from './context-menu.js';
-import { createInspector } from './inspector.js';
+import { createDownloads } from './downloads.js';
+import { InspectorError, createInspector } from './inspector.js';
 import { networkGrants, originGrants } from './config.js';
 import { createNativeSelectCompatibility } from './native-select-compatibility.js';
+import { createPageRequests, dialogBlockedMessage, publicDialog } from './page-requests.js';
 import { createPolicyProxy } from './policy-proxy.js';
 import { createSurface } from './surface.js';
+import { AUDIO_BINDING, AUDIO_WORLD, createTabAudio } from './tab-audio.js';
 import { applyViewport, cssScreenshotParams, presetViewport } from './viewports.js';
 
 const boundedText = (value, maximum = 1_000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maximum);
@@ -31,6 +35,13 @@ const createTab = (targetId, sessionId, openerId) => ({
   problems: [],
   compatibility: null,
   lastActive: 0,
+  // What the page asks of the person; see page-requests.js.
+  dialog: null,
+  fileChooser: null,
+  dialogListeners: new Set(),
+  // Settings the tab could not take while paused on a dialog ('viewport',
+  // 'zoom', 'colorScheme', 'nativeSelect'); they land once it is answered.
+  staleSettings: new Set(),
 });
 
 const isScopePage = (info, contextId, ignoredTargetId = null) => info?.type === 'page'
@@ -43,6 +54,9 @@ const isScopePage = (info, contextId, ignoredTargetId = null) => info?.type === 
 // user-data-dir. The copy is saved into the profile only when closed with
 // `save`. Without a profile, a context of a throwaway Chrome.
 // `projectDirectory` lets pages reach dev servers running inside that project.
+// `downloadsDirectory` is where pages' downloads go and `uploadsDirectory`
+// where files a person picks for a page are put; without one, downloads are
+// dropped and file choosers left to Chrome, which shows none.
 export const createBrowserRuntime = ({
   chromePath = null,
   allowedOrigins = [],
@@ -53,8 +67,11 @@ export const createBrowserRuntime = ({
   projectDirectory = null,
   profile = null,
   allowPrivateNetwork = null,
+  downloadsDirectory = null,
+  uploadsDirectory = null,
 } = {}) => {
-  let chrome = profile ? null : createChromeProcess({ chromePath });
+  // Lets the service capture a tab's sound; capture-guard.js keeps pages from doing the same.
+  let chrome = profile ? null : createChromeProcess({ chromePath, tabAudioCapture: true });
   let profileDirectory = null;
   let profileVersion = null;
   const grantSources = [
@@ -82,6 +99,7 @@ export const createBrowserRuntime = ({
   let cdp = null;
   let contextId = null;
   let eventCleanup = null;
+  let guardCleanup = null;
   let startupPromise = null;
   let pagePromise = null;
   let actionQueue = Promise.resolve();
@@ -109,6 +127,17 @@ export const createBrowserRuntime = ({
   chrome?.onExit(markDead);
 
   const activeTab = () => tabs.get(activeTargetId) ?? null;
+
+  const pageRequests = createPageRequests({ uploadRoot: uploadsDirectory });
+  const downloads = downloadsDirectory ? createDownloads({ directory: downloadsDirectory }) : null;
+  const audio = createTabAudio({
+    activeTab,
+    send: (sessionId, method, params) => cdp.sendSession(sessionId, method, params),
+  });
+  // The agent action running now and the tab it works on: a dialog that
+  // opens there ends the action at once instead of leaving it waiting on a
+  // paused page (page-requests.js).
+  let agentAction = null;
 
   const runtime = {
     get viewport() {
@@ -142,7 +171,24 @@ export const createBrowserRuntime = ({
         title: current.title,
         isLoading: current.isLoading,
         active: current.targetId === activeTargetId,
+        dialog: current.dialog ? { id: current.dialog.id, ...publicDialog(current.dialog) } : null,
+        fileChooser: current.fileChooser ? {
+          id: current.fileChooser.id,
+          multiple: current.fileChooser.mode === 'selectMultiple',
+          accept: current.fileChooser.accept,
+          directory: current.fileChooser.directory,
+        } : null,
       }));
+    },
+    get downloads() {
+      return downloads?.list ?? [];
+    },
+    // The page in front gives no sound (an insecure page cannot be captured).
+    get audioUnavailable() {
+      return audio.unavailable;
+    },
+    get audioHead() {
+      return audio.head;
     },
     get nativeSelectCompatibility() {
       return activeTab()?.compatibility.enabled ?? nativeSelectEnabled;
@@ -227,6 +273,7 @@ export const createBrowserRuntime = ({
     current.lastActive = activations;
     void contextMenu.close();
     surface.retarget();
+    audio.retarget();
     notifyTabs();
     // Chrome can defer input and frames for a page that is not in front.
     await cdp.sendSession(current.sessionId, 'Page.bringToFront').catch(() => {});
@@ -241,6 +288,8 @@ export const createBrowserRuntime = ({
     contextMenu.forget(current.sessionId);
     inspector.endTab(current.sessionId);
     zoomStyles.delete(targetId);
+    pageRequests.forget(current);
+    audio.forget(current);
     if (activeTargetId !== targetId) {
       notifyTabs();
       return;
@@ -268,17 +317,23 @@ export const createBrowserRuntime = ({
       });
       tabs.set(targetId, current);
       sessions.set(sessionId, current);
-      await Promise.all([
+      // Sent together: Chrome runs a session's commands in order. A page that
+      // opens a dialog as it loads takes most of them only once the dialog is
+      // answered, so the tab is ready (and shows the dialog) as soon as it
+      // opens; the commands still land, in order, after the answer.
+      await untilDialog(current, Promise.all([
         cdp.sendSession(sessionId, 'Page.enable'),
         cdp.sendSession(sessionId, 'Runtime.enable'),
         cdp.sendSession(sessionId, 'Log.enable'),
         cdp.sendSession(sessionId, 'Runtime.addBinding', { name: MENU_BINDING, executionContextName: MENU_WORLD }),
-      ]);
-      await applyViewport(cdp, sessionId, runtime.viewport);
-      if (userAgent) await cdp.sendSession(sessionId, 'Emulation.setUserAgentOverride', { userAgent });
-      if (nativeSelectEnabled) await current.compatibility.setEnabled(true).catch(() => {});
-      if (zoomLevel !== 0) await applyZoomToTab(current).catch(() => {});
-      if (colorScheme !== 'system') await applyColorScheme(current).catch(() => {});
+        cdp.sendSession(sessionId, 'Runtime.addBinding', { name: AUDIO_BINDING, executionContextName: AUDIO_WORLD }),
+        ...(pageRequests.interceptsFileChoosers ? [cdp.sendSession(sessionId, 'Page.setInterceptFileChooserDialog', { enabled: true })] : []),
+        applyViewport(cdp, sessionId, runtime.viewport),
+        ...(userAgent ? [cdp.sendSession(sessionId, 'Emulation.setUserAgentOverride', { userAgent })] : []),
+      ]));
+      if (nativeSelectEnabled) await applySetting(current, 'nativeSelect');
+      if (zoomLevel !== 0) await applySetting(current, 'zoom');
+      if (colorScheme !== 'system') await applySetting(current, 'colorScheme');
       await refreshNavigation(current);
       return current;
     })().finally(() => attaching.delete(targetId));
@@ -287,6 +342,10 @@ export const createBrowserRuntime = ({
   };
 
   const handleTargetEvent = (event) => {
+    if (event.method === 'Browser.downloadWillBegin' || event.method === 'Browser.downloadProgress') {
+      downloads?.event(event.method, event.params);
+      return;
+    }
     const info = event.params.targetInfo;
     if (event.method === 'Target.targetCreated' && isScopePage(info, contextId, launchTargetId)) {
       // Pages the site opens (popups, target=_blank) come to the front like in a
@@ -318,11 +377,29 @@ export const createBrowserRuntime = ({
     const current = sessions.get(event.sessionId);
     if (!current) return;
     inspector.event(current.sessionId, event.method, event.params);
+    if (event.method === 'Page.javascriptDialogOpening') {
+      pageRequests.dialogOpened(current, event.params);
+      if (agentAction?.targetId === current.targetId) {
+        agentAction.dialogs.abort(new Error(dialogBlockedMessage(current.dialog, { during: true })));
+      }
+    }
+    if (event.method === 'Page.javascriptDialogClosed') {
+      pageRequests.dialogClosed(current);
+      const stale = [...current.staleSettings];
+      current.staleSettings.clear();
+      for (const name of stale) void settingAppliers[name](current).catch(() => {});
+    }
+    if (event.method === 'Page.fileChooserOpened') {
+      void pageRequests.fileChooserOpened(current, event.params, (method, params) => cdp.sendSession(current.sessionId, method, params))
+        .catch(() => {});
+    }
     if (event.method === 'Page.frameNavigated' && event.params.frame?.id) {
       if (!event.params.frame.parentId) {
         current.mainFrameId = event.params.frame.id;
         // A new document starts with no problems, like the DevTools console.
         current.problems.length = 0;
+        pageRequests.navigated(current);
+        audio.navigated(current);
         contextMenu.forget(current.sessionId);
         current.url = event.params.frame.url;
         void refreshNavigation(current);
@@ -350,6 +427,9 @@ export const createBrowserRuntime = ({
     if (event.method === 'Runtime.bindingCalled' && event.params.name === MENU_BINDING) {
       contextMenu.handleBinding(current.sessionId, event.params);
     }
+    if (event.method === 'Runtime.bindingCalled' && event.params.name === AUDIO_BINDING) {
+      audio.binding(current, event.params.payload);
+    }
     if (event.method === 'Runtime.consoleAPICalled') {
       if (event.params.type !== 'warning' && event.params.type !== 'error') return;
       const message = event.params.args?.map((arg) => arg.value ?? arg.description).filter(Boolean).join(' ');
@@ -368,7 +448,7 @@ export const createBrowserRuntime = ({
     const proxyAddress = await proxy.listen();
     ({ directory: profileDirectory, version: profileVersion } = await profile.checkout());
     if (closed) throw new Error('Browser runtime is closed');
-    chrome = createChromeProcess({ chromePath, userDataDir: profileDirectory, proxyServer: proxyAddress });
+    chrome = createChromeProcess({ chromePath, userDataDir: profileDirectory, proxyServer: proxyAddress, tabAudioCapture: true });
     chrome.onExit(markDead);
     return { proxyAddress, processInfo: await chrome.ensure() };
   };
@@ -390,6 +470,8 @@ export const createBrowserRuntime = ({
       const reported = processInfo.version?.userAgent ?? '';
       userAgent = reported.includes('HeadlessChrome/') ? visibleUserAgent(reported) : null;
       nextCdp = await connectCdp(processInfo.endpoint);
+      // Before any page loads anything: no page may run without the guard.
+      guardCleanup = await installCaptureGuard(nextCdp);
       if (profile) {
         // The profile's cookies and storage live in the default context, which the command-line proxy covers.
         const { targetInfos = [] } = await nextCdp.send('Target.getTargets');
@@ -411,7 +493,12 @@ export const createBrowserRuntime = ({
       cdp.onClose(markDead);
       eventCleanup = cdp.onEvent(handleEvent);
       await cdp.send('Target.setDiscoverTargets', { discover: true });
+      // Browsing works without downloads: a folder that cannot be made only
+      // means files are dropped, as headless Chrome does by default.
+      await downloads?.enable(cdp, profile ? null : contextId).catch(() => {});
     } catch (error) {
+      guardCleanup?.();
+      guardCleanup = null;
       if (!profile && nextContextId && nextCdp?.isOpen) {
         await nextCdp.send('Target.disposeBrowserContext', { browserContextId: nextContextId }).catch(() => {});
       }
@@ -477,36 +564,125 @@ export const createBrowserRuntime = ({
     if (!current) throw new Error(`This chat's browser has no tab ${JSON.stringify(String(tabId))}. Use an id from browser.snapshot's tabs.`);
     return current;
   };
-  runtime.agentPage = async (tabId) => pageOf(await agentTab(tabId));
+  // The tab an agent action works on. A paused page cannot be read or used,
+  // so an open dialog fails the action at once, naming the dialog.
+  const claimForAction = (current) => {
+    if (current.dialog) throw new Error(dialogBlockedMessage(current.dialog));
+    if (agentAction) agentAction.targetId = current.targetId;
+    return pageOf(current);
+  };
+  runtime.agentPage = async (tabId) => claimForAction(await agentTab(tabId));
 
   // browser.open without a tab never replaces the viewer's page: it opens a
   // background tab, unless the viewer is on an untouched blank tab.
   runtime.agentOpenPage = async (tabId) => {
     const current = await agentTab(tabId);
     if (tabId !== undefined || (current.url === 'about:blank' && !current.canGoBack && !current.canGoForward)) {
-      return pageOf(current);
+      return claimForAction(current);
     }
-    return pageOf(await openTab({ background: true }));
+    return claimForAction(await openTab({ background: true }));
+  };
+
+  // browser.dialog: the one action a paused page still takes.
+  runtime.agentAnswerDialog = async ({ tabId, accept, promptText }) => {
+    const current = await agentTab(tabId);
+    if (!current.dialog) throw new Error('No dialog is open on this tab, so there is nothing to answer; browser.snapshot reads the page.');
+    const answer = await pageRequests.answerDialog(current, (method, params) => cdp.sendSession(current.sessionId, method, params), { accept, promptText });
+    return {
+      ...answer,
+      tabId: current.targetId,
+      url: current.url,
+      title: current.title,
+      ...(current.dialog ? { dialog: publicDialog(current.dialog) } : {}),
+    };
+  };
+
+  // The dock's answers name the tab and the request it showed.
+  const dockTab = (tabId) => {
+    const current = tabs.get(tabId);
+    if (!current) throw new Error('That tab is no longer open');
+    return current;
+  };
+  runtime.answerDialog = ({ tabId, dialogId, accept, promptText }) => {
+    const current = dockTab(tabId);
+    return pageRequests.answerDialog(current, (method, params) => cdp.sendSession(current.sessionId, method, params), { dialogId, accept, promptText });
+  };
+  runtime.answerFileChooser = ({ tabId, chooserId, files }) => {
+    const current = dockTab(tabId);
+    return pageRequests.answerFileChooser(current, (method, params) => cdp.sendSession(current.sessionId, method, params), { chooserId, files });
+  };
+
+  // Resolves with the command's result, or with null as soon as the page
+  // opens a dialog meanwhile ("leave this page?" on a navigation): the
+  // command then waits on the dialog, which the dock shows.
+  const untilDialog = (current, promise) => new Promise((resolve, reject) => {
+    const onChange = () => {
+      if (!current.dialog) return;
+      current.dialogListeners.delete(onChange);
+      promise.catch(() => {});
+      resolve(null);
+    };
+    current.dialogListeners.add(onChange);
+    onChange();
+    promise.then((value) => {
+      current.dialogListeners.delete(onChange);
+      resolve(value);
+    }, (error) => {
+      current.dialogListeners.delete(onChange);
+      reject(error);
+    });
+  });
+
+  const requireNoDialog = (current) => {
+    if (current?.dialog) throw new Error('Answer the dialog on this page first');
+  };
+
+  // The person's input reaches a paused page only once its dialog is
+  // answered, so surface.js drops it while one is open, and a click that
+  // opens one returns as soon as it is open instead of waiting on it.
+  runtime.dialogOpen = (targetId) => Boolean(tabs.get(targetId)?.dialog);
+  runtime.untilDialog = (targetId, promise) => {
+    const current = tabs.get(targetId);
+    return current ? untilDialog(current, promise) : promise;
   };
 
   // The active tab decides; other tabs follow on a best-effort basis.
   runtime.setNativeSelectCompatibility = async (enabled) => {
     await runtime.ensurePage();
     const active = activeTab();
+    requireNoDialog(active);
     await active.compatibility.setEnabled(enabled);
     nativeSelectEnabled = enabled;
-    await Promise.allSettled([...tabs.values()]
+    await Promise.all([...tabs.values()]
       .filter((current) => current !== active)
-      .map((current) => current.compatibility.setEnabled(enabled)));
+      .map((current) => applySetting(current, 'nativeSelect')));
+  };
+
+  // A page paused on a dialog takes no command that needs it until the dialog
+  // is answered; waiting on it would hold up every operation queued behind
+  // this one, a panel resize included. Its new size lands once it is answered.
+  const applyViewportToTab = (current, viewport) => {
+    if (current.dialog) {
+      current.staleSettings.add('viewport');
+      return Promise.resolve();
+    }
+    return applyViewport(cdp, current.sessionId, viewport);
+  };
+
+  // Sets the tab's emulated size again, unchanged; see surface.js for why.
+  runtime.reapplyViewport = (targetId) => {
+    const current = tabs.get(targetId);
+    return current ? applyViewportToTab(current, effectiveViewport()) : Promise.resolve();
   };
 
   const applyViewportToTabs = async () => {
     const viewport = effectiveViewport();
-    const page = await runtime.ensurePage();
-    await applyViewport(page.cdp, page.sessionId, viewport);
+    await runtime.ensurePage();
+    const active = activeTab();
+    await applyViewportToTab(active, viewport);
     await Promise.allSettled([...tabs.values()]
-      .filter((current) => current.sessionId !== page.sessionId)
-      .map((current) => applyViewport(cdp, current.sessionId, viewport)));
+      .filter((current) => current !== active)
+      .map((current) => applyViewportToTab(current, viewport)));
     surface?.refreshStream();
   };
 
@@ -565,21 +741,22 @@ export const createBrowserRuntime = ({
     }
     const page = await runtime.ensurePage();
     const current = activeTab();
+    requireNoDialog(current);
     const send = (method, params) => page.cdp.sendSession(page.sessionId, method, params);
     if (name === 'navigate') {
       const url = new URL(parameters.url);
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Open an absolute http(s) URL');
       runtime.clearConsoleProblems();
-      const result = await send('Page.navigate', { url: url.href });
-      if (result.errorText) throw new Error(`Navigation failed: ${result.errorText}`);
+      const result = await untilDialog(current, send('Page.navigate', { url: url.href }));
+      if (result?.errorText) throw new Error(`Navigation failed: ${result.errorText}`);
     } else if (name === 'back' || name === 'forward') {
       const history = await send('Page.getNavigationHistory');
       const entry = history.entries?.[history.currentIndex + (name === 'back' ? -1 : 1)];
       if (!entry) throw new Error(name === 'back' ? 'There is nothing to go back to' : 'There is nothing to go forward to');
-      await send('Page.navigateToHistoryEntry', { entryId: entry.id });
+      await untilDialog(current, send('Page.navigateToHistoryEntry', { entryId: entry.id }));
     } else if (name === 'reload') {
       runtime.clearConsoleProblems();
-      await send('Page.reload');
+      await untilDialog(current, send('Page.reload'));
     } else if (name === 'stop') {
       // Chrome refuses Page.stopLoading until a cross-document navigation
       // commits. The document's own stop, from a world the page cannot patch,
@@ -615,6 +792,7 @@ export const createBrowserRuntime = ({
   runtime.inspector = inspector;
   runtime.inspectorStart = async () => {
     await runtime.ensurePage();
+    if (activeTab().dialog) throw new InspectorError('UNAVAILABLE');
     return inspector.start(activeTab());
   };
 
@@ -656,11 +834,12 @@ export const createBrowserRuntime = ({
     if (!Number.isInteger(level) || level < ZOOM_LEVEL_MIN || level > ZOOM_LEVEL_MAX) {
       throw new Error(`Zoom level must be an integer from ${ZOOM_LEVEL_MIN} to ${ZOOM_LEVEL_MAX}`);
     }
-    zoomLevel = level;
     await runtime.ensurePage();
     const active = activeTab();
+    requireNoDialog(active);
+    zoomLevel = level;
     await applyZoomToTab(active);
-    await Promise.allSettled([...tabs.values()].filter((current) => current !== active).map(applyZoomToTab));
+    await Promise.all([...tabs.values()].filter((current) => current !== active).map((current) => applySetting(current, 'zoom')));
   };
   Object.defineProperty(runtime, 'zoomLevel', { get: () => zoomLevel, enumerable: true });
 
@@ -671,11 +850,29 @@ export const createBrowserRuntime = ({
   });
   runtime.setColorScheme = async (scheme) => {
     if (!['system', 'light', 'dark'].includes(scheme)) throw new Error('Color scheme must be system, light, or dark');
-    colorScheme = scheme;
     await runtime.ensurePage();
-    await Promise.allSettled([...tabs.values()].map(applyColorScheme));
+    requireNoDialog(activeTab());
+    colorScheme = scheme;
+    await Promise.all([...tabs.values()].map((current) => applySetting(current, 'colorScheme')));
   };
   Object.defineProperty(runtime, 'colorScheme', { get: () => colorScheme, enumerable: true });
+
+  // How each setting reaches a tab; a tab paused on a dialog gets it once the
+  // dialog is answered (staleSettings, applied on Page.javascriptDialogClosed).
+  const settingAppliers = {
+    viewport: (current) => applyViewport(cdp, current.sessionId, effectiveViewport()),
+    zoom: (current) => applyZoomToTab(current),
+    colorScheme: (current) => applyColorScheme(current),
+    nativeSelect: (current) => current.compatibility.setEnabled(nativeSelectEnabled),
+  };
+  // Other tabs follow the active one on a best-effort basis.
+  const applySetting = (current, name) => {
+    if (current.dialog) {
+      current.staleSettings.add(name);
+      return Promise.resolve();
+    }
+    return settingAppliers[name](current).catch(() => {});
+  };
 
   // `/page/evaluate`, `/page/capture`, and `/page/clear` act on the visible
   // tab for the native dock, independent of the agent's own queued actions
@@ -683,6 +880,7 @@ export const createBrowserRuntime = ({
   // mid-action, so these run straight against CDP.
   runtime.pageEvaluate = async (expression, { userGesture = false } = {}) => {
     const page = await runtime.ensurePage();
+    requireNoDialog(activeTab());
     const response = await page.cdp.sendSession(page.sessionId, 'Runtime.evaluate', {
       expression,
       returnByValue: true,
@@ -697,6 +895,7 @@ export const createBrowserRuntime = ({
 
   runtime.pageCapture = async () => {
     const page = await runtime.ensurePage();
+    requireNoDialog(activeTab());
     await page.cdp.sendSession(page.sessionId, 'Page.enable').catch(() => {});
     const capture = await page.cdp.sendSession(page.sessionId, 'Page.captureScreenshot', cssScreenshotParams(runtime.viewport));
     const metrics = await page.cdp.sendSession(page.sessionId, 'Page.getLayoutMetrics');
@@ -723,6 +922,7 @@ export const createBrowserRuntime = ({
   // WebSQL), never its cookies.
   runtime.pageClear = async (what) => {
     const page = await runtime.ensurePage();
+    requireNoDialog(activeTab());
     const send = (method, params) => page.cdp.sendSession(page.sessionId, method, params);
     if (what === 'cookies') {
       if (profile) {
@@ -770,12 +970,15 @@ export const createBrowserRuntime = ({
         throw new Error('The user controls the browser. Wait for them to hand control back.');
       }
       await contextMenu.close();
+      const dialogs = new AbortController();
+      agentAction = { targetId: null, dialogs };
       runtime.agentActive = true;
       try {
-        const data = await execute(action, parameters, signal);
+        const data = await execute(action, parameters, AbortSignal.any([signal, dialogs.signal]));
         await (tabs.get(data?.tabId ?? parameters?.tabId) ?? activeTab())?.compatibility.whenIdle();
         return data;
       } finally {
+        agentAction = null;
         runtime.agentActive = false;
       }
     });
@@ -788,6 +991,7 @@ export const createBrowserRuntime = ({
   runtime.surfaceControl = (controller) => surface.control(controller);
   runtime.surfaceResize = (size) => surface.resize(size);
   runtime.surfaceClipboard = () => surface.clipboard();
+  runtime.surfaceAudio = (request) => audio.batch(request);
   runtime.onDead = (listener) => {
     deathListeners.add(listener);
     return () => deathListeners.delete(listener);
@@ -821,9 +1025,13 @@ export const createBrowserRuntime = ({
       }
     }
     await discardProfileDirectory();
+    guardCleanup?.();
     cdp?.close();
+    audio.close();
     await surface.close();
     inspector.close();
+    await pageRequests.close();
+    await downloads?.close();
     await pagePromise?.catch(() => {});
     await actionQueue.catch(() => {});
     eventCleanup?.();

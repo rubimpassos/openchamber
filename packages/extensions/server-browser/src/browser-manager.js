@@ -50,7 +50,14 @@ export const createBrowserManager = ({
   let frameState = null;
   let frameSequence = 0;
   let viewGeneration = 0;
+  // Frame and sound requests waiting on the selected scope; a switch cancels them.
   const frameControllers = new Set();
+  // Where the host's sound requests stand in one browser's packets, and our
+  // own numbering of the answers across browsers. Kept per runtime, not per
+  // scope: a browser reopened under the same scope (a saved profile, a
+  // crash) numbers its packets from the start again.
+  let audioCursor = null;
+  let audioSequence = 0;
   const selectionWaiters = new Set();
   // The host reports the panel in device pixels when its CSS size changes; the
   // dock reports the ratio. Pages keep the CSS size worked out when the host
@@ -345,6 +352,15 @@ export const createBrowserManager = ({
     if (shownEarlierView(frameSeq)) throw new Error('The browser view changed before the dock command ran');
   };
 
+  // Answering what a page asks (a dialog, a file) is what lets it run again,
+  // so it is open to anyone while nobody or the agent holds the picture, and
+  // to the viewer in control while a person does.
+  const requireAnswerAccess = ({ viewer = null } = {}) => {
+    if (controller === 'user' && !(viewer !== null && viewer === controllingViewer)) {
+      throw new Error('Dock controls are available only while the shared surface is idle or to the viewer in control');
+    }
+  };
+
   const requireGeneration = (expectedGeneration) => {
     if (expectedGeneration !== viewGeneration) {
       throw new Error('The browser view changed before the dock command ran');
@@ -464,6 +480,8 @@ export const createBrowserManager = ({
           nativeSelectCompatibility: entry.runtime.nativeSelectCompatibility === true,
           nativeSelectCompatibilityError: entry.runtime.nativeSelectCompatibilityError ?? '',
           tabs: entry.runtime.tabs ?? [],
+          downloads: entry.runtime.downloads ?? [],
+          audioUnavailable: entry.runtime.audioUnavailable === true,
           viewport: entry.runtime.viewportState ?? null,
           problems: entry.runtime.problemCounts ?? { errors: 0, warnings: 0 },
           zoomLevel: entry.runtime.zoomLevel ?? 0,
@@ -593,6 +611,20 @@ export const createBrowserManager = ({
         await entry.runtime.command('tab-close', { tabId });
       });
     },
+    // Outside the operation queue: an agent action waiting on the paused page
+    // must not hold up the answer that lets it run again.
+    async pageDialog({ tabId, dialogId, accept, promptText }, access) {
+      requireAnswerAccess(access);
+      const entry = requireSelected();
+      touch(entry);
+      return entry.runtime.answerDialog({ tabId, dialogId, accept, promptText });
+    },
+    async pageFileChooser({ tabId, chooserId, files }, access) {
+      requireAnswerAccess(access);
+      const entry = requireSelected();
+      touch(entry);
+      return entry.runtime.answerFileChooser({ tabId, chooserId, files });
+    },
     setViewport({ mode, width, height, mobile }, expectedGeneration, access) {
       return enqueue(async () => {
         requireDockAccess(access);
@@ -695,6 +727,38 @@ export const createBrowserManager = ({
       };
       return wrapped;
     },
+    // The selected scope's sound. A listener that starts (`after` 0) or a
+    // browser it has not heard yet starts from the newest packet, not a replay.
+    async surfaceAudio({ after, wait, signal }) {
+      if (closed) return null;
+      signal?.throwIfAborted();
+      const entry = selected();
+      if (!entry?.runtime.surfaceAudio) {
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 1_000)));
+        return null;
+      }
+      touch(entry);
+      const from = after > 0 && audioCursor?.runtime === entry.runtime ? audioCursor.sourceSeq : entry.runtime.audioHead;
+      const switchController = new AbortController();
+      frameControllers.add(switchController);
+      let batch;
+      try {
+        batch = await entry.runtime.surfaceAudio({
+          after: from,
+          wait,
+          signal: signal ? AbortSignal.any([signal, switchController.signal]) : switchController.signal,
+        });
+      } catch (error) {
+        if (switchController.signal.aborted) return null;
+        throw error;
+      } finally {
+        frameControllers.delete(switchController);
+      }
+      if (!batch || selectedScopeId !== entry.id) return null;
+      audioCursor = { runtime: entry.runtime, sourceSeq: batch.seq };
+      audioSequence += 1;
+      return { ...batch, seq: audioSequence };
+    },
     surfaceInput(events, { viewer = null, frameSeq = null } = {}) {
       controller = 'user';
       // The host sends input only from the viewer in control, ahead of its control notice.
@@ -742,6 +806,8 @@ export const createBrowserManager = ({
     inspectorEvaluate(captureId, expression) {
       const entry = requireInspectable();
       if (controller === 'agent') throw new InspectorError('AGENT_ACTIVE');
+      // A page paused on a dialog runs no script until the dialog is answered.
+      if (entry.runtime.tabs?.some((tab) => tab.active && tab.dialog)) throw new InspectorError('UNAVAILABLE');
       return entry.runtime.inspector.evaluate(captureId, expression);
     },
     inspectorRequest(captureId, entryId, includeBody) {

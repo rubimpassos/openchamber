@@ -6,6 +6,10 @@ import {
   BROWSER_PROVIDER_OPEN_TIMEOUT_MS,
   BROWSER_PROVIDER_PATH,
   SURFACE_AGENT_ACTIVE_HEADER,
+  SURFACE_AUDIO_CHANNELS_HEADER,
+  SURFACE_AUDIO_CODEC_HEADER,
+  SURFACE_AUDIO_PATH,
+  SURFACE_AUDIO_SAMPLE_RATE_HEADER,
   SURFACE_CLIPBOARD_PATH,
   SURFACE_CONTROL_PATH,
   SURFACE_FRAME_PATH,
@@ -167,6 +171,33 @@ const generationProperty = (value) => (
 );
 
 const viewportDimension = (value) => Number.isInteger(value) && value >= 1 && value <= MAX_VIEWPORT_DIMENSION;
+
+const PROMPT_TEXT_MAX = 10_000;
+const CHOSEN_FILES_MAX = 32;
+const FILE_NAME_MAX = 255;
+
+const requestNumber = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
+
+// `{ tabId, dialogId, accept, promptText? }`: the dialog the dock showed.
+const readDialogAnswer = (body) => {
+  const tabId = identityProperty(body, 'tabId');
+  const dialogId = requestNumber(body?.dialogId);
+  if (!tabId || dialogId === null || typeof body.accept !== 'boolean') return null;
+  if (body.promptText !== undefined && (typeof body.promptText !== 'string' || body.promptText.length > PROMPT_TEXT_MAX)) return null;
+  return { tabId, dialogId, accept: body.accept, ...(body.promptText === undefined ? {} : { promptText: body.promptText }) };
+};
+
+// `{ tabId, chooserId, files }` with the names uploaded, or `cancel: true`.
+const readFileChooserAnswer = (body) => {
+  const tabId = identityProperty(body, 'tabId');
+  const chooserId = requestNumber(body?.chooserId);
+  if (!tabId || chooserId === null) return null;
+  if (body.cancel === true) return { tabId, chooserId, files: null };
+  const { files } = body;
+  if (!Array.isArray(files) || files.length === 0 || files.length > CHOSEN_FILES_MAX) return null;
+  if (!files.every((name) => typeof name === 'string' && name.length > 0 && name.length <= FILE_NAME_MAX)) return null;
+  return { tabId, chooserId, files };
+};
 
 const readViewportRequest = (value) => {
   if (typeof value?.mobile !== 'boolean') return null;
@@ -470,6 +501,28 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
       }
     }
 
+    if (request.method === 'POST' && url.pathname === '/page/dialog') {
+      const answer = readDialogAnswer(await readObjectBody(request));
+      if (!answer) return text(response, 400, 'tabId, dialogId, and accept are required; promptText is text\n');
+      try {
+        await runtime.pageDialog(answer, access);
+        return json(response, 200, runtime.state(access));
+      } catch (error) {
+        return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/page/file-chooser') {
+      const answer = readFileChooserAnswer(await readObjectBody(request));
+      if (!answer) return text(response, 400, `tabId and chooserId are required, with files (1 to ${CHOSEN_FILES_MAX} names) or cancel: true\n`);
+      try {
+        await runtime.pageFileChooser(answer, access);
+        return json(response, 200, runtime.state(access));
+      } catch (error) {
+        return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/page/capture') {
       const body = await readObjectBody(request);
       const generation = generationProperty(body);
@@ -636,6 +689,26 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
       if (runtime.agentActive) headers[SURFACE_AGENT_ACTIVE_HEADER] = '1';
       response.writeHead(200, headers);
       return response.end(frame.bytes);
+    }
+
+    if (request.method === 'GET' && url.pathname === SURFACE_AUDIO_PATH) {
+      const after = queryInteger(url, 'after', 0, Number.MAX_SAFE_INTEGER);
+      const wait = queryInteger(url, 'wait', 0, SURFACE_FRAME_WAIT_MS);
+      if (after === null || wait === null) return text(response, 400, 'Invalid audio query\n');
+      const batch = await runtime.surfaceAudio({ after, wait, signal });
+      if (!batch) {
+        response.writeHead(204);
+        return response.end();
+      }
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': batch.bytes.length,
+        [SURFACE_SEQ_HEADER]: String(batch.seq),
+        [SURFACE_AUDIO_CODEC_HEADER]: batch.codec,
+        [SURFACE_AUDIO_SAMPLE_RATE_HEADER]: String(batch.sampleRate),
+        [SURFACE_AUDIO_CHANNELS_HEADER]: String(batch.channels),
+      });
+      return response.end(batch.bytes);
     }
 
     if (request.method === 'POST' && url.pathname === SURFACE_INPUT_PATH) {

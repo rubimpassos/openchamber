@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createBrowserManager } from './browser-manager.js';
@@ -20,6 +22,27 @@ const readPort = (value) => {
 };
 
 export { createBrowserManager, createBrowserRuntime, createService };
+
+// A chat's browser keeps downloads and the files a person picks for a page in
+// the chat's project, beside the screenshots the agent saves there, so the
+// agent finds them and OpenChamber's file routes serve them. A browser with no
+// project folder (signing into a profile) keeps downloads with the service's
+// data and takes no files, which nothing could upload to it.
+const projectFilesRoot = (directory) => {
+  if (directory.startsWith('profile:') || !path.isAbsolute(directory)) return null;
+  try {
+    return fs.statSync(directory).isDirectory() ? path.join(directory, '.openchamber') : null;
+  } catch {
+    return null;
+  }
+};
+
+const fileDirectoriesFor = (directory, dataRoot) => {
+  const project = projectFilesRoot(directory);
+  if (project) return { downloadsDirectory: path.join(project, 'downloads'), uploadsDirectory: path.join(project, 'uploads') };
+  const key = crypto.createHash('sha256').update(directory).digest('hex').slice(0, 16);
+  return { downloadsDirectory: path.join(dataRoot, 'scopes', key, 'downloads'), uploadsDirectory: null };
+};
 
 export const startService = async ({
   env = process.env,
@@ -85,6 +108,7 @@ export const startService = async ({
       devServers,
       projectDevServers: config.projectDevServers ? scanner : null,
       projectDirectory: context.directory.startsWith('profile:') ? null : context.directory,
+      ...fileDirectoriesFor(context.directory, defaults.root),
       allowPrivateNetwork: networkPolicy.allowPrivateNetwork,
       profile: profile ? {
         id: profile.id,

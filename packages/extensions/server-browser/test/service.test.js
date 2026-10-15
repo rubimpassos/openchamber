@@ -637,6 +637,85 @@ describe('server browser service', () => {
     }
   });
 
+  test('page/dialog and page/file-chooser validate their answers and pass the viewer\'s access', async () => {
+    // Given a runtime that records the answers it gets.
+    const runtime = createRuntime();
+    runtime.pageDialog = async (answer, access) => { runtime.calls.push(['dialog', answer, access]); };
+    runtime.pageFileChooser = async (answer, access) => {
+      runtime.calls.push(['chooser', answer, access]);
+      if (answer.files?.includes('gone.txt')) throw new Error('That file request is no longer open');
+    };
+    const fixture = await startFixture(runtime);
+    try {
+      const post = (route, body, headers = {}) => fetch(`${fixture.origin}${route}`, {
+        method: 'POST', headers: { ...authorization, ...headers }, body: JSON.stringify(body),
+      });
+
+      // When answers miss their ids, carry a non-boolean accept, or list no file names, then they are refused unread.
+      const refused = await Promise.all([
+        post('/page/dialog', { tabId: 't1', accept: true }),
+        post('/page/dialog', { tabId: 't1', dialogId: 2, accept: 'yes' }),
+        post('/page/dialog', { tabId: 't1', dialogId: 2, accept: true, promptText: 7 }),
+        post('/page/file-chooser', { tabId: 't1', chooserId: 3, files: [] }),
+        post('/page/file-chooser', { tabId: 't1', chooserId: 3, files: [''] }),
+        post('/page/file-chooser', { chooserId: 3, cancel: true }),
+      ]);
+      expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400]);
+
+      // When the viewer in control answers a prompt, picks files, and cancels a request.
+      const viewer = { 'x-surface-viewer': 'viewer-a', 'x-surface-viewer-controls': '1' };
+      const dialog = await post('/page/dialog', { tabId: 't1', dialogId: 2, accept: true, promptText: 'Grace' }, viewer);
+      const chosen = await post('/page/file-chooser', { tabId: 't1', chooserId: 3, files: ['a.txt', 'b.txt'] }, viewer);
+      const cancelled = await post('/page/file-chooser', { tabId: 't1', chooserId: 4, cancel: true });
+      const gone = await post('/page/file-chooser', { tabId: 't1', chooserId: 5, files: ['gone.txt'] });
+
+      // Then each reaches the manager with that viewer, and a request that is gone answers 404.
+      expect([dialog.status, chosen.status, cancelled.status, gone.status]).toEqual([200, 200, 200, 404]);
+      expect(runtime.calls).toEqual([
+        ['dialog', { tabId: 't1', dialogId: 2, accept: true, promptText: 'Grace' }, { viewer: 'viewer-a', frameSeq: null }],
+        ['chooser', { tabId: 't1', chooserId: 3, files: ['a.txt', 'b.txt'] }, { viewer: 'viewer-a', frameSeq: null }],
+        ['chooser', { tabId: 't1', chooserId: 4, files: null }, { viewer: null, frameSeq: null }],
+        ['chooser', { tabId: 't1', chooserId: 5, files: ['gone.txt'] }, { viewer: null, frameSeq: null }],
+      ]);
+    } finally {
+      await fixture.service.close();
+    }
+  });
+
+  test('GET /surface/audio answers length-prefixed Opus with its format, or no content', async () => {
+    // Given a runtime with one batch of sound and then none.
+    const runtime = createRuntime();
+    const packets = Buffer.from([0, 2, 7, 8, 0, 1, 9]);
+    let pending = { seq: 12, codec: 'opus', sampleRate: 48_000, channels: 2, bytes: packets };
+    runtime.surfaceAudio = async (request) => {
+      runtime.calls.push(['audio', request.after, request.wait]);
+      const batch = pending;
+      pending = null;
+      return batch;
+    };
+    const fixture = await startFixture(runtime);
+    try {
+      // When the host asks for sound, then it gets the packets and their format.
+      const first = await fetch(`${fixture.origin}/surface/audio?after=0&wait=25000`, { headers: authorization });
+      expect(first.status).toBe(200);
+      expect(first.headers.get('content-type')).toBe('application/octet-stream');
+      expect(first.headers.get('x-surface-seq')).toBe('12');
+      expect(first.headers.get('x-surface-audio-codec')).toBe('opus');
+      expect(first.headers.get('x-surface-audio-sample-rate')).toBe('48000');
+      expect(first.headers.get('x-surface-audio-channels')).toBe('2');
+      expect(Buffer.from(await first.arrayBuffer())).toEqual(packets);
+
+      // When nothing new arrived, then the answer is empty; a wait past the limit is refused.
+      const none = await fetch(`${fixture.origin}/surface/audio?after=12&wait=0`, { headers: authorization });
+      expect(none.status).toBe(204);
+      const tooLong = await fetch(`${fixture.origin}/surface/audio?after=12&wait=999999`, { headers: authorization });
+      expect(tooLong.status).toBe(400);
+      expect(runtime.calls).toEqual([['audio', 0, 25000], ['audio', 12, 0]]);
+    } finally {
+      await fixture.service.close();
+    }
+  });
+
   test('GET /chrome answers the chrome status function, or 404 without one', async () => {
     const fixture = await startFixture();
     try {

@@ -111,6 +111,33 @@ const MOTION_QUALITY = 75;
 const REFINE_QUALITY = 88;
 const REFINE_AFTER_MS = 180;
 const REFINE_ECHO_MS = 120;
+// While any tab is captured for its sound (tab-audio.js), Chrome shows a
+// sharing bar in every tab, and takes it away after; each time the real view
+// changes size under the emulated one, and the screencast goes on at the real
+// size: the page cut off and shifted, with clicks landing elsewhere. Setting
+// the same emulation again and restarting the screencast brings the frames
+// back (either alone does not), and the page sees no resize. A frame at
+// another size is dropped while that repair runs (frames of the stream a
+// resize replaced arrive that way too); should frames keep that size for
+// longer anyway, they are shown as they are rather than never.
+const SIZE_REPAIR_GAP_MS = 300;
+const SIZE_GIVE_UP_MS = 3_000;
+// Chrome rounds when it scales a frame to the stream's size.
+const SIZE_SLACK_PX = 2;
+
+// The pixel size in a JPEG's frame header, or null. A frame's metadata can
+// name the emulated size while its picture is the real view's.
+const jpegSize = (bytes) => {
+  let offset = 2;
+  while (offset + 9 < bytes.length && bytes[offset] === 0xff) {
+    const marker = bytes[offset + 1];
+    if (marker >= 0xc0 && marker <= 0xc3) {
+      return { width: bytes.readUInt16BE(offset + 7), height: bytes.readUInt16BE(offset + 5) };
+    }
+    offset += 2 + bytes.readUInt16BE(offset + 2);
+  }
+  return null;
+};
 
 const stopScreencast = (page) => {
   if (page?.cdp.isOpen) void page.cdp.sendSession(page.sessionId, 'Page.stopScreencast').catch(() => {});
@@ -136,6 +163,10 @@ export const createSurface = (runtime) => {
   let refineTimer = null;
   let changes = 0;
   let refinedAt = 0;
+  let repairingSize = false;
+  let sizeRepairedAt = 0;
+  // When frames started coming at another size; 0 while they fit.
+  let offSizeSince = 0;
 
   const finishWaiter = (waiter, value) => {
     if (!waiters.delete(waiter)) return;
@@ -159,6 +190,8 @@ export const createSurface = (runtime) => {
   const refine = async (current, mark) => {
     const viewport = runtime.viewport;
     if (!viewport || deviceScale(viewport, viewport.scale) <= 1) return;
+    // A page paused on a dialog takes no screenshot until it is answered.
+    if (runtime.dialogOpen(current.targetId)) return;
     let capture;
     try {
       capture = await current.cdp.sendSession(current.sessionId, 'Page.captureScreenshot', {
@@ -206,6 +239,43 @@ export const createSurface = (runtime) => {
     page = null;
   };
 
+  const repairSize = async (current) => {
+    if (repairingSize || Date.now() - sizeRepairedAt < SIZE_REPAIR_GAP_MS) return;
+    repairingSize = true;
+    try {
+      await runtime.reapplyViewport(current.targetId);
+      if (closed || page !== current) return;
+      detach();
+      void start().catch(() => {});
+    } catch {
+      // The tab went away; the next stream starts from scratch anyway.
+    } finally {
+      sizeRepairedAt = Date.now();
+      repairingSize = false;
+    }
+  };
+
+  // A frame at another size than the viewport's, while a repair can fix it.
+  // The stream is capped at the viewport's CSS size, so the picture has it too.
+  const offSize = (current, width, height, bytes) => {
+    const viewport = runtime.viewport;
+    const picture = jpegSize(bytes);
+    const fits = !viewport || (width === viewport.width && height === viewport.height && (!picture || (
+      Math.abs(picture.width - viewport.width) <= SIZE_SLACK_PX && Math.abs(picture.height - viewport.height) <= SIZE_SLACK_PX
+    )));
+    if (fits) {
+      offSizeSince = 0;
+      return false;
+    }
+    // A page paused on a dialog keeps its old size until it is answered.
+    if (runtime.dialogOpen(current.targetId)) return false;
+    const now = Date.now();
+    if (offSizeSince === 0) offSizeSince = now;
+    if (now - offSizeSince > SIZE_GIVE_UP_MS) return false;
+    void repairSize(current);
+    return true;
+  };
+
   const startSurface = async () => {
     // A page swapping renderers mid-navigation briefly refuses page commands.
     const retryUntil = Date.now() + 2_000;
@@ -224,8 +294,11 @@ export const createSurface = (runtime) => {
         // Chrome repaints after taking the screenshot; that frame shows the
         // same page, blurrier, so it does not replace the sharp one.
         if (Date.now() - refinedAt < REFINE_ECHO_MS) return;
+        const width = Math.round(event.params.metadata?.deviceWidth ?? runtime.viewport?.width ?? 0);
+        const height = Math.round(event.params.metadata?.deviceHeight ?? runtime.viewport?.height ?? 0);
         const bytes = Buffer.from(String(event.params.data ?? ''), 'base64');
         if (bytes.length === 0 || bytes.length > SURFACE_FRAME_MAX_BYTES) return;
+        if (offSize(current, width, height, bytes)) return;
         changes += 1;
         scheduleRefine(current);
         sequence += 1;
@@ -233,8 +306,8 @@ export const createSurface = (runtime) => {
           sequence,
           bytes,
           mime: 'image/jpeg',
-          width: Math.round(event.params.metadata?.deviceWidth ?? runtime.viewport?.width ?? 0),
-          height: Math.round(event.params.metadata?.deviceHeight ?? runtime.viewport?.height ?? 0),
+          width,
+          height,
           title: runtime.title,
         });
       });
@@ -319,9 +392,10 @@ export const createSurface = (runtime) => {
             continue;
           }
         }
+        if (runtime.dialogOpen(current.targetId)) return;
         if (secondary && event.action === 'down') await menu.observe(current).catch(() => {});
-        await dispatchInput(current, event);
-        if (secondary && event.action === 'up') await menu.settle(current, theme).catch(() => {});
+        await runtime.untilDialog(current.targetId, dispatchInput(current, event));
+        if (secondary && event.action === 'up' && !runtime.dialogOpen(current.targetId)) await menu.settle(current, theme).catch(() => {});
       }
     },
     control(controller) {
@@ -347,6 +421,8 @@ export const createSurface = (runtime) => {
     },
     async clipboard() {
       const current = await start();
+      // A paused page runs no script, and its dialog is what has the focus.
+      if (runtime.dialogOpen(current.targetId)) return '';
       const response = await current.cdp.sendSession(current.sessionId, 'Runtime.evaluate', {
         expression: clipboardExpression,
         returnByValue: true,
