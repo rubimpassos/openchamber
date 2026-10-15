@@ -47,6 +47,8 @@ Dit vereist de desktopapp. Een pagina in een webtabblad kan niet op deze manier 
 
 Een extensie kan hier de desktopapp vervangen. Een extensie die een browserprovider opgeeft, draait een eigen browser op de OpenChamber-server en beantwoordt dezelfde acties. Zo kan een agent ook browsen als er geen desktopapp openstaat, bijvoorbeeld op een remote-server. Kies de provider bij **Instellingen → Algemeen → OpenChamber-tools → Browserprovider**. Zonder zo'n extensie toont de uitgeschakelde keuzelijst alleen 'OpenChamber Web'. De keuze geldt vanaf de volgende browseractie. Als de extensie wordt gepauzeerd of verwijderd, keert OpenChamber Web terug en verschijnt een melding. Voor extensiemakers staat meer in `GUEST_SERVICES.md` in het SDK-pakket.
 
+De ingebouwde Server Browser van OpenChamber brengt je ook wat een pagina van je vraagt. Een alert, confirm of prompt van de pagina verschijnt over het beeld, en de agent kan hem ook beantwoorden. Klik je op een bestandsveld, dan kies je bestanden op je eigen apparaat. Bestanden die een pagina downloadt, blijven voor de agent in `.openchamber/downloads/` in je project, en de melding of het ⋯-menu slaat ze op je apparaat op. De luidsprekerknop speelt het geluid van de pagina af; hij staat uit tot je hem aanzet, en pagina's die via gewoon `http` van ergens anders dan `localhost` komen, hebben geen geluid.
+
 ## Afmetingen en uiterlijk
 
 Klik op de telefoonknop om de apparaatbalk te openen. Kies een voorinstelling of voer een breedte en hoogte in. De pagina gebruikt die afmetingen. Is ze groter dan het paneel, dan wordt ze verkleind weergegeven, maar voor de pagina zelf blijven de opgegeven afmetingen gelden.
