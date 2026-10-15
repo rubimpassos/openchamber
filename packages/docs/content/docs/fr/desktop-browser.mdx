@@ -47,6 +47,8 @@ Cela nécessite l'application de bureau : une page affichée dans un onglet de n
 
 Une extension peut remplacer ici l'application de bureau. Une extension qui déclare un fournisseur de navigateur exécute son propre navigateur sur le serveur OpenChamber et répond aux mêmes actions, si bien qu'un agent peut naviguer sans application de bureau ouverte, par exemple sur un serveur distant. Choisissez-la dans **Réglages → Général → Outils OpenChamber → Fournisseur de navigateur** ; sans extension de ce type, la liste n'affiche que « OpenChamber Web » et reste désactivée. Le choix s'applique à la prochaine action de navigateur. Si cette extension est mise en pause ou supprimée, OpenChamber Web est de nouveau utilisé et une notification vous le signale. Auteurs d'extensions : voir `GUEST_SERVICES.md` dans le paquet SDK.
 
+Le Server Browser intégré d'OpenChamber vous transmet aussi ce qu'une page vous demande. Un alert, confirm ou prompt de la page apparaît par-dessus l'image, et l'agent peut aussi y répondre. Un champ de fichier sur lequel vous cliquez vous permet de choisir des fichiers sur votre appareil. Les fichiers qu'une page télécharge sont gardés dans `.openchamber/downloads/` de votre projet pour l'agent, et la notification ou le menu ⋯ les enregistre sur votre appareil. Le bouton haut-parleur joue le son de la page ; il est coupé tant que vous ne l'activez pas, et les pages servies en `http` simple depuis ailleurs que `localhost` n'en ont pas.
+
 ## Outils de développement
 
 Appuyez sur le bouton terminal de la barre pour ouvrir les outils de développement de Chromium pour la page — console, réseau, éléments, tout ce à quoi vous vous attendez.
