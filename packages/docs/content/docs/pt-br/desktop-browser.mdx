@@ -47,6 +47,8 @@ Isso exige o aplicativo de desktop: uma página exibida numa aba do navegador n�
 
 Uma extensão pode substituir o aplicativo de desktop aqui. Uma que declare um provedor de navegador executa seu próprio navegador no servidor do OpenChamber e responde às mesmas ações, então um agente pode navegar sem nenhum aplicativo de desktop aberto, por exemplo num servidor remoto. Escolha-a em **Configurações → Geral → Ferramentas do OpenChamber → Provedor do navegador**; sem uma extensão assim instalada, a lista mostra apenas "OpenChamber Web" e fica desativada. A escolha vale a partir da próxima ação de navegador. Se essa extensão for pausada ou removida, o OpenChamber Web volta a ser usado e um aviso informa você. Autores de extensões: veja `GUEST_SERVICES.md` no pacote do SDK.
 
+O Server Browser embutido do OpenChamber também traz para você o que uma página pede. Um alert, confirm ou prompt da página aparece sobre a imagem, e o agente também pode respondê-lo. Clicar num campo de arquivo deixa você escolher arquivos no seu dispositivo. Os arquivos que uma página baixa ficam em `.openchamber/downloads/` no seu projeto para o agente, e a notificação ou o menu ⋯ salva-os no seu dispositivo. O botão de alto-falante toca o som da página; ele fica desligado até você ligá-lo, e páginas servidas por `http` simples de qualquer lugar que não seja `localhost` não têm som.
+
 ## Ferramentas de desenvolvedor
 
 Pressione o botão de terminal na barra para abrir as ferramentas de desenvolvedor do próprio Chromium para a página — console, rede, elementos, tudo o que você espera.
