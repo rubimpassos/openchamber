@@ -39,6 +39,11 @@ export const closeZoneOnEscape = (
   if (isEditorEventTarget(event.target)) {
     return;
   }
+  // And for what a pane draws over its content that answers Escape itself,
+  // like a page's dialog in the Browser pane (`data-owns-escape`).
+  if (event.target instanceof Element && event.target.closest('[data-owns-escape]')) {
+    return;
+  }
   // Something under the zone already handled this Escape.
   if (event.defaultPrevented) {
     return;
