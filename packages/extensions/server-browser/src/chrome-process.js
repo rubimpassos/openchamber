@@ -74,12 +74,15 @@ export const visibleUserAgent = (userAgent) => String(userAgent ?? '').replace(/
 // launch gets a temporary profile that is removed with the process.
 // `proxyServer` sends the default browser context through the policy proxy,
 // for callers that use it instead of a context of their own.
+// `tabAudioCapture` lets a page capture its own tab without a prompt; a caller
+// that sets it installs capture-guard.js before any page loads.
 export const createChromeProcess = ({
   chromePath = null,
   startupTimeoutMs = 15_000,
   userDataDir = null,
   proxyServer = null,
   gracefulCloseMs = 2_000,
+  tabAudioCapture = false,
 } = {}) => {
   let launchPromise = null;
   let child = null;
@@ -141,6 +144,7 @@ export const createChromeProcess = ({
       '--disable-component-update',
       '--disable-sync',
       '--password-store=basic',
+      ...(tabAudioCapture ? ['--auto-accept-this-tab-capture'] : []),
       ...(proxyServer ? [`--proxy-server=${proxyServer}`, '--proxy-bypass-list=<-loopback>'] : []),
       'about:blank',
     ], {

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createBrowserManager } from '../src/browser-manager.js';
 import { createBrowserRuntime } from '../src/browser-runtime.js';
+import { connectCdp } from '../src/cdp-client.js';
 import { createChromeProcess, resolveChromePath } from '../src/chrome-process.js';
 import { createProfileStore } from '../src/profile-store.js';
 
@@ -107,6 +108,77 @@ const startWebFixture = async () => {
     if (request.url === '/whoami') {
       const signedIn = /session=signed-in/.test(request.headers.cookie ?? '');
       response.end(html(`<h1 id="state">${signedIn ? 'cookie present' : 'no cookie'}</h1><p id="agent">${request.headers['user-agent']}</p><p id="stored"></p><script>document.querySelector('#stored').textContent = 'stored ' + localStorage.getItem('who')</script>`, 'Who am I'));
+      return;
+    }
+    if (request.url === '/dialogs') {
+      response.end(html(`
+        <button id="surface" onclick="document.querySelector('#output').textContent = String(confirm('Delete the draft?'))">Confirm</button>
+        <button id="name" onclick="document.querySelector('#output').textContent = String(prompt('Your name?', 'Ada'))">Prompt</button>
+        <button id="mark" onclick="alert('first'); alert('second'); document.querySelector('#output').textContent = 'alerts done'">Alerts</button>
+        <div id="output">Waiting</div>
+      `, 'Dialogs'));
+      return;
+    }
+    if (request.url === '/opens-alert') {
+      response.end(html(`<button id="surface" onclick="window.open('/alerts-on-load')">Open</button>`, 'Opens alert'));
+      return;
+    }
+    if (request.url === '/alerts-on-load') {
+      response.end(html('<script>alert("hello from the popup")</script><div id="output">Loaded</div>', 'Alerts on load'));
+      return;
+    }
+    if (request.url === '/leave') {
+      response.end(html(`
+        <script>addEventListener('beforeunload', (event) => { event.preventDefault(); event.returnValue = ''; });</script>
+        <input id="surface" value="unsaved">
+      `, 'Leave'));
+      return;
+    }
+    if (request.url === '/files') {
+      response.end(html(`
+        <input id="surface" type="file" accept=".txt" multiple>
+        <div id="output">Waiting</div>
+        <script>
+          const input = document.querySelector('#surface');
+          input.addEventListener('change', async () => {
+            const read = await Promise.all([...input.files].map(async (file) => file.name + '=' + await file.text()));
+            document.querySelector('#output').textContent = read.join(',');
+          });
+        </script>
+      `, 'Files'));
+      return;
+    }
+    if (request.url === '/report') {
+      response.setHeader('content-type', 'text/csv');
+      response.setHeader('content-disposition', 'attachment; filename="report.csv"');
+      response.end('a,b\n1,2\n');
+      return;
+    }
+    if (request.url === '/downloads') {
+      response.end(html('<a id="surface" href="/report" download>Report</a>', 'Downloads'));
+      return;
+    }
+    if (request.url === '/tone') {
+      response.end(html(`
+        <button id="surface" onclick="window.startTone()">Play</button>
+        <script>
+          window.startTone = () => {
+            const context = new AudioContext();
+            const oscillator = context.createOscillator();
+            const gain = context.createGain();
+            gain.gain.value = 0.3;
+            oscillator.frequency.value = 440;
+            oscillator.connect(gain).connect(context.destination);
+            oscillator.start();
+            return context.resume();
+          };
+          window.selfCapture = () => navigator.mediaDevices.getDisplayMedia({ video: true, audio: true, preferCurrentTab: true })
+            .then((stream) => { stream.getTracks().forEach((track) => track.stop()); return 'granted'; }, (error) => error.name);
+        </script>
+        <iframe id="frame" srcdoc="<script>window.selfCapture = () => navigator.mediaDevices.getDisplayMedia({ video: true, preferCurrentTab: true }).then(() => 'granted', (error) => error.name);</script>"></iframe>
+        <div id="tick"></div>
+        <script>let tick = 0; setInterval(() => { document.querySelector('#tick').textContent = String(tick++); }, 100);</script>
+      `, 'Tone'));
       return;
     }
     if (request.url === '/hang') {
@@ -897,6 +969,307 @@ test.skipIf(noChrome)('keeps a profile\'s login and storage across browsers and 
     expect((await throwaway.perform('browser.snapshot', {})).text).toMatch(/no cookie/);
   } finally {
     for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+const click = (runtime, x, y) => runtime.surfaceInput([
+  { type: 'pointer', action: 'down', x, y, button: 0, buttons: 1, modifiers },
+  { type: 'pointer', action: 'up', x, y, button: 0, buttons: 0, modifiers },
+]);
+
+const temporaryDirectory = () => fs.mkdtempSync(path.join(os.tmpdir(), 'server-browser-files-'));
+
+test.skipIf(noChrome)('holds a page\'s dialogs for the dock and the agent instead of hanging', async () => {
+  // Given a page with confirm, prompt, and two alerts in a row.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
+    cleanups.push(() => runtime.close());
+    await runtime.perform('browser.open', { url: `${web.origin}/dialogs` });
+    const shown = () => runtime.tabs.find((tab) => tab.active);
+
+    // When the person clicks Confirm, then the dialog is held on the tab and the page waits for it.
+    await click(runtime, 30, 30);
+    await waitFor(() => shown().dialog !== null);
+    expect(shown().dialog).toMatchObject({ type: 'confirm', message: 'Delete the draft?' });
+
+    // Then an agent action on the paused tab fails at once, naming the dialog.
+    const started = Date.now();
+    await expect(runtime.perform('browser.snapshot', {})).rejects.toThrow(/confirm dialog: "Delete the draft\?"/);
+    expect(Date.now() - started).toBeLessThan(2_000);
+
+    // When the panel changes size meanwhile, then the resize does not wait on the paused page.
+    const resizing = Date.now();
+    await runtime.surfaceResize({ width: 700, height: 500 });
+    expect(Date.now() - resizing).toBeLessThan(2_000);
+    await expect(runtime.setZoomLevel(1)).rejects.toThrow(/Answer the dialog/);
+
+    // When the dock presses Cancel on that dialog, then the page runs again with the answer and its new size.
+    await runtime.answerDialog({ tabId: shown().id, dialogId: shown().dialog.id, accept: false });
+    expect(shown().dialog).toBeNull();
+    expect((await runtime.perform('browser.snapshot', {})).text).toMatch(/false/);
+    const page = await runtime.ensurePage();
+    await waitFor(async () => (await page.cdp.sendSession(page.sessionId, 'Runtime.evaluate', { expression: 'innerWidth', returnByValue: true })).result.value === 700);
+
+    // When an agent click opens a prompt, then the click ends at once naming it, and browser.dialog answers it.
+    await expect(runtime.perform('browser.click', { selector: '#name' })).rejects.toThrow(/prompt dialog: "Your name\?"/);
+    const answered = await runtime.perform('browser.dialog', { accept: true, promptText: 'Grace' });
+    expect(answered).toMatchObject({ answered: { type: 'prompt', message: 'Your name?', defaultPrompt: 'Ada' }, accepted: true });
+    expect((await runtime.perform('browser.snapshot', {})).text).toMatch(/Grace/);
+
+    // When a page opens two alerts in a row, then the answer to the first reports the second.
+    await expect(runtime.perform('browser.click', { selector: '#mark' })).rejects.toThrow(/alert: "first"/);
+    const first = await runtime.perform('browser.dialog', { accept: true });
+    expect(first.dialog).toEqual({ type: 'alert', message: 'second' });
+    const second = await runtime.perform('browser.dialog', { accept: true });
+    expect(second.dialog).toBeUndefined();
+    expect((await runtime.perform('browser.snapshot', {})).text).toMatch(/alerts done/);
+
+    // Then an answer with no dialog open, or to a dialog that is gone, is refused.
+    await expect(runtime.perform('browser.dialog', { accept: true })).rejects.toThrow(/No dialog is open/);
+    await expect(runtime.answerDialog({ tabId: shown().id, dialogId: 1, accept: true })).rejects.toThrow(/no longer open/);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('brings a page that opens with an alert to the front at once, and sets it up once answered', async () => {
+  // Given a page whose button opens a page that alerts while it loads.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
+    cleanups.push(() => runtime.close());
+    await runtime.surfaceResize({ width: 700, height: 500 });
+    await runtime.perform('browser.open', { url: `${web.origin}/opens-alert` });
+
+    // When the person opens it, then its tab comes to the front with the alert held, well before any command times out.
+    const started = Date.now();
+    await click(runtime, 30, 30);
+    await waitFor(() => runtime.tabs.some((tab) => tab.active && tab.dialog?.message === 'hello from the popup'));
+    expect(Date.now() - started).toBeLessThan(5_000);
+
+    // When the alert is answered, then the page loads at the viewer's size.
+    const shown = runtime.tabs.find((tab) => tab.active);
+    await runtime.answerDialog({ tabId: shown.id, dialogId: shown.dialog.id, accept: true });
+    const page = await runtime.ensurePage();
+    await waitFor(async () => (await page.cdp.sendSession(page.sessionId, 'Runtime.evaluate', { expression: 'innerWidth', returnByValue: true })).result.value === 700);
+    expect((await runtime.perform('browser.snapshot', {})).text).toMatch(/Loaded/);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('gives a tab paused on a dialog the color scheme it missed once the dialog is answered', async () => {
+  // Given a tab paused on a confirm, and a second tab in front.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
+    cleanups.push(() => runtime.close());
+    await runtime.perform('browser.open', { url: `${web.origin}/dialogs` });
+    const paused = runtime.tabs.find((tab) => tab.active);
+    await click(runtime, 30, 30);
+    await waitFor(() => runtime.tabs.find((tab) => tab.id === paused.id)?.dialog !== null);
+    await runtime.command('tab-new');
+    await waitFor(() => runtime.tabs.find((tab) => tab.active)?.id !== paused.id);
+
+    // When the person switches to dark while the first tab is paused.
+    await runtime.setColorScheme('dark');
+
+    // Then, once its dialog is answered, the paused tab is dark too.
+    const dialog = runtime.tabs.find((tab) => tab.id === paused.id).dialog;
+    await runtime.answerDialog({ tabId: paused.id, dialogId: dialog.id, accept: true });
+    const page = await runtime.ensurePage();
+    const sessionId = await page.cdp.attach(paused.id);
+    await waitFor(async () => (await page.cdp.sendSession(sessionId, 'Runtime.evaluate', {
+      expression: 'matchMedia("(prefers-color-scheme: dark)").matches', returnByValue: true,
+    })).result.value === true);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('asks before leaving a page that wants to stay, from the dock or the agent', async () => {
+  // Given a page with a beforeunload handler the person has used.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
+    cleanups.push(() => runtime.close());
+    await runtime.perform('browser.open', { url: `${web.origin}/leave` });
+    await click(runtime, 30, 30);
+    const shown = () => runtime.tabs.find((tab) => tab.active);
+
+    // When the dock navigates away, then the command returns and the dialog waits on the tab.
+    await runtime.command('navigate', { url: `${web.origin}/next` });
+    await waitFor(() => shown().dialog !== null);
+    expect(shown().dialog.type).toBe('beforeunload');
+
+    // When the dock chooses to stay, then the page stays.
+    await runtime.answerDialog({ tabId: shown().id, dialogId: shown().dialog.id, accept: false });
+    expect(runtime.url).toBe(`${web.origin}/leave`);
+
+    // When the agent opens another page in that tab, then it is told about the dialog and leaves with browser.dialog.
+    await expect(runtime.perform('browser.open', { tabId: shown().id, url: `${web.origin}/next` })).rejects.toThrow(/"leave this page\?" dialog/);
+    await runtime.perform('browser.dialog', { accept: true });
+    await waitFor(() => runtime.url === `${web.origin}/next`);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('hands the files a person picked to the page and refuses names outside the request', async () => {
+  // Given a page with a file input and a folder for uploads.
+  const web = await startWebFixture();
+  const files = temporaryDirectory();
+  const cleanups = [() => close(web.server), () => fs.promises.rm(files, { recursive: true, force: true })];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin], uploadsDirectory: path.join(files, 'uploads') });
+    cleanups.push(() => runtime.close());
+    await runtime.perform('browser.open', { url: `${web.origin}/files` });
+    const shown = () => runtime.tabs.find((tab) => tab.active);
+
+    // When the person clicks the file input, then the request is held with what it accepts and where to put files.
+    await click(runtime, 30, 30);
+    await waitFor(() => shown().fileChooser !== null);
+    const chooser = shown().fileChooser;
+    expect(chooser).toMatchObject({ multiple: true, accept: '.txt' });
+    expect(fs.readFileSync(path.join(files, 'uploads', '.gitignore'), 'utf8')).toBe('*\n');
+
+    // Then a name that is not a file in the request's folder is refused.
+    await expect(runtime.answerFileChooser({ tabId: shown().id, chooserId: chooser.id, files: ['../escape.txt'] })).rejects.toThrow(/plain names/);
+    await expect(runtime.answerFileChooser({ tabId: shown().id, chooserId: chooser.id, files: ['missing.txt'] })).rejects.toThrow(/was not uploaded/);
+
+    // When the files are in the folder and the dock answers, then the page reads them.
+    fs.writeFileSync(path.join(chooser.directory, 'notes.txt'), 'hello');
+    fs.writeFileSync(path.join(chooser.directory, 'more.txt'), 'world');
+    await runtime.answerFileChooser({ tabId: shown().id, chooserId: chooser.id, files: ['notes.txt', 'more.txt'] });
+    expect(shown().fileChooser).toBeNull();
+    await waitFor(async () => /notes\.txt=hello,more\.txt=world/.test((await runtime.perform('browser.snapshot', {})).text));
+
+    // When the person opens the chooser again and cancels, then the page gets nothing and the request ends.
+    await click(runtime, 30, 30);
+    await waitFor(() => shown().fileChooser !== null);
+    const second = shown().fileChooser;
+    await runtime.answerFileChooser({ tabId: shown().id, chooserId: second.id, files: null });
+    expect(shown().fileChooser).toBeNull();
+    expect(fs.existsSync(second.directory)).toBe(false);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('keeps what pages download under the site\'s name and tells the agent where', async () => {
+  // Given a page with a download link and a downloads folder.
+  const web = await startWebFixture();
+  const files = temporaryDirectory();
+  const cleanups = [() => close(web.server), () => fs.promises.rm(files, { recursive: true, force: true })];
+  try {
+    const downloadsDirectory = path.join(files, 'downloads');
+    fs.mkdirSync(downloadsDirectory);
+    fs.writeFileSync(path.join(downloadsDirectory, 'report.csv'), 'older');
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin], downloadsDirectory });
+    cleanups.push(() => runtime.close());
+    await runtime.perform('browser.open', { url: `${web.origin}/downloads` });
+
+    // When the link is clicked, then the file lands beside the older one without replacing it.
+    await runtime.perform('browser.click', { selector: '#surface' });
+    await waitFor(() => runtime.downloads[0]?.state === 'complete');
+    const [download] = runtime.downloads;
+    expect(download).toMatchObject({ name: 'report (1).csv', url: `${web.origin}/report`, receivedBytes: 8 });
+    expect(fs.readFileSync(download.path, 'utf8')).toBe('a,b\n1,2\n');
+    expect(fs.readFileSync(path.join(downloadsDirectory, 'report.csv'), 'utf8')).toBe('older');
+    expect(fs.readFileSync(path.join(downloadsDirectory, '.gitignore'), 'utf8')).toBe('*\n');
+    expect(fs.readdirSync(path.join(downloadsDirectory, '.partial'))).toEqual([]);
+
+    // Then a snapshot tells the agent where the file is.
+    const snapshot = await runtime.perform('browser.snapshot', {});
+    expect(snapshot.downloads).toEqual([expect.objectContaining({ name: 'report (1).csv', path: download.path, state: 'complete' })]);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('streams the sound of the tab in front only while asked, and pages cannot capture their own tab', async () => {
+  // Given a page that plays a tone once clicked.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
+    cleanups.push(() => runtime.close());
+    await runtime.perform('browser.open', { url: `${web.origin}/tone` });
+    await click(runtime, 30, 30);
+
+    await runtime.surfaceResize({ width: 640, height: 480 });
+    // The picture shown before the resize; what comes after it is what counts.
+    const shown = await runtime.surfaceFrame({ after: 0, wait: 0 });
+
+    // When a viewer asks for sound, then Opus packets of the tab arrive, length-prefixed.
+    const batch = await runtime.surfaceAudio({ after: runtime.audioHead, wait: 10_000 });
+    expect(batch).toMatchObject({ codec: 'opus', channels: 2 });
+    expect([44_100, 48_000]).toContain(batch.sampleRate);
+    let offset = 0;
+    let count = 0;
+    while (offset < batch.bytes.length) {
+      const length = batch.bytes.readUInt16BE(offset);
+      expect(length).toBeGreaterThan(0);
+      offset += 2 + length;
+      count += 1;
+    }
+    expect(offset).toBe(batch.bytes.length);
+    expect(count).toBeGreaterThan(0);
+
+    // Then the picture keeps the viewport's size while the tab is captured
+    // (Chrome's sharing bar shrinks the real view under the emulated one).
+    const pictureSize = (bytes) => {
+      for (let at = 2; at + 9 < bytes.length; at += 2 + bytes.readUInt16BE(at + 2)) {
+        if (bytes[at + 1] >= 0xc0 && bytes[at + 1] <= 0xc3) return `${bytes.readUInt16BE(at + 7)}x${bytes.readUInt16BE(at + 5)}`;
+      }
+      return null;
+    };
+    const sizes = new Set();
+    let after = shown?.sequence ?? 0;
+    for (const deadline = Date.now() + 2_000; Date.now() < deadline;) {
+      const frame = await runtime.surfaceFrame({ after, wait: 1_000 });
+      if (!frame) continue;
+      after = frame.sequence;
+      sizes.add(`${frame.width}x${frame.height} ${pictureSize(frame.bytes)}`);
+    }
+    expect([...sizes]).toEqual(['640x480 640x480']);
+
+    // Then the page, and a frame in it, cannot capture the tab themselves.
+    const page = await runtime.ensurePage();
+    const evaluate = async (expression) => (await page.cdp.sendSession(page.sessionId, 'Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true })).result.value;
+    expect(await evaluate('window.selfCapture()')).toBe('NotAllowedError');
+    expect(await evaluate('document.querySelector("#frame").contentWindow.selfCapture()')).toBe('NotAllowedError');
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('tells a command Chrome refused from one it did not answer in time, or a closed connection', async () => {
+  // Given a connection to Chrome with a short command timeout.
+  const chrome = createChromeProcess({ chromePath });
+  const running = await chrome.ensure();
+  const cdp = await connectCdp(running.endpoint, { commandTimeoutMs: 500 });
+  try {
+    // When Chrome answers with an error, then the error says Chrome refused.
+    await expect(cdp.send('Target.closeTarget', { targetId: 'no-such-target' })).rejects.toMatchObject({ code: 'protocol' });
+
+    // When Chrome gives no answer in time, then the error says so instead: Chrome may still carry it out.
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
+    const sessionId = await cdp.attach(targetId);
+    await expect(cdp.sendSession(sessionId, 'Runtime.evaluate', { expression: 'new Promise(() => {})', awaitPromise: true }))
+      .rejects.toMatchObject({ code: 'timeout' });
+
+    // When the connection is gone, then that is what the error says.
+    cdp.close();
+    await expect(cdp.send('Browser.getVersion')).rejects.toMatchObject({ code: 'closed' });
+  } finally {
+    cdp.close();
+    await chrome.close();
   }
 });
 

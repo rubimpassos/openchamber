@@ -169,6 +169,99 @@ test('lets the viewer in control use the dock while other viewers only watch', a
   assert.equal(manager.state({ viewer: 'viewer-c' }).viewerInControl, true);
 });
 
+test('lets anyone answer a page\'s dialog or file request unless another person holds control', async () => {
+  // Given a selected scope whose page asks for something, with an agent action waiting on the queue.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  const runtime = runtimes.get('ses_one');
+  runtime.answerDialog = async (answer) => { runtime.calls.push(['dialog', answer]); };
+  runtime.answerFileChooser = async (answer) => { runtime.calls.push(['chooser', answer]); };
+  let releaseAction;
+  runtime.perform = () => new Promise((resolve) => { releaseAction = resolve; });
+  const waiting = manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_one'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // When a dock answers while the agent works, then the answer is not held behind the agent's action.
+  await manager.pageDialog({ tabId: 't1', dialogId: 2, accept: true }, { viewer: null });
+  await manager.pageFileChooser({ tabId: 't1', chooserId: 3, files: null }, { viewer: 'viewer-b' });
+  releaseAction({});
+  await waiting;
+
+  // When a person holds control, then only that person's dock answers.
+  await manager.surfaceControl('user', 'viewer-a');
+  await assert.rejects(manager.pageDialog({ tabId: 't1', dialogId: 4, accept: false }, { viewer: 'viewer-b' }), /surface is idle/i);
+  await manager.pageDialog({ tabId: 't1', dialogId: 4, accept: false }, { viewer: 'viewer-a' });
+  assert.deepEqual(runtime.calls.filter(([name]) => name === 'dialog' || name === 'chooser'), [
+    ['dialog', { tabId: 't1', dialogId: 2, accept: true, promptText: undefined }],
+    ['chooser', { tabId: 't1', chooserId: 3, files: null }],
+    ['dialog', { tabId: 't1', dialogId: 4, accept: false, promptText: undefined }],
+  ]);
+});
+
+test('starts a listener at the newest sound and follows it from there, per scope', async () => {
+  // Given a selected scope whose sound is at packet 40.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  const runtime = runtimes.get('ses_one');
+  runtime.audioHead = 40;
+  const asked = [];
+  runtime.surfaceAudio = async ({ after }) => {
+    asked.push(after);
+    return { seq: after + 2, codec: 'opus', sampleRate: 48_000, channels: 2, bytes: Buffer.from([0, 1, 7]) };
+  };
+
+  // When a listener starts, then it gets what comes after the newest packet, under the manager's own numbers.
+  const first = await manager.surfaceAudio({ after: 0, wait: 0 });
+  assert.equal(first.seq, 1);
+
+  // When it asks for more, then it continues where the last answer ended.
+  const second = await manager.surfaceAudio({ after: first.seq, wait: 0 });
+  assert.equal(second.seq, 2);
+  assert.deepEqual(asked, [40, 42]);
+
+  // When another scope becomes the view, then its sound starts at its own newest packet.
+  await manager.perform('browser.open', { url: 'https://two.test' }, undefined, context('/repo', 'ses_two'));
+  const other = runtimes.get('ses_two');
+  other.audioHead = 7;
+  other.surfaceAudio = async ({ after }) => {
+    asked.push(after);
+    return null;
+  };
+  await manager.selectScope(manager.state().scopes.find((scope) => scope.sessionId === 'ses_two').id, manager.state().generation, {});
+  assert.equal(await manager.surfaceAudio({ after: second.seq, wait: 0 }), null);
+  assert.deepEqual(asked, [40, 42, 7]);
+});
+
+test('starts a reopened browser\'s sound at its own newest packet', async () => {
+  // Given a listener that has heard a chat's browser up to its packet 42.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  const asked = [];
+  const listen = (runtime, head) => {
+    runtime.audioHead = head;
+    runtime.surfaceAudio = async ({ after }) => {
+      asked.push(after);
+      return { seq: after + 2, codec: 'opus', sampleRate: 48_000, channels: 2, bytes: Buffer.from([0, 1, 7]) };
+    };
+  };
+  listen(runtimes.get('ses_one'), 40);
+  const heard = await manager.surfaceAudio({ after: 0, wait: 0 });
+
+  // When that browser is closed and the chat opens a new one under the same scope.
+  const scope = manager.state().scopes[0];
+  await manager.closeScope(scope.id, manager.state().generation, {});
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  listen(runtimes.get('ses_one'), 3);
+  if (manager.state().selectedScopeId !== scope.id) await manager.selectScope(scope.id, manager.state().generation, {});
+
+  // Then the listener continues from the new browser's newest packet, not the old browser's number.
+  await manager.surfaceAudio({ after: heard.seq, wait: 0 });
+  assert.deepEqual(asked, [40, 3]);
+});
+
 test('refuses input and dock commands made on a picture of an earlier view', async () => {
   // Given a frame the viewer drew from the first chat's browser.
   const { factory, runtimes } = createRuntimeFactory();

@@ -122,15 +122,27 @@ export const createBrowserActions = (runtime) => async (action, parameters, sign
     return { ...info, opened: true, settled, viewport: viewportSummary(runtime.viewport), tabId: page.targetId };
   }
 
+  if (action === 'browser.dialog') {
+    return withAbort(signal, runtime.agentAnswerDialog({
+      tabId: parameters.tabId,
+      accept: parameters.accept === true,
+      promptText: typeof parameters.promptText === 'string' ? parameters.promptText : undefined,
+    }));
+  }
+
   const page = await runtime.agentPage(parameters.tabId);
   if (action === 'browser.snapshot') {
     const data = await runPageScript(page, buildSnapshotScript(parameters), signal);
     const problems = runtime.consoleProblems(page.targetId);
+    const downloads = runtime.downloads.slice(0, 10).map(({ name, path, state, receivedBytes, totalBytes, url }) => ({
+      name, path, state, receivedBytes, totalBytes, url,
+    }));
     return {
       ...data,
       viewport: viewportSummary(runtime.viewport),
       ...(problems.length > 0 ? { consoleProblems: problems } : {}),
       tabs: runtime.tabs.map(({ id, title, url, active }) => ({ id, title, url, active })),
+      ...(downloads.length > 0 ? { downloads } : {}),
     };
   }
   if (action === 'browser.click') return runPageScript(page, buildClickScript(parameters), signal);
