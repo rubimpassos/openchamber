@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { serverMachineSampleSchema, type ServerMachineSample } from '@/lib/serverMachineStats';
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
@@ -576,6 +577,35 @@ export const desktopHostUpdateServer = async (hostId: string): Promise<RemoteHos
   const raw = await invoke('desktop_host_update_server', { hostId }).catch(() => null);
   const parsed = remoteHostUpdateResult.safeParse(raw);
   return parsed.success ? parsed.data : { status: 'failed', error: null };
+};
+
+type DesktopHostMachineStats =
+  | { kind: 'sample'; sample: ServerMachineSample }
+  | { kind: 'unsupported' }
+  | { kind: 'failed' };
+
+const hostStatsResult = z.discriminatedUnion('status', [
+  // Older servers forward the route to OpenCode, which answers something else.
+  z.object({ status: z.literal('ok'), sample: serverMachineSampleSchema.nullable().catch(null) }),
+  z.object({ status: z.literal('auth') }),
+  z.object({ status: z.literal('unsupported') }),
+  z.object({ status: z.literal('failed') }),
+]);
+
+/**
+ * Machine stats of a saved host other than the connected one. The main
+ * process reads the address and token from the hosts file; a refused token
+ * counts as a failure here, since the list has nothing to show for it.
+ */
+export const desktopHostMachineStats = async (hostId: string): Promise<DesktopHostMachineStats> => {
+  const invoke = getInvoke();
+  if (!invoke) return { kind: 'failed' };
+  const parsed = hostStatsResult.safeParse(await invoke('desktop_host_stats', { hostId }).catch(() => null));
+  if (!parsed.success) return { kind: 'failed' };
+  if (parsed.data.status === 'unsupported') return { kind: 'unsupported' };
+  if (parsed.data.status !== 'ok') return { kind: 'failed' };
+  const { sample } = parsed.data;
+  return sample ? { kind: 'sample', sample } : { kind: 'unsupported' };
 };
 
 const REMOTE_HOST_UPDATE_WAIT_MS = 10 * 60 * 1000;

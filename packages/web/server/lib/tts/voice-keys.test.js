@@ -21,7 +21,7 @@ describe('voice keys store', () => {
   });
 
   it('keeps keys in an owner-only file and answers only whether each is set', () => {
-    expect(updateVoiceKeys({ openai: ' sk-openai ', stt: 'sk-stt' })).toEqual({ openai: true, openaiCompatible: false, stt: true });
+    expect(updateVoiceKeys({ openai: ' sk-openai ', stt: 'sk-stt' })).toEqual({ openai: true, openaiCompatible: false, gemini: false, stt: true });
     expect(readVoiceKey('openai')).toBe('sk-openai');
     expect(JSON.stringify(describeVoiceKeys())).not.toContain('sk-');
     if (process.platform !== 'win32') {
@@ -31,7 +31,7 @@ describe('voice keys store', () => {
 
   it('removes a key on null and leaves the others alone', () => {
     updateVoiceKeys({ openai: 'sk-openai', openaiCompatible: 'sk-compat' });
-    expect(updateVoiceKeys({ openai: null })).toEqual({ openai: false, openaiCompatible: true, stt: false });
+    expect(updateVoiceKeys({ openai: null })).toEqual({ openai: false, openaiCompatible: true, gemini: false, stt: false });
     expect(readVoiceKey('openaiCompatible')).toBe('sk-compat');
   });
 

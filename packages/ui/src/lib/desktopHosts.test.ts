@@ -18,7 +18,7 @@ mock.module('@/lib/relay/tunnel-client', () => ({
   },
 }));
 
-const { desktopHostProbe, desktopHostsGet, desktopHostsSet, desktopHostUpdateServer, importDesktopHostPairing, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl, waitForDesktopHostUpdated } = await import('./desktopHosts');
+const { desktopHostMachineStats, desktopHostProbe, desktopHostsGet, desktopHostsSet, desktopHostUpdateServer, importDesktopHostPairing, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl, waitForDesktopHostUpdated } = await import('./desktopHosts');
 
 const withDesktopBridge = async <T>(handler: (cmd: string, args: Record<string, unknown>) => unknown | Promise<unknown>, run: () => Promise<T>): Promise<T> => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -287,5 +287,38 @@ describe('probeRelayDesktopHost', () => {
 
     expect(result.status).toBe('auth');
     expect(tunnel.calls).toEqual(['/health', '/auth/session']);
+  });
+});
+
+describe('desktopHostMachineStats', () => {
+  const sample = {
+    collectedAt: '2026-10-14T00:00:00.000Z', hostname: 'srv-1', osName: 'Ubuntu', platform: 'linux', arch: 'x64', uptimeSec: 1,
+    openchamberVersion: '2.3.8', openCodeRunning: true,
+    cpu: { usagePercent: 10, cores: 4, model: null, loadAverage: [1, 1, 1] },
+    memory: { totalBytes: 100, availableBytes: 50, usedPercent: 50 },
+    disk: null,
+    process: { rssBytes: 1, cpuPercent: null, uptimeSec: 1 },
+  };
+
+  test('asks the main process by host id only and returns a valid sample', async () => {
+    const calls: Array<[string, string]> = [];
+    const result = await withDesktopBridge((cmd, args) => {
+      calls.push([cmd, String(args.hostId)]);
+      return { status: 'ok', sample };
+    }, () => desktopHostMachineStats('vps'));
+    expect(calls).toEqual([['desktop_host_stats', 'vps']]);
+    expect(result).toEqual({ kind: 'sample', sample });
+  });
+
+  test('reads a body that is not a stats sample as an older server', async () => {
+    const result = await withDesktopBridge(() => ({ status: 'ok', sample: { data: [] } }), () => desktopHostMachineStats('vps'));
+    expect(result).toEqual({ kind: 'unsupported' });
+  });
+
+  test('treats a refused token, a failure, and a rejected IPC call as failed', async () => {
+    for (const reply of [{ status: 'auth' }, { status: 'failed' }]) {
+      expect(await withDesktopBridge(() => reply, () => desktopHostMachineStats('vps'))).toEqual({ kind: 'failed' });
+    }
+    expect(await withDesktopBridge(() => { throw new Error('IPC not available for this origin'); }, () => desktopHostMachineStats('vps'))).toEqual({ kind: 'failed' });
   });
 });

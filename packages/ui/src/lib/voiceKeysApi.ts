@@ -9,22 +9,24 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 const voiceApiKeyStateSchema = z.object({
   openai: z.boolean(),
   openaiCompatible: z.boolean(),
+  // Absent on servers from before Gemini read-aloud.
+  gemini: z.boolean().catch(false),
   stt: z.boolean(),
 });
 
 export type VoiceApiKeyState = z.infer<typeof voiceApiKeyStateSchema>;
 export type VoiceApiKeyKind = keyof VoiceApiKeyState;
 
-export const EMPTY_VOICE_API_KEYS = { openai: false, openaiCompatible: false, stt: false } satisfies VoiceApiKeyState;
+export const EMPTY_VOICE_API_KEYS = { openai: false, openaiCompatible: false, gemini: false, stt: false } satisfies VoiceApiKeyState;
 
 /** Where builds before the server-side store kept each key in the browser. */
 const LEGACY_STORAGE_KEYS = {
   openai: 'openaiApiKey',
   openaiCompatible: 'openaiCompatibleApiKey',
   stt: 'sttApiKey',
-} as const satisfies Record<VoiceApiKeyKind, string>;
+} as const satisfies Partial<Record<VoiceApiKeyKind, string>>;
 
-const VOICE_API_KEY_KINDS = ['openai', 'openaiCompatible', 'stt'] as const satisfies readonly VoiceApiKeyKind[];
+const LEGACY_VOICE_API_KEY_KINDS = ['openai', 'openaiCompatible', 'stt'] as const satisfies readonly (keyof typeof LEGACY_STORAGE_KEYS)[];
 
 export const fetchVoiceApiKeys = async (): Promise<VoiceApiKeyState> => {
   const response = await runtimeFetch('/api/voice/keys', { headers: { Accept: 'application/json' } });
@@ -54,7 +56,7 @@ export const updateVoiceApiKeys = async (
 export const migrateLegacyVoiceApiKeys = async (): Promise<VoiceApiKeyState | null> => {
   const patch: Partial<Record<VoiceApiKeyKind, string>> = {};
   let legacyPresent = false;
-  for (const kind of VOICE_API_KEY_KINDS) {
+  for (const kind of LEGACY_VOICE_API_KEY_KINDS) {
     const stored = window.localStorage.getItem(LEGACY_STORAGE_KEYS[kind]);
     if (stored === null) continue;
     legacyPresent = true;
@@ -62,7 +64,7 @@ export const migrateLegacyVoiceApiKeys = async (): Promise<VoiceApiKeyState | nu
   }
   if (!legacyPresent) return null;
   const state = Object.keys(patch).length > 0 ? await updateVoiceApiKeys(patch) : null;
-  for (const kind of VOICE_API_KEY_KINDS) {
+  for (const kind of LEGACY_VOICE_API_KEY_KINDS) {
     window.localStorage.removeItem(LEGACY_STORAGE_KEYS[kind]);
   }
   return state;

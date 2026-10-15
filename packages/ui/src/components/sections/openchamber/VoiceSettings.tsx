@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
+import { GEMINI_FAILURE_MESSAGE_KEYS, GEMINI_VOICE_OPTIONS, useGeminiTTS } from '@/hooks/useGeminiTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
 import { toast } from '@/components/ui';
 import type { VoiceApiKeyKind } from '@/lib/voiceKeysApi';
@@ -558,7 +559,7 @@ const OPENAI_VOICE_OPTIONS = [
  * shows whether one is saved; typing a new key and pressing Enter (or leaving
  * the field) replaces it, the cross removes it.
  */
-const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind }> = ({ kind }) => {
+const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind; placeholder?: string }> = ({ kind, placeholder = 'sk-...' }) => {
     const { t } = useI18n();
     const saved = useConfigStore((state) => state.voiceApiKeys[kind]);
     const setVoiceApiKey = useConfigStore((state) => state.setVoiceApiKey);
@@ -592,7 +593,7 @@ const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind }> = ({ kind }) => {
                 onKeyDown={(e) => {
                     if (e.key === 'Enter') commitDraft();
                 }}
-                placeholder={saved ? t('settings.voice.page.field.apiKeySavedPlaceholder') : 'sk-...'}
+                placeholder={saved ? t('settings.voice.page.field.apiKeySavedPlaceholder') : placeholder}
                 className={VOICE_TEXT_INPUT_CLASS}
                 aria-label={t('settings.voice.page.field.apiKey')}
             />
@@ -652,6 +653,28 @@ export const VoiceSettings: React.FC = () => {
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
     const setOpenaiVoice = useConfigStore((state) => state.setOpenaiVoice);
     const hasOpenaiApiKey = useConfigStore((state) => state.voiceApiKeys.openai);
+    const hasGeminiApiKey = useConfigStore((state) => state.voiceApiKeys.gemini);
+    const geminiVoice = useConfigStore((state) => state.geminiVoice);
+    const setGeminiVoice = useConfigStore((state) => state.setGeminiVoice);
+    const { speak: speakGeminiTts, stop: stopGeminiTts } = useGeminiTTS();
+    const [isGeminiPreviewPlaying, setIsGeminiPreviewPlaying] = useState(false);
+
+    const previewGeminiVoice = useCallback(async () => {
+        if (isGeminiPreviewPlaying) {
+            stopGeminiTts();
+            return;
+        }
+        setIsGeminiPreviewPlaying(true);
+        const result = await speakGeminiTts(t('settings.voice.page.preview.voiceLine', { voiceName: geminiVoice }), {
+            voice: geminiVoice,
+            pitch: useConfigStore.getState().speechPitch,
+            volume: useConfigStore.getState().speechVolume,
+        });
+        setIsGeminiPreviewPlaying(false);
+        if (result.status === 'failed') {
+            toast.error(t(GEMINI_FAILURE_MESSAGE_KEYS[result.code]));
+        }
+    }, [geminiVoice, isGeminiPreviewPlaying, speakGeminiTts, stopGeminiTts, t]);
     const refreshVoiceApiKeys = useConfigStore((state) => state.refreshVoiceApiKeys);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const setOpenaiCompatibleUrl = useConfigStore((state) => state.setOpenaiCompatibleUrl);
@@ -1019,6 +1042,7 @@ export const VoiceSettings: React.FC = () => {
                                     <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.localTts')}</li>
                                     <li><strong>{t('settings.voice.page.provider.openai')}</strong> {t('settings.voice.page.tooltip.openai')}</li>
                                     <li><strong>{t('settings.voice.page.provider.custom')}</strong> {t('settings.voice.page.tooltip.custom')}</li>
+                                    <li><strong>{t('settings.voice.page.provider.gemini')}</strong> {t('settings.voice.page.tooltip.gemini')}</li>
                                     <li><strong>{t('settings.voice.page.provider.say')}</strong> {t('settings.voice.page.tooltip.say')}</li>
                                 </ul>
                             )}
@@ -1033,6 +1057,7 @@ export const VoiceSettings: React.FC = () => {
                                     { value: 'local', label: t('settings.voice.page.provider.local') },
                                     { value: 'openai', label: t('settings.voice.page.provider.openai') },
                                     { value: 'openai-compatible', label: t('settings.voice.page.provider.custom') },
+                                    { value: 'gemini', label: t('settings.voice.page.provider.gemini') },
                                     ...(isSayAvailable
                                         ? [{
                                             value: 'say' as const,
@@ -1048,7 +1073,7 @@ export const VoiceSettings: React.FC = () => {
                             />
                         </SettingsControlGroup>
 
-                            {voiceEnterpriseMode && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && (
+                            {voiceEnterpriseMode && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible' || voiceProvider === 'gemini') && (
                                 <p className={SETTINGS_HELPER_CLASS}>{t('settings.voice.page.enterpriseMode')}</p>
                             )}
 
@@ -1066,6 +1091,18 @@ export const VoiceSettings: React.FC = () => {
                                             : t('settings.voice.page.field.apiKeyHintProvide')}
                                     </span>
                                     <VoiceApiKeyField kind="openai" />
+                                </div>
+                            )}
+
+                            {voiceProvider === 'gemini' && (
+                                <div className="space-y-1.5">
+                                    <span className={cn(SETTINGS_FIELD_LABEL_CLASS, !hasGeminiApiKey && "text-[var(--status-error)]")}>
+                                        {t('settings.voice.page.field.apiKey')}
+                                    </span>
+                                    <span className={cn(SETTINGS_HELPER_CLASS, !hasGeminiApiKey && "text-[var(--status-error)]/80")}>
+                                        {t('settings.voice.page.field.geminiApiKeyHint')}
+                                    </span>
+                                    <VoiceApiKeyField kind="gemini" placeholder="AIza..." />
                                 </div>
                             )}
 
@@ -1208,6 +1245,24 @@ export const VoiceSettings: React.FC = () => {
                                         <span className={SETTINGS_HELPER_CLASS}>{t('settings.voice.page.field.configuredAbove')}</span>
                                     )}
 
+                                    {voiceProvider === 'gemini' && (
+                                        <>
+                                            <Select value={geminiVoice} onValueChange={setGeminiVoice}>
+                                                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                                                    <SelectValue placeholder={t('settings.voice.page.field.selectVoicePlaceholder')} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {GEMINI_VOICE_OPTIONS.map((voice) => (
+                                                        <SelectItem key={voice} value={voice}>{voice}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button size="xs" variant="ghost" onClick={() => void previewGeminiVoice()} title={t('settings.voice.page.actions.preview')} disabled={!hasGeminiApiKey}>
+                                                {isGeminiPreviewPlaying ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />}
+                                            </Button>
+                                        </>
+                                    )}
+
                                     {voiceProvider === 'say' && isSayAvailable && sayVoices.length > 0 && (
                                         <>
                                             <Select value={sayVoice} onValueChange={setSayVoice}>
@@ -1246,11 +1301,13 @@ export const VoiceSettings: React.FC = () => {
                                     )}
                             </SettingsFieldRow>
 
-                            {/* Speech Rate */}
-                            <SettingsFieldRow label={t('settings.voice.page.field.speechRate')}>
-                                    {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechRate} onChange={(e) => setSpeechRate(Number(e.target.value))} className={sliderClass} />}
-                                    <NumberInput value={speechRate} onValueChange={setSpeechRate} min={0.5} max={2} step={0.1} className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')} />
-                            </SettingsFieldRow>
+                            {/* Speech Rate: Gemini has no speed parameter */}
+                            {voiceProvider !== 'gemini' && (
+                                <SettingsFieldRow label={t('settings.voice.page.field.speechRate')}>
+                                        {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechRate} onChange={(e) => setSpeechRate(Number(e.target.value))} className={sliderClass} />}
+                                        <NumberInput value={speechRate} onValueChange={setSpeechRate} min={0.5} max={2} step={0.1} className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')} />
+                                </SettingsFieldRow>
+                            )}
 
                             {/* Speech Pitch */}
                             <SettingsFieldRow label={t('settings.voice.page.field.speechPitch')}>

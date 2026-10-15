@@ -41,7 +41,7 @@ import { z } from 'zod';
  * - The private relay runs only on a pinned self-hosted endpoint
  *   (`relay/service.js`).
  * - Speech and transcription go only to servers on this machine (`tts`,
- *   `dictation`).
+ *   `dictation`): OpenAI and Gemini read-aloud are refused.
  * - Push notifications carry no message text or session name (`notifications`).
  * - Update checks still run but never report usage (`package-manager.js`).
  * - Environment variables from Settings and `opencode service set env` do

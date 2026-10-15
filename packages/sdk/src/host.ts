@@ -7,6 +7,8 @@ export { HostRequestError } from './host-errors.ts';
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageOptions, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import { isGuestStatusControls } from './status-controls.ts';
+import type { GuestStatusSummaryItem } from './status-summary.ts';
+import { isGuestStatusSummary } from './status-summary.ts';
 import type { JsonValue } from './contract.ts';
 import { GUEST_TOOLTIP_TEXT_MAX, isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest, type GuestTooltipRequest } from './popover.ts';
 import {
@@ -136,6 +138,8 @@ export type HostClient = LoopbackClient & {
   onPopoverClosed: (listener: (event: GuestPopoverClosedEvent) => void) => () => void;
   /** Replace this status frame's host-rendered controls. Pass [] to clear them. */
   setStatusControls: (controls: GuestStatusControl[]) => Promise<void>;
+  /** Replace the readouts beside this status section's title, shown folded and expanded. Pass [] to clear them. */
+  setStatusSummary: (items: GuestStatusSummaryItem[]) => Promise<void>;
   openPopover: (request: GuestPopoverRequest) => Promise<void>;
   closePopover: (id: string, reason?: 'closed' | 'escape') => Promise<void>;
   setPopoverAnchorActive: (id: string, active: boolean) => Promise<void>;
@@ -859,6 +863,15 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         return Promise.reject(new HostRequestError('HOST_REJECTED', 'Status controls must have unique bounded ids and valid selected options.'));
       }
       return request({ ...envelope, type: 'status-controls', id: nextId(ids), payload: { controls } });
+    },
+    setStatusSummary: (items) => {
+      if (lastReady?.features?.statusSummary !== true) {
+        return Promise.reject(new HostRequestError('UNSUPPORTED', 'This host does not support a status summary.'));
+      }
+      if (!isGuestStatusSummary(items)) {
+        return Promise.reject(new HostRequestError('HOST_REJECTED', 'A status summary has at most four items with short text, a Remixicon name and a known tone.'));
+      }
+      return request({ ...envelope, type: 'status-summary', id: nextId(ids), payload: { items } });
     },
     openPopover: (payload) => {
       if (lastReady?.features?.popovers !== true) {

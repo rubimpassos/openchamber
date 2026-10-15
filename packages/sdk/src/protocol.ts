@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { loopbackRequestSchema, loopbackRequestResultSchema, loopbackUrlRequestSchema, loopbackUrlResultSchema } from './loopback-schemas.ts';
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
-import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
+import { guestStatusControlEventSchema, guestStatusControlsSchema, guestStatusSummarySchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema, guestTooltipRequestSchema } from './popover-schemas.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
@@ -256,6 +256,7 @@ const readyPayloadSchema = z.object({
   features: z.object({
     deviceStorage: z.literal(true).optional(),
     statusControls: z.literal(true).optional(),
+    statusSummary: z.literal(true).optional(),
     popovers: z.literal(true).optional(),
     tooltips: z.literal(true).optional(),
   }).optional(),
@@ -468,6 +469,12 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('status-controls'),
     id: z.string().min(1),
     payload: z.object({ controls: guestStatusControlsSchema }).strict(),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('status-summary'),
+    id: z.string().min(1),
+    payload: z.object({ items: guestStatusSummarySchema }).strict(),
   }),
   z.object({ ...envelope, type: z.literal('popover-open'), id: z.string().min(1), payload: guestPopoverRequestSchema }),
   z.object({ ...envelope, type: z.literal('popover-close'), id: z.string().min(1), payload: z.object({ id: z.string().min(1).max(80), reason: z.enum(['closed', 'escape']).optional() }).strict() }),

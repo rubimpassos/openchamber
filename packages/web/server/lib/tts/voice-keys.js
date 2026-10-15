@@ -5,17 +5,18 @@ import { z } from 'zod';
 
 /**
  * API keys for voice services the user typed in Settings: OpenAI read-aloud,
- * a custom OpenAI-compatible speech server, and a custom transcription
- * server. They live here, mode 0600, like every other credential the server
+ * Gemini read-aloud, a custom OpenAI-compatible speech server, and a custom
+ * transcription server. They live here, mode 0600, like every other credential the server
  * keeps; browsers hold only whether each one is set. Routes fill a request's
  * key from here, so a key never travels with a request from the UI.
  */
-const VOICE_KEY_KINDS = ['openai', 'openaiCompatible', 'stt'];
+const VOICE_KEY_KINDS = ['openai', 'openaiCompatible', 'gemini', 'stt'];
 
 const storedKey = z.string().trim().min(1).max(1024);
 const storedKeysSchema = z.object({
   openai: storedKey.optional().catch(undefined),
   openaiCompatible: storedKey.optional().catch(undefined),
+  gemini: storedKey.optional().catch(undefined),
   stt: storedKey.optional().catch(undefined),
 });
 // A string sets the key, null or '' removes it, an absent kind stays as is.
@@ -23,6 +24,7 @@ const patchValue = z.union([z.literal(''), z.null(), storedKey]);
 const patchSchema = z.object({
   openai: patchValue.optional(),
   openaiCompatible: patchValue.optional(),
+  gemini: patchValue.optional(),
   stt: patchValue.optional(),
 }).strict();
 

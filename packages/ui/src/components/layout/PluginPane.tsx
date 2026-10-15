@@ -15,6 +15,7 @@ import {
   type GuestPopoverClosedEvent,
   type GuestPopoverContext,
   type GuestPopoverRequest,
+  type GuestStatusSummaryItem,
   type GuestMessage,
   type HostMessage,
   type HostReadyContext,
@@ -115,6 +116,8 @@ type PluginPaneProps = {
   /** The guest asked for this content height (`setHeight`). The Work Status section sizes its frame from it. */
   onResize?: (height: number) => void;
   onStatusControls?: (binding: GuestStatusControlBinding | null) => void;
+  /** The guest's header readouts (`setStatusSummary`); an empty list when the frame is gone or the project changed. */
+  onStatusSummary?: (items: GuestStatusSummaryItem[]) => void;
   /** The Work Status panel's own directory; null deliberately means no project. */
   statusDirectory?: string | null;
   /**
@@ -171,6 +174,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onSessionStarted,
   onResize,
   onStatusControls,
+  onStatusSummary,
   statusDirectory,
   fileEditor,
   pinnedDirectory,
@@ -243,6 +247,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     const features: NonNullable<HostReadyContext['features']> = {};
     if (guest?.storageId && globalThis.indexedDB) features.deviceStorage = true;
     if (surface === 'status' && onStatusControls) features.statusControls = true;
+    if (surface === 'status' && onStatusSummary) features.statusSummary = true;
     if (!popoverHost && !popover && !headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime()
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
     if (!headless) features.tooltips = true;
@@ -298,7 +303,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     popover: popoverHost?.context ?? popover,
     features,
     };
-  }, [currentTheme, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [currentTheme, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, onStatusSummary, popover, popoverHost, sessionSnapshot, surface]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
@@ -359,6 +364,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const onStatusControlsRef = React.useRef(onStatusControls);
   onStatusControlsRef.current = onStatusControls;
   const statusControlsRef = React.useRef<ReturnType<typeof createGuestStatusControls> | null>(null);
+  const onStatusSummaryRef = React.useRef(onStatusSummary);
+  onStatusSummaryRef.current = onStatusSummary;
   // The app scales its interface by resizing the root rem (Settings → font
   // size). A guest document has its own root, so zoom the frame by the same
   // factor; the guest keeps laying out in its own CSS pixels.
@@ -545,7 +552,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     statusControlsRef.current = statusControls;
     const clearSubscriptions = () => { for (const unsubscribe of subscriptions.values()) unsubscribe(); subscriptions.clear(); };
-    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; lifetime.abort(); closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopOauthPoll(); });
+    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; lifetime.abort(); closeActivePopover('owner'); statusControls.dispose(); onStatusSummaryRef.current?.([]); clearSubscriptions(); stopOauthPoll(); });
     const requireSessions = () => {
       if (!guestMay(currentGuest(), 'sessions')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
     };
@@ -645,6 +652,11 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         setStatusControls: (controls) => {
           if (surface !== 'status' || !onStatusControlsRef.current) throw new HostRequestError('UNSUPPORTED', 'This frame has no status header.');
           statusControls.set(controls);
+        },
+        setStatusSummary: (items) => {
+          if (surface !== 'status' || !onStatusSummaryRef.current) throw new HostRequestError('UNSUPPORTED', 'This frame has no status header.');
+          if (!ownsFrame()) throw new HostRequestError('DISABLED', 'This status frame is no longer active.');
+          onStatusSummaryRef.current(items);
         },
         filesWatch: async ({ subscriptionId, paths }) => {
           if (!guestEnabledRef.current) throw new HostRequestError('DISABLED', 'This extension is disabled in Settings → Extensions.');
@@ -954,6 +966,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       if (!childPopover) closeActivePopover('owner');
       statusControls.dispose();
       if (statusControlsRef.current === statusControls) statusControlsRef.current = null;
+      onStatusSummaryRef.current?.([]);
       lifetime.abort();
       clearSubscriptions();
       runtimeUnsubscribe();
@@ -963,7 +976,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
   // A project switch retires header callbacks, not the still-mounted frame's
   // workspace observers or unrelated in-flight requests.
-  React.useLayoutEffect(() => { statusControlsRef.current?.retire(); }, [statusContextKey]);
+  React.useLayoutEffect(() => {
+    statusControlsRef.current?.retire();
+    onStatusSummaryRef.current?.([]);
+  }, [statusContextKey]);
 
   React.useEffect(() => {
     if (backgroundAction && (frameStatus === 'error' || !guestEnabled)) {

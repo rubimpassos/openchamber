@@ -271,6 +271,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     if (section !== true && section?.height !== undefined) guest.statusHeight = section.height;
     if (section !== true && section?.defaultExpanded !== undefined) guest.statusDefaultExpanded = section.defaultExpanded;
     if (section !== true && section?.requiresProject !== undefined) guest.statusRequiresProject = section.requiresProject;
+    if (section !== true && section?.keepAlive === true) guest.statusKeepAlive = true;
   }
   // File editors are frames of their own too; each entry is checked the same way.
   const fileEditors = parsed.manifest.contributes.fileEditors ?? [];
@@ -394,6 +395,7 @@ export const toPublicGuest = (guest) => {
   if (Number.isInteger(guest.statusHeight)) row.statusHeight = guest.statusHeight;
   if (guest.statusDefaultExpanded !== undefined) row.statusDefaultExpanded = guest.statusDefaultExpanded;
   if (guest.statusRequiresProject !== undefined) row.statusRequiresProject = guest.statusRequiresProject;
+  if (guest.statusKeepAlive === true) row.statusKeepAlive = true;
   if (attach) {
     row.attach = attach;
   }

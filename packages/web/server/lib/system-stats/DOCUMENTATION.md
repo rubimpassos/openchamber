@@ -22,4 +22,9 @@ The UI parser lives in `packages/ui/src/lib/serverMachineStats.ts`; keep both in
 - **Process CPU** is a share of the whole machine (all cores), on the same scale as host CPU.
 
 ## Clients
-Only the Electron desktop instance menu polls this route (every 5 s while the menu is open, 30 s otherwise, paused while the window is hidden). Web, VS Code and mobile do not mount the menu. Older servers without the route answer 404, or forward it to OpenCode; the UI treats both as "not supported" until a valid sample arrives.
+Only the Electron desktop instance menu reads this route. Web, VS Code and mobile do not mount the menu.
+
+- **Connected instance**: polled through `runtimeFetch` every 5 s while the menu is open, 30 s otherwise, paused while the window is hidden. Feeds the Machine block and the dot on the instance button.
+- **Other saved instances**: read through the `desktop_host_stats` IPC (`packages/electron/remote-host-stats.mjs`) once when the menu opens and every 60 s while it stays open, only for hosts whose probe (or SSH tunnel) is up. The main process takes the address and token from the hosts file; the IPC is not available to remote-origin pages, so a page served by one instance cannot read the others. Relay-only hosts are not read.
+
+Older servers without the route answer 404, or forward it to OpenCode; the UI treats both as "not supported" until a valid sample arrives.
