@@ -159,7 +159,7 @@ const fetchSelectionInputs = async ({ client, readSettingsFromDiskMigrated }) =>
   return { settings, models, agents, opencodeDefaultAgent, opencodeDefaultModel };
 };
 
-const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel, autoAvailable }) => {
+const resolveDefaultSelection = ({ requestedAgent, agents, models, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel, autoAvailable }) => {
   const primaryAgents = agents.filter((agent) => isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true);
   let resolvedAgent = null;
   const projectDefaultAgent = asNonEmptyString(projectDefaults?.defaultAgent);
@@ -174,7 +174,8 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
       || agents.find((agent) => typeof agent?.id === 'string' && agent.id.toLowerCase() === wanted)
       || null;
   };
-  if (projectDefaultAgent) resolvedAgent = findAgentBySetting(projectDefaultAgent);
+  if (requestedAgent) resolvedAgent = findAgentBySetting(requestedAgent);
+  if (!resolvedAgent && projectDefaultAgent) resolvedAgent = findAgentBySetting(projectDefaultAgent);
   if (!resolvedAgent && settingsDefaultAgent) resolvedAgent = findAgentBySetting(settingsDefaultAgent);
   if (!resolvedAgent && opencodeDefaultAgent) {
     const candidate = agents.find((agent) => agent?.id === opencodeDefaultAgent) || null;
@@ -193,9 +194,18 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
   // can carry its variant and is parsed with the canonical parser.
   const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = splitModel(settings?.defaultModel);
+  // An agent's model is a v2 `ModelRef`: `id` is the model id, not a composite.
+  const agentModel = resolvedAgent?.model;
+  const hasAgentModel = asNonEmptyString(agentModel?.providerID) && asNonEmptyString(agentModel?.id);
+  // A named agent's own model wins over the saved defaults: asking for an
+  // agent means asking for the model it is configured with.
+  if (requestedAgent && hasAgentModel) {
+    model = { providerID: agentModel.providerID, modelID: agentModel.id };
+    variant = resolveVariant(models, model.providerID, model.modelID, agentModel.variant);
+  }
   // A saved choice is honoured even when the catalog has not listed it yet: a
   // discovery gap must not silently move the user onto another model.
-  if (projectDefaultModel) {
+  if (!model && projectDefaultModel) {
     model = projectDefaultModel;
     variant = resolveVariant(models, model.providerID, model.modelID, projectDefaults?.defaultVariant);
   }
@@ -204,9 +214,7 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
     variant = resolveVariant(models, model.providerID, model.modelID, settings?.defaultVariant);
   }
 
-  // An agent's model is a v2 `ModelRef`: `id` is the model id, not a composite.
-  const agentModel = resolvedAgent?.model;
-  if (!model && asNonEmptyString(agentModel?.providerID) && asNonEmptyString(agentModel?.id)) {
+  if (!model && hasAgentModel) {
     model = { providerID: agentModel.providerID, modelID: agentModel.id };
     variant = resolveVariant(models, model.providerID, model.modelID, agentModel.variant);
   }
@@ -600,6 +608,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         && await isAutoReady().catch(() => false);
       const defaults = resolveDefaultSelection({
         ...inputs,
+        requestedAgent: agent,
         projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
         autoAvailable,
       });

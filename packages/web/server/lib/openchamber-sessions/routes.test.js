@@ -557,6 +557,46 @@ describe('openchamber session routes', () => {
     expect(sessionSwitchAgentMock).toHaveBeenCalledWith({ sessionID: 'ses_123', agent: 'build' });
   });
 
+  it('starts a named agent on its own model ahead of saved defaults', async () => {
+    useCatalog({
+      agents: [
+        ...CATALOG_AGENTS,
+        { id: 'deep', name: 'Deep', mode: 'primary', model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' } },
+      ],
+      config: [{ info: { default_agent: 'build', model: 'openai/gpt-5.5' } }],
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'openai/gpt-5.5' }],
+      }),
+    });
+
+    const named = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'deep' })
+      .expect(200);
+    expect(named.body.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
+    expect(named.body.agent).toBe('deep');
+    expect(sessionSwitchModelMock).toHaveBeenLastCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'claude-sonnet-5', providerID: 'anthropic', variant: 'high' },
+    });
+
+    const explicit = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'deep', model: 'openai/gpt-5.5' })
+      .expect(200);
+    expect(explicit.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+
+    const planWithoutModel = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'plan' })
+      .expect(200);
+    expect(planWithoutModel.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+  });
+
   it('skips a model hidden in the picker when nothing names a model (#1801)', async () => {
     useCatalog({
       models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS],
