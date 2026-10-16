@@ -1,0 +1,117 @@
+---
+title: Suggested Tasks
+description: Let scans read your project on a schedule and propose work you approve, snooze or dismiss.
+---
+
+# Suggested Tasks
+
+Suggested tasks are scans that read a project and propose work: a forgotten TODO, a security hole, docs that no longer match the code. Each suggestion lands in an inbox, where you start a session on it, turn it into a todo or an issue, snooze it, or dismiss it. Open the inbox from the lightbulb at the top of the session sidebar; a dot on it means there are open suggestions.
+
+A scan only reads files. It cannot edit them, run commands, or use your MCP tools. Work starts only when you approve a suggestion, or when you tell a lens to act on its own.
+
+## Turn it on for a project
+
+1. Open **Settings → Projects**, pick the project, and open the **Suggested tasks** tab.
+2. Check **Scan this project for suggested tasks**.
+3. Under **Lenses**, click **Add a lens** and pick a starting point, for example **Security** or **Forgotten TODOs and FIXMEs**. Add a second one if you like.
+4. Choose **When to scan**. **Manual** runs a scan only when you start one.
+5. Click **Scan now**.
+
+The inbox shows the scan as running. Each lens adds its suggestions when it finishes, usually within a few minutes.
+
+## Lenses
+
+A lens looks for one kind of work. Each lens has:
+
+- a name and a prompt that says what to look for
+- its own model, thinking level and agent, or the project's session defaults
+- web access, off unless you allow it; a dependencies lens uses it to check current versions
+- what happens with what it finds
+
+The starting points are forgotten TODOs and FIXMEs, security, performance, accessibility, test coverage, outdated dependencies, outdated docs and dead code. Each one copies its prompt into your lens, so you can change it. **Custom lens** starts empty.
+
+Every lens of a scan runs in its own session. If one fails, the others still add their suggestions, and the inbox says which lens failed and why. Click the play button next to a lens to scan with that lens alone.
+
+### What a lens does with its suggestions
+
+By default a lens only suggests: everything waits in the inbox. You can also let it act on its own:
+
+| Choice | What happens to each new suggestion |
+|---|---|
+| Only suggest | Waits in the inbox. |
+| Add to project todos | Becomes a todo in [Notes, Todos & Plans](/notes-todos-plans/). |
+| Start a session | A session in the project starts working on it. |
+| Start a session in a new worktree | It gets its own [worktree](/worktrees/) and session. |
+| Work until a draft pull request | A worktree session works on it as a [goal](/session-goals/) and opens a draft pull request. |
+
+The last three start sessions without asking, and those sessions spend tokens.
+
+## When scans run
+
+- **Manual**: only when you click **Scan now**
+- **Daily** or **Weekly**: at a time you pick, in a time zone you pick
+- **Cron**: any cron expression, such as `0 9 * * 1-5` for 9:00 on weekdays
+
+**Quiet hours** skip scheduled scans that fall in a window, such as 22:00 to 07:00. A scan you start yourself always runs. Scans are timed by the same scheduler as [Scheduled Tasks](/scheduled-tasks/), so they run while OpenChamber's server runs, even with the window closed.
+
+## What a scan looks at
+
+- **Only these files** and **Skip these files** take one pattern per line, like `src/**` or `*.test.ts`.
+- **Branch** scans another branch in a temporary copy that is removed afterwards. Empty scans the project folder as it is.
+- **Only look at files changed since the last scan** makes later scans read only what changed. When nothing in scope changed, the scan is skipped and costs nothing.
+
+## Limits
+
+- **Suggestions per scan** caps what one scan adds across all lenses. The most severe and most certain ones are kept.
+- **Stop a scan after a token budget** stops every lens still reading once the scan used that many tokens.
+- **Lowest confidence** and **Lowest severity** leave out suggestions below them.
+
+## The inbox
+
+Each suggestion shows its title, why it matters, the files and lines involved, the lens that found it, how severe it is and how sure the lens is. Click a file to open it at that line.
+
+- **Start session** starts a session in the project with the suggestion as its prompt.
+- **Approve as** offers more ways to take it on:
+  - a session in a new worktree
+  - a worktree session that works until a draft pull request
+  - a new draft you edit first, where you can also pick an isolated space
+  - a project todo
+  - an issue on GitHub, GitLab or Linear
+- **Snooze** hides it for a day, a week or a month.
+- **Dismiss** asks for an optional reason.
+
+Creating an issue opens the tracker's new-issue page with the title and description filled in. You submit it with your own account.
+
+## Teaching scans what you do not want
+
+Scans compare findings with suggestions already open, snoozed or approved. By default they also read what you dismissed, with your reasons, and your open project todos, so "we accept this risk" on one suggestion helps keep similar ones away. Turn either off under **Avoid repeats**.
+
+Scans also compare findings with open issues from the project's bound GitHub or GitLab repository and its mapped Linear teams. A provider failure or a backlog larger than 10 pages appears as a warning on the scan. Similarity matching can miss differently worded duplicates.
+
+## Lenses in the repository
+
+A team can share lenses as markdown files in `.agents/lenses/`:
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Only `name` and the body are required. Without `model`, the lens uses the session defaults. `action` is one of `suggest`, `todo`, `session`, `worktree` and `draft-pr`.
+
+A lens from the repository appears in the lens list but runs only after you check it on your machine. If someone changes the file later, it waits for you to check it again.
+
+## Notifications and scan sessions
+
+When a scan adds suggestions, OpenChamber [notifies](/notifications/) you, unless you turned that off under **After a scan**. Scan sessions are archived when the scan ends, so they stay out of the sidebar. Open one from the inbox under **Last scan**.
+
+## Where it is available
+
+The inbox and scans work in the web app and the desktop app. On a phone you can open the inbox, start scans and act on suggestions; set them up from a computer. The VS Code extension does not offer suggested tasks.

@@ -205,6 +205,23 @@
           }
         },
         {
+          "label": "Suggested Tasks",
+          "link": "/suggested-tasks/",
+          "translations": {
+            "nl": "Voorgestelde taken",
+            "uk": "Запропоновані задачі",
+            "zh-CN": "建议任务",
+            "es": "Tareas sugeridas",
+            "pt-BR": "Tarefas sugeridas",
+            "ko": "제안된 작업",
+            "pl": "Sugerowane zadania",
+            "fr": "Tâches suggérées",
+            "ja": "提案タスク",
+            "de": "Vorgeschlagene Aufgaben",
+            "tr": "Önerilen görevler"
+          }
+        },
+        {
           "label": "Agent Control Tool",
           "link": "/agent-control-tool/",
           "translations": {
