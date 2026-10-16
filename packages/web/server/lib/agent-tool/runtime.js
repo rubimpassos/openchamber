@@ -87,7 +87,7 @@ const ALL_PARAMETER_PROPERTIES = {
   targetSessionId: { type: 'string', description: 'Scheduled task target; omit for a new session, empty on update clears it' },
   title: { type: 'string' },
   prompt: { type: 'string' },
-  model: { type: 'string', description: 'Model in provider/model format. When the user names no model: for session.create pick a suitable one from models.list favorites or recents (omit if there are none); for send and fork omit it — the session reuses its previous model' },
+  model: { type: 'string', description: 'Model in provider/model format. Set it only when the user names a model. Otherwise omit it: session.create starts on the agent\'s own model, or on the configured default when no agent is set; send and fork reuse the session\'s previous model' },
   agent: { type: 'string', description: 'OpenCode agent name; new sessions default to the build agent and existing sessions keep their previous one. Set only when the user explicitly requests a different agent' },
   variant: { type: 'string', description: 'Model variant; use only when the user explicitly requests it' },
   worktree: { type: 'string', description: 'Folder name of a new worktree. For session.create omit it by default and use it only when the user explicitly asks for an isolated worktree; uncommitted changes do not carry over there. Required for session.moveToWorktree: short and named after the task, such as fix-login-timeout' },
