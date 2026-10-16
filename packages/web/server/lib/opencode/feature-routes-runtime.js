@@ -27,6 +27,8 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { registerSuggestedTaskRoutes } from '../suggested-tasks/routes.js';
+import { createProjectOpenIssuesReader } from '../suggested-tasks/open-issues.js';
 import { createTrackedItemsService } from '../tracked-items/service.js';
 import { createProviderReadCache } from '../provider-read-cache/index.js';
 import { createTrackedItemReaders } from '../tracked-items/readers.js';
@@ -113,6 +115,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
   let walkthroughService = null;
   let walkthroughBindingService = null;
+  let projectOpenIssuesReader = null;
   let gitRepositoryCredentialRuntime = null;
   let networkOperations = null;
   let gitWorktreeCreation = null;
@@ -253,6 +256,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       sessionKnowledgeRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
+      suggestedTasksRuntime,
       openChamberSessionService,
       openChamberControlService,
       waitForOpenCodeReady,
@@ -325,6 +329,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenChamberEventClients,
       writeSseEvent,
     });
+
+    registerSuggestedTaskRoutes(app, { suggestedTasksRuntime });
 
     registerOpenChamberSessionRoutes(app, {
       readSettingsFromDiskMigrated,
@@ -499,6 +505,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         store: gitlabAuthStore,
         readSettings: readSettingsFromDisk,
       },
+    });
+    projectOpenIssuesReader = createProjectOpenIssuesReader({
+      getBindingService: () => walkthroughBindingService,
+      readSourceControlAccount: resolveSourceControlAccount,
     });
     registerWalkthroughRoutes(app, {
       getWalkthroughService,
@@ -757,6 +767,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
   return {
     registerRoutes,
+    readProjectOpenIssues: (directory) => projectOpenIssuesReader
+      ? projectOpenIssuesReader(directory)
+      : Promise.resolve({ titles: [], warnings: [{
+        provider: 'source-control', kind: 'unavailable', message: 'Project open issue deduplication is unavailable until feature routes are registered.',
+      }] }),
     hydrateBoundCheckout,
     createChangeRequestWorktree,
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
