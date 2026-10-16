@@ -9,7 +9,7 @@ import path from 'node:path';
 // Everything that resolves the data directory (early-startup's settings path,
 // the embedded server, managed OpenCode) reads OPENCHAMBER_DATA_DIR, so setting
 // it here, before any of them is imported, moves all of them at once.
-export const TURBO2_DATA_DIR_NAME = 'openchamber-turbo2';
+const TURBO2_DATA_DIR_NAME = 'openchamber-turbo2';
 const LEGACY_DATA_DIR_NAME = 'openchamber';
 const SEEDED_FILES = ['settings.json', 'preferences.json'];
 
@@ -45,4 +45,3 @@ export const applyTurbo2DataDir = ({ environment = process.env, homeDir = os.hom
   }
   return dataDir;
 };
-
