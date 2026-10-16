@@ -4,6 +4,10 @@ import path from 'node:path';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { discoverLoopFiles, loopFingerprint, parseLoopDefinition, setLoopFileEnabled } from './loops.js';
 
+// A project's Suggested tasks scan is timed by the scheduler but configured
+// in Settings; editing it here would be undone by the next settings save.
+const SUGGESTED_SCAN_MANAGED = new OpenChamberControlError('This task runs Suggested tasks. Change it in Settings, under the project\'s Suggested tasks.', 409);
+
 // Same scope rule the scheduler applies: a file under the project's own
 // `.agents/loops` is a repository loop, even where it is also the user folder.
 const isRepositoryLoop = (projectPath, loopFile) => discoverLoopFiles(projectPath)
@@ -112,6 +116,7 @@ export const createScheduledTaskService = (dependencies) => {
     }
     let upserted;
     const previous = taskInput.id ? (await projectConfigRuntime.listScheduledTasks(id)).find((task) => task.id === taskInput.id) : null;
+    if (previous?.suggestedScan || taskInput.suggestedScan === true) throw SUGGESTED_SCAN_MANAGED;
     if (taskInput.targetSessionId && (taskInput.enabled !== false || previous?.targetSessionId !== taskInput.targetSessionId)) {
       await scheduledTasksRuntime.validateTarget(id, taskInput.targetSessionId);
     }
@@ -140,6 +145,7 @@ export const createScheduledTaskService = (dependencies) => {
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
     const current = await projectConfigRuntime.listScheduledTasks(id);
     const existing = current.find((task) => task.id === normalizedTaskID) || null;
+    if (existing?.suggestedScan) throw SUGGESTED_SCAN_MANAGED;
     if (existing?.loopFile && fs.existsSync(existing.loopFile)) {
       // Loop tasks are owned by their `.agents/loops` markdown file: deleting
       // the JSON row would be silently undone by the next reconcile while the

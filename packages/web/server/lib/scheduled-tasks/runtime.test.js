@@ -400,6 +400,48 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(patches[startIndex + 1]).toEqual({ lastSessionId: 'ses_failed' });
     expect(patches.at(-1)).toMatchObject({ lastStatus: 'error', lastSessionId: 'ses_failed' });
   });
+
+  it('hands a Suggested tasks scan to its runner and records a scan that had nothing to do as skipped', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const task = {
+      id: 'suggested-tasks-scan',
+      name: 'Suggested tasks scan',
+      enabled: true,
+      suggestedScan: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'fallback', useDefaults: true },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runSuggestedScan = vi.fn(async () => ({ skipped: 'no-changes' }));
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      runSuggestedScan,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'suggested-tasks-scan');
+    runtime.stop();
+
+    expect(runSuggestedScan).toHaveBeenCalledWith('proj', 'manual');
+    // The scan starts its own sessions; the scheduler sends no prompt of its own.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, status: 'skipped' });
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'skipped' });
+  });
 });
 
 describe('scheduled-tasks runtime chats scope', () => {
