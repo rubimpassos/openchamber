@@ -102,6 +102,10 @@ type AgentMemoryChangedEvent = {
 const projectContextChangedSchema = z.object({ projectId: z.string().min(1) });
 type ProjectContextChangedEvent = { type: 'project-context-changed' } & z.infer<typeof projectContextChangedSchema>;
 
+/** A project's Suggested tasks inbox, settings or scans changed. */
+const suggestedTasksChangedSchema = z.object({ projectId: z.string().min(1) });
+type SuggestedTasksChangedEvent = { type: 'suggested-tasks-changed' } & z.infer<typeof suggestedTasksChangedSchema>;
+
 /**
  * The extension chosen as browser provider can no longer serve (paused,
  * removed, or approval withdrawn), so the server put the in-app browser back.
@@ -194,6 +198,7 @@ type OpenChamberEvent =
   | PlanOpenRequestEvent
   | BrowserProviderResetEvent
   | ProjectContextChangedEvent
+  | SuggestedTasksChangedEvent
   | AgentMemoryChangedEvent
   | GuestFilesChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
@@ -451,6 +456,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:project-context-changed') {
     const parsed = projectContextChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'project-context-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:suggested-tasks-changed') {
+    const parsed = suggestedTasksChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'suggested-tasks-changed', ...parsed.data });
     return;
   }
 
