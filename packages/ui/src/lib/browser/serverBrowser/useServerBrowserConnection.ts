@@ -44,7 +44,7 @@ const POLL_MS = 2_000;
 const STATE_WAIT_MS = 15_000;
 const POLL_MS_HIDDEN = 10_000;
 
-export type ServerBrowserConnection = {
+type ServerBrowserConnection = {
   readonly state: ServerBrowserState | null;
   readonly scope: ServerBrowserScope | null;
   readonly sessionId: string | null;

@@ -71,7 +71,7 @@ export const panelTabsByChromeTab = (
  * shows that profile's sign-in browser (instead of the chat's) with a bar to
  * save the sign-in or cancel it.
  */
-export type ProfileSignIn = { readonly profileId: string; readonly name: string };
+type ProfileSignIn = { readonly profileId: string; readonly name: string };
 
 type ProfileSignInStore = {
   readonly signIn: ProfileSignIn | null;
