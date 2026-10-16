@@ -1345,6 +1345,17 @@ describe('openchamber session service directory resolution', () => {
     await expect(service.resolveDirectory({ projectId: 'proj_1' })).resolves.toBe('/repo/app');
   });
 
+  it('records a created session before dispatch, and exposes its identity if that recording fails', async () => {
+    const service = await createService({
+      createOpenCodeClient: () => ({ session: { create: async () => ({ id: 'ses_recorded' }) } }),
+    });
+    const record = vi.fn(async () => undefined);
+    await expect(service.create({ projectId: 'proj_1' }, { onSessionCreated: record })).resolves.toMatchObject({ sessionId: 'ses_recorded' });
+    expect(record).toHaveBeenCalledWith({ sessionId: 'ses_recorded', directory: '/repo/app' });
+    await expect(service.create({ projectId: 'proj_1' }, { onSessionCreated: async () => { throw new Error('disk full'); } }))
+      .rejects.toMatchObject({ partial: true, sessionId: 'ses_recorded', directory: '/repo/app', message: 'disk full' });
+  });
+
   it('fails for an unknown project, a missing project folder, or unreadable settings', async () => {
     await expect((await createService()).resolveDirectory({ projectId: 'missing' }))
       .rejects.toMatchObject({ statusCode: 404, message: 'Project not found' });
