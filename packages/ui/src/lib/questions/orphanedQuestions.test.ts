@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
-import type { AssistantMessage, Message, Part, QuestionRequest } from '@/lib/opencode/model';
+import type { AssistantMessage, Message, Part, QuestionRequest, Session } from '@/lib/opencode/model';
 import {
   ORPHANED_QUESTION_ID_PREFIX,
   buildOrphanedAnswerMessage,
@@ -7,6 +7,7 @@ import {
   isOrphanedQuestionDismissed,
   isOrphanedQuestionId,
   markOrphanedQuestionDismissed,
+  wasInterruptedByInactivity,
 } from './orphanedQuestions';
 import { projectQuestionForm, questionToForm } from '@/lib/opencode/projection';
 
@@ -86,7 +87,7 @@ function makeQuestionToolPart(options?: {
   const state = status === 'completed'
     ? { status, input, output: 'done', title: '', metadata: {}, time: { start: 1, end: 2 } }
     : status === 'error'
-      ? { status, input, error: 'rejected', time: { start: 1, end: 2 } }
+      ? { status, input, error: 'Tool execution interrupted', time: { start: 1, end: 2 } }
       : status === 'pending'
         ? { status, input, raw: '' }
         : { status, input, time: { start: 1 } };
@@ -121,7 +122,7 @@ describe('collectOrphanedQuestionRequests', () => {
       info: { id: 'idle', sessionID: SESSION_ID, role: 'idle', time: { created: 2 }, outcome: 'interrupted' },
       parts: [],
     });
-    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [])).toHaveLength(1);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], false)).toHaveLength(1);
   });
 
   test('projects v2 form metadata to the original tool call identity', () => {
@@ -134,11 +135,11 @@ describe('collectOrphanedQuestionRequests', () => {
     expect(projected?.tool).toEqual(question.tool);
     expect(form.fields[0].key).toBe('q0');
     expect(form.fields[0].type).toBe('string');
-    expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), projected ? [projected] : [])).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), projected ? [projected] : [], false)).toHaveLength(0);
   });
 
   test('synthesizes a request from a stale running question tool part', () => {
-    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), []);
+    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), [], false);
     expect(orphaned).toHaveLength(1);
     expect(orphaned[0].id).toBe(`${ORPHANED_QUESTION_ID_PREFIX}call_1`);
     expect(orphaned[0].sessionID).toBe(SESSION_ID);
@@ -153,19 +154,43 @@ describe('collectOrphanedQuestionRequests', () => {
       SESSION_ID,
       makeRecords([makeQuestionToolPart({ status: 'pending' })]),
       [],
+      false,
     );
     expect(orphaned).toHaveLength(1);
   });
 
-  test('ignores completed and errored question tool parts', () => {
+  test('ignores completed question tool parts, and errored ones unless the inactivity eviction errored them', () => {
     for (const status of ['completed', 'error'] as const) {
       const orphaned = collectOrphanedQuestionRequests(
         SESSION_ID,
         makeRecords([makeQuestionToolPart({ status })]),
         [],
+        false,
       );
       expect(orphaned).toHaveLength(0);
     }
+  });
+
+  test('brings back a question errored by an inactivity interruption', () => {
+    const orphaned = collectOrphanedQuestionRequests(
+      SESSION_ID,
+      makeRecords([makeQuestionToolPart({ status: 'error' })]),
+      [],
+      true,
+    );
+    expect(orphaned.map((question) => question.id)).toEqual([`${ORPHANED_QUESTION_ID_PREFIX}call_1`]);
+  });
+
+  test('looks past the agent switch and idle marker OpenCode records after an interrupted turn', () => {
+    const records = makeRecords([makeQuestionToolPart({ status: 'error' })]);
+    records.push(
+      {
+        info: { id: 'switch', sessionID: SESSION_ID, role: 'agent-switched', time: { created: 2 }, agent: 'build', previous: 'build' },
+        parts: [],
+      },
+      { info: { id: 'idle', sessionID: SESSION_ID, role: 'idle', time: { created: 3 }, outcome: 'interrupted' }, parts: [] },
+    );
+    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], true)).toHaveLength(1);
   });
 
   test('excludes questions still pending server-side (matched by callID)', () => {
@@ -173,6 +198,7 @@ describe('collectOrphanedQuestionRequests', () => {
       SESSION_ID,
       makeRecords([makeQuestionToolPart({ callID: 'call_1' })]),
       [makeLiveQuestion('call_1')],
+      false,
     );
     expect(orphaned).toHaveLength(0);
   });
@@ -182,6 +208,7 @@ describe('collectOrphanedQuestionRequests', () => {
       SESSION_ID,
       makeRecords([makeQuestionToolPart({ callID: 'call_2' })]),
       [makeLiveQuestion('call_1')],
+      false,
     );
     expect(orphaned).toHaveLength(1);
   });
@@ -194,7 +221,7 @@ describe('collectOrphanedQuestionRequests', () => {
         parts: [],
       },
     ];
-    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [])).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], false)).toHaveLength(0);
   });
 
   test('ignores non-assistant last message and mismatched session', () => {
@@ -202,10 +229,10 @@ describe('collectOrphanedQuestionRequests', () => {
       [makeQuestionToolPart()],
       { id: 'msg_user', sessionID: SESSION_ID, role: 'user', time: { created: 1 } } as Message,
     );
-    expect(collectOrphanedQuestionRequests(SESSION_ID, userRecord, [])).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, userRecord, [], false)).toHaveLength(0);
 
     const otherSession = makeRecords([makeQuestionToolPart()], makeAssistantInfo({ sessionID: 'ses_other' }));
-    expect(collectOrphanedQuestionRequests(SESSION_ID, otherSession, [])).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, otherSession, [], false)).toHaveLength(0);
   });
 
   test('skips malformed tool input', () => {
@@ -214,6 +241,7 @@ describe('collectOrphanedQuestionRequests', () => {
         SESSION_ID,
         makeRecords([makeQuestionToolPart({ input })]),
         [],
+        false,
       );
       expect(orphaned).toHaveLength(0);
     }
@@ -222,8 +250,40 @@ describe('collectOrphanedQuestionRequests', () => {
   test('excludes dismissed questions', () => {
     markOrphanedQuestionDismissed('call_1');
     expect(isOrphanedQuestionDismissed('call_1')).toBe(true);
-    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), []);
+    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), [], false);
     expect(orphaned).toHaveLength(0);
+  });
+});
+
+describe('wasInterruptedByInactivity', () => {
+  const session = (interruption: { reason?: string; at?: number } | null, idle: number): Session => ({
+    id: SESSION_ID,
+    projectID: 'prj',
+    directory: '/repo',
+    title: 'test',
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 1, idle },
+    metadata: interruption === null ? {} : { openchamber: { interruption } },
+  });
+
+  test('is true for an inactivity record written after the last idle time', () => {
+    expect(wasInterruptedByInactivity(session({ reason: 'inactivity', at: 200 }, 100))).toBe(true);
+  });
+
+  test('is false for a user stop or a superseded turn', () => {
+    expect(wasInterruptedByInactivity(session({ reason: 'user', at: 200 }, 100))).toBe(false);
+    expect(wasInterruptedByInactivity(session({ reason: 'superseded', at: 200 }, 100))).toBe(false);
+  });
+
+  test('is false once a later turn has ended', () => {
+    expect(wasInterruptedByInactivity(session({ reason: 'inactivity', at: 200 }, 300))).toBe(false);
+  });
+
+  test('is false without a record or with a malformed one', () => {
+    expect(wasInterruptedByInactivity(undefined)).toBe(false);
+    expect(wasInterruptedByInactivity(session(null, 100))).toBe(false);
+    expect(wasInterruptedByInactivity(session({ reason: 'inactivity' }, 100))).toBe(false);
   });
 });
 
