@@ -1,0 +1,115 @@
+---
+title: Önerilen görevler
+description: Taramaların projenizi zamanlamaya göre okumasına ve onaylayacağınız, erteleyeceğiniz ya da reddedeceğiniz işler önermesine izin verin.
+---
+
+# Önerilen görevler
+
+Önerilen görevler, bir projeyi okuyup iş öneren taramalardır: unutulmuş bir TODO, bir güvenlik açığı, artık koda uymayan dokümanlar. Her öneri bir gelen kutusuna düşer. Orada onunla bir oturum başlatır, yapılacak ya da issue'ya çevirir, ertelersiniz veya reddedersiniz. Gelen kutusunu oturum kenar çubuğunun üstündeki ampulden açın; üzerindeki nokta açık öneriler olduğunu gösterir.
+
+Bir tarama yalnızca dosyaları okur. Dosyaları düzenleyemez, komut çalıştıramaz ve MCP araçlarınızı kullanamaz. İş, ancak bir öneriyi onayladığınızda ya da bir mercek kendi başına harekete geçsin dediğinizde başlar.
+
+## Bir proje için açma
+
+1. **Ayarlar → Projeler**'i açın, projeyi seçin ve **Önerilen görevler** sekmesini açın.
+2. **Önerilen görevler için bu projeyi tara** seçeneğini işaretleyin.
+3. **Mercekler** altında **Mercek ekle**'ye tıklayın ve bir başlangıç noktası seçin, örneğin **Güvenlik** ya da **Unutulmuş TODO ve FIXME'ler**. İsterseniz ikincisini de ekleyin.
+4. **Ne zaman taranır** seçeneğini belirleyin. **Manuel**, taramayı yalnızca siz başlattığınızda çalıştırır.
+5. **Şimdi tara**'ya tıklayın.
+
+Gelen kutusu taramayı çalışıyor olarak gösterir. Her mercek işini bitirince önerilerini ekler, genellikle birkaç dakika içinde.
+
+## Mercekler
+
+Bir mercek tek tür iş arar. Her merceğin şunları vardır:
+
+- bir ad ve neyin aranacağını söyleyen bir prompt
+- kendi modeli, düşünme düzeyi ve ajanı ya da projenin varsayılan oturum ayarları
+- siz izin vermedikçe kapalı olan web erişimi; bağımlılık merceği güncel sürümleri kontrol etmek için kullanır
+- bulduklarına ne olacağı
+
+Başlangıç noktaları unutulmuş TODO ve FIXME'ler, güvenlik, performans, erişilebilirlik, test kapsamı, eskimiş bağımlılıklar, eskimiş dokümanlar ve ölü koddur. Her biri promptunu merceğinize kopyalar, böylece değiştirebilirsiniz. **Özel mercek** boş başlar.
+
+Bir taramanın her merceği kendi oturumunda çalışır. Biri başarısız olursa diğerleri yine önerilerini ekler, gelen kutusu da hangi merceğin neden başarısız olduğunu söyler. Yalnızca o merceğle taramak için merceğin yanındaki oynat düğmesine tıklayın.
+
+### Bir merceğin önerileriyle ne yaptığı
+
+Varsayılan olarak bir mercek yalnızca önerir: her şey gelen kutusunda bekler. Kendi başına harekete geçmesine de izin verebilirsiniz:
+
+| Seçenek | Her yeni öneriye ne olur |
+|---|---|
+| Yalnızca öner | Gelen kutusunda bekler. |
+| Proje yapılacaklarına ekle | [Proje Notları, Yapılacaklar ve Planlar](/tr/notes-todos-plans/) içinde bir yapılacak olur. |
+| Session başlat | Projede bir oturum onun üzerinde çalışmaya başlar. |
+| Yeni bir worktree'de session başlat | Kendi [worktree](/tr/worktrees/)'sini ve oturumunu alır. |
+| Taslak PR'a kadar çalış | Bir worktree oturumu onu [hedef](/tr/session-goals/) olarak ele alır ve taslak PR açar. |
+
+Son üçü sormadan oturum başlatır ve bu oturumlar token harcar.
+
+## Taramalar ne zaman çalışır
+
+- **Manuel**: yalnızca **Şimdi tara**'ya tıkladığınızda
+- **Günlük** veya **Haftalık**: seçtiğiniz saatte ve saat diliminde
+- **Cron zamanlaması**: herhangi bir cron ifadesi, örneğin hafta içi 9:00 için `0 9 * * 1-5`
+
+**Sessiz saatler**, 22:00 ile 07:00 gibi bir aralığa düşen zamanlanmış taramaları atlar. Kendiniz başlattığınız tarama her zaman çalışır. Taramaları [Zamanlanmış görevler](/tr/scheduled-tasks/) ile aynı zamanlayıcı yönetir, bu yüzden OpenChamber sunucusu çalıştığı sürece, pencere kapalıyken bile çalışırlar.
+
+## Bir taramanın baktığı yerler
+
+- **Yalnızca bu dosyalar** ve **Bu dosyaları atla** her satıra bir desen alır, örneğin `src/**` ya da `*.test.ts`.
+- **Dal**, başka bir dalı sonradan silinen geçici bir kopyada tarar. Boşsa proje klasörünü olduğu gibi tarar.
+- **Yalnızca son taramadan beri değişen dosyalara bak** sonraki taramaların yalnızca değişeni okumasını sağlar. Kapsamda hiçbir şey değişmediyse tarama atlanır ve hiçbir maliyeti olmaz.
+
+## Sınırlar
+
+- **Tarama başına öneri** bir taramanın tüm mercekler genelinde ekleyeceği öneri sayısını sınırlar. En ciddi ve en kesin olanlar tutulur.
+- **Token bütçesinden sonra taramayı durdur**, tarama o kadar token kullandığında hâlâ okuyan tüm mercekleri durdurur.
+- **En düşük güven** ve **En düşük önem**, bunların altındaki önerileri dışarıda bırakır.
+
+## Gelen kutusu
+
+Her öneri başlığını, neden önemli olduğunu, ilgili dosya ve satırları, onu bulan merceği, ciddiyetini ve merceğin ne kadar emin olduğunu gösterir. Bir dosyaya tıklayarak o satırda açın.
+
+- **Session başlat**, öneriyi prompt olarak kullanıp projede bir oturum başlatır.
+- **Şu olarak onayla** daha fazla seçenek sunar:
+  - yeni bir worktree'de oturum
+  - taslak PR'a kadar çalışan bir worktree oturumu
+  - önce düzenlediğiniz yeni bir taslak, burada yalıtılmış bir alan da seçebilirsiniz
+  - bir proje yapılacağı
+  - GitHub, GitLab veya Linear'da bir issue
+- **Ertele** onu bir gün, bir hafta ya da bir ay gizler.
+- **Reddet** isteğe bağlı bir neden sorar.
+
+Issue oluşturmak, izleyicinin yeni issue sayfasını başlık ve açıklama doldurulmuş olarak açar. Onu kendi hesabınızla gönderirsiniz.
+
+## Taramalara istemediklerinizi öğretme
+
+Taramalar buldukları şeyleri zaten açık, ertelenmiş ya da onaylanmış önerilerle karşılaştırır ve benzer olanları dışarıda bırakır. Ayrıca projeye bağlı GitHub veya GitLab deposundaki ve eşlenen Linear ekiplerindeki açık issue'larla da karşılaştırır. Bir sağlayıcı hata verirse ya da backlog 10 sayfadan büyükse tarama bir uyarı gösterir. Benzerlik eşleştirmesi, farklı sözcüklerle yazılmış kopyaları kaçırabilir. Varsayılan olarak reddettiklerinizi nedenleriyle birlikte ve açık proje yapılacaklarınızı da okurlar; böylece bir öneride "bu riski kabul ediyoruz" demek benzerlerini uzak tutar. İkisini de **Tekrarları önle** altından kapatabilirsiniz.
+
+## Depodaki mercekler
+
+Bir ekip, mercekleri `.agents/lenses/` içinde markdown dosyaları olarak paylaşabilir:
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Yalnızca `name` ve gövde zorunludur. `model` yoksa mercek varsayılan oturum ayarlarını kullanır. `action` değeri `suggest`, `todo`, `session`, `worktree` ve `draft-pr` değerlerinden biridir.
+
+Depodaki bir mercek mercek listesinde görünür, ancak siz onu kendi makinenizde işaretledikten sonra çalışır. Dosyayı sonradan biri değiştirirse, onu yeniden işaretlemenizi bekler.
+
+## Bildirimler ve tarama oturumları
+
+Bir tarama öneri eklediğinde OpenChamber size [bildirim](/tr/notifications/) gönderir; **Taramadan sonra** altında kapatmadıysanız. Tarama oturumları tarama bitince arşivlenir ve kenar çubuğunun dışında kalır. Birini gelen kutusundan, **Son tarama** altından açın.
+
+## Nerede kullanılabilir
+
+Gelen kutusu ve taramalar web uygulamasında ve masaüstü uygulamasında çalışır. Telefonda gelen kutusunu açabilir, tarama başlatabilir ve önerilere işlem yapabilirsiniz; kurulumu bir bilgisayardan yapın. VS Code eklentisi önerilen görevleri sunmaz.
