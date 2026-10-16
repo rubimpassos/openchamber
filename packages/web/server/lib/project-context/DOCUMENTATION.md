@@ -13,6 +13,7 @@ The managed Chats root (`~/.config/openchamber/chats`) is also one context owner
 | `<projectsDir>/<projectId>/context.json` | **this module, exclusively** | notes, todos, plan manifest |
 | `<projectsDir>/<projectId>/plans/*.md` | **this module, exclusively** | plan bodies |
 | `<projectsDir>/<projectId>/memory.json` | `packages/web/server/lib/agent-memory` | what the agent chose to remember about the project |
+| `<projectsDir>/<projectId>/suggested-tasks.json` | `packages/web/server/lib/suggested-tasks` | the Suggested tasks inbox: suggestions, scan runs, incremental baselines |
 | `<repo>/<plansDir>/*.md` | this module (read, edit, delete, move) when the team config names a `plansDir`; the folder is the team's, any tool may write there | shared plan bodies |
 
 `<projectId>` in these paths is the bounded stem `projectConfigFileStemOf`
