@@ -1,0 +1,115 @@
+---
+title: Vorgeschlagene Aufgaben
+description: Lass Scans dein Projekt nach Zeitplan lesen und Arbeit vorschlagen, die du genehmigst, zurückstellst oder verwirfst.
+---
+
+# Vorgeschlagene Aufgaben
+
+Vorgeschlagene Aufgaben sind Scans, die ein Projekt lesen und Arbeit vorschlagen: ein vergessenes TODO, eine Sicherheitslücke, Dokumentation, die nicht mehr zum Code passt. Jeder Vorschlag landet in einem Posteingang. Dort startest du eine Sitzung dazu, machst ein Todo oder ein Issue daraus, stellst ihn zurück oder verwirfst ihn. Den Posteingang öffnest du über die Glühbirne oben in der Sitzungs-Seitenleiste. Ein Punkt darauf zeigt offene Vorschläge an.
+
+Ein Scan liest nur Dateien. Er kann sie nicht bearbeiten, keine Befehle ausführen und deine MCP-Tools nicht nutzen. Arbeit beginnt erst, wenn du einen Vorschlag genehmigst oder einer Linse sagst, dass sie selbstständig handeln soll.
+
+## Für ein Projekt aktivieren
+
+1. Öffne **Einstellungen → Projekte**, wähle das Projekt und öffne den Tab **Vorgeschlagene Aufgaben**.
+2. Aktiviere **Dieses Projekt auf vorgeschlagene Aufgaben scannen**.
+3. Klicke unter **Linsen** auf **Linse hinzufügen** und wähle einen Ausgangspunkt, zum Beispiel **Sicherheit** oder **Vergessene TODOs und FIXMEs**. Füge gern eine zweite hinzu.
+4. Wähle unter **Wann gescannt wird** einen Rhythmus. **Manuell** startet einen Scan nur, wenn du ihn anstößt.
+5. Klicke auf **Jetzt scannen**.
+
+Der Posteingang zeigt den Scan als laufend an. Jede Linse fügt ihre Vorschläge hinzu, sobald sie fertig ist, meist nach wenigen Minuten.
+
+## Linsen
+
+Eine Linse sucht nach einer bestimmten Art von Arbeit. Jede Linse hat:
+
+- einen Namen und einen Prompt, der beschreibt, wonach gesucht wird
+- ein eigenes Modell, eine eigene Denkstufe und einen eigenen Agenten, oder die Sitzungs-Standards des Projekts
+- Webzugriff, der aus ist, solange du ihn nicht erlaubst; eine Abhängigkeiten-Linse nutzt ihn, um aktuelle Versionen zu prüfen
+- eine Festlegung, was mit den Funden passiert
+
+Zur Auswahl stehen vergessene TODOs und FIXMEs, Sicherheit, Performance, Barrierefreiheit, Testabdeckung, veraltete Abhängigkeiten, veraltete Dokumentation und toter Code. Jeder Ausgangspunkt kopiert seinen Prompt in deine Linse, du kannst ihn also ändern. **Eigene Linse** beginnt leer.
+
+Jede Linse eines Scans läuft in einer eigenen Sitzung. Schlägt eine fehl, liefern die anderen trotzdem ihre Vorschläge, und der Posteingang zeigt, welche Linse aus welchem Grund fehlgeschlagen ist. Mit dem Play-Button neben einer Linse scannst du nur mit dieser Linse.
+
+### Was eine Linse mit ihren Vorschlägen macht
+
+Standardmäßig schlägt eine Linse nur vor: Alles wartet im Posteingang. Du kannst sie auch selbstständig handeln lassen:
+
+| Auswahl | Was mit jedem neuen Vorschlag passiert |
+|---|---|
+| Nur vorschlagen | Wartet im Posteingang. |
+| Zu Projekt-Todos hinzufügen | Wird ein Todo in [Projektnotizen, Todos & Pläne](/de/notes-todos-plans/). |
+| Sitzung starten | Eine Sitzung im Projekt arbeitet daran. |
+| Sitzung in neuem Worktree starten | Er bekommt einen eigenen [Worktree](/de/worktrees/) und eine eigene Sitzung. |
+| Arbeiten bis zum Entwurfs-PR | Eine Worktree-Sitzung bearbeitet ihn als [Ziel](/de/session-goals/) und öffnet einen Entwurfs-PR. |
+
+Die letzten drei starten Sitzungen ohne Rückfrage, und diese Sitzungen verbrauchen Tokens.
+
+## Wann Scans laufen
+
+- **Manuell**: nur, wenn du auf **Jetzt scannen** klickst
+- **Täglich** oder **Wöchentlich**: zu einer Uhrzeit und in einer Zeitzone deiner Wahl
+- **Cron-Zeitplan**: jeder beliebige Cron-Ausdruck, etwa `0 9 * * 1-5` für 9:00 Uhr an Werktagen
+
+**Ruhezeiten** überspringen geplante Scans, die in ein Zeitfenster fallen, zum Beispiel 22:00 bis 07:00. Ein Scan, den du selbst startest, läuft immer. Den Takt geben dieselben Scheduler vor wie bei [Geplanten Aufgaben](/de/scheduled-tasks/). Die Scans laufen also, solange der OpenChamber-Server läuft, auch bei geschlossenem Fenster.
+
+## Was ein Scan ansieht
+
+- **Nur diese Dateien** und **Diese Dateien überspringen** nehmen ein Muster pro Zeile, etwa `src/**` oder `*.test.ts`.
+- **Git-Branch** scannt einen anderen Branch in einer temporären Kopie, die danach entfernt wird. Leer scannt den Projektordner so, wie er ist.
+- **Nur seit dem letzten Scan geänderte Dateien ansehen** lässt spätere Scans nur das Geänderte lesen. Hat sich im Bereich nichts geändert, wird der Scan übersprungen und kostet nichts.
+
+## Limits
+
+- **Vorschläge pro Scan** begrenzt, was ein Scan über alle Linsen hinzufügt. Die schwerwiegendsten und sichersten bleiben erhalten.
+- **Scan nach einem Token-Budget beenden** stoppt alle Linsen, die noch lesen, sobald der Scan so viele Tokens verbraucht hat.
+- **Niedrigste Sicherheit** und **Niedrigster Schweregrad** lassen Vorschläge darunter weg.
+
+## Der Posteingang
+
+Jeder Vorschlag zeigt seinen Titel, warum er wichtig ist, die betroffenen Dateien und Zeilen, die Linse, die ihn gefunden hat, den Schweregrad und wie sicher sich die Linse ist. Ein Klick auf eine Datei öffnet sie an der passenden Zeile.
+
+- **Sitzung starten** startet im Projekt eine Sitzung mit dem Vorschlag als Prompt.
+- **Genehmigen als** bietet weitere Wege:
+  - eine Sitzung in einem neuen Worktree
+  - eine Worktree-Sitzung, die bis zum Entwurfs-PR arbeitet
+  - ein neuer Entwurf, den du zuerst bearbeitest und bei dem du auch einen isolierten Bereich wählen kannst
+  - ein Projekt-Todo
+  - ein Issue auf GitHub, GitLab oder Linear
+- **Zurückstellen** blendet ihn für einen Tag, eine Woche oder einen Monat aus.
+- **Verwerfen** fragt nach einem optionalen Grund.
+
+Beim Erstellen eines Issues öffnet sich die Seite des Trackers für neue Issues, mit ausgefülltem Titel und ausgefüllter Beschreibung. Du sendest es mit deinem eigenen Konto ab.
+
+## Scans beibringen, was du nicht willst
+
+Scans vergleichen ihre Funde mit Vorschlägen, die schon offen, zurückgestellt oder genehmigt sind, und lassen Ähnliches weg. Sie vergleichen sie auch mit offenen Issues aus dem gebundenen GitHub- oder GitLab-Repository des Projekts und aus den zugeordneten Linear-Teams. Fällt ein Anbieter aus oder ist der Backlog größer als 10 Seiten, zeigt der Scan eine Warnung. Der Ähnlichkeitsabgleich kann Duplikate mit anderem Wortlaut übersehen. Standardmäßig lesen sie auch, was du verworfen hast, samt deiner Gründe, sowie deine offenen Projekt-Todos. Ein „dieses Risiko akzeptieren wir“ bei einem Vorschlag hält also ähnliche fern. Beides schaltest du unter **Wiederholungen vermeiden** ab.
+
+## Linsen im Repository
+
+Ein Team kann Linsen als Markdown-Dateien in `.agents/lenses/` teilen:
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Nur `name` und der Textkörper sind Pflicht. Ohne `model` nutzt die Linse die Sitzungs-Standards. `action` ist einer der Werte `suggest`, `todo`, `session`, `worktree` und `draft-pr`.
+
+Eine Linse aus dem Repository erscheint in der Linsenliste, läuft aber erst, nachdem du sie auf deinem Rechner aktiviert hast. Ändert jemand die Datei später, wartet sie darauf, dass du sie erneut aktivierst.
+
+## Benachrichtigungen und Scan-Sitzungen
+
+Fügt ein Scan Vorschläge hinzu, [benachrichtigt](/de/notifications/) OpenChamber dich, es sei denn, du hast das unter **Nach einem Scan** abgeschaltet. Scan-Sitzungen werden archiviert, wenn der Scan endet, und bleiben so aus der Seitenleiste heraus. Öffne eine über den Posteingang unter **Letzter Scan**.
+
+## Wo es verfügbar ist
+
+Posteingang und Scans funktionieren in der Web-App und in der Desktop-App. Auf dem Handy kannst du den Posteingang öffnen, Scans starten und auf Vorschläge reagieren; eingerichtet wird am Computer. Die VS-Code-Erweiterung bietet keine vorgeschlagenen Aufgaben.

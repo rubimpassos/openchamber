@@ -143,6 +143,7 @@ type MobileSessionsSheetProps = {
     onOpenInstances?: () => void;
     onOpenSettings: () => void;
     onOpenScheduled: () => void;
+    onOpenSuggested: () => void;
     onOpenArchive: () => void;
     onOpenUsage: () => void;
     /** The issues and PRs board. */
@@ -2493,6 +2494,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                     <span className="flex items-center gap-2">
                       <Icon name="calendar-schedule" className="size-4" />
                       {t('sessions.sidebar.header.actions.scheduledTasks')}
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={footer.onOpenSuggested} className={MOBILE_MENU_ITEM_CLASS}>
+                    <span className="flex items-center gap-2">
+                      <Icon name="lightbulb" className="size-4" />
+                      {t('suggestedTasks.sidebar.open')}
                     </span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={footer.onOpenArchive} className={MOBILE_MENU_ITEM_CLASS}>

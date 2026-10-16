@@ -254,8 +254,18 @@ popover with the colour (`shared/SettingsColorField.tsx`, the same field the
 Agents page uses) and the symbol or image, and the name is edited in place. Below
 it a tab strip splits the rest: General (new-chat defaults, the team file, trust,
 plans folder), Actions (a card grid with an editor dialog), Worktrees (setup
-commands and a link to the worktrees page) and Environment (not in VS Code).
+commands and a link to the worktrees page), Environment and Suggested tasks
+(both absent in VS Code).
 Identity fields autosave through `useProjectIdentityAutoSave`, as before.
+
+Suggested tasks configuration is available on desktop web and Electron. Hosted
+mobile and Capacitor expose the inbox only. The settings and inbox visits are
+keyed by runtime lifetime and project, so an old load or action cannot replace
+another project's form or navigate another inbox visit. Worktree and draft-PR
+actions require `checkIsGitRepository` to confirm the project's directory.
+Lens model and agent pickers read the edited project's catalogs. Settings writes
+are serialized by `useSuggestedTasksSettingsStore`; closing the form does not
+discard already admitted project edits.
 
 A project's setup lives in two files: the team's `.openchamber/project.json` in
 the repo and the user's own config (`packages/web/server/lib/projects`). The page

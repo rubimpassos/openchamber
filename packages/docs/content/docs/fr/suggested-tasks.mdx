@@ -1,0 +1,115 @@
+---
+title: Tâches suggérées
+description: Laissez des analyses lire votre projet selon un planning et proposer du travail que vous approuvez, reportez ou rejetez.
+---
+
+# Tâches suggérées
+
+Les tâches suggérées sont des analyses qui lisent un projet et proposent du travail : un TODO oublié, une faille de sécurité, une documentation qui ne correspond plus au code. Chaque suggestion arrive dans une boîte de réception, où vous démarrez une session dessus, en faites une tâche ou une issue, la reportez ou la rejetez. Ouvrez la boîte depuis l’ampoule en haut de la barre latérale des sessions ; un point dessus signale des suggestions ouvertes.
+
+Une analyse lit seulement les fichiers. Elle ne peut ni les modifier, ni exécuter de commandes, ni utiliser vos outils MCP. Le travail ne commence que lorsque vous approuvez une suggestion, ou lorsque vous dites à une lentille d’agir seule.
+
+## L’activer pour un projet
+
+1. Ouvrez **Paramètres → Projets**, choisissez le projet et ouvrez l’onglet **Tâches suggérées**.
+2. Cochez **Analyser ce projet pour des tâches suggérées**.
+3. Sous **Lentilles**, cliquez sur **Ajouter une lentille** et choisissez un point de départ, par exemple **Sécurité** ou **TODO et FIXME oubliés**. Ajoutez-en une deuxième si vous voulez.
+4. Choisissez **Quand analyser**. **Manuel** ne lance une analyse que lorsque vous en démarrez une.
+5. Cliquez sur **Analyser maintenant**.
+
+La boîte de réception affiche l’analyse comme en cours. Chaque lentille ajoute ses suggestions quand elle a fini, en général en quelques minutes.
+
+## Lentilles
+
+Une lentille cherche un type de travail. Chaque lentille a :
+
+- un nom et un prompt qui dit quoi chercher
+- son propre modèle, niveau de réflexion et agent, ou les réglages de session par défaut du projet
+- un accès web, désactivé sauf si vous l’autorisez ; une lentille de dépendances s’en sert pour vérifier les versions actuelles
+- ce qui arrive à ce qu’elle trouve
+
+Les points de départ sont les TODO et FIXME oubliés, la sécurité, les performances, l’accessibilité, la couverture de tests, les dépendances obsolètes, la documentation obsolète et le code mort. Chacun copie son prompt dans votre lentille, vous pouvez donc le modifier. **Lentille personnalisée** démarre vide.
+
+Chaque lentille d’une analyse tourne dans sa propre session. Si l’une échoue, les autres ajoutent quand même leurs suggestions, et la boîte indique quelle lentille a échoué et pourquoi. Cliquez sur le bouton de lecture à côté d’une lentille pour analyser avec elle seule.
+
+### Ce qu’une lentille fait de ses suggestions
+
+Par défaut, une lentille se contente de suggérer : tout attend dans la boîte de réception. Vous pouvez aussi la laisser agir seule :
+
+| Choix | Ce qui arrive à chaque nouvelle suggestion |
+|---|---|
+| Suggérer seulement | Elle attend dans la boîte de réception. |
+| Ajouter aux tâches du projet | Elle devient une tâche dans [Notes, todos et plans de projet](/fr/notes-todos-plans/). |
+| Démarrer une session | Une session du projet se met à travailler dessus. |
+| Démarrer une session dans un nouveau worktree | Elle reçoit son propre [worktree](/fr/worktrees/) et sa session. |
+| Travailler jusqu'à une PR en brouillon | Une session worktree la traite comme un [objectif](/fr/session-goals/) et ouvre une PR en brouillon. |
+
+Les trois derniers choix démarrent des sessions sans demander, et ces sessions consomment des tokens.
+
+## Quand les analyses s’exécutent
+
+- **Manuel** : seulement quand vous cliquez sur **Analyser maintenant**
+- **Tous les jours** ou **Hebdomadaire** : à l’heure et dans le fuseau horaire de votre choix
+- **Planification cron** : n’importe quelle expression cron, comme `0 9 * * 1-5` pour 9 h les jours ouvrés
+
+Les **Heures calmes** ignorent les analyses planifiées qui tombent dans une plage, par exemple de 22 h à 7 h. Une analyse que vous lancez vous-même s’exécute toujours. Le même planificateur que pour les [Tâches planifiées](/fr/scheduled-tasks/) cadence les analyses : elles tournent tant que le serveur d’OpenChamber tourne, même fenêtre fermée.
+
+## Ce qu’une analyse regarde
+
+- **Seulement ces fichiers** et **Ignorer ces fichiers** acceptent un motif par ligne, comme `src/**` ou `*.test.ts`.
+- **Branche** analyse une autre branche dans une copie temporaire supprimée ensuite. Vide, l’analyse porte sur le dossier du projet tel quel.
+- **Ne regarder que les fichiers modifiés depuis la dernière analyse** fait que les analyses suivantes ne lisent que ce qui a changé. Si rien n’a changé dans le périmètre, l’analyse est ignorée et ne coûte rien.
+
+## Limites
+
+- **Suggestions par analyse** plafonne ce qu’une analyse ajoute, toutes lentilles confondues. Les plus graves et les plus sûres sont conservées.
+- **Arrêter une analyse après un budget de tokens** arrête toutes les lentilles encore en lecture une fois ce nombre de tokens consommé.
+- **Confiance minimale** et **Gravité minimale** écartent les suggestions en dessous.
+
+## La boîte de réception
+
+Chaque suggestion montre son titre, pourquoi elle compte, les fichiers et lignes concernés, la lentille qui l’a trouvée, sa gravité et le degré de certitude de la lentille. Cliquez sur un fichier pour l’ouvrir à cette ligne.
+
+- **Démarrer une session** lance une session dans le projet avec la suggestion comme prompt.
+- **Approuver en tant que** propose d’autres façons de s’en occuper :
+  - une session dans un nouveau worktree
+  - une session worktree qui travaille jusqu’à une PR en brouillon
+  - un nouveau brouillon que vous modifiez d’abord, où vous pouvez aussi choisir un espace isolé
+  - une tâche du projet
+  - une issue sur GitHub, GitLab ou Linear
+- **Reporter** la masque pour un jour, une semaine ou un mois.
+- **Rejeter** demande un motif facultatif.
+
+Créer une issue ouvre la page de nouvelle issue du gestionnaire, avec le titre et la description remplis. Vous l’envoyez avec votre propre compte.
+
+## Apprendre aux analyses ce que vous ne voulez pas
+
+Les analyses comparent leurs résultats aux suggestions déjà ouvertes, reportées ou approuvées et écartent ce qui y ressemble. Elles les comparent aussi aux issues ouvertes du dépôt GitHub ou GitLab lié au projet et de ses équipes Linear associées. Si un fournisseur échoue ou si le backlog dépasse 10 pages, l’analyse affiche un avertissement. La comparaison par similarité peut manquer des doublons formulés autrement. Par défaut, elles lisent aussi ce que vous avez rejeté, avec vos motifs, et vos tâches de projet ouvertes : un « on accepte ce risque » sur une suggestion tient donc à distance les suggestions semblables. Désactivez l’un ou l’autre sous **Éviter les doublons**.
+
+## Lentilles dans le dépôt
+
+Une équipe peut partager des lentilles sous forme de fichiers markdown dans `.agents/lenses/` :
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Seuls `name` et le corps sont obligatoires. Sans `model`, la lentille utilise les réglages de session par défaut. `action` vaut `suggest`, `todo`, `session`, `worktree` ou `draft-pr`.
+
+Une lentille du dépôt apparaît dans la liste des lentilles, mais ne s’exécute qu’après que vous l’avez activée sur votre machine. Si quelqu’un modifie le fichier plus tard, elle attend que vous l’activiez à nouveau.
+
+## Notifications et sessions d’analyse
+
+Quand une analyse ajoute des suggestions, OpenChamber vous [notifie](/fr/notifications/), sauf si vous l’avez désactivé sous **Après une analyse**. Les sessions d’analyse sont archivées à la fin de l’analyse et restent donc hors de la barre latérale. Ouvrez-en une depuis la boîte de réception, sous **Dernière analyse**.
+
+## Où c’est disponible
+
+La boîte de réception et les analyses fonctionnent dans l’application web et dans l’application de bureau. Sur un téléphone, vous pouvez ouvrir la boîte, lancer des analyses et agir sur les suggestions ; la configuration se fait depuis un ordinateur. L’extension VS Code ne propose pas les tâches suggérées.

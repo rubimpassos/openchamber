@@ -828,7 +828,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     return { restored, failedIds };
   };
 
-  const create = async (payload = {}) => {
+  const create = async (payload = {}, { onSessionCreated } = {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -916,6 +916,13 @@ export const createOpenChamberSessionService = (dependencies) => {
       directory: sessionDirectory,
       ...(title ? { title } : {}),
     });
+
+    try {
+      await onSessionCreated?.({ sessionId: sessionID, directory: sessionDirectory });
+    } catch (error) {
+      throw new OpenChamberControlError(error instanceof Error ? error.message : 'Failed to record created session', 500,
+        { partial: true, partialAction: 'create', sessionId: sessionID, directory: sessionDirectory });
+    }
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {

@@ -1,0 +1,115 @@
+---
+title: Tarefas Sugeridas
+description: Deixe varreduras lerem seu projeto em uma agenda e proporem trabalho que você aprova, adia ou descarta.
+---
+
+# Tarefas Sugeridas
+
+Tarefas sugeridas são varreduras que leem um projeto e propõem trabalho: um TODO esquecido, uma brecha de segurança, uma documentação que não bate mais com o código. Cada sugestão cai em uma caixa de entrada, onde você inicia uma sessão com ela, a transforma em uma tarefa ou em uma issue, a adia ou a descarta. Abra a caixa pela lâmpada no topo da barra lateral de sessões; um ponto nela indica sugestões abertas.
+
+Uma varredura só lê arquivos. Ela não pode editá-los, executar comandos nem usar suas ferramentas MCP. O trabalho só começa quando você aprova uma sugestão ou quando manda uma lente agir por conta própria.
+
+## Ative para um projeto
+
+1. Abra **Configurações → Projetos**, escolha o projeto e abra a aba **Tarefas sugeridas**.
+2. Marque **Varrer este projeto em busca de tarefas sugeridas**.
+3. Em **Lentes**, clique em **Adicionar uma lente** e escolha um ponto de partida, por exemplo **Segurança** ou **TODOs e FIXMEs esquecidos**. Adicione uma segunda se quiser.
+4. Escolha **Quando varrer**. **Sob demanda** executa uma varredura somente quando você inicia uma.
+5. Clique em **Varrer agora**.
+
+A caixa de entrada mostra a varredura em andamento. Cada lente adiciona suas sugestões ao terminar, em geral em poucos minutos.
+
+## Lentes
+
+Uma lente procura um tipo de trabalho. Cada lente tem:
+
+- um nome e um prompt que diz o que procurar
+- seu próprio modelo, nível de raciocínio e agente, ou os padrões de sessão do projeto
+- acesso à web, desligado a menos que você permita; uma lente de dependências usa isso para checar as versões atuais
+- o que acontece com o que ela encontra
+
+Os pontos de partida são TODOs e FIXMEs esquecidos, segurança, desempenho, acessibilidade, cobertura de testes, dependências desatualizadas, documentação desatualizada e código morto. Cada um copia seu prompt para a sua lente, então você pode alterá-lo. **Lente personalizada** começa vazia.
+
+Cada lente de uma varredura roda em uma sessão própria. Se uma falhar, as outras ainda adicionam suas sugestões, e a caixa de entrada diz qual lente falhou e por quê. Clique no botão de reproduzir ao lado de uma lente para varrer somente com ela.
+
+### O que uma lente faz com as sugestões
+
+Por padrão, uma lente só sugere: tudo fica esperando na caixa de entrada. Você também pode deixá-la agir por conta própria:
+
+| Escolha | O que acontece com cada nova sugestão |
+|---|---|
+| Apenas sugerir | Fica esperando na caixa de entrada. |
+| Adicionar às tarefas do projeto | Vira uma tarefa em [Notas, Tarefas e Planos do Projeto](/pt-br/notes-todos-plans/). |
+| Iniciar uma sessão | Uma sessão no projeto começa a trabalhar nela. |
+| Iniciar uma sessão em um novo worktree | Ela ganha seu próprio [worktree](/pt-br/worktrees/) e sessão. |
+| Trabalhar até uma PR em rascunho | Uma sessão de worktree trabalha nela como um [objetivo](/pt-br/session-goals/) e abre uma PR em rascunho. |
+
+As três últimas iniciam sessões sem perguntar, e essas sessões gastam tokens.
+
+## Quando as varreduras rodam
+
+- **Sob demanda**: somente quando você clica em **Varrer agora**
+- **Diário** ou **Semanal**: em um horário e fuso horário à sua escolha
+- **Agendamento cron**: qualquer expressão cron, como `0 9 * * 1-5` para 9h em dias úteis
+
+O **Horário de silêncio** pula varreduras agendadas que caem em uma janela, como 22h às 7h. Uma varredura que você inicia sempre roda. O mesmo agendador das [Tarefas Agendadas](/pt-br/scheduled-tasks/) controla os horários, então as varreduras rodam enquanto o servidor do OpenChamber estiver rodando, mesmo com a janela fechada.
+
+## O que uma varredura examina
+
+- **Somente estes arquivos** e **Ignorar estes arquivos** aceitam um padrão por linha, como `src/**` ou `*.test.ts`.
+- **Branch a varrer** varre outro branch em uma cópia temporária que é removida depois. Vazio varre a pasta do projeto como está.
+- **Olhar só os arquivos alterados desde a última varredura** faz as varreduras seguintes lerem apenas o que mudou. Quando nada no escopo mudou, a varredura é pulada e não custa nada.
+
+## Limites
+
+- **Sugestões por varredura** limita o que uma varredura adiciona somando todas as lentes. As mais graves e mais certas são mantidas.
+- **Parar uma varredura após um orçamento de tokens** para todas as lentes que ainda estão lendo quando a varredura usar essa quantidade de tokens.
+- **Menor confiança** e **Menor gravidade** deixam de fora as sugestões abaixo desses níveis.
+
+## A caixa de entrada
+
+Cada sugestão mostra seu título, por que importa, os arquivos e linhas envolvidos, a lente que a encontrou, a gravidade e o quanto a lente tem certeza. Clique em um arquivo para abri-lo naquela linha.
+
+- **Iniciar sessão** inicia uma sessão no projeto com a sugestão como prompt.
+- **Aprovar como** oferece mais formas de assumi-la:
+  - uma sessão em um novo worktree
+  - uma sessão de worktree que trabalha até uma PR em rascunho
+  - um novo rascunho que você edita primeiro, onde também pode escolher um espaço isolado
+  - uma tarefa do projeto
+  - uma issue no GitHub, GitLab ou Linear
+- **Adiar** a esconde por um dia, uma semana ou um mês.
+- **Descartar** pede um motivo opcional.
+
+Criar uma issue abre a página de nova issue do rastreador com título e descrição preenchidos. Você a envia com a sua própria conta.
+
+## Ensinando às varreduras o que você não quer
+
+As varreduras comparam o que encontram com as sugestões já abertas, adiadas ou aprovadas e deixam de fora o que for parecido. Também comparam com as issues abertas do repositório GitHub ou GitLab vinculado ao projeto e de suas equipes do Linear mapeadas. Se um provedor falhar ou o backlog passar de 10 páginas, a varredura mostra um aviso. A comparação por similaridade pode deixar passar duplicatas escritas de outro jeito. Por padrão, elas também leem o que você descartou, com seus motivos, e suas tarefas abertas do projeto, então um "aceitamos esse risco" em uma sugestão afasta as parecidas. Desligue qualquer um dos dois em **Evitar repetições**.
+
+## Lentes no repositório
+
+Uma equipe pode compartilhar lentes como arquivos markdown em `.agents/lenses/`:
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Só `name` e o corpo são obrigatórios. Sem `model`, a lente usa os padrões de sessão. `action` é um entre `suggest`, `todo`, `session`, `worktree` e `draft-pr`.
+
+Uma lente do repositório aparece na lista de lentes, mas só roda depois que você a marca na sua máquina. Se alguém alterar o arquivo depois, ela espera você marcá-la de novo.
+
+## Notificações e sessões de varredura
+
+Quando uma varredura adiciona sugestões, o OpenChamber [notifica](/pt-br/notifications/) você, a menos que desligue isso em **Depois de uma varredura**. As sessões de varredura são arquivadas quando a varredura termina, então ficam fora da barra lateral. Abra uma pela caixa de entrada, em **Última varredura**.
+
+## Onde está disponível
+
+A caixa de entrada e as varreduras funcionam no app web e no app desktop. No celular, você pode abrir a caixa, iniciar varreduras e agir nas sugestões; configure-as em um computador. A extensão do VS Code não oferece tarefas sugeridas.

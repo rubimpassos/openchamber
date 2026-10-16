@@ -100,6 +100,17 @@ Manual `runNow` does not claim a schedule occurrence. It also runs paused
 (`enabled: false`) tasks — that is the point of the button — while scheduled
 dispatches still skip disabled tasks, and completion never re-arms a paused task.
 
+## Suggested tasks scans
+
+A task with `suggestedScan: true` times a project's Suggested tasks scan
+(`../suggested-tasks/DOCUMENTATION.md`). It is claimed, queued and counted
+like any task, but `runTaskWithWatchdog` hands it to the injected
+`runSuggestedScan(projectID, reason)` instead of creating a session. A scan
+that had nothing to do (quiet hours, no changes, no lenses) returns `skipped`
+and the run is recorded with `lastStatus: 'skipped'`. Only the suggested-tasks
+module writes these tasks: the service refuses to save or delete them (409),
+and loop reconciliation never adopts one by name.
+
 ## Existing-session tasks
 
 `targetSessionId` sends to an existing session instead of creating one.

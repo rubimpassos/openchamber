@@ -1,0 +1,115 @@
+---
+title: Tareas sugeridas
+description: Deja que los análisis lean tu proyecto según una programación y propongan trabajo que apruebas, pospones o descartas.
+---
+
+# Tareas sugeridas
+
+Las tareas sugeridas son análisis que leen un proyecto y proponen trabajo: un TODO olvidado, un agujero de seguridad, documentación que ya no coincide con el código. Cada sugerencia llega a una bandeja de entrada, donde inicias una sesión con ella, la conviertes en una tarea o en una incidencia, la pospones o la descartas. Abre la bandeja desde la bombilla en la parte superior de la barra lateral de sesiones; un punto sobre ella indica que hay sugerencias abiertas.
+
+Un análisis solo lee archivos. No puede editarlos, ejecutar comandos ni usar tus herramientas MCP. El trabajo empieza solo cuando apruebas una sugerencia o cuando indicas a una lente que actúe por su cuenta.
+
+## Actívalo en un proyecto
+
+1. Abre **Configuración → Proyectos**, elige el proyecto y abre la pestaña **Tareas sugeridas**.
+2. Marca **Analizar este proyecto en busca de tareas sugeridas**.
+3. En **Lentes**, haz clic en **Añadir una lente** y elige un punto de partida, por ejemplo **Seguridad** o **TODO y FIXME olvidados**. Añade una segunda si quieres.
+4. Elige **Cuándo analizar**. **A mano** ejecuta un análisis solo cuando tú lo inicias.
+5. Haz clic en **Analizar ahora**.
+
+La bandeja muestra el análisis como en curso. Cada lente añade sus sugerencias cuando termina, normalmente en pocos minutos.
+
+## Lentes
+
+Una lente busca un tipo de trabajo. Cada lente tiene:
+
+- un nombre y un prompt que dice qué buscar
+- su propio modelo, nivel de razonamiento y agente, o los valores predeterminados de sesión del proyecto
+- acceso a la web, desactivado salvo que lo permitas; una lente de dependencias lo usa para comprobar las versiones actuales
+- qué ocurre con lo que encuentra
+
+Los puntos de partida son TODO y FIXME olvidados, seguridad, rendimiento, accesibilidad, cobertura de pruebas, dependencias desactualizadas, documentación desactualizada y código muerto. Cada uno copia su prompt en tu lente, así que puedes modificarlo. **Lente personalizada** empieza vacía.
+
+Cada lente de un análisis se ejecuta en su propia sesión. Si una falla, las demás siguen añadiendo sus sugerencias, y la bandeja indica qué lente falló y por qué. Haz clic en el botón de reproducir junto a una lente para analizar solo con ella.
+
+### Qué hace una lente con sus sugerencias
+
+Por defecto, una lente solo sugiere: todo espera en la bandeja. También puedes dejar que actúe por su cuenta:
+
+| Opción | Qué pasa con cada sugerencia nueva |
+|---|---|
+| Solo sugerir | Espera en la bandeja. |
+| Añadir a las tareas del proyecto | Se convierte en una tarea en [Notas, tareas y planes de proyecto](/es/notes-todos-plans/). |
+| Iniciar una sesión | Una sesión del proyecto empieza a trabajar en ella. |
+| Iniciar una sesión en un worktree nuevo | Recibe su propio [worktree](/es/worktrees/) y su sesión. |
+| Trabajar hasta una PR en borrador | Una sesión de worktree trabaja en ella como un [objetivo](/es/session-goals/) y abre una PR en borrador. |
+
+Las tres últimas inician sesiones sin preguntar, y esas sesiones gastan tokens.
+
+## Cuándo se ejecutan los análisis
+
+- **A mano**: solo cuando haces clic en **Analizar ahora**
+- **Diario** o **Semanal**: a la hora que elijas, en la zona horaria que elijas
+- **Programación cron**: cualquier expresión cron, como `0 9 * * 1-5` para las 9:00 en días laborables
+
+Las **Horas de silencio** omiten los análisis programados que caen dentro de una franja, por ejemplo de 22:00 a 07:00. Un análisis que inicias tú siempre se ejecuta. El mismo programador que usan las [Tareas programadas](/es/scheduled-tasks/) controla los tiempos, así que los análisis se ejecutan mientras el servidor de OpenChamber esté en marcha, incluso con la ventana cerrada.
+
+## Qué mira un análisis
+
+- **Solo estos archivos** y **Omitir estos archivos** aceptan un patrón por línea, como `src/**` o `*.test.ts`.
+- **Rama** analiza otra rama en una copia temporal que se elimina después. Si está vacío, analiza la carpeta del proyecto tal como está.
+- **Mirar solo los archivos modificados desde el último análisis** hace que los análisis posteriores lean solo lo que cambió. Si nada dentro del alcance cambió, el análisis se omite y no cuesta nada.
+
+## Límites
+
+- **Sugerencias por análisis** limita lo que un análisis añade entre todas las lentes. Se conservan las más graves y las más seguras.
+- **Detener un análisis tras un presupuesto de tokens** detiene todas las lentes que aún leen cuando el análisis ha usado esa cantidad de tokens.
+- **Confianza mínima** y **Gravedad mínima** excluyen las sugerencias por debajo de ese nivel.
+
+## La bandeja
+
+Cada sugerencia muestra su título, por qué importa, los archivos y líneas implicados, la lente que la encontró, su gravedad y lo segura que está la lente. Haz clic en un archivo para abrirlo en esa línea.
+
+- **Iniciar sesión** inicia una sesión en el proyecto con la sugerencia como prompt.
+- **Aprobar como** ofrece más formas de asumirla:
+  - una sesión en un worktree nuevo
+  - una sesión de worktree que trabaja hasta una PR en borrador
+  - un borrador nuevo que editas primero, donde también puedes elegir un espacio aislado
+  - una tarea del proyecto
+  - una incidencia en GitHub, GitLab o Linear
+- **Posponer** la oculta durante un día, una semana o un mes.
+- **Descartar** pide un motivo opcional.
+
+Al crear una incidencia se abre la página de nueva incidencia del gestor, con el título y la descripción rellenos. Lo envías con tu propia cuenta.
+
+## Enseñar a los análisis lo que no quieres
+
+Los análisis comparan lo que encuentran con las sugerencias que ya están abiertas, pospuestas o aprobadas, y omiten lo parecido. También lo comparan con las incidencias abiertas del repositorio de GitHub o GitLab vinculado al proyecto y de sus equipos de Linear asignados. Si falla un proveedor o la lista pendiente supera las 10 páginas, el análisis muestra una advertencia. La comparación por similitud puede pasar por alto duplicados redactados de otra forma. Por defecto, también leen lo que descartaste, con tus motivos, y las tareas pendientes abiertas de tu proyecto, de modo que un "aceptamos este riesgo" en una sugerencia mantiene alejadas a las parecidas. Desactiva cualquiera de las dos opciones en **Evitar repeticiones**.
+
+## Lentes en el repositorio
+
+Un equipo puede compartir lentes como archivos markdown en `.agents/lenses/`:
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Solo `name` y el cuerpo son obligatorios. Sin `model`, la lente usa los valores predeterminados de sesión. `action` es uno de `suggest`, `todo`, `session`, `worktree` y `draft-pr`.
+
+Una lente del repositorio aparece en la lista de lentes, pero solo se ejecuta después de que la actives en tu equipo. Si alguien cambia el archivo más tarde, queda en espera hasta que la actives de nuevo.
+
+## Notificaciones y sesiones de análisis
+
+Cuando un análisis añade sugerencias, OpenChamber te [notifica](/es/notifications/), salvo que lo hayas desactivado en **Después de un análisis**. Las sesiones de análisis se archivan cuando el análisis termina, así que no aparecen en la barra lateral. Abre una desde la bandeja, en **Último análisis**.
+
+## Dónde está disponible
+
+La bandeja y los análisis funcionan en la aplicación web y en la de escritorio. En el móvil puedes abrir la bandeja, iniciar análisis y actuar sobre las sugerencias; configúralos desde un ordenador. La extensión de VS Code no ofrece tareas sugeridas.

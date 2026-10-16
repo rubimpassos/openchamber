@@ -1,0 +1,115 @@
+---
+title: Voorgestelde taken
+description: Laat scans je project volgens een schema lezen en werk voorstellen dat je goedkeurt, uitstelt of afwijst.
+---
+
+# Voorgestelde taken
+
+Voorgestelde taken zijn scans die een project lezen en werk voorstellen: een vergeten TODO, een beveiligingslek, documentatie die niet meer bij de code past. Elk voorstel komt in een inbox. Daar start je er een sessie op, maak je er een taak of issue van, stel je het uit of wijs je het af. Open de inbox met de gloeilamp bovenaan de sessiezijbalk. Een stip erop betekent dat er open voorstellen zijn.
+
+Een scan leest alleen bestanden. Hij kan ze niet bewerken, geen opdrachten uitvoeren en je MCP-tools niet gebruiken. Het werk begint pas als je een voorstel goedkeurt, of als je een lens zegt zelf te handelen.
+
+## Aanzetten voor een project
+
+1. Open **Instellingen → Projecten**, kies het project en open het tabblad **Voorgestelde taken**.
+2. Vink **Dit project scannen op voorgestelde taken** aan.
+3. Klik onder **Lenzen** op **Een lens toevoegen** en kies een beginpunt, bijvoorbeeld **Beveiliging** of **Vergeten TODO's en FIXME's**. Voeg gerust een tweede toe.
+4. Kies **Wanneer scannen**. Bij **Handmatig** draait een scan alleen als jij er een start.
+5. Klik op **Nu scannen**.
+
+De inbox toont de scan als lopend. Elke lens voegt zijn voorstellen toe zodra hij klaar is, meestal binnen een paar minuten.
+
+## Lenzen
+
+Een lens zoekt één soort werk. Elke lens heeft:
+
+- een naam en een prompt die zegt waarnaar gezocht wordt
+- een eigen model, denkniveau en agent, of de standaardinstellingen voor sessies van het project
+- webtoegang, uit tenzij je die toestaat; een lens voor afhankelijkheden gebruikt die om actuele versies te controleren
+- een keuze wat er met de vondsten gebeurt
+
+De beginpunten zijn vergeten TODO's en FIXME's, beveiliging, prestaties, toegankelijkheid, testdekking, verouderde afhankelijkheden, verouderde documentatie en dode code. Elk beginpunt kopieert zijn prompt naar je lens, dus je kunt hem aanpassen. **Eigen lens** begint leeg.
+
+Elke lens van een scan draait in een eigen sessie. Als er een faalt, voegen de andere toch hun voorstellen toe, en de inbox zegt welke lens faalde en waarom. Klik op de afspeelknop naast een lens om alleen met die lens te scannen.
+
+### Wat een lens met zijn voorstellen doet
+
+Standaard stelt een lens alleen voor: alles wacht in de inbox. Je kunt hem ook zelf laten handelen:
+
+| Keuze | Wat er met elk nieuw voorstel gebeurt |
+|---|---|
+| Alleen voorstellen | Wacht in de inbox. |
+| Toevoegen aan projecttaken | Wordt een taak in [Projectnotities, taken en plannen](/nl/notes-todos-plans/). |
+| Een sessie starten | Een sessie in het project gaat ermee aan de slag. |
+| Een sessie starten in een nieuwe worktree | Het krijgt een eigen [worktree](/nl/worktrees/) en sessie. |
+| Werken tot een concept-PR | Een worktree-sessie werkt eraan als [doel](/nl/session-goals/) en opent een concept-PR. |
+
+De laatste drie starten sessies zonder te vragen, en die sessies kosten tokens.
+
+## Wanneer scans draaien
+
+- **Handmatig**: alleen als je op **Nu scannen** klikt
+- **Dagelijks** of **Wekelijks**: op een tijd en in een tijdzone naar keuze
+- **Cron-schema**: elke cron-expressie, zoals `0 9 * * 1-5` voor 9:00 op werkdagen
+
+**Stille uren** slaan geplande scans over die in een tijdvak vallen, bijvoorbeeld 22:00 tot 07:00. Een scan die je zelf start, draait altijd. Dezelfde planner als bij [Geplande taken](/nl/scheduled-tasks/) bepaalt de tijden, dus scans draaien zolang de OpenChamber-server draait, ook met het venster dicht.
+
+## Wat een scan bekijkt
+
+- **Alleen deze bestanden** en **Deze bestanden overslaan** nemen één patroon per regel, zoals `src/**` of `*.test.ts`.
+- **Branch om te scannen** scant een andere branch in een tijdelijke kopie die daarna wordt verwijderd. Leeg scant de projectmap zoals die is.
+- **Alleen bestanden bekijken die sinds de laatste scan zijn gewijzigd** laat latere scans alleen lezen wat veranderd is. Als er binnen het bereik niets veranderd is, wordt de scan overgeslagen en kost hij niets.
+
+## Limieten
+
+- **Suggesties per scan** beperkt wat één scan over alle lenzen toevoegt. De ernstigste en zekerste blijven over.
+- **Een scan stoppen na een tokenbudget** stopt alle lenzen die nog lezen zodra de scan zoveel tokens heeft gebruikt.
+- **Laagste zekerheid** en **Laagste ernst** laten voorstellen eronder weg.
+
+## De inbox
+
+Elk voorstel toont de titel, waarom het ertoe doet, de betrokken bestanden en regels, de lens die het vond, hoe ernstig het is en hoe zeker de lens is. Klik op een bestand om het op die regel te openen.
+
+- **Sessie starten** start een sessie in het project met het voorstel als prompt.
+- **Goedkeuren als** biedt meer manieren om het op te pakken:
+  - een sessie in een nieuwe worktree
+  - een worktree-sessie die werkt tot een concept-PR
+  - een nieuw concept dat je eerst bewerkt, waarbij je ook een geïsoleerde ruimte kunt kiezen
+  - een projecttaak
+  - een issue op GitHub, GitLab of Linear
+- **Uitstellen** verbergt het voor een dag, een week of een maand.
+- **Afwijzen** vraagt om een optionele reden.
+
+Een issue maken opent de pagina voor een nieuw issue van de tracker, met titel en beschrijving al ingevuld. Je verstuurt het met je eigen account.
+
+## Scans leren wat je niet wilt
+
+Scans vergelijken hun vondsten met voorstellen die al open, uitgesteld of goedgekeurd zijn en laten vergelijkbare weg. Ze vergelijken ze ook met open issues uit de gekoppelde GitHub- of GitLab-repository van het project en uit de toegewezen Linear-teams. Als een provider faalt of de backlog groter is dan 10 pagina's, toont de scan een waarschuwing. Overeenkomstmatching kan duplicaten met een andere formulering missen. Standaard lezen ze ook wat je hebt afgewezen, met je redenen, en je open projecttaken. Een "dit risico nemen we" bij één voorstel houdt dus vergelijkbare voorstellen weg. Zet een van beide uit onder **Herhalingen voorkomen**.
+
+## Lenzen in de repository
+
+Een team kan lenzen delen als markdownbestanden in `.agents/lenses/`:
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Alleen `name` en de inhoud zijn verplicht. Zonder `model` gebruikt de lens de standaardinstellingen voor sessies. `action` is een van `suggest`, `todo`, `session`, `worktree` en `draft-pr`.
+
+Een lens uit de repository verschijnt in de lijst met lenzen, maar draait pas nadat je hem op je eigen machine hebt aangevinkt. Als iemand het bestand later wijzigt, wacht de lens tot je hem opnieuw aanvinkt.
+
+## Meldingen en scansessies
+
+Als een scan voorstellen toevoegt, stuurt OpenChamber je een [melding](/nl/notifications/), tenzij je dat hebt uitgezet onder **Na een scan**. Scansessies worden gearchiveerd als de scan eindigt, zodat ze uit de zijbalk blijven. Open er een vanuit de inbox onder **Laatste scan**.
+
+## Waar het beschikbaar is
+
+De inbox en scans werken in de webapp en de desktopapp. Op een telefoon kun je de inbox openen, scans starten en op voorstellen reageren; stel ze in vanaf een computer. De VS Code-extensie biedt geen voorgestelde taken.

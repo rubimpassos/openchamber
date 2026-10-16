@@ -365,6 +365,9 @@ const normalizeTaskForStorage = (value, options) => {
     ...(loopFile ? { loopFile } : {}),
   };
   if (targetSessionId) storedTask.targetSessionId = targetSessionId;
+  // The project's Suggested tasks scan: the scheduler times it, the
+  // suggested-tasks module runs it, and only that module writes it.
+  if (value.suggestedScan === true) storedTask.suggestedScan = true;
   return storedTask;
 };
 
@@ -912,7 +915,7 @@ export const createProjectConfigRuntime = (deps) => {
         // field); JSON tasks adopt by name.
         const loop = task.loopFile
           ? loopsByPath.get(task.loopFile) || null
-          : pendingLoops.get(task.name) || null;
+          : (task.suggestedScan ? null : pendingLoops.get(task.name) || null);
         if (loop) {
           try {
             const adopted = normalizeTaskForStorage(
@@ -1000,6 +1003,18 @@ export const createProjectConfigRuntime = (deps) => {
       delete loopApprovals[filePath];
     }
     await writeRawProjectConfigToDisk(projectID, { ...existing, version: PROJECT_CONFIG_VERSION, loopApprovals });
+  });
+
+  // The `suggestedTasks` key, owned by `suggested-tasks/runtime.js`, which
+  // validates it; this only reads and writes it under the project lock.
+  const readSuggestedTasksSection = async (projectID) => (await readRawProjectConfigFromDisk(projectID)).suggestedTasks;
+
+  /** `change(current)` returns the new value of the key, under the lock. */
+  const updateSuggestedTasksSection = async (projectID, change) => withProjectWriteLock(projectID, async () => {
+    const existing = await readRawProjectConfigFromDisk(projectID);
+    const next = await change(existing.suggestedTasks);
+    await writeRawProjectConfigToDisk(projectID, { ...existing, version: PROJECT_CONFIG_VERSION, suggestedTasks: next });
+    return next;
   });
 
   // The client-owned part of the file (worktree setup, project actions, draft
@@ -1124,6 +1139,8 @@ export const createProjectConfigRuntime = (deps) => {
     updateScheduledTaskStateIf,
     reconcileLoopTasks,
     setLoopApproval,
+    readSuggestedTasksSection,
+    updateSuggestedTasksSection,
     resolveProjectConfigPath,
   };
 };

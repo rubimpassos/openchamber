@@ -25,7 +25,7 @@ import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { fetchEligibleScheduledTaskTargets } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
-import { canonicalizeTimezone } from '@/lib/timezones';
+import { canonicalizeTimezone, TIMEZONE_OPTIONS } from '@/lib/timezones';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useAllLiveSessions } from '@/sync/sync-context';
@@ -36,21 +36,6 @@ const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 // Mirrors the composer's footer icon toggles (PermissionAutoAcceptButton /
 // SessionGoalButton) so the state reads the same in both places.
 const EDITOR_TOGGLE_BUTTON_CLASS = 'flex h-6 w-6 cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0';
-
-const TIMEZONE_OPTIONS = (() => {
-  if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
-    return [...new Set(Intl.supportedValuesOf('timeZone').map(canonicalizeTimezone))];
-  }
-  return [
-    'UTC',
-    'Europe/Kyiv',
-    'Europe/London',
-    'Europe/Berlin',
-    'America/New_York',
-    'America/Los_Angeles',
-    'Asia/Tokyo',
-  ];
-})();
 
 const getLocalDateISO = () => {
   const now = new Date();

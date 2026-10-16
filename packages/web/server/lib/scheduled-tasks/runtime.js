@@ -269,6 +269,9 @@ export const createScheduledTasksRuntime = (deps) => {
     messageQueueRuntime,
     resolvePrimaryWorktreeRoot,
     isSessionArchived,
+    // Runs a project's Suggested tasks scan (a task with `suggestedScan`):
+    // `(projectID, reason) => { sessionID, directory, skipped }`.
+    runSuggestedScan = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -622,6 +625,22 @@ export const createScheduledTasksRuntime = (deps) => {
 
     if (typeof waitForOpenCodeReady === 'function') {
       await waitForOpenCodeReady(10_000, 250);
+    }
+
+    if (task.suggestedScan) {
+      if (!runSuggestedScan) throw new Error('Suggested tasks are not available on this server');
+      const scan = await runSuggestedScan(projectID, reason);
+      if (scan.sessionID) await onSessionCreated?.(scan.sessionID);
+      const finishedAt = Date.now();
+      return {
+        sessionID: scan.sessionID ?? undefined,
+        directory: scan.directory ?? projectPath,
+        skipped: scan.skipped ?? undefined,
+        durationMs: Math.max(0, finishedAt - startedAt),
+        reason,
+        startedAt,
+        finishedAt,
+      };
     }
 
     // A chats-scope run is a new chat, so it gets its own directory the way a
@@ -1009,7 +1028,8 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID = result.sessionID;
         sessionDirectory = result.directory;
         durationMs = result.durationMs;
-        status = 'success';
+        // A Suggested tasks scan that had nothing to do (quiet hours, no change).
+        status = result.skipped ? 'skipped' : 'success';
         logger.info?.(
           '[ScheduledTasks] run completed',
           { projectID, taskID, status, reason, sessionID, durationMs }
@@ -1123,7 +1143,7 @@ export const createScheduledTasksRuntime = (deps) => {
         // The session already ran — surface persist failure without treating a
         // successful dispatch as a hard run failure (manual runNow would 500).
         return {
-          ok: status === 'success',
+          ok: status === 'success' || status === 'skipped',
           status,
           sessionID,
           directory: sessionDirectory,
@@ -1146,7 +1166,7 @@ export const createScheduledTasksRuntime = (deps) => {
       }
 
       return {
-        ok: status === 'success',
+        ok: status === 'success' || status === 'skipped',
         status,
         sessionID,
         directory: sessionDirectory,

@@ -24,6 +24,7 @@ import { useGuestPages } from '@/hooks/useGuestSurfaces';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
+import { useOpenSuggestionCount } from '@/stores/useSuggestedTasksStore';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -151,6 +152,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
   const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
   const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+  const isSuggestedOpen = useUIStore((state) => state.isSuggestedTasksPageOpen);
+  const openSuggestions = useOpenSuggestionCount();
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
@@ -363,6 +366,20 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 className={headerActionButtonClass}
               >
                 <Icon name="calendar-schedule" className={headerActionIconClass} />
+              </SidebarPageButton>
+
+              <SidebarPageButton
+                label={openSuggestions > 0
+                  ? t('suggestedTasks.sidebar.openWithCount', { count: openSuggestions })
+                  : t('suggestedTasks.sidebar.open')}
+                pressed={isSuggestedOpen}
+                onClick={() => useUIStore.getState().setSuggestedTasksPageOpen(!isSuggestedOpen)}
+                className={headerActionButtonClass}
+              >
+                <span className="relative inline-flex">
+                  <Icon name="lightbulb" className={headerActionIconClass} />
+                  {openSuggestions > 0 ? <span className="absolute -top-0.5 -end-0.5 size-1.5 rounded-full bg-primary" aria-hidden /> : null}
+                </span>
               </SidebarPageButton>
 
               <SidebarPageButton

@@ -2927,6 +2927,57 @@ export async function isAncestorOfHead(directory, sha) {
   return result.success;
 }
 
+// What a Suggested tasks scan reads: the checked-out branch (null when HEAD is
+// detached) and commit of `directory`. Throws when it is not a repository.
+export async function readScanCheckout(directory) {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  const commit = await runGitCommand(normalizedDirectory, ['rev-parse', 'HEAD']);
+  if (!commit.success) throw new Error(commit.message || 'Not a Git repository');
+  const branch = await runGitCommand(normalizedDirectory, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  return { commit: commit.stdout.trim(), branch: branch.success ? branch.stdout.trim() : null };
+}
+
+// Files changed between two commits, or null when `base` is no longer an
+// ancestor of `head` (history rewritten, or never fetched): the caller then
+// scans everything instead of trusting a partial list.
+export async function listChangedPathsSince(directory, base, head) {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  const ancestor = await runGitCommand(normalizedDirectory, ['merge-base', '--is-ancestor', base, head]);
+  if (!ancestor.success) return null;
+  const diff = await runGitCommand(normalizedDirectory, ['-c', 'core.fsmonitor=false', 'diff', '--no-ext-diff', '--no-textconv', '--name-only', '-z', '--no-renames', base, '--'], { env: { ...await buildGitEnv(normalizedDirectory), GIT_OPTIONAL_LOCKS: '0' } });
+  if (!diff.success) throw new Error(diff.message || 'git diff failed');
+  const untracked = await runGitCommand(normalizedDirectory, ['ls-files', '--others', '--exclude-standard', '-z']);
+  if (!untracked.success) throw new Error(untracked.message || 'Could not list untracked files');
+  return [...new Set([...diff.stdout.split('\0'), ...untracked.stdout.split('\0')].filter(Boolean))];
+}
+
+// A detached checkout of `ref` at `worktreePath`, for reading a branch the
+// project does not have checked out. Removed with removeDetachedWorktree.
+export async function addDetachedWorktree(directory, worktreePath, ref) {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  if (!ref || ref.startsWith('-')) throw new Error('Invalid scan branch');
+  const resolved = await runGitCommand(normalizedDirectory, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
+  if (!resolved.success) throw new Error('Scan branch does not resolve to a commit');
+  const result = await runGitCommand(normalizedDirectory, [...WORKTREE_POPULATE_CONFIG_ARGS, 'worktree', 'add', '--no-checkout', '--detach', worktreePath, resolved.stdout.trim()]);
+  if (!result.success) throw new Error(result.message || `Could not check out ${ref}`);
+  try {
+    const command = await buildWorktreePopulateCommand(worktreePath);
+    const populated = await runGitCommand(worktreePath, command.args, { env: command.env });
+    if (!populated.success) throw new Error(populated.message || 'Could not populate scan checkout');
+  } catch (error) {
+    await removeDetachedWorktree(normalizedDirectory, worktreePath);
+    throw error;
+  }
+}
+
+export async function removeDetachedWorktree(directory, worktreePath) {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  const listing = await runGitCommandOrThrow(normalizedDirectory, ['worktree', 'list', '--porcelain'], 'Could not inspect scan checkouts');
+  if (!parseWorktreePorcelain(listing.stdout).some((entry) => path.resolve(entry.worktree) === path.resolve(worktreePath))) return;
+  const result = await runGitCommand(normalizedDirectory, ['worktree', 'remove', '--force', worktreePath]);
+  if (!result.success) throw new Error(result.message || 'Could not remove the scan checkout');
+}
+
 const PATCH_EQUIVALENCE_TIMEOUT_MS = 5_000;
 
 // Whether a commit has an equivalent patch reachable from the checked-out HEAD.

@@ -1,0 +1,115 @@
+---
+title: Sugerowane zadania
+description: Pozwól skanom czytać projekt według harmonogramu i proponować pracę, którą zatwierdzasz, odkładasz lub odrzucasz.
+---
+
+# Sugerowane zadania
+
+Sugerowane zadania to skany, które czytają projekt i proponują pracę: zapomniany TODO, dziurę w zabezpieczeniach, dokumentację niezgodną już z kodem. Każda sugestia trafia do skrzynki, w której uruchamiasz na jej podstawie sesję, zamieniasz ją w zadanie lub issue, odkładasz albo odrzucasz. Skrzynkę otworzysz żarówką u góry paska bocznego sesji. Kropka na niej oznacza otwarte sugestie.
+
+Skan tylko czyta pliki. Nie może ich edytować, uruchamiać poleceń ani używać Twoich narzędzi MCP. Praca zaczyna się dopiero wtedy, gdy zatwierdzisz sugestię albo każesz soczewce działać samodzielnie.
+
+## Włącz dla projektu
+
+1. Otwórz **Ustawienia → Projekty**, wybierz projekt i otwórz kartę **Sugerowane zadania**.
+2. Zaznacz **Skanuj ten projekt pod kątem sugerowanych zadań**.
+3. W sekcji **Soczewki** kliknij **Dodaj soczewkę** i wybierz punkt wyjścia, na przykład **Bezpieczeństwo** albo **Zapomniane TODO i FIXME**. Możesz dodać drugą.
+4. Wybierz **Kiedy skanować**. **Ręcznie** uruchamia skan tylko wtedy, gdy sam go zaczniesz.
+5. Kliknij **Skanuj teraz**.
+
+Skrzynka pokazuje skan jako trwający. Każda soczewka dodaje swoje sugestie po zakończeniu, zwykle w ciągu kilku minut.
+
+## Soczewki
+
+Soczewka szuka jednego rodzaju pracy. Każda soczewka ma:
+
+- nazwę i prompt, który mówi, czego szukać
+- własny model, poziom myślenia i agenta albo domyślne ustawienia sesji projektu
+- dostęp do sieci, wyłączony, dopóki go nie dopuścisz; soczewka zależności używa go do sprawdzania aktualnych wersji
+- ustawienie tego, co dzieje się z jej znaleziskami
+
+Punkty wyjścia to zapomniane TODO i FIXME, bezpieczeństwo, wydajność, dostępność, pokrycie testami, przestarzałe zależności, przestarzała dokumentacja i martwy kod. Każdy kopiuje swój prompt do Twojej soczewki, więc możesz go zmienić. **Własna soczewka** zaczyna od pustej.
+
+Każda soczewka skanu działa we własnej sesji. Jeśli jedna zawiedzie, pozostałe i tak dodadzą swoje sugestie, a skrzynka pokaże, która soczewka zawiodła i dlaczego. Kliknij przycisk odtwarzania obok soczewki, by skanować tylko nią.
+
+### Co soczewka robi ze swoimi sugestiami
+
+Domyślnie soczewka tylko sugeruje: wszystko czeka w skrzynce. Możesz też pozwolić jej działać samodzielnie:
+
+| Wybór | Co dzieje się z każdą nową sugestią |
+|---|---|
+| Tylko sugeruj | Czeka w skrzynce. |
+| Dodaj do zadań projektu | Staje się zadaniem w [Notatkach, listach zadań i planach projektu](/pl/notes-todos-plans/). |
+| Rozpocznij sesję | Sesja w projekcie zaczyna nad nią pracować. |
+| Rozpocznij sesję w nowym worktree | Dostaje własny [worktree](/pl/worktrees/) i sesję. |
+| Pracuj do szkicu PR | Sesja worktree pracuje nad nią jako [cel](/pl/session-goals/) i otwiera szkic PR. |
+
+Ostatnie trzy uruchamiają sesje bez pytania, a te sesje zużywają tokeny.
+
+## Kiedy skany się uruchamiają
+
+- **Ręcznie**: tylko po kliknięciu **Skanuj teraz**
+- **Codziennie** lub **Co tydzień**: o wybranej godzinie, w wybranej strefie czasowej
+- **Harmonogram cron**: dowolne wyrażenie cron, na przykład `0 9 * * 1-5` dla 9:00 w dni robocze
+
+**Godziny ciszy** pomijają zaplanowane skany wypadające w danym oknie, na przykład od 22:00 do 07:00. Skan uruchomiony przez Ciebie zawsze się wykona. Czas wyznacza ten sam harmonogram co w [Zaplanowanych zadaniach](/pl/scheduled-tasks/), więc skany działają, dopóki działa serwer OpenChamber, nawet przy zamkniętym oknie.
+
+## Co skan przegląda
+
+- **Tylko te pliki** i **Pomijaj te pliki** przyjmują jeden wzorzec na linię, na przykład `src/**` lub `*.test.ts`.
+- **Gałąź** skanuje inną gałąź w tymczasowej kopii, którą potem usuwa. Puste pole skanuje folder projektu w obecnym stanie.
+- **Sprawdzaj tylko pliki zmienione od ostatniego skanu** sprawia, że kolejne skany czytają tylko zmiany. Gdy w zakresie nic się nie zmieniło, skan jest pomijany i nic nie kosztuje.
+
+## Limity
+
+- **Sugestie na skan** ogranicza, ile dodaje jeden skan ze wszystkich soczewek. Zostają najpoważniejsze i najpewniejsze.
+- **Zatrzymaj skan po wyczerpaniu budżetu tokenów** zatrzymuje wszystkie soczewki, które jeszcze czytają, gdy skan zużyje tyle tokenów.
+- **Najniższa pewność** i **Najniższa waga** pomijają sugestie poniżej tych progów.
+
+## Skrzynka
+
+Każda sugestia pokazuje tytuł, dlaczego jest ważna, pliki i linie, których dotyczy, soczewkę, która ją znalazła, wagę i to, jak pewna jest soczewka. Kliknij plik, by otworzyć go w tej linii.
+
+- **Rozpocznij sesję** uruchamia w projekcie sesję z sugestią jako promptem.
+- **Zatwierdź jako** daje więcej sposobów podjęcia sugestii:
+  - sesja w nowym worktree
+  - sesja worktree pracująca do szkicu PR
+  - nowy szkic, który najpierw edytujesz i w którym możesz też wybrać odizolowaną przestrzeń
+  - zadanie projektu
+  - issue na GitHubie, GitLabie lub w Linear
+- **Odłóż** ukrywa ją na dzień, tydzień lub miesiąc.
+- **Odrzuć** pyta o opcjonalny powód.
+
+Utworzenie issue otwiera stronę nowego issue w trackerze z wypełnionym tytułem i opisem. Wysyłasz je własnym kontem.
+
+## Uczenie skanów, czego nie chcesz
+
+Skany porównują swoje znaleziska z sugestiami, które są już otwarte, odłożone lub zatwierdzone, i pomijają podobne. Porównują je też z otwartymi issue z repozytorium GitHub lub GitLab powiązanego z projektem oraz z przypisanych zespołów Linear. Gdy dostawca zawiedzie albo backlog przekroczy 10 stron, skan pokazuje ostrzeżenie. Dopasowanie po podobieństwie może przeoczyć duplikaty sformułowane inaczej. Domyślnie czytają też to, co odrzuciłeś, razem z powodami, oraz Twoje otwarte zadania projektu, więc „akceptujemy to ryzyko” przy jednej sugestii trzyma z dala podobne. Każde z tych ustawień wyłączysz w sekcji **Unikaj powtórzeń**.
+
+## Soczewki w repozytorium
+
+Zespół może współdzielić soczewki jako pliki markdown w `.agents/lenses/`:
+
+```markdown
+---
+name: Security review
+model: anthropic/claude-sonnet-4-5
+variant: high
+agent: plan
+web: false
+action: suggest
+---
+Look for injection, missing authorization checks and secrets in logs.
+```
+
+Wymagane są tylko `name` i treść. Bez `model` soczewka używa domyślnych ustawień sesji. `action` to jedna z wartości `suggest`, `todo`, `session`, `worktree` i `draft-pr`.
+
+Soczewka z repozytorium pojawia się na liście soczewek, ale działa dopiero po tym, jak zaznaczysz ją na swoim komputerze. Jeśli ktoś później zmieni plik, będzie czekać, aż zaznaczysz ją ponownie.
+
+## Powiadomienia i sesje skanów
+
+Gdy skan dodaje sugestie, OpenChamber [powiadamia](/pl/notifications/) Cię, chyba że wyłączysz to w sekcji **Po skanie**. Sesje skanów są archiwizowane po zakończeniu skanu, więc nie zaśmiecają paska bocznego. Otwórz jedną ze skrzynki w sekcji **Ostatni skan**.
+
+## Gdzie jest dostępne
+
+Skrzynka i skany działają w aplikacji webowej i desktopowej. Na telefonie możesz otworzyć skrzynkę, uruchamiać skany i reagować na sugestie; konfiguruj je z komputera. Rozszerzenie VS Code nie oferuje sugerowanych zadań.

@@ -246,6 +246,7 @@ every surface reached only through those is unreachable.
 | Walkthrough | NOT MOUNTED | `WalkthroughView` imported only by `ContextPanel` |
 | Archive view | NOT MOUNTED | `ArchiveView` imported only by `MainLayout` |
 | Scheduled tasks | NOT MOUNTED | `ScheduledTasksDialog` imported only by `MainLayout` |
+| Suggested tasks | NOT MOUNTED | `SuggestedTasksPage` imported only by `MainLayout`; the Settings tab is hidden by `isVSCodeRuntime()` |
 | Memory debug panel | NOT MOUNTED | `MemoryDebugPanel` imported only by `App.tsx` (web/desktop root) |
 | Mini chat | NOT MOUNTED | `MiniChatLayout` imported only by `ElectronMiniChatApp` |
 

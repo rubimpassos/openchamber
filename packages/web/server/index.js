@@ -94,6 +94,8 @@ import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
+import { createSuggestedTasksRuntime } from './lib/suggested-tasks/runtime.js';
+import { createSuggestionStore } from './lib/suggested-tasks/store.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -133,7 +135,16 @@ import { readIdleStopSetting, startIdleStop } from './lib/spaces/idle-stop.js';
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { configureGitEnvironment, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
+import {
+  addDetachedWorktree,
+  configureGitEnvironment,
+  getRepositoryRemoteUrls,
+  listChangedPathsSince,
+  readScanCheckout,
+  removeDetachedWorktree,
+  resolvePrimaryWorktreeRoot,
+} from './lib/git/service.js';
+import { getLinearAuth } from './lib/linear/auth.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
@@ -1596,6 +1607,8 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
+  // Declared further down; the scheduler only calls it when a scan task fires.
+  runSuggestedScan: (projectID, reason) => suggestedTasksRuntime.runScan(projectID, reason),
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
@@ -1842,6 +1855,35 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
   broadcastUiNotification,
 });
 
+// Suggested tasks: scans timed by the scheduler above, run as read-only lens
+// sessions, collected into a per-project inbox. See lib/suggested-tasks.
+const suggestedTasksRuntime = createSuggestedTasksRuntime({
+  projectConfigRuntime,
+  scheduledTasksRuntime,
+  store: createSuggestionStore({ projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR }),
+  listProjects: async () => {
+    const settings = await readSettingsFromDiskMigrated();
+    return sanitizeProjects(settings?.projects || []);
+  },
+  projectContextRuntime,
+  sessionService: openChamberSessionService,
+  readSessionDefaults: async (projectID) => {
+    const settings = await readSettingsFromDiskMigrated();
+    const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;
+    return resolveSessionDefaults({ settings, project });
+  },
+  globalEventHub: globalMessageStreamHub,
+  git: { readScanCheckout, listChangedPathsSince, addDetachedWorktree, removeDetachedWorktree, getRepositoryRemoteUrls },
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  notify: (payload) => pluginNotificationEmitter.emit(payload),
+  broadcast: broadcastOpenChamberUiEvent,
+  isLinearConnected: () => Boolean(getLinearAuth()),
+  readProjectOpenIssues: (directory) => featureRoutesRuntime.readProjectOpenIssues(directory),
+  scanCheckoutsDir: path.join(OPENCHAMBER_DATA_DIR, 'suggested-tasks', 'checkouts'),
+});
+suggestedTasksRuntime.start();
+
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1955,6 +1997,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   contextObligatoryRuntime,
   messageQueueRuntime,
   dispatchResultsRuntime,
+  suggestedTasksRuntime,
   messageSearchRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
@@ -2623,6 +2666,7 @@ async function main(options = {}) {
     sessionKnowledgeRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,
+    suggestedTasksRuntime,
     openChamberSessionService,
     openChamberControlService,
     waitForOpenCodeReady,
