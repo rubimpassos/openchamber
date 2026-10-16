@@ -41,7 +41,7 @@ import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
 import { noteDraftSendWaiting, waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
-import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
+import { getWorktreeBootstrapState, waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
@@ -826,9 +826,14 @@ const resolveProjectRefForWorktreeDirectory = (directory: string | null, project
   return resolved?.path ? { id: resolved.id, path: resolved.path } : null
 }
 
-const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, projectId?: string | null): Promise<void> => {
+const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, draft: NewSessionDraftState): Promise<void> => {
   if (!directory) return
-  const project = resolveProjectRefForWorktreeDirectory(directory, projectId)
+  const project = resolveProjectRefForWorktreeDirectory(directory, draft.selectedProjectId)
+  const knownWorktree = project && useSessionUIStore.getState().availableWorktreesByProject.get(project.path)?.some((worktree) => (
+    normalizePath(worktree.path) === normalizePath(directory) && normalizePath(worktree.path) !== normalizePath(project.path)
+  ))
+  // FORK: ordinary roots have no worktree setup to wait for, so sending reads no setup config.
+  if (!draft.pendingWorktreeRequestId && !draft.bootstrapPendingDirectory && !getWorktreeBootstrapState(directory) && !knownWorktree) return
   if (project && await getWorktreeSetupWaitEnabled(project)) {
     await waitForWorktreeBootstrap(directory)
   }
@@ -1037,7 +1042,7 @@ export async function materializeOpenDraftSession(selection: {
     }
   }
 
-  await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
+  await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draft)
 
   const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
   // The draft already knows what the first turn runs on, so the session is

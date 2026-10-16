@@ -371,6 +371,7 @@ mock.module("@/lib/sharedTrustConfirmation", () => ({
 }))
 
 mock.module("@/lib/worktrees/worktreeBootstrap", () => ({
+  getWorktreeBootstrapState: () => null,
   waitForWorktreeBootstrap: async () => undefined,
 }))
 
