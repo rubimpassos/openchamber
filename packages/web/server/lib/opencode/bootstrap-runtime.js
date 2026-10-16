@@ -66,6 +66,7 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      notificationCenter,
       agentToolRuntime,
       pluginNotificationEmitter,
       desktopUpdater,
@@ -168,6 +169,7 @@ export const createBootstrapRuntime = (dependencies) => {
       markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
       setAutoAcceptSession,
+      notificationCenter,
     });
 
     registerOpenChamberRoutes(app, {

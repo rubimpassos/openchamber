@@ -14,6 +14,8 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/emit-route.js`: `POST /api/notifications/emit` for OpenCode plugins.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
 - `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
+- `packages/web/server/lib/notifications/center.js`: the notification center store (`createNotificationCenterRuntime`, `createNotificationCenterPersistence`); see "Notification center" below.
+- `packages/web/server/lib/notifications/center-routes.js`: `GET /api/notification-center`, `POST /api/notification-center/read`, `DELETE /api/notification-center`, registered by `routes.js` when a center is passed in.
 - `packages/web/server/lib/notifications/message.js`: helper implementation module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
@@ -155,6 +157,55 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 ### Testing
 - Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing changes.
 - Unit tests should cover truncation behavior and edge cases (empty strings, invalid inputs).
+
+## Notification center
+
+Every notification this server raises is also kept as an entry, so a client
+can list what it missed. Advertised as the `api.notification-center.v1`
+server capability.
+
+- Who records: the trigger runtime (ready, error, question, permission), the
+  goal settle and browser-help paths in `index.js`, and the plugin emitter
+  (`emit-route.js`). An entry is recorded once the per-event toggle, subtask,
+  goal, auto-accept and cooldown checks have passed, whether or not an alert
+  goes out. `nativeNotificationsEnabled` gates the alert only, so the center
+  still fills with alerts turned off (the plugin and browser-help paths stop
+  before recording when it is off, as before).
+- Entry: `{ id, createdAt, kind, priority, delivery, verdict, title, body,
+  sessionId, directory, sessionName, readAt }`. `kind` is the trigger
+  (`ready`, `error`, `question`, `permission`, `goal`, `browser-help`,
+  `plugin`). `priority`: questions, permissions, errors, browser help and a
+  blocked goal are `high`; a turn Jev ranked low is `low`; the rest `normal`.
+  `delivery`: `delivered` (went out on the channels the user has on),
+  `focused` (none, the app was in front and `notificationMode` is
+  `hidden-only`), `quiet` (none, Jev ranked the finished turn low). The
+  title and body are the same templated text the desktop alert shows; they
+  never leave this machine.
+- Storage: `notification-center.json` in the data directory, mode `0600`,
+  written through a temp file and rename, one second after a change. At most
+  500 entries and 30 days. A missing file is an empty center; an unreadable
+  or malformed one is logged and starts empty; single entries that do not
+  parse are dropped.
+- Read state lives on the server, so every client sees the same. Changes are
+  broadcast on the control stream as `openchamber:notification-center.changed`
+  (`{ change: 'added', entry }`, `{ change: 'read', ids, readAt }`,
+  `{ change: 'cleared' }`); a client lists again after each
+  `event-stream-ready`.
+- Runtimes: web, desktop, hosted and native mobile read it over HTTP and the
+  control stream (relayed on mobile). VS Code has no OpenChamber server and
+  shows no center.
+
+### Jev ranking of finished turns
+
+Before a `ready` notification goes out, the trigger runtime asks
+`awaitTurnVerdict` (session-work) for Jev's reading of the turn and waits up
+to 8 seconds. `looks-done` and `trivial` make the entry `low` and `quiet`:
+no desktop alert, no toast, no web push and no APNs. `review`,
+`stopped-midway`, no answer, a failure or a timeout announce as before.
+Errors, questions, permissions, goals, browser help and plugin notices never
+wait for Jev. The setting is `notificationClassifierEnabled` (default on),
+which only matters with a classification provider and completion
+notifications on.
 
 ## Browser event delivery
 

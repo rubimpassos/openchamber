@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { loadAssistContext } from '../session-assist/context.js';
 import { turnsToHistory, excerptHead, excerptHeadTail } from '../routing/history.js';
-import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } from './questions.js';
+import { buildTurnEndRequest, decideAssist, decideReviewReady, decideTurnVerdict, decideWrapUp } from './questions.js';
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
@@ -32,16 +32,24 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
   'settings.json',
 );
 
-/** In work defaults on, the review offer off; read at every use so a change applies without a restart. */
+/**
+ * In work defaults on, the review offer off; read at every use so a change
+ * applies without a restart. `rankNotifications`: Jev also reads each
+ * finished turn for the notification that announces it, which needs
+ * completion notifications on and the ranking setting not turned off.
+ */
 const readSessionWorkSettings = () => {
   const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
   return {
     enabled: settings.sessionWorkEnabled !== false,
     reviewOffer: settings.sessionReviewOfferEnabled === true,
+    rankNotifications: settings.notificationClassifierEnabled !== false && settings.notifyOnCompletion !== false,
   };
 };
 
 const READ_TIMEOUT_MS = 5_000;
+/** How long a notification waits for Jev's reading of the turn before it goes out without one. */
+const VERDICT_WAIT_MS = 8_000;
 const REQUEST_CHARS = 1_500;
 /** Head and tail of the turn's answer: what was changed sits early, the outcome late. */
 const ANSWER_EDGE_CHARS = 500;
@@ -119,11 +127,35 @@ export function createSessionWorkRuntime({
   const turnGenerations = new Map();
   let lastTurnGeneration = 0;
   const turnGeneration = (sessionId) => turnGenerations.get(sessionId) ?? 0;
+  // Jev's reading of each session's latest finished turn, for the notification
+  // that announces it. The notification and the turn-end check start from
+  // different events in either order, so whichever comes first creates the
+  // entry; it belongs to one turn generation and a new turn resolves it null.
+  const verdicts = new Map();
+  const forgetVerdict = (sessionId) => {
+    verdicts.get(sessionId)?.resolve(null);
+    verdicts.delete(sessionId);
+  };
   const advanceTurn = (sessionId) => {
     lastTurnGeneration += 1;
     turnGenerations.delete(sessionId);
     turnGenerations.set(sessionId, lastTurnGeneration);
     while (turnGenerations.size > SEEN_MESSAGES_LIMIT) turnGenerations.delete(turnGenerations.keys().next().value);
+    forgetVerdict(sessionId);
+  };
+  const verdictEntry = (sessionId) => {
+    // Never capture 0: an evicted session also reads 0.
+    if (!turnGenerations.has(sessionId)) advanceTurn(sessionId);
+    const generation = turnGeneration(sessionId);
+    const existing = verdicts.get(sessionId);
+    if (existing?.generation === generation) return existing;
+    forgetVerdict(sessionId);
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    const entry = { generation, promise, resolve };
+    verdicts.set(sessionId, entry);
+    while (verdicts.size > SEEN_MESSAGES_LIMIT) forgetVerdict(verdicts.keys().next().value);
+    return entry;
   };
 
   const openCodeClient = (directory) => {
@@ -227,10 +259,12 @@ export function createSessionWorkRuntime({
   const evaluateTurnEnd = async ({ sessionId, directory, assist }) => {
     if (stopped || lineage?.isChild(sessionId) === true) return null;
     const settings = getSettings();
-    if (!settings.enabled && !settings.reviewOffer && !assist.recap && !assist.suggestion) return null;
-    // Never capture 0: an evicted session also reads 0.
-    if (!turnGenerations.has(sessionId)) advanceTurn(sessionId);
-    const generation = turnGeneration(sessionId);
+    if (!settings.enabled && !settings.reviewOffer && !settings.rankNotifications && !assist.recap && !assist.suggestion) {
+      return null;
+    }
+    const verdict = verdictEntry(sessionId);
+    const { generation } = verdict;
+    let turnVerdict = null;
     try {
       const endpoint = await classifierEndpoint();
       if (!endpoint) return null;
@@ -239,11 +273,18 @@ export function createSessionWorkRuntime({
       const session = await eligibleSession(client, sessionId, signal);
       if (!session || session.revert?.messageID) return null;
       const work = settings.enabled ? readWork(await readMetadata(sessionId, directory)) : null;
-      const ask = {
+      // The hints keep their own settings; ranking the notification only asks
+      // the same questions more often.
+      const hints = {
         wrapUp: settings.enabled && work?.state === 'open',
         reviewReady: settings.reviewOffer,
-        recap: assist.recap,
-        nextStep: assist.suggestion,
+      };
+      const rank = settings.rankNotifications;
+      const ask = {
+        wrapUp: hints.wrapUp || rank,
+        reviewReady: hints.reviewReady || rank,
+        recap: assist.recap || rank,
+        nextStep: assist.suggestion || rank,
       };
       const context = await loadAssistContext({ readPage: readPages(client, sessionId, signal), signal });
       if (!context) return null;
@@ -257,10 +298,11 @@ export function createSessionWorkRuntime({
       if (!request) return null;
       const { answers } = await jev.ask(request, endpoint);
       if (stopped) return null;
+      if (rank) turnVerdict = decideTurnVerdict(answers);
       // Looks done wins over a review offer from the same turn.
-      const suggest = ask.wrapUp && decideWrapUp(answers)
+      const suggest = hints.wrapUp && decideWrapUp(answers)
         ? suggestDonePatch
-        : ask.reviewReady && decideReviewReady(answers) ? offerReviewPatch : null;
+        : hints.reviewReady && decideReviewReady(answers) ? offerReviewPatch : null;
       if (suggest) {
         // Decided at write time: a turn that started while Jev was answering
         // makes this answer about an older turn.
@@ -271,19 +313,45 @@ export function createSessionWorkRuntime({
         );
         if (changed) markSuggested(sessionId, directory);
       }
-      return ask.recap || ask.nextStep ? decideAssist(answers) : null;
+      return assist.recap || assist.suggestion ? decideAssist(answers) : null;
     } catch (error) {
       console.warn('[session-work] turn-end check failed:', errorMessage(error));
       return null;
+    } finally {
+      // A newer turn already resolved this entry null; resolving again is a no-op.
+      verdict.resolve(turnVerdict);
+    }
+  };
+
+  /**
+   * Jev's reading of the session's last finished turn (`decideTurnVerdict`),
+   * or null without one: ranking off, no classification provider, a
+   * subsession, a failure, or no answer within `timeoutMs`.
+   */
+  const awaitTurnVerdict = async (sessionId, { timeoutMs = VERDICT_WAIT_MS } = {}) => {
+    if (stopped || lineage?.isChild(sessionId) === true) return null;
+    if (!getSettings().rankNotifications) return null;
+    if (!(await classifierEndpoint().catch(() => null))) return null;
+    const { promise } = verdictEntry(sessionId);
+    let timer;
+    const timeout = new Promise((done) => {
+      timer = setTimeout(() => done(null), timeoutMs);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timer);
     }
   };
 
   const stop = () => {
     stopped = true;
+    for (const sessionId of [...verdicts.keys()]) forgetVerdict(sessionId);
     seenMessages.clear();
     suggested.clear();
     turnGenerations.clear();
   };
 
-  return { processPayload, evaluateTurnEnd, stop };
+  return { processPayload, evaluateTurnEnd, awaitTurnVerdict, stop };
 }

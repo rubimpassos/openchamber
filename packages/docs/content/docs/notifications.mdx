@@ -26,6 +26,12 @@ Notifications tell you when something needs your attention so you don't have to 
 
 Sessions set to auto-accept won't nag you with permission notifications.
 
+## The notification center
+
+The bell in the header lists every notification the server raised in the last 30 days, the newest first, including the ones that arrived while you were in the app. A dot marks the unread ones, and the bell shows how many there are. Opening a session marks its notifications read on every device. Click one to jump to its session, or filter to the unread ones and the ones waiting for you: questions, permissions and errors.
+
+With a [classification provider](/classification-providers/) set up, Jev also reads each finished turn. A turn that looks done or has nothing to act on lands in the notification center without an alert or push; the others alert as before, a few seconds later. Questions, permissions and errors never go through Jev. Turn it off with **Let Jev decide which finished turns alert you**.
+
 ## Customize the wording
 
 Each kind of notification has a title and message template you can edit, using fields like the agent name and model. There's also a limit on how much of the last message is included, so notifications stay short.

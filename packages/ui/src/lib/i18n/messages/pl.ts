@@ -17,6 +17,7 @@ import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
 import { suggestedTasksI18n } from './suggested-tasks.i18n';
+import { notificationCenterI18n } from './notification-center.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
@@ -155,6 +156,7 @@ export const dict: Record<I18nKey, string> = {
   ...sourceBoardI18n.pl,
   ...projectActionsI18n.pl,
   ...suggestedTasksI18n.pl,
+  ...notificationCenterI18n.pl,
   ...environmentI18n.pl,
   ...providersI18n.pl,
   ...mcpGridI18n.pl,

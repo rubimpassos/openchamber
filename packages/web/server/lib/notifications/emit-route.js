@@ -31,6 +31,7 @@ export const createPluginNotificationEmitter = (dependencies) => {
     readSettingsFromDiskMigrated,
     emitDesktopNotification,
     broadcastUiNotification,
+    recordNotification = () => {},
     now = Date.now,
   } = dependencies;
 
@@ -78,6 +79,15 @@ export const createPluginNotificationEmitter = (dependencies) => {
     };
     const desktopNotificationDelivered = emitDesktopNotification(payload) === true;
     broadcastUiNotification(payload, { desktopNotificationDelivered });
+    recordNotification({
+      kind: 'plugin',
+      priority: 'normal',
+      delivery: 'delivered',
+      title: payload.title,
+      body: payload.body ?? '',
+      sessionId: payload.sessionId,
+      directory: payload.directory,
+    });
     return { status: 200, body: { delivered: true } };
   };
 

@@ -36,7 +36,11 @@ import { z } from 'zod';
  *   Signing in to a remote MCP server from the OpenCode config uses the same
  *   routes and stays allowed.
  * - Jev classification is off, unless the administrator pinned their own
- *   endpoint (`routing/runtime.js`).
+ *   endpoint (`routing/runtime.js`). Every Jev feature asks through
+ *   `classifierEndpoint`, including the ranking of finished-turn
+ *   notifications (`session-work`), so all of them follow.
+ * - The notification center (`notifications/center.js`) stays on this
+ *   machine and is unchanged.
  * - External tunnels are refused: their provider sees plain text (`tunnels`).
  * - The private relay runs only on a pinned self-hosted endpoint
  *   (`relay/service.js`).

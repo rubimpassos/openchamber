@@ -307,3 +307,53 @@ describe('session work runtime: a turn ended', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('session work runtime: ranking the notification of a finished turn', () => {
+  const NO_ASSIST = { recap: false, suggestion: false };
+  const rankOnly = { enabled: false, reviewOffer: false, rankNotifications: true };
+
+  it('asks the turn-end questions for the notification alone and writes no hint', async () => {
+    stubOpenCode();
+    const { runtime, jev, updateMetadata } = makeRuntime({
+      settings: rankOnly,
+      answers: { wrap_up: { noul: 0.9 }, review_ready: { noul: 0.1 }, next_step: { noul: 0.1 }, recap: { noul: 0.9 } },
+    });
+
+    const waiting = runtime.awaitTurnVerdict('ses_1');
+    await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: NO_ASSIST });
+
+    await expect(waiting).resolves.toBe('looks-done');
+    expect(Object.keys(jev.ask.mock.calls[0][0].questions).sort()).toEqual(['next_step', 'recap', 'review_ready', 'wrap_up']);
+    expect(updateMetadata).not.toHaveBeenCalled();
+  });
+
+  it('hands the reading to a notification that asks after the check finished', async () => {
+    stubOpenCode();
+    const { runtime } = makeRuntime({ settings: rankOnly, answers: { review_ready: { noul: 0.9 } } });
+
+    await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: NO_ASSIST });
+
+    await expect(runtime.awaitTurnVerdict('ses_1')).resolves.toBe('review');
+  });
+
+  it('answers null when a new turn starts, when ranking is off, or with no provider', async () => {
+    stubOpenCode();
+    const ranked = makeRuntime({ settings: rankOnly });
+    const waiting = ranked.runtime.awaitTurnVerdict('ses_1');
+    // The provider check comes first; the turn starts once the wait is armed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    ranked.runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    await expect(waiting).resolves.toBeNull();
+
+    const off = makeRuntime({ settings: { rankNotifications: false } });
+    await expect(off.runtime.awaitTurnVerdict('ses_1')).resolves.toBeNull();
+
+    const noProvider = makeRuntime({ settings: rankOnly, endpoint: null });
+    await expect(noProvider.runtime.awaitTurnVerdict('ses_1')).resolves.toBeNull();
+  });
+
+  it('stops waiting after the timeout', async () => {
+    const { runtime } = makeRuntime({ settings: rankOnly });
+    await expect(runtime.awaitTurnVerdict('ses_1', { timeoutMs: 10 })).resolves.toBeNull();
+  });
+});

@@ -105,6 +105,7 @@ import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
 import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
+import { createNotificationCenterPersistence, createNotificationCenterRuntime } from './lib/notifications/center.js';
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
@@ -937,6 +938,18 @@ notificationTemplateRuntime = createNotificationTemplateRuntime({
   resolveGitBinaryForSpawn,
 });
 
+// Every notification the trigger runtime raises is also kept here, so clients
+// can list and mark read what they missed.
+const notificationCenter = createNotificationCenterRuntime({
+  persistence: createNotificationCenterPersistence({ dataDir: OPENCHAMBER_DATA_DIR }),
+  broadcast: broadcastOpenChamberUiEvent,
+});
+const recordCenterNotification = (entry) => {
+  void notificationCenter.record(entry).catch((error) => {
+    console.warn('[notification-center] could not record a notification:', error?.message ?? error);
+  });
+};
+
 const notificationTriggerRuntime = createNotificationTriggerRuntime({
   readSettingsFromDisk,
   prepareNotificationLastMessage,
@@ -953,6 +966,9 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   readSessionMetadata: readStoredSessionMetadata,
+  recordNotification: recordCenterNotification,
+  // Declared further down; only ever called after startup.
+  awaitTurnVerdict: (sessionId) => sessionWorkRuntime.awaitTurnVerdict(sessionId),
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
@@ -1012,6 +1028,15 @@ const sessionGoalRuntime = createSessionGoalRuntime({
     };
     const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
     broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+    recordCenterNotification({
+      kind: 'goal',
+      priority: status === 'complete' ? 'normal' : 'high',
+      delivery: 'delivered',
+      title,
+      body: notificationPayload.body,
+      sessionId,
+      directory,
+    });
     void notificationTriggerRuntime.sendGoalSettlePush({
       sessionId,
       directory,
@@ -1806,6 +1831,15 @@ const notifyBrowserHelp = async ({ guestId, reason, kind, context }) => {
   };
   const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
   broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+  recordCenterNotification({
+    kind: 'browser-help',
+    priority: 'high',
+    delivery: 'delivered',
+    title,
+    body,
+    sessionId,
+    directory,
+  });
 
   // The push deep link needs a session to reopen; a help request with none
   // (a CLI-invoked action, for instance) still gets the in-app notice above.
@@ -1859,6 +1893,7 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
   readSettingsFromDiskMigrated,
   emitDesktopNotification,
   broadcastUiNotification,
+  recordNotification: recordCenterNotification,
 });
 
 // Suggested tasks: scans timed by the scheduler above, run as read-only lens
@@ -2482,6 +2517,7 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    notificationCenter,
     agentToolRuntime,
     desktopUpdater,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,

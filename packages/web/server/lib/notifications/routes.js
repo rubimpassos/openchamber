@@ -1,3 +1,5 @@
+import { registerNotificationCenterRoutes } from './center-routes.js';
+
 const parsePushSubscribeBody = (body) => {
   if (!body || typeof body !== 'object') return null;
   const endpoint = body.endpoint;
@@ -53,7 +55,10 @@ export const registerNotificationRoutes = (app, dependencies) => {
     markUserMessageSent,
     setPushInitialized,
     setAutoAcceptSession,
+    notificationCenter,
   } = dependencies;
+
+  if (notificationCenter) registerNotificationCenterRoutes(app, { notificationCenter });
 
   const ensureSessionWatcher = async () => {
     if (typeof ensureGlobalWatcherStarted !== 'function') {

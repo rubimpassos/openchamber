@@ -566,6 +566,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.notifyOnQuestion === 'boolean') {
       result.notifyOnQuestion = candidate.notifyOnQuestion;
     }
+    if (candidate.notificationClassifierEnabled === true || candidate.notificationClassifierEnabled === false) {
+      result.notificationClassifierEnabled = candidate.notificationClassifierEnabled;
+    }
     if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
       result.notificationTemplates = candidate.notificationTemplates;
     }
