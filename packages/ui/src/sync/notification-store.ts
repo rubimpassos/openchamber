@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { create } from "zustand"
+import { useNotificationCenterStore } from "@/stores/useNotificationCenterStore"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,8 +151,10 @@ export function appendNotification(notification: Notification) {
   useNotificationStore.getState().append(notification)
 }
 
+/** Viewing a session also reads its entries in the server's notification center. */
 export function markSessionViewed(sessionId: string) {
   useNotificationStore.getState().markSessionViewed(sessionId)
+  useNotificationCenterStore.getState().markSessionRead(sessionId)
 }
 
 // ---------------------------------------------------------------------------

@@ -86,6 +86,20 @@ whether a message started work, and every session now counts instead.
   window. One call carries only the questions that apply: `wrap_up` while in
   work, `review_ready` while the review offer is on, `recap` / `next_step` for
   the assist fields the user has on. No applicable question, no call.
+- Ranking notifications (`notificationClassifierEnabled`, default on, and
+  completion notifications on) adds all four questions to that same call, in
+  every eligible session, so a turn costs at most one Jev call either way. The
+  hints and the assist gate still follow only their own settings: ranking
+  writes no hint and wakes no Small Model.
+- The answers become one verdict (`decideTurnVerdict`, same thresholds):
+  `review`, then `stopped-midway` (`next_step`), then `looks-done`
+  (`wrap_up`), then `trivial` (`recap` below 0.3), else null.
+  `awaitTurnVerdict(sessionId)` hands it to the notification runtime. The
+  ready notification and the turn-end check start from different events in
+  either order, so whichever comes first creates the per-session entry; it
+  belongs to one turn generation, a new turn resolves it null, and the wait
+  ends after 8 seconds. No provider, ranking off, a subsession or a failure
+  answer null, which announces the turn as before.
 - Jev reads the request's first 1500 characters, the answer's first and last
   500, and three earlier turns cut as routing cuts them.
 
@@ -118,8 +132,11 @@ the wording or thresholds without re-running this measurement.
 - `sessionReviewOfferEnabled`: the review offer, default off (Settings → Chat →
   Session Assistance); not offered in VS Code, inert without a classification
   provider, independent of In work.
+- `notificationClassifierEnabled`: Jev ranks the notification of a finished
+  turn, default on (Settings → Notifications → Events); see
+  `../notifications/DOCUMENTATION.md`.
 
-Both are read at every use. A session in work also stays under its project
+All are read at every use. A session in work also stays under its project
 group and folders: In work is an extra view of it, not a move.
 
 ## Runtime parity

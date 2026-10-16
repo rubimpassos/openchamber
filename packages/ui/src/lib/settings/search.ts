@@ -1443,6 +1443,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['completion', 'subtasks', 'errors', 'questions'],
   },
   {
+    id: 'notifications.classifier',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.events.classifierLabel',
+    descriptionKey: 'settings.notifications.page.events.classifierInfo',
+    keywords: ['jev', 'classifier', 'priority', 'quiet', 'notification center'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'notifications.push',
     page: 'notifications',
     titleKey: 'settings.notifications.page.push.title',

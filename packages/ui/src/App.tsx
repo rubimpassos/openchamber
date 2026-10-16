@@ -25,6 +25,7 @@ import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRelayLimitToast } from '@/hooks/useRelayLimitToast';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
+import { useNotificationCenterSync } from '@/hooks/useNotificationCenterSync';
 import { useIntegrationCatalogPrefetch } from '@/hooks/useIntegrationCatalogPrefetch';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
@@ -676,6 +677,7 @@ function App({ apis }: AppProps) {
   useAgentMemorySync(currentDirectory || null);
   useBrowserProviderSync();
   useRoutingSync();
+  useNotificationCenterSync();
   useEnterprisePolicySync();
   // Desktop windows on a relay host; the phone has its own handling in MobileApp.
   useRelayLimitToast();

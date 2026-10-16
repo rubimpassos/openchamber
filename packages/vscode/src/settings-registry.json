@@ -667,6 +667,14 @@
     "notifyOnQuestion": {
       "scope": "profile"
     },
+    "notificationClassifierEnabled": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "notificationTemplates": {
       "scope": "profile"
     },

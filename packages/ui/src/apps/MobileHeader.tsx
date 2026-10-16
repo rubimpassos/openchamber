@@ -12,6 +12,8 @@ import { useSession } from '@/sync/sync-context';
 
 import { SpaceAccessButton } from '@/components/session/spaces/SpaceAccessButton';
 
+import { MobileNotificationCenterButton } from '@/components/notifications/NotificationCenter';
+
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
 
@@ -147,6 +149,14 @@ export const MobileHeader: React.FC<{
             directory={effectiveDirectory}
             className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             iconClassName="size-5"
+          />
+
+          <MobileNotificationCenterButton
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onOpen={() => {
+              setMetadataOpen(false);
+              setSwitcherOpen(false);
+            }}
           />
 
           <button

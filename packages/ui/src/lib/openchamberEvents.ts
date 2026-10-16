@@ -8,6 +8,7 @@ import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
+import { notificationCenterChangeSchema, type NotificationCenterChange } from './notificationCenter';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -180,6 +181,8 @@ const notificationPropertiesSchema = z.object({
 
 type OpenChamberEvent =
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
+  /** The server's notification center changed: an entry added, some read, or all cleared. */
+  | { type: 'notification-center-changed'; change: NotificationCenterChange }
   /** `connectionId` names this connection on the server; absent from servers before tracked items. */
   | { type: 'event-stream-ready'; connectionId: string | null }
   | TrackedItemsChangedEvent
@@ -376,6 +379,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     if (parsed.success) {
       for (const listener of listeners) listener({ type: 'notification', payload: parsed.data });
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:notification-center.changed') {
+    const parsed = notificationCenterChangeSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'notification-center-changed', change: parsed.data });
     return;
   }
 

@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
+import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
+import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
 import {
   SettingsSection,
   SettingsTwoColumn,
@@ -66,6 +68,9 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnError = useUIStore(state => state.setNotifyOnError);
   const notifyOnQuestion = useUIStore(state => state.notifyOnQuestion);
   const setNotifyOnQuestion = useUIStore(state => state.setNotifyOnQuestion);
+  const notificationClassifierEnabled = useUIStore(state => state.notificationClassifierEnabled);
+  const setNotificationClassifierEnabled = useUIStore(state => state.setNotificationClassifierEnabled);
+  const jevAvailable = useRoutingStore(selectSafetyNetAvailable);
   const notificationTemplates = useUIStore(state => state.notificationTemplates);
   const setNotificationTemplates = useUIStore(state => state.setNotificationTemplates);
 
@@ -531,6 +536,22 @@ export const NotificationSettings: React.FC = () => {
                   label={t('settings.notifications.page.events.completionLabel')}
                   ariaLabel={t('settings.notifications.page.events.completionAria')}
                 />
+
+                {/* Jev runs on the OpenChamber server, which VS Code does not have. */}
+                {!isVSCode && notifyOnCompletion && (
+                  <div>
+                    <SettingsCheckboxRow
+                      checked={jevAvailable && notificationClassifierEnabled}
+                      onChange={setNotificationClassifierEnabled}
+                      disabled={!jevAvailable}
+                      label={t('settings.notifications.page.events.classifierLabel')}
+                      ariaLabel={t('settings.notifications.page.events.classifierLabel')}
+                      info={t('settings.notifications.page.events.classifierInfo')}
+                      settingsItem="notifications.classifier"
+                    />
+                    <JevAccessNote />
+                  </div>
+                )}
 
                 <SettingsCheckboxRow
                   checked={notifyOnSubtasks}

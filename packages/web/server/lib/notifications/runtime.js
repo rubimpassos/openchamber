@@ -25,6 +25,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     // OpenChamber's own session metadata (the goal lives there, not on the
     // OpenCode record). Optional: without it no goal can suppress a push.
     readSessionMetadata = null,
+    recordNotification = () => {},
+    // Jev's reading of a finished turn (session-work `awaitTurnVerdict`), or
+    // null. Without it every finished turn is announced as before.
+    awaitTurnVerdict = async () => null,
   } = deps;
   let getIsSessionAutoAccepting = deps.getIsSessionAutoAccepting;
   const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: 2000 });
@@ -477,9 +481,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
-        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
-          return;
-        }
+        const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
 
         const now = Date.now();
         const lastAt = lastReadyNotificationAt.get(sessionId) ?? 0;
@@ -523,6 +525,26 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Template resolution failed, using defaults:', error?.message || error);
         }
 
+        // Jev ranks a finished turn that looks done or trivial low: it goes
+        // to the notification center only, with no alert and no push.
+        const verdict = await Promise.resolve(awaitTurnVerdict(sessionId)).catch(() => null);
+        const quiet = verdict === 'looks-done' || verdict === 'trivial';
+        const delivery = focused ? 'focused' : (quiet ? 'quiet' : 'delivered');
+        recordNotification({
+          kind: 'ready',
+          priority: quiet ? 'low' : 'normal',
+          delivery,
+          verdict,
+          title,
+          body,
+          sessionId,
+          directory: notificationDirectory,
+          sessionName,
+        });
+        if (delivery !== 'delivered') {
+          return;
+        }
+
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
             title,
@@ -563,9 +585,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         if (now - lastAt < PUSH_READY_COOLDOWN_MS) return;
         lastErrorNotificationAt.set(sessionId, now);
 
-        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
-          return;
-        }
+        const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
 
         let title = 'Tool error';
         let body = 'An error occurred';
@@ -594,6 +614,20 @@ export const createNotificationTriggerRuntime = (deps) => {
           if (shouldApplyResolvedTemplateMessage(errorTemplate.message, resolvedBody, variables)) body = resolvedBody;
         } catch (error) {
           console.warn('[Notification] Error template resolution failed, using defaults:', error?.message || error);
+        }
+
+        recordNotification({
+          kind: 'error',
+          priority: 'high',
+          delivery: focused ? 'focused' : 'delivered',
+          title,
+          body,
+          sessionId,
+          directory: notificationDirectory,
+          sessionName,
+        });
+        if (focused) {
+          return;
         }
 
         if (settings.nativeNotificationsEnabled) {
@@ -644,9 +678,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
-        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
-          return;
-        }
+        const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
 
         // v2 replaced questions with forms: the form's title is the ask, and
         // the first field carries the detail a question used to put in its body.
@@ -683,6 +715,20 @@ export const createNotificationTriggerRuntime = (deps) => {
           if (shouldApplyResolvedTemplateMessage(questionTemplate.message, resolvedBody, variables)) body = resolvedBody;
         } catch (error) {
           console.warn('[Notification] Question template resolution failed, using defaults:', error?.message || error);
+        }
+
+        recordNotification({
+          kind: 'question',
+          priority: 'high',
+          delivery: focused ? 'focused' : 'delivered',
+          title,
+          body,
+          sessionId: formSessionId,
+          directory: notificationDirectory,
+          sessionName,
+        });
+        if (focused) {
+          return;
         }
 
         if (settings.nativeNotificationsEnabled) {
@@ -786,9 +832,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
-        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
-          return;
-        }
+        const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
 
         const sessionTitle = payload.properties?.sessionTitle;
         const permissionText = typeof permission === 'string' && permission.length > 0 ? permission : '';
@@ -815,6 +859,20 @@ export const createNotificationTriggerRuntime = (deps) => {
           if (shouldApplyResolvedTemplateMessage(questionTemplate.message, resolvedBody, variables)) body = resolvedBody;
         } catch (error) {
           console.warn('[Notification] Permission template resolution failed, using defaults:', error?.message || error);
+        }
+
+        recordNotification({
+          kind: 'permission',
+          priority: 'high',
+          delivery: focused ? 'focused' : 'delivered',
+          title,
+          body,
+          sessionId,
+          directory: notificationDirectory,
+          sessionName,
+        });
+        if (focused) {
+          return;
         }
 
         if (settings.nativeNotificationsEnabled) {

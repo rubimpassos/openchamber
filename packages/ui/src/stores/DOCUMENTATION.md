@@ -126,6 +126,18 @@ verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 
 ### UI state stores
 
+`useNotificationCenterStore.ts` projects the server's notification center
+(`packages/web/server/lib/notifications/DOCUMENTATION.md`, "Notification
+center"). `hooks/useNotificationCenterSync.ts` reads the list once per
+runtime and after every control-stream `event-stream-ready`, then applies
+`notification-center-changed` events. Read state belongs to the server: a
+mark-read is applied from the server's answer or event, never optimistically.
+A failed read is `error` and keeps entries from the same server; a 404 is
+`unsupported` (an older server) and hides the bell; a runtime switch empties
+the store. Viewing a session (`markSessionViewed` in `sync/notification-store.ts`)
+also marks its entries read, asking the server only when this client holds an
+unread one. VS Code never loads it.
+
 Sidebar visibility and its persisted width are independent. Opening or closing
 the sidebar never writes a width; only resizing changes the saved choice.
 The initial width is separate from the component's minimum resize width.

@@ -66,6 +66,7 @@ import { useMultiRunTitle } from '@/lib/multirun/useMultiRuns';
 import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
+import { NotificationCenterButton } from '@/components/notifications/NotificationCenter';
 
 // Like the icon rail: muted at rest, full strength on hover, while its menu is
 // open or while what it controls is on, and no hover fill.
@@ -1356,6 +1357,7 @@ export const Header: React.FC = () => {
               </TooltipContent>
             </Tooltip>
           ) : null}
+          <NotificationCenterButton buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
 
           {desktopSidebarActions}
           <WindowsWindowControls visible={endEdgeOwnedByInWindowControls} position={windowControlsSide} />

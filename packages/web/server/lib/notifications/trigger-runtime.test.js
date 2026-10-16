@@ -9,10 +9,13 @@ import { createNotificationTriggerRuntime } from './runtime.js';
  * agent and model from the start, a user abort announces nothing, and an
  * active goal (which lives in OpenChamber's own metadata) silences the push.
  */
-const makeRuntime = ({ metadata = {} } = {}) => {
+const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always' } = {}) => {
   const emitDesktopNotification = vi.fn(() => true);
+  const recordNotification = vi.fn();
+  const sendPushToAllUiSessions = vi.fn(async () => undefined);
+  const awaitTurnVerdict = vi.fn(async () => verdict);
   const runtime = createNotificationTriggerRuntime({
-    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true }),
+    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode, notifyOnCompletion: true }),
     prepareNotificationLastMessage: async ({ message }) => message,
     buildTemplateVariables: async () => ({}),
     extractLastMessageText: () => 'done',
@@ -21,14 +24,16 @@ const makeRuntime = ({ metadata = {} } = {}) => {
     shouldApplyResolvedTemplateMessage: () => false,
     emitDesktopNotification,
     broadcastUiNotification: vi.fn(),
-    sendPushToAllUiSessions: vi.fn(async () => undefined),
+    sendPushToAllUiSessions,
     sendApnsToAllUiSessions: vi.fn(async () => undefined),
     isAnyInteractiveClientVisible: () => true,
     buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
     getOpenCodeAuthHeaders: () => ({}),
     readSessionMetadata: async () => metadata,
+    recordNotification,
+    awaitTurnVerdict,
   });
-  return { runtime, emitDesktopNotification };
+  return { runtime, emitDesktopNotification, recordNotification, sendPushToAllUiSessions, awaitTurnVerdict };
 };
 
 const stepStarted = (sessionID, id) => ({
@@ -85,6 +90,64 @@ describe('ready notification on v2 step events', () => {
     await runtime.maybeSendPushForTrigger(turnEnded('ses_3'));
 
     expect(emitDesktopNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('notification center and Jev ranking of a finished turn', () => {
+  const finishTurn = async (runtime, sessionID) => {
+    await runtime.maybeSendPushForTrigger(stepStarted(sessionID, `msg_${sessionID}`));
+    await runtime.maybeSendPushForTrigger(turnEnded(sessionID));
+  };
+
+  it('alerts and records a turn Jev did not rank low', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification, recordNotification, sendPushToAllUiSessions } = makeRuntime({ verdict: 'review' });
+
+    await finishTurn(runtime, 'ses_review');
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(sendPushToAllUiSessions).toHaveBeenCalledTimes(1);
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'ready', priority: 'normal', delivery: 'delivered', verdict: 'review', sessionId: 'ses_review',
+    }));
+  });
+
+  it.each(['looks-done', 'trivial'])('keeps a %s turn in the center only, with no alert or push', async (verdict) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification, recordNotification, sendPushToAllUiSessions } = makeRuntime({ verdict });
+
+    await finishTurn(runtime, `ses_${verdict}`);
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'ready', priority: 'low', delivery: 'quiet', verdict,
+    }));
+  });
+
+  it('announces as before when Jev gives no reading or fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification, recordNotification, awaitTurnVerdict } = makeRuntime();
+    awaitTurnVerdict.mockRejectedValueOnce(new Error('jev down'));
+
+    await finishTurn(runtime, 'ses_plain');
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ priority: 'normal', delivery: 'delivered', verdict: null }));
+  });
+
+  it('records a notification the focused window kept from alerting', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification, recordNotification } = makeRuntime({ notificationMode: 'hidden-only' });
+    runtime.setGetIsWindowFocused(() => true);
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'message.updated',
+      properties: { sessionID: 'ses_err', info: { id: 'm', sessionID: 'ses_err', role: 'assistant', finish: 'error' } },
+    });
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', priority: 'high', delivery: 'focused' }));
   });
 });
 

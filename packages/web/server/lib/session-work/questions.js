@@ -102,6 +102,23 @@ export const decideReviewReady = (answers) => {
 };
 
 /**
+ * How the notification that announces a finished turn reads it, from the
+ * same answers and thresholds as the hints and the assist gate: `review`
+ * (changes to look over), `stopped-midway` (the agent could go on), then
+ * `looks-done` and `trivial`, which the notification runtime ranks low.
+ * Null when no answer says anything, or Jev was not asked.
+ */
+export const decideTurnVerdict = (answers) => {
+  if (decideReviewReady(answers)) return 'review';
+  const nextStep = answerOf(answers, 'next_step');
+  if (nextStep !== null && nextStep >= NEXT_STEP_THRESHOLD) return 'stopped-midway';
+  if (decideWrapUp(answers)) return 'looks-done';
+  const recap = answerOf(answers, 'recap');
+  if (recap !== null && recap < RECAP_SKIP_BELOW) return 'trivial';
+  return null;
+};
+
+/**
  * Which assist fields are worth the Small Model. A field Jev did not answer
  * stays allowed: an unanswered question must not silence the assist.
  */
