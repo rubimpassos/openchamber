@@ -12,3 +12,19 @@ const LEGACY_TIMEZONE_ALIASES: Record<string, string> = {
 };
 
 export const canonicalizeTimezone = (timezone: string): string => LEGACY_TIMEZONE_ALIASES[timezone] ?? timezone;
+
+/** Every IANA zone the runtime knows, by modern name; a short list where Intl cannot list them. */
+export const TIMEZONE_OPTIONS = (() => {
+  if ('supportedValuesOf' in Intl) {
+    return [...new Set(Intl.supportedValuesOf('timeZone').map(canonicalizeTimezone))];
+  }
+  return [
+    'UTC',
+    'Europe/Kyiv',
+    'Europe/London',
+    'Europe/Berlin',
+    'America/New_York',
+    'America/Los_Angeles',
+    'Asia/Tokyo',
+  ];
+})();
