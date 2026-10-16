@@ -114,6 +114,7 @@ import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js'
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
+import { createSessionInterruptionRuntime } from './lib/session-interruption/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
@@ -1095,6 +1096,10 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   lineage: sessionLineage,
 });
 
+const sessionInterruptionRuntime = createSessionInterruptionRuntime({
+  persistMetadata: persistSessionMetadataPatch,
+});
+
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
@@ -1191,6 +1196,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWorkRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
+    sessionInterruptionRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     linearSessionStatusRuntime.processPayload(payload);
   }

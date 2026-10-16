@@ -1,4 +1,5 @@
-import type { Message, Part, QuestionInfo, QuestionOption, QuestionRequest } from '@/lib/opencode/model';
+import { z } from 'zod';
+import type { Message, Part, QuestionInfo, QuestionOption, QuestionRequest, Session } from '@/lib/opencode/model';
 
 /**
  * Orphaned question detection.
@@ -16,8 +17,17 @@ import type { Message, Part, QuestionInfo, QuestionOption, QuestionRequest } fro
  * the server authoritatively and falls back to sending the answers as a new
  * user message.
  *
- * Scope: only the current session's last non-idle message is considered (a stale
- * question from an older turn the user already moved past must not
+ * On OpenCode 2.x the part usually does not stay pending: the interrupted
+ * step settles it as `error` ("Tool execution interrupted"). The most common
+ * cause is OpenCode's location eviction, which interrupts every execution in
+ * a directory after 60 minutes without session events, and a question waiting
+ * for an answer produces none. An errored question counts as orphaned only
+ * when the session's last interruption was that eviction
+ * (`wasInterruptedByInactivity`); a Stop pressed by the user errors the part
+ * the same way and must not bring the question back.
+ *
+ * Scope: only the current session's last assistant message is considered (a
+ * stale question from an older turn the user already moved past must not
  * resurrect), and only while the session is idle — callers gate on session
  * status because a live waiting question keeps the session busy.
  */
@@ -34,6 +44,43 @@ type QuestionToolPart = Extract<Part, { type: 'tool' }>;
 
 const isQuestionToolPart = (part: Part): part is QuestionToolPart =>
   part.type === 'tool' && part.tool === 'question';
+
+/**
+ * Rows OpenCode 2.x records after a turn that carry no content: the turn's
+ * idle marker and the agent/model/location switches. The question still
+ * belongs to the last turn when one of these follows it.
+ */
+const TURN_MARKER_ROLES = new Set<Message['role']>(['idle', 'agent-switched', 'model-switched', 'location-switched']);
+
+/** Index of the last message with content, or -1. */
+export function findLastContentMessageIndex(messages: ReadonlyArray<Message>): number {
+  let index = messages.length - 1;
+  while (index >= 0 && TURN_MARKER_ROLES.has(messages[index].role)) index -= 1;
+  return index;
+}
+
+/**
+ * Written by the server's session-interruption runtime
+ * (`packages/web/server/lib/session-interruption/runtime.js`) when OpenCode
+ * interrupts a turn for any reason but a shutdown.
+ */
+const interruptionSchema = z.object({
+  openchamber: z.object({
+    interruption: z.object({ reason: z.string(), at: z.number() }),
+  }),
+});
+
+/**
+ * Whether the session's latest turn ended because OpenCode evicted its
+ * location for inactivity. A record older than the session's last idle time
+ * belongs to an earlier turn and does not count.
+ */
+export function wasInterruptedByInactivity(session: Session | null | undefined): boolean {
+  if (!session) return false;
+  const interruption = interruptionSchema.safeParse(session.metadata).data?.openchamber.interruption;
+  if (!interruption || interruption.reason !== 'inactivity') return false;
+  return interruption.at >= (session.time?.idle ?? 0);
+}
 
 const parseQuestionOption = (value: unknown): QuestionOption | null => {
   if (!value || typeof value !== 'object') return null;
@@ -70,9 +117,9 @@ const parseQuestionsFromToolInput = (input: unknown): QuestionInfo[] => {
 
 /**
  * Collect answerable question requests for question tool calls that are stuck
- * pending/running in the last message of the session but are no longer
- * pending server-side (`liveQuestions` is the authoritative pending set for
- * the session subtree).
+ * pending/running in the last message of the session, or errored by an
+ * inactivity interruption, and are no longer pending server-side
+ * (`liveQuestions` is the authoritative pending set for the session subtree).
  *
  * Callers must additionally gate on the session being idle: while a question
  * is genuinely waiting, the session run is active and the live form dock
@@ -82,12 +129,11 @@ export function collectOrphanedQuestionRequests(
   sessionId: string,
   records: MessageRecord[],
   liveQuestions: QuestionRequest[],
+  interruptedByInactivity: boolean,
 ): QuestionRequest[] {
   if (!sessionId || records.length === 0) return [];
 
-  let lastIndex = records.length - 1;
-  while (lastIndex >= 0 && records[lastIndex].info.role === 'idle') lastIndex -= 1;
-  const lastRecord = records[lastIndex];
+  const lastRecord = records[findLastContentMessageIndex(records.map((record) => record.info))];
   if (!lastRecord || lastRecord.info.role !== 'assistant' || lastRecord.info.sessionID !== sessionId) return [];
 
   const liveCallIds = new Set<string>();
@@ -98,7 +144,9 @@ export function collectOrphanedQuestionRequests(
   const orphaned: QuestionRequest[] = [];
   for (const part of lastRecord.parts) {
     if (!isQuestionToolPart(part)) continue;
-    if (part.state.status !== 'pending' && part.state.status !== 'running') continue;
+    const stranded = part.state.status === 'pending' || part.state.status === 'running';
+    const interrupted = part.state.status === 'error' && interruptedByInactivity;
+    if (!stranded && !interrupted) continue;
     if (liveCallIds.has(part.callID)) continue;
     if (isOrphanedQuestionDismissed(part.callID)) continue;
 
