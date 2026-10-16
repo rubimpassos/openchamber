@@ -51,6 +51,19 @@ owner cannot replace the catalog or finish the current owner's loading state.
 
 ### Feature cache / query stores
 
+`useSuggestedTasksStore` keeps each project's inbox and the last confirmed summary
+for one runtime lifetime. Concurrent inbox reads share one request; a change
+received during that read earns a trailing read. Completed suggestion mutations
+overlay older reads, including while a failed refresh retains the last inbox.
+`useSuggestedTasksSettingsStore` owns the confirmed settings and ordered pending
+edits per project. Config and repository-lens writes share that order. A failed
+edit rolls back independently, and later edits rebase on the confirmed snapshot.
+Reads wait for admitted writes and cannot overwrite newer mutations. Project
+navigation lets admitted writes finish for their original project; a runtime
+switch aborts requests and cancels unsent edits. `suggestedTasksRuntime.ts`
+retires the exact lifetime, including an A to B to A switch. Neither store persists
+its cache in the browser.
+
 The Stats page keeps its reports in a feature-local store, `components/views/usage/usageStatsStore.ts`: keyed by runtime, range and project, in memory only, never refetched on its own once a key has a report, cleared on runtime switch. A failed refresh keeps the cached report. The report is requested with `tools: "none"`; tool calls, which make OpenCode scan every tool call in the range, load on request under the same key, over the loaded report's own window. Once the user asks for them, every report shown later in the app session fetches its tool calls after it lands. A failed tool read shows an error with retry and never reads as zero calls.
 
 PR status reads share the aggregate background-network budget as well as their PR-specific cap. Command discovery gates each scope/config read, including body decoding, rather than only gating the initial SDK list. Command reads have a bounded deadline and abort on runtime reset. Reset clears server-derived command caches and invalidates late reads and mutation responses while preserving unsaved command drafts.
