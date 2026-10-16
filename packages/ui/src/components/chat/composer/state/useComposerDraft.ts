@@ -85,7 +85,7 @@ export interface ComposerDraftControls {
     /** Restore a draft after a failed send without using persistence as state. */
     restoreDraft: (identity: ChatDraftIdentity | null, draft: string, confirmedMentions: Set<string>) => void;
     /** Move an in-memory draft to an identity materialized during an async flow. */
-    migrateDraft: (from: ChatDraftIdentity | null, to: ChatDraftIdentity | null) => void;
+    migrateDraft: (from: ChatDraftIdentity | null, to: ChatDraftIdentity | null, merge?: boolean) => void;
 }
 
 export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftControls {
@@ -376,7 +376,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         setMessage('');
     }, [confirmedMentionsRef, messageRef, persistNow, setMessage]);
 
-    const migrateDraft = React.useCallback((from: ChatDraftIdentity | null, to: ChatDraftIdentity | null) => {
+    const migrateDraft = React.useCallback((from: ChatDraftIdentity | null, to: ChatDraftIdentity | null, merge = false) => {
         if (!to) return;
         const current = currentIdentityRef.current;
         const draft = from && current && getChatDraftIdentityKey(from) === getChatDraftIdentityKey(current)
@@ -384,12 +384,16 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             : (from && draftMemoryRef.current.get(getChatDraftIdentityKey(from)))
             || (persistEnabled ? readChatDraft(from) : null);
         if (!draft) return;
+        if (merge) {
+            if (draft.text) restoreDraft(to, draft.text, draft.confirmedMentions);
+            return;
+        }
         draftMemoryRef.current.set(getChatDraftIdentityKey(to), { text: draft.text, confirmedMentions: new Set(draft.confirmedMentions) });
         if (persistEnabled) {
             writeChatDraft(to, draft.text, draft.confirmedMentions);
             lastPersistedRef.current.set(getChatDraftIdentityKey(to), draftSignature(draft.text, draft.confirmedMentions));
         }
-    }, [confirmedMentionsRef, messageRef, persistEnabled]);
+    }, [confirmedMentionsRef, messageRef, persistEnabled, restoreDraft]);
 
     return { persistNow, handoffDraft, restoreDraft, migrateDraft };
 }

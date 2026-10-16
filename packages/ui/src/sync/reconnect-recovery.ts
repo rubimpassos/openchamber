@@ -1,6 +1,7 @@
 import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
 import { getLastConversationMessage, isIncompleteAssistantTurn } from "@/lib/opencode/model"
 import { getSessionMaterializationStatus } from "./materialization"
+import { isPendingSessionCreation } from "./pending-session-creation"
 
 type ReconnectMaterializationState = {
   session: Session[]
@@ -80,7 +81,7 @@ export function mergeBootstrapSessions(
         .map(([sessionId]) => sessionId),
     )
     for (const session of existingSessions) {
-      if ((revisions.eventRevision?.[session.id] ?? 0) <= revisions.baselineRevision) continue
+      if ((revisions.eventRevision?.[session.id] ?? 0) <= revisions.baselineRevision && !isPendingSessionCreation(session.id)) continue
       sessionsById.set(session.id, session)
       includedIds.add(session.id)
       const parentId = getParentId(session)

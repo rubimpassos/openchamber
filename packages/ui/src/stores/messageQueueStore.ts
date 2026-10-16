@@ -12,6 +12,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
+import { SessionCreationError, waitForFirstSessionSubmission, waitForSessionCreation } from '@/sync/pending-session-creation';
 
 export type FollowUpBehavior = 'steer' | 'queue';
 
@@ -327,6 +328,9 @@ const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessag
 };
 
 const requestJson = async <T,>(schema: z.ZodType<T>, path: string, init?: RequestInit): Promise<T> => {
+    const id = path.match(/^\/api\/message-queue\/sessions\/([^/]+)/)?.[1];
+    const creation = id ? waitForFirstSessionSubmission(decodeURIComponent(id)) ?? waitForSessionCreation(decodeURIComponent(id)) : undefined;
+    if (creation) await creation;
     const response = await runtimeFetch(path, init);
     if (!response.ok) {
         const error: Error & { status?: number } = new Error(`Message queue request failed (${response.status})`);
@@ -536,6 +540,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         const result = await requestJson(serverSessionResponseSchema, path, init);
                         applyServerSession(result.session, result.revision, target.runtimeKey);
                     } catch (error) {
+                        if (error instanceof SessionCreationError) return;
                         console.warn('[queue] server update failed:', error);
                         await refreshSession(target);
                     }
@@ -584,11 +589,16 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             set((state) => removeMessageLocally(state, key, id));
                             throw new Error('A queued message needs a provider and model to be delivered later.');
                         }
-                        const historyIdentity = createInputHistoryIdentity(target.runtimeKey, target.directory, target.sessionId);
                         const historySubmission = createInputHistorySubmission(message.content, message.attachments ?? []);
                         try {
+                            // FORK: a queue on an idle, just-created session would otherwise run before its first prompt.
+                            const pending = waitForFirstSessionSubmission(target.sessionId) ?? waitForSessionCreation(target.sessionId);
+                            const confirmed = pending ? await pending : undefined;
+                            if (target.runtimeKey !== getRuntimeKey()) throw new SessionCreationError('runtime-changed');
+                            if (!get().queuedMessages[key]?.some((item) => item.id === id)) return;
+                            const historyIdentity = createInputHistoryIdentity(target.runtimeKey, confirmed?.directory ?? target.directory, target.sessionId);
                             const result = await requestJson(serverSessionResponseSchema, `${sessionPath(target.sessionId)}/items`, jsonInit('POST', {
-                                directory: target.directory,
+                                directory: confirmed?.directory ?? target.directory,
                                 item: toServerItemInput(message, message.sendConfig),
                             }));
                             // The optimistic entry is replaced by the server's copy of the queue.
@@ -845,6 +855,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
 
                     setServerHold: async (sessionId, held) => {
                         if (!isServerOwnedMessageQueue()) return;
+                        const creation = waitForSessionCreation(sessionId);
+                        if (creation) await creation;
                         const response = await runtimeFetch(`${sessionPath(sessionId)}/hold`, jsonInit('PUT', { held }));
                         if (!response.ok) throw new Error(`Message queue hold request failed (${response.status})`);
                     },

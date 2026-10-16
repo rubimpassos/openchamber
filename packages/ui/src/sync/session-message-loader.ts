@@ -356,6 +356,21 @@ export class SessionMessageLoader {
     store.setState(draft)
   }
 
+  relocateCreatedSession(source: SessionMessageTarget, directory: string): void {
+    const previous = this.entries.get(this.keyFor(source))
+    if (!previous) return
+    const optimistic = [...previous.optimistic]
+    const snapshot = previous.snapshot
+    this.invalidateSession(source)
+    const target = this.getEntry({ sessionID: source.sessionID, directory })
+    this.bumpGeneration(target)
+    target.inflight = null
+    target.verifiedEpoch = this.historyEpoch
+    target.snapshot = { ...snapshot, generation: target.snapshot.generation }
+    for (const [id, item] of optimistic) target.optimistic.set(id, item)
+    this.notify(target)
+  }
+
   initializeCreatedSession(target: SessionMessageTarget): void {
     const normalized = this.normalizeTarget(target)
     if (!normalized || this.disposed) return

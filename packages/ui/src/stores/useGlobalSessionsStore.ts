@@ -18,6 +18,7 @@ import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { ensureChatsRootDirectory, getChatsRoot } from '@/lib/chatDirectories';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
+import { isPendingSessionCreation } from '@/sync/pending-session-creation';
 import {
   applyGlobalSessionStructureMutations,
   buildGlobalSessionStructure,
@@ -457,7 +458,7 @@ const overlayMutationsSince = (
 ): LoadResult => {
   const affectedIds = new Set<string>();
   for (const [sessionId, revision] of state.mutationRevisionBySessionId) {
-    if (revision > baselineRevision) affectedIds.add(sessionId);
+    if (revision > baselineRevision || isPendingSessionCreation(sessionId)) affectedIds.add(sessionId);
   }
   if (affectedIds.size === 0) return { activeSessions, archivedSessions };
 

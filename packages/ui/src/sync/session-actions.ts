@@ -59,6 +59,7 @@ import { recordSessionActionFailure } from "./session-action-failures"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
 import { getSessionGoal } from "@/lib/sessionGoalMetadata"
 import { fetchGoalObjectiveContent, writeGoalObjectiveFile } from "@/lib/goalObjectiveFiles"
+import { cancelPendingSessionCreation, isPendingSessionCreation, SessionCreationError, waitForSessionCreation } from "./pending-session-creation"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -330,13 +331,15 @@ export async function moveSessionToDirectory(
   destinationDirectory: string,
   expectedRuntimeKey?: string,
 ): Promise<void> {
+  const creation = waitForSessionCreation(session.id)
+  const confirmed = creation ? await creation : undefined
   await opencodeClient.moveSession(session.id, destinationDirectory)
 
   // If the runtime changed during the move request, the server move
   // already happened, but we must not publish stale local state to the UI/stores.
   if (isStaleRuntime(expectedRuntimeKey)) return
 
-  const moved = relocateSession(session, sourceDirectory, destinationDirectory)
+  const moved = relocateSession(confirmed ?? session, confirmed?.directory ?? sourceDirectory, destinationDirectory)
   useGlobalSessionsStore.getState().upsertSession(moved)
 }
 
@@ -351,6 +354,22 @@ export function adoptSessionMove(sessionId: string, sourceDirectory: string, des
   const session = _childStores?.getChild(sourceDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
   if (!session) return
   relocateSession(session, sourceDirectory, destinationDirectory)
+}
+
+export function adoptCreatedSession(session: Session, sourceDirectory: string): void {
+  const loader = getImperativeSessionMessageLoader()
+  if (sourceDirectory !== session.directory) {
+    loader?.relocateCreatedSession({ directory: sourceDirectory, sessionID: session.id }, session.directory)
+    reconcileSessionMove(session, sourceDirectory, session.directory)
+  }
+  mirrorSessionIntoLiveStores(session, session.directory)
+  const store = _childStores?.getChild(session.directory)
+  if (store) store.setState((state) => ({
+    session: [...state.session].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    ...sessionMutationPatch(state, session.id, false),
+  }))
+  registerSessionDirectory(session.id, session.directory)
+  useSessionUIStore.getState().setSessionDirectory(session.id, session.directory)
 }
 
 function relocateSession(session: Session, sourceDirectory: string, destinationDirectory: string): Session {
@@ -1097,7 +1116,9 @@ export async function patchSessionMetadata(
   expectedRuntimeKey?: string,
 ): Promise<Session> {
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
-  const targetDirectory = directory ?? getSessionDirectory(sessionId)
+  const creation = waitForSessionCreation(sessionId)
+  const confirmed = creation ? await creation : undefined
+  const targetDirectory = confirmed?.directory ?? directory ?? getSessionDirectory(sessionId)
   const current = await opencodeClient.getSession(sessionId, targetDirectory)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const currentMetadata = getSessionMetadata(current)
@@ -1456,6 +1477,10 @@ export type DeleteSessionOptions = {
 export async function deleteSession(sessionId: string, options?: DeleteSessionOptions): Promise<boolean> {
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
   if (isStaleRuntime(expectedRuntimeKey)) return false
+  const creation = waitForSessionCreation(sessionId)
+  if (creation) {
+    try { await creation } catch (error) { if (error instanceof SessionCreationError) return false; throw error }
+  }
   const sessionDirectory = getSessionDirectory(sessionId)
   const chatDirectoryCleanup = planChatDirectoryCleanup(sessionId, getGlobalSessionSnapshot(sessionId), sessionDirectory)
   try {
@@ -1536,6 +1561,10 @@ export async function deleteSessions(
  */
 export async function archiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
+  const creation = waitForSessionCreation(sessionId)
+  if (creation) {
+    try { await creation } catch (error) { if (error instanceof SessionCreationError) return false; throw error }
+  }
   const sessionDirectory = getSessionDirectory(sessionId)
   const archivedAt = Date.now()
   try {
@@ -1694,7 +1723,7 @@ function planArchiveBatches(ids: string[]) {
     const directory = session
       ? resolveGlobalSessionDirectory(session) ?? getSessionDirectory(id)
       : undefined
-    if (!session || !directory || hasLinkedSessionCleanup(session)) {
+    if (!session || !directory || isPendingSessionCreation(id) || hasLinkedSessionCleanup(session)) {
       individualIds.push(id)
       continue
     }
@@ -1911,9 +1940,11 @@ export async function updateSessionTitle(
   options?: { directory?: string | null; expectedRuntimeKey?: string; signal?: AbortSignal },
 ): Promise<void> {
   if (isStaleRuntime(options?.expectedRuntimeKey)) throw new Error("runtime changed")
+  const creation = waitForSessionCreation(sessionId)
+  const confirmed = creation ? await creation : undefined
   if (options?.signal) options.signal.throwIfAborted()
   else cancelSessionTitleGeneration(sessionId)
-  const sessionDirectory = options?.directory ?? getSessionDirectory(sessionId)
+  const sessionDirectory = confirmed?.directory ?? options?.directory ?? getSessionDirectory(sessionId)
   await opencodeClient.renameSession(sessionId, title, sessionDirectory)
   // `session.update` answers with nothing, so the record published to the
   // stores is re-read rather than assembled from the local copy plus a hope.
@@ -1928,6 +1959,13 @@ export async function updateSessionTitle(
 // Optimistic message send — insert user message before API call, rollback on error
 // ---------------------------------------------------------------------------
 
+const creationOwnsRollback = {
+  "creation-failed": true,
+  "runtime-changed": true,
+  "cancelled": true,
+  "first-send-failed": false,
+} satisfies Readonly<Record<SessionCreationError["reason"], boolean>>
+
 /**
  * Wraps an async send operation with optimistic user-message insertion.
  * Uses useSync()'s optimistic infrastructure — message + parts are inserted
@@ -1941,14 +1979,15 @@ export async function optimisticSend(input: {
   directory?: string | null
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   /** Context admitted ahead of the prompt; shown in the optimistic message until the server echoes it. */
-  context?: SyntheticContextInput[]
+  context?: Array<SyntheticContextInput | Promise<SyntheticContextInput | null>>
   /**
    * Context still being fetched, admitted ahead of `context` once it resolves
    * (the session's project knowledge). The user message is inserted without
-   * waiting for it; only the request waits. Must not reject: it resolves to
-   * null when there is nothing to add.
+   * waiting for it; only the request waits. Null means there is nothing to add;
+   * an owning preparation failure rejects and rolls back the send.
    */
   leadingContext?: Promise<SyntheticContextInput | null>
+  ready?: Promise<string | undefined>
   appendSubmissions?: () => void
   onOptimisticInsert?: () => void
   onMessageID?: (messageID: string) => void
@@ -1978,10 +2017,10 @@ export async function optimisticSend(input: {
   assertRuntimeUnchanged()
   input.beforeOptimisticInsert?.()
   assertRuntimeUnchanged()
-  input.appendSubmissions?.()
+  if (!input.ready) input.appendSubmissions?.()
 
-  const targetDirectory = input.directory ?? dir()
-  const store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
+  let targetDirectory = input.directory ?? dir()
+  let store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
   const stateBeforeSend = store.getState()
   const sessionBeforeSend = stateBeforeSend.session.find((session) => session.id === input.sessionId)
   const revertMessageID = sessionBeforeSend?.revert?.messageID
@@ -2020,12 +2059,18 @@ export async function optimisticSend(input: {
   // The leading item's id is reserved now, before it is known, so it still
   // sorts ahead of everything else when it arrives after the insert.
   const leadingContextID = input.leadingContext ? ascendingId("msg") : null
-  const context = (input.context ?? [])
-    .filter((item) => item.text.trim())
-    .map((item) => ({ ...item, id: ascendingId("msg") }))
+  // FORK: reserve deferred context IDs in place, ahead of the visible prompt.
+  const contextSlots = (input.context ?? [])
+    .filter((item) => item instanceof Promise || item.text.trim())
+    .map((item) => ({ item, id: ascendingId("msg") }))
+  const context = contextSlots.flatMap(({ item, id }) => item instanceof Promise ? [] : [{ ...item, id }])
+  const resolvedContext = Promise.all(contextSlots.map(async ({ item, id }) => {
+    const resolved = await item
+    return resolved?.text.trim() ? { ...resolved, id } : null
+  }))
   const messageID = ascendingId("msg")
   input.onMessageID?.(messageID)
-  const optimisticIDs = [...context.map((item) => item.id), messageID]
+  const optimisticIDs = [...contextSlots.map((item) => item.id), messageID]
 
   // Part ids follow `partIds`, the same derivation the projection uses for the
   // server's echo of this message. Identical ids let the echo reconcile in
@@ -2093,14 +2138,27 @@ export async function optimisticSend(input: {
   })
 
   try {
-    let sentContext = context
+    // FORK: rendering stays synchronous; only server-dependent work waits for creation.
+    const prepared = await Promise.all([input.ready, input.leadingContext, resolvedContext])
+    if (input.ready) {
+      targetDirectory = prepared[0]
+      assertRuntimeUnchanged()
+      store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
+      input.appendSubmissions?.()
+    }
+    const deferredIDs = new Set(contextSlots.filter(({ item }) => item instanceof Promise).map(({ id }) => id))
+    const completeContext = prepared[2].filter((item) => item !== null)
+    for (const item of completeContext) {
+      if (deferredIDs.has(item.id)) addSyntheticContext(item)
+    }
+    let sentContext = completeContext
     if (input.leadingContext && leadingContextID) {
-      const leading = await input.leadingContext
+      const leading = prepared[1]
       if (leading?.text.trim()) {
         const leadingItem = { ...leading, id: leadingContextID }
         addSyntheticContext(leadingItem)
         optimisticIDs.unshift(leadingContextID)
-        sentContext = [leadingItem, ...context]
+        sentContext = [leadingItem, ...completeContext]
       }
     }
     assertRuntimeUnchanged()
@@ -2108,6 +2166,16 @@ export async function optimisticSend(input: {
     assertRuntimeUnchanged()
     await input.send(messageID, sentContext)
   } catch (error) {
+    if (input.ready && input.runtimeKey && input.runtimeKey !== getRuntimeKey()) throw error
+    if (error instanceof SessionCreationError) {
+      if (creationOwnsRollback[error.reason]) throw error
+      // FORK: failed first submission keeps the session; each waiting bubble owns its rollback.
+      const acknowledgedDirectory = getSessionDirectory(input.sessionId)
+      if (acknowledgedDirectory && acknowledgedDirectory !== targetDirectory) {
+        targetDirectory = acknowledgedDirectory
+        store = dirStoreForDirectory(acknowledgedDirectory)
+      }
+    }
     const status = getErrorStatus(error)
     const ambiguousFailure = isAmbiguousSendFailure(error)
     const acceptedRecords = ambiguousFailure
@@ -2247,6 +2315,8 @@ function materializeConfirmedSendRecords(
 // ---------------------------------------------------------------------------
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
+  // FORK: Stop cancels the unsubmitted first prompt even while create is still in flight.
+  if (cancelPendingSessionCreation(sessionId)) return
   // The abort must carry the SESSION'S directory, not the active UI directory:
   // OpenCode routes the request to the per-directory instance, and an abort
   // sent to the wrong instance cancels nothing while still returning 200 true

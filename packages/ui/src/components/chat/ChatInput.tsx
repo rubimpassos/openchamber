@@ -125,7 +125,6 @@ import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
-import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
 import { useOpenCodeStartupStore } from '@/sync/opencode-startup-gate';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
@@ -1670,9 +1669,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // the one outcome this handler must never produce. The mentions are
         // snapshotted here because sending clears them before it can fail.
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
+        let restoreIdentity = chatDraftIdentity;
         const restoreComposerText = () => {
             if (queuedOnly || !inputSnapshot.message) return;
-            restoreDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
+            restoreDraft(restoreIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
         };
 
         // An extension command never reaches the model: the extension turns
@@ -1867,6 +1867,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             historySubmissions?: InputHistorySubmission[];
             delivery?: 'steer';
             skills?: SkillMentions;
+            responseStyle?: Promise<string | null>;
+            onCreationFailure?: (session: { sessionId: string; directory: string }) => void;
+            onSessionReady?: (session: { sessionId: string; directory: string | null }) => void;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -1880,6 +1883,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
         sendMessageOptions = { ...sendMessageOptions, userInitiated: true };
+        if (capturedDraftSnapshot) {
+            // Once creation succeeds, a failed prompt belongs to that session's composer.
+            sendMessageOptions.onSessionReady = (session) => {
+                restoreIdentity = createChatDraftIdentity(submitRuntimeKey, session.directory, session.sessionId);
+            };
+            // FORK: a pending session can already hold a second unsent draft.
+            // Merge it into the submission's draft before session cleanup clears it.
+            sendMessageOptions.onCreationFailure = (session) => {
+                const failedIdentity = createChatDraftIdentity(submitRuntimeKey, session.directory, session.sessionId);
+                migrateDraft(failedIdentity, chatDraftIdentity, true);
+                useInputStore.getState().moveAttachedFiles(failedIdentity, chatDraftIdentity);
+            };
+        }
 
         // Queued messages resolved their mentions when they were queued; only
         // the composer's own text can still name a file to read.
@@ -2074,13 +2090,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // so the response-style instruction never applies there.
         const shouldAddResponseStyle = !isBtwActive && (newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false));
         if (shouldAddResponseStyle) {
-            const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
-            if (responseStyleInstruction) {
-                additionalParts.push({
-                    text: wrapSystemReminder(responseStyleInstruction),
-                    synthetic: true,
-                });
-            }
+            // FORK: settings may cross a remote connection. Keep this read off
+            // the draft-to-session animation path; only prompt delivery waits.
+            sendMessageOptions = {
+                ...sendMessageOptions,
+                responseStyle: fetchResponseStyleInstruction().catch(() => null),
+            };
         }
 
         const expandOutgoingSnippets = async () => {
@@ -2242,14 +2257,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreIdentity);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreIdentity);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
@@ -2257,14 +2272,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (normalized.includes('runtime changed')) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreIdentity);
                 }
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                useInputStore.getState().restoreAttachedFiles(allAttachments, restoreIdentity);
             }
 
             if (normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {

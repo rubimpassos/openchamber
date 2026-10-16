@@ -3,6 +3,7 @@ import { z } from "zod"
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient } from "@/lib/relay/tunnel-client"
+import { deferSessionOperation, SessionCreationError, trackPendingSessionCreation } from '@/sync/pending-session-creation'
 
 // The generated `@opencode/client` runs for real here; only the runtime
 // transport (`runtimeFetch`) and runtime identity are replaced. That keeps
@@ -95,6 +96,39 @@ const sessionInfo = {
   title: "First",
   location: { directory: "/repo/app" },
 }
+
+test('uses the confirmed directory when a session mutation waits for creation', async () => {
+  // Given a pending create and a mutation addressed with the optimistic spelling.
+  const creation = deferSessionOperation<import('./model').Session>()
+  const release = trackPendingSessionCreation('ses_pending', { ready: creation.promise, isCurrent: () => true })
+  const client = createRuntimeOpencodeClient({ baseUrl: 'http://runtime.test/api', directory: '/requested' })
+  responses.push(noContent())
+  // When the server acknowledges the canonical owner.
+  const rename = client.session.update({ sessionID: 'ses_pending', title: 'changed' })
+  creation.resolve({ ...sessionInfo, id: 'ses_pending', directory: '/canonical' })
+  try {
+    await rename
+    // Then the original SDK operation reaches the confirmed directory with its body intact.
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.headers.get('x-opencode-directory')).toBe(encodeURIComponent('/canonical'))
+    expect(requests[0]?.body).toEqual({ title: 'changed' })
+  } finally { release() }
+})
+
+test('sends no session mutation when creation rejects', async () => {
+  // Given a pending create that the server rejects.
+  const creation = deferSessionOperation<import('./model').Session>()
+  const release = trackPendingSessionCreation('ses_pending', { ready: creation.promise, isCurrent: () => true })
+  const client = createRuntimeOpencodeClient({ baseUrl: 'http://runtime.test/api' })
+  // When a delete waits on that create.
+  const deletion = client.session.remove({ sessionID: 'ses_pending' })
+  creation.reject(new SessionCreationError('creation-failed'))
+  try {
+    // Then the mutation fails locally without reaching either server.
+    await expect(deletion).rejects.toThrow()
+    expect(requests).toEqual([])
+  } finally { release() }
+})
 
 beforeEach(() => {
   requests.length = 0

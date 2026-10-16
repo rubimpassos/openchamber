@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { selectInputHistoryEntries, useInputHistoryStore } from "./useInputHistoryStore"
 import type { AttachedFile } from "./types/sessionTypes"
 import type { MessageQueueUpdatedEvent } from "./messageQueueStore"
+import type { Session } from '@/lib/opencode/model'
+import { deferSessionOperation, trackPendingSessionCreation } from '@/sync/pending-session-creation'
 
 type FetchCall = { path: string; method: string; body: ReturnType<typeof JSON.parse> }
 let calls: FetchCall[] = []
@@ -103,6 +105,38 @@ beforeEach(() => {
 })
 
 describe("server-owned message queue", () => {
+  test('waits for the first prompt before admitting a pending session follow-up', async () => {
+    // Given a confirmed create whose first prompt is still preparing context.
+    const submitted = deferSessionOperation<boolean>()
+    const confirmed: Session = { id: target.sessionId, projectID: 'project', title: '', directory: '/canonical',
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 } }
+    const release = trackPendingSessionCreation(target.sessionId, { ready: Promise.resolve(confirmed), submitted: submitted.promise, isCurrent: () => true })
+    // When a follow-up is queued before that first submission.
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: 'follow-up', sendConfig: { providerID: 'p', modelID: 'm' } })
+    expect(calls).toEqual([])
+    submitted.resolve(true)
+    try {
+      await queued
+      // Then the queue uses the canonical owner after the initial prompt was accepted.
+      expect(calls[0]?.body.directory).toBe('/canonical')
+    } finally { release() }
+  })
+
+  test('rolls back queue admission when the initial session submission fails', async () => {
+    // Given a pending first submission.
+    const submitted = deferSessionOperation<boolean>()
+    const release = trackPendingSessionCreation(target.sessionId, { ready: new Promise<Session>(() => {}), submitted: submitted.promise, isCurrent: () => true })
+    // When that submission fails while a follow-up is waiting.
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: 'follow-up', sendConfig: { providerID: 'p', modelID: 'm' } })
+    submitted.resolve(false)
+    try {
+      // Then no queue reaches the server and its optimistic projection is removed.
+      await expect(queued).rejects.toThrow('Failed to send message')
+      expect(calls).toEqual([])
+      expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+    } finally { release() }
+  })
+
   // First: the one-time upload of a legacy local queue happens before this
   // runtime is known to be server-owned, which the later hydrations establish.
   test("hydrate uploads messages queued by an older build before reading the server", async () => {

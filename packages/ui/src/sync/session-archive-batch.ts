@@ -19,6 +19,7 @@ import type { JsonValue, Metadata } from "@/lib/opencode/model"
 import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { waitForSessionCreation } from './pending-session-creation';
 
 /**
  * The route answers with the archive stamps it stored, `{ id, archivedAt }`,
@@ -43,6 +44,10 @@ export async function requestSessionArchiveBatch(
 ): Promise<SessionArchiveBatchResult> {
   let response: Response;
   try {
+    for (const id of ids) {
+      const creation = waitForSessionCreation(id);
+      if (creation) await creation;
+    }
     response = await runtimeFetch('/api/openchamber/sessions/archive', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -92,6 +97,10 @@ export type SessionUnarchiveBatchResult =
 export async function requestSessionUnarchiveBatch(ids: string[], directory?: string | null): Promise<SessionUnarchiveBatchResult> {
   let response: Response;
   try {
+    for (const id of ids) {
+      const creation = waitForSessionCreation(id);
+      if (creation) await creation;
+    }
     response = await runtimeFetch('/api/openchamber/sessions/unarchive', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -151,11 +160,13 @@ export async function requestSessionMetadataUpdate(
 ): Promise<SessionMetadataUpdateResult> {
   let response: Response;
   try {
+    const creation = waitForSessionCreation(sessionID);
+    const confirmed = creation ? await creation : undefined;
     response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionID)}/metadata`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ patch }),
-      directory,
+      directory: confirmed?.directory ?? directory,
     });
   } catch (error) {
     return { outcome: 'unavailable', reason: error instanceof Error ? error.message : 'metadata request failed' };

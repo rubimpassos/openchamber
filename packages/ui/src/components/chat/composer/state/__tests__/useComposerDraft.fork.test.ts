@@ -26,13 +26,14 @@ function renderComposer(persistEnabled: boolean) {
     const root = createRoot(dom.container);
     const restored: string[] = [];
     const result = { text: '', mentions: new Set<string>(), restored };
+    let actions: ReturnType<typeof useComposerDraft>;
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
         const [message, setMessage] = React.useState('source draft @source.ts');
         const messageRef = React.useRef(message);
         const confirmedMentionsRef = React.useRef(new Set(['source.ts']));
         React.useEffect(() => { messageRef.current = message; }, [message]);
-        useComposerDraft({
+        actions = useComposerDraft({
             message, messageRef, setMessage, confirmedMentionsRef, identity, persistEnabled,
             initialDraft: { text: '', identity: source },
             onDraftRestored: (reason) => { result.restored.push(reason); },
@@ -49,6 +50,13 @@ function renderComposer(persistEnabled: boolean) {
     return {
         result,
         render,
+        recover: (from: ChatDraftIdentity, to: ChatDraftIdentity) => {
+            act(() => {
+                actions.migrateDraft(from, to, true);
+                useInputStore.getState().moveAttachedFiles(from, to);
+                clearChatDraft(from, true);
+            });
+        },
         flushFrames: () => {
             const pending = [...frames.values()];
             frames.clear();
@@ -70,6 +78,41 @@ beforeEach(() => {
 });
 
 describe('fork composer restoration', () => {
+    for (const persistEnabled of [true, false]) {
+        test(`recovers newer pending-session text and files without overwriting another draft, persistence=${persistEnabled}`, () => {
+            // Given newer text in a pending session and a different draft selected.
+            const composer = renderComposer(persistEnabled);
+            try {
+                useInputStore.getState().addRestoredAttachment(replayFile);
+                composer.render(fork);
+                expect(composer.result.text).toBe('');
+                // When failed-session recovery runs before its deletion listeners.
+                composer.recover(source, fork);
+                // Then the selected draft gains the unsent text and files.
+                expect(composer.result.text).toBe('source draft @source.ts');
+                expect(composer.result.mentions).toEqual(new Set(['source.ts']));
+                expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(['replay.txt']);
+            } finally {
+                composer.teardown();
+            }
+        });
+    }
+
+    test('merges recovery into existing destination text', () => {
+        // Given text already saved for the recovery destination.
+        writeChatDraft(fork, 'destination draft', []);
+        const composer = renderComposer(true);
+        try {
+            // When the source is recovered while still on screen, then removed.
+            composer.recover(source, fork);
+            composer.render(fork);
+            // Then neither draft is lost.
+            expect(composer.result.text).toBe('destination draft\n\nsource draft @source.ts');
+        } finally {
+            composer.teardown();
+        }
+    });
+
     for (const persistEnabled of [true, false]) {
         test(`waits for the rendered fork and preserves the source, persistence=${persistEnabled}`, () => {
             writeChatDraft(fork, 'previous fork draft @old.ts', ['old.ts']);

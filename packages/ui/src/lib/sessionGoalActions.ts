@@ -1,4 +1,5 @@
 import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-actions';
+import { waitForSessionCreation } from '@/sync/pending-session-creation';
 import type { Metadata } from '@/lib/opencode/model';
 import { distillGoalObjective } from '@/lib/smallModel';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
@@ -71,6 +72,8 @@ export async function setSessionGoal(
   input: SetSessionGoalInput,
   existing: SessionGoalPayload | null,
 ): Promise<void> {
+  const creation = waitForSessionCreation(sessionId);
+  if (creation) await creation;
   const rawObjective = input.objective.trim();
   if (!rawObjective) {
     throw new Error('Goal objective must not be empty');

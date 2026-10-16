@@ -15,6 +15,7 @@ import {
   readManagedChatSessions,
 } from "./persist-cache"
 import { getSyncPerformanceDiagnostics, setSyncPerformanceDiagnosticsEnabled } from "./performance-diagnostics"
+import { trackPendingSessionCreation } from './pending-session-creation'
 
 class TestStorage implements Storage {
   readonly values = new Map<string, string>()
@@ -99,6 +100,22 @@ afterEach(() => {
 })
 
 describe("persisted directory sessions", () => {
+  test('excludes pending creates from directory and global startup snapshots', async () => {
+    // Given one confirmed session and one unacknowledged local session.
+    const confirmed = session(1, 1)
+    const optimistic = session(2, 2)
+    const release = trackPendingSessionCreation(optimistic.id, { ready: new Promise<Session>(() => {}), isCurrent: () => true })
+    try {
+      // When lifecycle persistence flushes both visible lists.
+      persistSessions(directory, [confirmed, optimistic])
+      persistGlobalSessionSnapshot([confirmed, optimistic])
+      await waitForPersistence()
+      // Then only server-backed sessions can return on restart.
+      expect(readDirCache(directory).sessions?.map((item) => item.id)).toEqual([confirmed.id])
+      expect(readGlobalSessionSnapshot().map((item) => item.id)).toEqual([confirmed.id])
+    } finally { release() }
+  })
+
   test("keeps one runtime-scoped startup snapshot for managed chats", async () => {
     const chat = session(1, 2, "Chat", "/home/user/.config/openchamber/chats/2026-08-21/session-a")
     persistManagedChatSessions([session(2, 3), chat])

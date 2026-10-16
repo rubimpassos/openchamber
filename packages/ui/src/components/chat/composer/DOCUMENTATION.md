@@ -17,6 +17,14 @@ animation. Do not restore separate draft and session composer branches:
 remounting the editor loses focus and interrupts the transition. Keep the
 existing mobile fixed-position rules unchanged.
 
+The fork opens an optimistic session before creation completes. If creation
+fails, the composer merges any newer unsent text and moves its attachments back
+to the submission's draft before session cleanup fires deletion listeners.
+Restoring the original prompt then merges with that recovered text. Recovery
+uses captured identities and never changes a newer navigation.
+After creation succeeds, a rejected first prompt restores text and attachments
+to the acknowledged session's composer, including its canonical directory.
+
 `ComposerFloatingPanel` is the shared frame for `BtwPanel`, `PermissionDock`
 and `FormDock`. They mount inside the composer form, outside both the
 full editor and collapsed mobile pill, with one absolute `bottom-full`

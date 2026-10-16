@@ -1181,12 +1181,14 @@ describe('createSession draft lifecycle', () => {
 describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
   const sendMessageCalls = [];
   const createSessionCalls = [];
+  const createdSessionIds = [];
   let originalSendMessage;
   let originalCreateSession;
 
   beforeEach(() => {
     sendMessageCalls.length = 0;
     createSessionCalls.length = 0;
+    createdSessionIds.length = 0;
 
     const childStore = {
       getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
@@ -1207,9 +1209,10 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
       sendMessageCalls.push(params);
       return 'msg';
     };
-    opencodeClient.createSession = async (_params, directory) => {
+    opencodeClient.createSession = async (params, directory) => {
       createSessionCalls.push(directory);
-      return { id: 'session-materialized', directory: directory ?? '/projects/alpha' };
+      createdSessionIds.push(params.id);
+      return { id: params.id, directory: directory ?? '/projects/alpha' };
     };
   });
 
@@ -1268,7 +1271,8 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(createSessionCalls).toHaveLength(1);
     expect(createSessionCalls[0]).toBe('/projects/alpha');
     expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].id).toBe('session-materialized');
+    expect(createdSessionIds[0]).toMatch(/^ses_/);
+    expect(sendMessageCalls[0].id).toBe(createdSessionIds[0]);
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
     expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
   });

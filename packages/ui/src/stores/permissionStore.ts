@@ -12,6 +12,7 @@ import {
 } from "./utils/permissionAutoAccept";
 import { getAllSyncSessionMap } from "@/sync/sync-refs";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { waitForSessionCreation } from "@/sync/pending-session-creation";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useSessionUIStore } from "@/sync/session-ui-store";
@@ -152,6 +153,9 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
         pendingSavingOperations.add(operation.sequence);
         set({ saving: true });
         try {
+            const creation = waitForSessionCreation(sessionId);
+            if (creation) await creation;
+            if (!isCurrentOperation(operation)) return;
             const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
                 ?? opencodeClient.getDirectory()
                 ?? undefined;

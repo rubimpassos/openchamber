@@ -34,6 +34,7 @@ import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { spaceMarkSchema, type SpaceMark } from "@/lib/spaces/spaces-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { waitForSessionCreation } from "@/sync/pending-session-creation"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { markStartupTrace } from "@/lib/startupTrace"
 import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess } from "./provider-tracker"
@@ -340,9 +341,19 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
     headers: config.directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(config.directory) } : undefined,
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url)
+      const sessionId = url.pathname.match(/\/api\/session\/([^/]+)/)?.[1]
+      const creation = sessionId ? waitForSessionCreation(decodeURIComponent(sessionId)) : undefined
+      let requestInit = init
+      if (creation) {
+        // FORK: gate official session operations without rebuilding the SDK Request.
+        const confirmed = await creation
+        const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+        headers.set(OPENCODE_DIRECTORY_HEADER, encodeURIComponent(confirmed.directory))
+        requestInit = { ...init, headers }
+      }
       const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
       if (isEventStreamUrl(url) || method === "POST") {
-        return validateRuntimeResponse(await runtimeFetch(input, init))
+        return validateRuntimeResponse(await runtimeFetch(input, requestInit))
       }
       const timeout = createTimeoutSignal(requestTimeoutMs)
       const callerSignal = init?.signal !== undefined
@@ -385,7 +396,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       }
       let responseHasBody = false
       try {
-        const response = await runtimeFetch(input, { ...init, signal })
+        const response = await runtimeFetch(input, { ...requestInit, signal })
         validateRuntimeResponse(response)
         responseHasBody = response.body !== null
         return response

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { cyclePermissionMode } from "../../components/chat/permissionAutoAccept"
 
 const storage = new Map<string, string>()
+const sdkClient = Object.freeze({})
 const createSessionCalls: Array<{ title?: string; directory: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, string]> = []
 const savedVariantCalls: Array<string | undefined> = []
@@ -109,6 +110,7 @@ mock.module("@/stores/utils/safeStorage", () => ({
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
+    getSdkClient: () => sdkClient,
     getDirectory: () => null,
     getFilesystemHome: mock(async () => "/home/test"),
     getFilesystemHomeInfo: async () => ({ home: "/home/test" }),
@@ -304,6 +306,7 @@ mock.module("../input-store", () => ({
 }))
 
 mock.module("../sync-refs", () => ({
+  getSyncChildStores: () => { throw new Error("No sync provider in this draft-selection test") },
   getDirectoryState: () => null,
   getSyncSessions: () => [],
   getSyncMessages: () => [],
@@ -316,6 +319,7 @@ mock.module("../sync-refs", () => ({
 }))
 
 mock.module("../session-actions", () => ({
+  adoptCreatedSession: () => { throw new Error("No optimistic create in this draft-selection test") },
   // Mirrors the real action's authoritative steps: the created session becomes
   // current under the directory the server confirmed, and that directory enters
   // the routing index. Everything these tests assert about routing depends on

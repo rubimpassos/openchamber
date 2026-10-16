@@ -13,6 +13,8 @@
 
 import { runtimeFetch } from './runtime-fetch';
 import { z } from 'zod';
+import { waitForSessionCreation } from '@/sync/pending-session-creation';
+import { getRuntimeKey } from './runtime-switch';
 
 interface SessionKnowledge {
   /** Empty when the session already carries what it needs. */
@@ -34,6 +36,7 @@ export const fetchSessionKnowledge = async (
   directory: string | null,
   sessionId: string | null,
 ): Promise<SessionKnowledge> => {
+  const runtimeKey = getRuntimeKey();
   if (!directory) {
     return EMPTY;
   }
@@ -43,7 +46,10 @@ export const fetchSessionKnowledge = async (
   }
 
   try {
-    const params = new URLSearchParams({ directory });
+    const creation = sessionId ? waitForSessionCreation(sessionId) : undefined;
+    const confirmed = creation ? await creation : undefined;
+    if (runtimeKey !== getRuntimeKey()) return EMPTY;
+    const params = new URLSearchParams({ directory: confirmed?.directory ?? directory });
     if (sessionId) {
       params.set('sessionId', sessionId);
     }
@@ -79,10 +85,12 @@ export const reportSessionKnowledgeDelivered = async (
   invalidateSummary(directory, sessionId);
   const report = (async () => {
     try {
+      const creation = waitForSessionCreation(sessionId);
+      const confirmed = creation ? await creation : undefined;
       await runtimeFetch('/api/session-knowledge/delivered', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ directory, sessionId, signature }),
+        body: JSON.stringify({ directory: confirmed?.directory ?? directory, sessionId, signature }),
       });
     } catch {
       // Only means the block may be sent once more.
@@ -138,7 +146,9 @@ const requestSessionKnowledgeSummary = async (
   sessionId?: string | null,
 ): Promise<SessionKnowledgeSummary> => {
   try {
-    const params = new URLSearchParams({ directory });
+    const creation = sessionId ? waitForSessionCreation(sessionId) : undefined;
+    const confirmed = creation ? await creation : undefined;
+    const params = new URLSearchParams({ directory: confirmed?.directory ?? directory });
     if (sessionId) params.set('sessionId', sessionId);
     const response = await runtimeFetch(
       `/api/session-knowledge/summary?${params.toString()}`,
@@ -176,10 +186,12 @@ export const setSessionProjectContextPin = async (
 ): Promise<SessionProjectContextPins | null> => {
   invalidateSummary(directory, sessionId);
   try {
+    const creation = waitForSessionCreation(sessionId);
+    const confirmed = creation ? await creation : undefined;
     const response = await runtimeFetch('/api/session-knowledge/pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory, sessionId, kind, id, pinned }),
+      body: JSON.stringify({ directory: confirmed?.directory ?? directory, sessionId, kind, id, pinned }),
     });
     if (!response.ok) return null;
     return sessionProjectContextPinsResponseSchema.parse(await response.json()).pins;

@@ -86,6 +86,7 @@ The VS Code queue gate and its live inputs are documented in
 |---|---|---|
 | `ChildStoreManager` and child directory stores | Priority-scheduled directory bootstrap plus `session`, `message`, `part`, `permission`, `form`, etc. | One runtime and one store per directory |
 | `SessionMessageLoader` | Initial message loading, pagination, prefetch, retries, load state, and optimistic reconciliation | One runtime, directory, and session ID |
+| `optimistic-session-creation.ts` and `pending-session-creation.ts` | Fork-only first-prompt session promotion, creation acknowledgment, first-submission ordering and rollback | Captured runtime, SDK identity and client-generated session ID |
 | `global-session-status.ts` | Incremental non-idle session status index reconciled from events and authoritative directory snapshots, plus a reference-stable active-ID membership collection maintained from the same mutations | All known directories in the active runtime |
 | `session-ordering.ts` | Ephemeral lifecycle rank used by every user-visible session list | All known sessions in the active runtime |
 | `session-activity-timing.ts` | Elapsed time of the running turn and of the turn that just finished, plus the persisted starts that survive a reload | All known sessions in the active runtime |
@@ -234,6 +235,66 @@ stays as it was until the reconnect status snapshot or the watchdog poll
 reports the authoritative state.
 
 ## Session list rules
+
+### Fork-only optimistic first session
+
+A normal first prompt materializes its session before the create response arrives.
+Directory preparation, pending worktree creation and configured worktree setup still finish first.
+Ordinary project roots skip the worktree setup-config read. A pending worktree request,
+explicit bootstrap directory, existing bootstrap lifecycle or known worktree identity keeps
+the configured setup wait in place.
+Shell and slash-command creation keep their confirmed-create path, as do background session creators
+and `materializeOpenDraftSession` callers that omit its optimistic options.
+
+| Runtime | First normal prompt |
+|---|---|
+| Web | Shared optimistic session and prompt; server-owned queue waits for first submission. |
+| Electron | Same shared flow through the selected runtime. |
+| VS Code | Shared optimistic session and prompt; local queue and existing unsupported routes stay unchanged. |
+| Hosted mobile | Shared flow through runtime transport. |
+| Capacitor mobile | Shared flow through runtime transport, including relayed connections. |
+
+No runtime adapter, route or persisted format changes.
+
+`optimistic-session-creation.ts` inserts a session with `Session.ID.create()` behind the OpenCode
+boundary, initializes empty loader coverage, registers event routing, and then selects it.
+The first prompt enters the loader's visible history and optimistic shadow synchronously.
+The pending owner retains the session through global and directory snapshots, including reads
+started after insertion. Acknowledgment applies a fresh mutation revision before pending lifetime ends.
+The server's canonical directory moves the visible transcript and loader shadows together.
+First-submission input history and its restorable file references use that confirmed directory.
+Desired model, agent and effort stay captured from submit time. Their switch comparison runs
+against the acknowledged record immediately before prompt or command dispatch. Auto is omitted
+by the create adapter, so the first prompt must compare it with the server's concrete default.
+
+Official session requests wait at the SDK transport boundary. Knowledge reads and pins, goal
+creation, metadata writes, permission mode, archive operations and queue mutations also wait for
+creation. Follow-up sends and queue admission wait for the first prompt's submission, so a queue
+cannot run ahead while that prompt prepares knowledge or its armed goal. The first prompt's
+rendering never waits for those requests. Pending sessions are excluded from session snapshots
+and the durable last-session pointer.
+Successful first submission registers its knowledge-delivery report before releasing follow-up
+waiters. It does not await that report's network response; each follow-up knowledge read waits
+on the registered report. A failed first submission rejects waiting follow-ups and removes each
+of their optimistic bubbles and shadows from the acknowledged directory, preserving the session.
+
+Response-style settings enter the send as a deferred synthetic-context slot after attached
+context and before goal context. Its message ID is reserved before the visible prompt ID,
+even when settings resolve later. Knowledge, style and each attached context item keep their
+own synthetic records and ordering; an empty style adds no record. Only submission awaits
+the settings promise.
+
+Create failure removes the local record, history, optimistic shadows and session-owned persisted
+state. The submitted draft and its original directory return only while that optimistic session
+is still selected. Composer rejection uses its existing captured-text, context and attachment
+restoration. A newer navigation or draft stays selected. An ambiguous create response leaves the
+chat directory intact because the server may have created the session there. Runtime and SDK
+identity guards reject stale completions before they touch destination stores or submit a prompt.
+
+Stop during pending creation rejects local readiness and runs the same rollback immediately.
+The create request may still succeed on the server, so cancellation leaves its directory intact
+and ignores its later response locally. The cancelled entry rejects session operations until
+that request settles. No interrupt is sent for a prompt that was never submitted.
 
 Opening a new draft applies its configured model identifier immediately, then
 reconciles after project config activation. That continuation belongs to the

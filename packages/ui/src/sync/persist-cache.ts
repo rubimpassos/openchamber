@@ -15,6 +15,7 @@ import { countSyncPersistenceSerialization, countSyncPersistenceStorageWrite } f
 import { isChatDirectoryPath } from "@/lib/chatDirectories"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { z } from "zod"
+import { isPendingSessionCreation } from "./pending-session-creation"
 
 /** Cap persisted session lists so localStorage stays bounded per directory. */
 const PERSISTED_SESSION_LIMIT = 50
@@ -353,7 +354,7 @@ export function persistSessions(directory: string, sessions: Session[] | undefin
     writeSessionCache(key, legacyCacheKey(directory, "sessions"), sessions)
     return
   }
-  scheduleSessionCacheWrite(directory, sessions)
+  scheduleSessionCacheWrite(directory, sessions.filter((session) => !isPendingSessionCreation(session.id)))
 }
 
 /**
@@ -479,7 +480,8 @@ export function persistGlobalSessionSnapshot(sessions: Session[]): void {
   if (isVSCodeRuntime()) return
   const runtimeKey = getRuntimeKey() || "local"
   const key = globalSnapshotKey(runtimeKey)
-  scheduleSessionWrite({ runtimeKey, key, sessions, write: () => writeGlobalSessionSnapshot(key, runtimeKey, sessions) })
+  const confirmed = sessions.filter((session) => !isPendingSessionCreation(session.id))
+  scheduleSessionWrite({ runtimeKey, key, sessions: confirmed, write: () => writeGlobalSessionSnapshot(key, runtimeKey, confirmed) })
 }
 
 /** Write vcs info to cache */

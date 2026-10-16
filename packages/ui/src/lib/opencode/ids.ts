@@ -4,6 +4,11 @@
  * the transport, and tests that mock the client keep this helper real.
  */
 
+import { Session } from "@opencode/schema/session"
+
+/** FORK: session IDs sort descending upstream; message IDs still sort ascending. */
+export const createSessionId = (): string => Session.ID.create()
+
 const ID_RANDOM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 const ID_RANDOM_LENGTH = 14
 
@@ -28,7 +33,7 @@ const randomBase62 = (length: number): string => {
 }
 
 /** Time-sortable id in OpenCode's own format, so client-generated ids sort with server ones. */
-export const ascendingId = (prefix: "msg" | "ses"): string => {
+export const ascendingId = (prefix: "msg"): string => {
   const timestamp = Date.now()
   if (timestamp !== lastIdTimestamp) {
     lastIdTimestamp = timestamp
