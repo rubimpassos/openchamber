@@ -77,6 +77,7 @@ import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { ArchiveSessionsView } from '@/components/views/ArchiveView';
 import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
+import { SuggestedTasksView } from '@/components/suggested-tasks/SuggestedTasksPage';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
@@ -131,7 +132,7 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
     (Changes / Files / Terminal / Notes / MCP) are separate layers. */
-type MobileSurface = 'archive' | 'board' | 'instances' | 'scheduled' | 'settings' | 'update' | 'usage';
+type MobileSurface = 'archive' | 'board' | 'instances' | 'scheduled' | 'suggested' | 'settings' | 'update' | 'usage';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t, direction } = useI18n();
@@ -418,6 +419,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       onOpenSettings: () => openSettingsSurface('nav'),
       onOpenUsage: () => openSurface('usage'),
       onOpenScheduled: () => openSurface('scheduled'),
+      onOpenSuggested: () => openSurface('suggested'),
       onOpenArchive: () => openSurface('archive'),
       onOpenSourceBoard: () => openSurface('board'),
       onOpenUpdate: showUpdateItem ? () => openSurface('update') : undefined,
@@ -723,6 +725,21 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           >
             <ErrorBoundary>
               <ScheduledTasksView layout="mobile" onLeave={leaveScheduledTasks} />
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {activeSurface === 'suggested' ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeSurface}
+            ariaLabel={t('suggestedTasks.page.title')}
+            title={t('suggestedTasks.page.title')}
+          >
+            <ErrorBoundary>
+              <SuggestedTasksView layout="mobile" onLeave={leaveSourceBoard} />
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}
