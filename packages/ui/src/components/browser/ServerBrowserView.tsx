@@ -53,7 +53,7 @@ import { ServerBrowserBanners } from './ServerBrowserBanners';
 import { ServerBrowserInspector } from './ServerBrowserInspector';
 import { ServerBrowserDialogCard, ServerBrowserFileChooserCard } from './ServerBrowserPageRequests';
 
-export type ServerBrowserViewProps = {
+type ServerBrowserViewProps = {
   guestId: string;
   directory: string;
   /** The Browser panel tab in front, which shows one Chrome tab of the chat; null when no Browser tab is. */

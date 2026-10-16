@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const SCHEMA_VERSION = 1;
 export const MAX_BODY_BYTES = 128 * 1024;
 export const MAX_PROMPT_LENGTH = 16_000;
-export const MAX_MESSAGES = 100;
+const MAX_MESSAGES = 100;
 
 export const ERROR_DEFINITIONS = Object.freeze({
   UNAUTHORIZED: { statusCode: 401, message: 'Authentication required.' },
@@ -41,7 +41,7 @@ export const inputSchemas = Object.freeze({
 
 export const ACTIONS = Object.freeze(Object.keys(inputSchemas));
 const envelope = { schemaVersion: z.literal(SCHEMA_VERSION), requestId: z.string().uuid() };
-export const requestSchema = z.discriminatedUnion('action', ACTIONS.map((action) => z.object({
+const requestSchema = z.discriminatedUnion('action', ACTIONS.map((action) => z.object({
   ...envelope, action: z.literal(action), input: inputSchemas[action],
 }).strict()));
 
@@ -51,7 +51,7 @@ const dispatchResult = z.object({ sessionId: identifier, promptDispatched: z.boo
 const message = z.object({
   id: identifier, role: z.enum(['user', 'assistant']), text: z.string().max(MAX_BODY_BYTES),
 }).strict();
-export const dataSchemas = Object.freeze({
+const dataSchemas = Object.freeze({
   'projects.list': z.object({ projects: z.array(z.object({ id: identifier, label: label.optional() }).strict()).max(100) }).strict(),
   'session.list': z.object({ sessions: z.array(sessionSummary).max(100) }).strict(),
   'session.create': dispatchResult,
@@ -68,7 +68,7 @@ const errorSchema = z.discriminatedUnion('code', Object.entries(ERROR_DEFINITION
     partial: z.literal(true).optional(), sessionId: identifier.optional(),
   }).strict().refine((error) => (error.partial === true) === (error.sessionId !== undefined)),
 ));
-export const responseSchema = z.discriminatedUnion('action', ACTIONS.map((action) => z.object({
+const responseSchema = z.discriminatedUnion('action', ACTIONS.map((action) => z.object({
   ...envelope, domainId: identifier, action: z.literal(action), ok: z.boolean(),
   data: dataSchemas[action].optional(), error: errorSchema.optional(),
 }).strict().refine((response) => response.ok

@@ -5,7 +5,7 @@
  */
 const SUBAGENT_SUFFIX = /^(.*?)\s*\(@([^()]+?) subagent\)\s*$/;
 
-export type SubagentTitle = { title: string; agent: string | null };
+type SubagentTitle = { title: string; agent: string | null };
 
 export const splitSubagentTitle = (title: string): SubagentTitle => {
   const match = SUBAGENT_SUFFIX.exec(title);

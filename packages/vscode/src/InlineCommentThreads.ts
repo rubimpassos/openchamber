@@ -22,7 +22,7 @@ import { DELIVERY_CONFIRMATION_TIMEOUT_MS, canCommentOnDocument, nextDraftId, re
 // two have to be kept in step by hand.
 const INLINE_COMMENT_CONTROLLER_ID = 'openchamber.inlineComments';
 
-export interface InlineCommentDraftPayload {
+interface InlineCommentDraftPayload {
     draftId: string;
     filePath: string;
     relativePath: string;
@@ -63,7 +63,7 @@ interface OpenChamberCommentThread extends vscode.CommentThread {
 /** Identifies one chat webview: a session panel id, or the sidebar. */
 export const SIDEBAR_SURFACE_ID = 'sidebar';
 
-export interface InlineCommentThreadsOptions {
+interface InlineCommentThreadsOptions {
     /**
      * Hands a finished draft to a chat webview.
      *

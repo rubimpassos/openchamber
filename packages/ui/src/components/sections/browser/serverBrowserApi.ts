@@ -41,7 +41,7 @@ export interface ChromeStatus {
   version?: string;
 }
 
-export interface BrowserStateScope {
+interface BrowserStateScope {
   id: string;
   directory: string;
   sessionId: string;
@@ -52,7 +52,7 @@ export interface BrowserStateScope {
   title: string;
 }
 
-export interface BrowserState {
+interface BrowserState {
   controller: 'none' | 'user';
   viewerInControl: boolean;
   selectedScopeId: string | null;
@@ -67,7 +67,7 @@ export interface ProfileSite {
 }
 
 /** A call reached the extension but it answered with a non-2xx status. */
-export interface ServerBrowserHttpError {
+interface ServerBrowserHttpError {
   ok: false;
   kind: 'http';
   status: number;
@@ -75,14 +75,14 @@ export interface ServerBrowserHttpError {
 }
 
 /** The host proxy itself could not reach the extension (not installed, disabled, service down…). */
-export interface ServerBrowserUnavailable {
+interface ServerBrowserUnavailable {
   ok: false;
   kind: 'unavailable';
   message: string;
 }
 
-export type ServerBrowserError = ServerBrowserHttpError | ServerBrowserUnavailable;
-export type ServerBrowserResult<T> = { ok: true; value: T } | ServerBrowserError;
+type ServerBrowserError = ServerBrowserHttpError | ServerBrowserUnavailable;
+type ServerBrowserResult<T> = { ok: true; value: T } | ServerBrowserError;
 
 const parseJsonBody = (body: string): unknown => {
   if (!body) return null;

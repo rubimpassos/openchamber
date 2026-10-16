@@ -12,7 +12,6 @@ import { proxyGuestServiceRequest } from '@/lib/guests/service';
 import type { GuestRequest, GuestRequestMethod } from '@openchamber/sdk';
 
 import type {
-  ServerBrowserChromeStatus,
   ServerBrowserInspectorBatch,
   ServerBrowserRequestDetail,
   ServerBrowserState,
@@ -211,11 +210,6 @@ export const clearServerBrowserData = (
   body: { generation: number; what: 'cookies' | 'cache' },
 ): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/page/clear', body);
 
-export const getServerBrowserChromeStatus = (
-  guestId: string,
-  viewerId: string | undefined,
-): Promise<ServerBrowserResult<ServerBrowserChromeStatus>> => call(guestId, viewerId, 'GET', '/chrome');
-
 export const closeServerBrowserProfile = (
   guestId: string,
   viewerId: string | undefined,
@@ -252,14 +246,6 @@ export const pollServerBrowserInspector = (
   after: number,
 ): Promise<ServerBrowserResult<ServerBrowserInspectorBatch>> => (
   call(guestId, viewerId, 'GET', '/inspector/events', { query: { captureId, after: String(after) } })
-);
-
-export const evaluateServerBrowserInspector = (
-  guestId: string,
-  viewerId: string | undefined,
-  body: { captureId: string; expression: string },
-): Promise<ServerBrowserResult<{ value?: unknown; error?: string }>> => (
-  call(guestId, viewerId, 'POST', '/inspector/evaluate', { body })
 );
 
 export const getServerBrowserInspectorRequest = (

@@ -50,7 +50,7 @@ const capped = (text: string): string => (
 );
 
 /** `{match.name}` / `{match.1}` from a regex match; an unknown group is an empty string. */
-export const renderMessageTemplate = (template: string, match: RegExpExecArray): string => (
+const renderMessageTemplate = (template: string, match: RegExpExecArray): string => (
   template.replace(PLACEHOLDER, (_whole, key: string) => {
     const value = /^\d+$/.test(key) ? match[Number(key)] : match.groups?.[key];
     return capped((value ?? '').replace(/\s+/g, ' ').trim());

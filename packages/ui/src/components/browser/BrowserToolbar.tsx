@@ -48,7 +48,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, dis
   </Tooltip>
 );
 
-export type BrowserToolbarMenuItem =
+type BrowserToolbarMenuItem =
   | { kind: 'item'; id: string; icon: IconName; label: string; onSelect: () => void; destructive?: boolean; disabled?: boolean }
   | { kind: 'separator'; id: string };
 
