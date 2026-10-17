@@ -297,6 +297,18 @@ const addTypedIconNameRecords = (content) => {
     addIconLiterals(content.slice(openBraceIndex + 1, closeBraceIndex))
     recordRegex.lastIndex = closeBraceIndex + 1
   }
+
+  const satisfiesRegex = /\b(?:const|let|var)\s+\w+\s*=\s*{/g
+  while ((match = satisfiesRegex.exec(content)) !== null) {
+    const openBraceIndex = content.indexOf("{", match.index)
+    const closeBraceIndex = findMatchingBrace(content, openBraceIndex)
+    if (closeBraceIndex === -1) continue
+
+    if (/^\s*(?:as\s+const\s+)?satisfies\s+Record<[^>]*IconName[^>]*>/.test(content.slice(closeBraceIndex + 1))) {
+      addIconLiterals(content.slice(openBraceIndex + 1, closeBraceIndex))
+    }
+    satisfiesRegex.lastIndex = closeBraceIndex + 1
+  }
 }
 
 const addIconNameVariableAssignments = (content) => {

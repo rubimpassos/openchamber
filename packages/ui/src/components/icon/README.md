@@ -27,7 +27,7 @@ Common suffixes:
 
 1. Use `<Icon name="new-icon-name" />` or declare a shared literal as `const icon: IconName = "new-icon-name"`.
 2. Run `bun run icons:generate` to regenerate the sprite.
-3. The script scans JSX names, typed icon constants and records, and existing `RiX` references under `packages/ui/src`.
+3. The script scans JSX names, typed icon constants and records (including `satisfies Record<Kind, IconName>`), and existing `RiX` references under `packages/ui/src`.
 
 If the icon doesn't exist in the sprite, the script will warn you.
 
