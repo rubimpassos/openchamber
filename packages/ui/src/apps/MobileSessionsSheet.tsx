@@ -99,10 +99,12 @@ import {
   ROW_ACTION_SLOT_WIDTH,
   ROW_ACTIONS_WIDTH,
   type MobileSessionPinAction,
+  type MobileSessionPriorityAction,
   type MobileSessionWorkAction,
 } from './MobileSessionSwipe';
 import { isDoneSuggested, isSessionInWork } from '@/lib/sessionWorkMetadata';
-import { setSessionWorkState } from '@/sync/session-actions';
+import { setSessionPriority, setSessionWorkState } from '@/sync/session-actions';
+import { isSessionPriority } from '@/lib/sessionPriority';
 import { useUIStore } from '@/stores/useUIStore';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import {
@@ -224,7 +226,8 @@ const CHAT_PAGE_SIZE = 3;
 const MOBILE_TREE_BASE_PADDING_PX = 32;
 const treeRowLeft = (depth: number): number => MOBILE_TREE_BASE_PADDING_PX + depth * 12;
 const treeTextLeft = (depth: number): number => treeRowLeft(depth) + 20;
-/** Expansion keys of the "Pinned" and "In work" sections, alongside project ids. */
+/** Expansion keys of the "Priority", "Pinned" and "In work" sections, alongside project ids. */
+const PRIORITY_SECTION_ID = 'openchamber:priority';
 const PINNED_SECTION_ID = 'openchamber:pinned';
 const WORK_SECTION_ID = 'openchamber:work';
 // Chats are flat rows in both views, aligned with the timeline rows' text.
@@ -344,6 +347,8 @@ const SessionRow: React.FC<{
   work?: MobileSessionWorkAction;
   /** Pin / Unpin in the swipe actions, and the pin marker; top-level rows. */
   pin?: MobileSessionPinAction;
+  /** Mark as priority / Remove priority in the swipe actions; top-level rows. */
+  priority?: MobileSessionPriorityAction;
   /** Subsessions of the row; while they are hidden, their waiting requests
       count on this row. Absent: only the row's own requests count. */
   descendantIdsOf?: (sessionId: string) => readonly string[];
@@ -370,6 +375,7 @@ const SessionRow: React.FC<{
   onCancelRename,
   work,
   pin,
+  priority,
   descendantIdsOf,
 }) => {
   const { t } = useI18n();
@@ -547,7 +553,7 @@ const SessionRow: React.FC<{
 
   return (
     <MobileSwipeActionsRow
-      actionsWidth={ROW_ACTIONS_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0) + (pin ? ROW_ACTION_SLOT_WIDTH : 0)}
+      actionsWidth={ROW_ACTIONS_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0) + (pin ? ROW_ACTION_SLOT_WIDTH : 0) + (priority ? ROW_ACTION_SLOT_WIDTH : 0)}
       revealed={revealed}
       onRevealedChange={(next) => onRevealedChange?.(next)}
       dataActiveSession={active}
@@ -568,6 +574,7 @@ const SessionRow: React.FC<{
           onRevealedChange={onRevealedChange}
           work={work}
           pin={pin}
+          priority={priority}
         />
       )}
     >
@@ -1049,6 +1056,17 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
     return ids;
   }, [childrenBySessionId, sessionWorkEnabled, sessions, showWorkSection]);
+  // Priority project sessions, with their subsessions, come first, above
+  // Chats, whatever the display panel shows, and only there.
+  const priorityZoneSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const session of sessions) {
+      if (getParentId(session) || isChatDirectoryPath(getSessionDirectory(session)) || !isSessionPriority(session)) continue;
+      ids.add(session.id);
+      for (const id of getDescendantIds(childrenBySessionId, session.id)) ids.add(id);
+    }
+    return ids;
+  }, [childrenBySessionId, sessions]);
   // Pinned project sessions, with their subsessions, get their own section
   // above In work while the display panel shows it; a pinned session in work
   // is listed there only. Pinned chats stay at the top of Chats.
@@ -1057,12 +1075,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     if (!showPinnedSection) return ids;
     for (const session of sessions) {
       const directory = getSessionDirectory(session);
-      if (getParentId(session) || isChatDirectoryPath(directory) || !isSessionPinned(pinnedSessionIds, directory || null, session.id)) continue;
+      if (getParentId(session) || isChatDirectoryPath(directory) || priorityZoneSessionIds.has(session.id)
+        || !isSessionPinned(pinnedSessionIds, directory || null, session.id)) continue;
       ids.add(session.id);
       for (const id of getDescendantIds(childrenBySessionId, session.id)) ids.add(id);
     }
     return ids;
-  }, [childrenBySessionId, pinnedSessionIds, sessions, showPinnedSection]);
+  }, [childrenBySessionId, pinnedSessionIds, priorityZoneSessionIds, sessions, showPinnedSection]);
   const sectionChatSessions = React.useMemo(
     () => (workSessionIds.size > 0 ? chatSessions.filter((session) => !workSessionIds.has(session.id)) : chatSessions),
     [chatSessions, workSessionIds],
@@ -1132,6 +1151,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       ? orderSessionsByLifecycleScopes(sessions.filter((session) => pinnedZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
       : [],
   }), [pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions]);
+  const priorityBucket = React.useMemo<WorktreeBucket>(() => ({
+    key: PRIORITY_SECTION_ID,
+    label: '',
+    path: '',
+    worktree: null,
+    space: null,
+    sessions: priorityZoneSessionIds.size > 0
+      ? orderSessionsByLifecycleScopes(sessions.filter((session) => priorityZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
+      : [],
+  }), [pinnedSessionIds, priorityZoneSessionIds, sessionOrderRanks, sessions]);
   const workBucket = React.useMemo<WorktreeBucket>(() => ({
     key: WORK_SECTION_ID,
     label: '',
@@ -1139,9 +1168,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     worktree: null,
     space: null,
     sessions: workSessionIds.size > 0
-      ? orderSessionsByLifecycleScopes(sessions.filter((session) => workSessionIds.has(session.id) && !pinnedZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
+      ? orderSessionsByLifecycleScopes(sessions.filter((session) => workSessionIds.has(session.id) && !pinnedZoneSessionIds.has(session.id) && !priorityZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
       : [],
-  }), [pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions, workSessionIds]);
+  }), [pinnedSessionIds, pinnedZoneSessionIds, priorityZoneSessionIds, sessionOrderRanks, sessions, workSessionIds]);
   const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
   const chatRootCount = React.useMemo(
     () => sectionChatSessions.filter((session) => !getParentId(session)).length,
@@ -1376,6 +1405,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             onCancelRename={() => setRenamingSessionId(null)}
             work={workActionFor(session)}
             pin={pinActionFor(session)}
+            priority={priorityActionFor(session)}
             descendantIdsOf={descendantIdsOf}
           />
           {hasChildren && expanded && rowDepth !== null
@@ -1491,6 +1521,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const pinActionFor = (session: Session): MobileSessionPinAction | undefined => {
     if (getParentId(session) || !getSessionDirectory(session)) return undefined;
     return { pinned: isPinned(session), onToggle: () => handleTogglePin(session) };
+  };
+
+  const handleTogglePriority = (session: Session, priority: boolean) => {
+    setSessionPriority(session.id, getSessionDirectory(session) || null, !priority).catch(() => {
+      toast.error(t('sessions.sidebar.session.priority.updateFailed'));
+    });
+  };
+
+  /** Mark as priority / Remove priority for a top-level row. */
+  const priorityActionFor = (session: Session): MobileSessionPriorityAction | undefined => {
+    if (getParentId(session)) return undefined;
+    const priority = isSessionPriority(session);
+    return { priority, onToggle: () => handleTogglePriority(session, priority) };
   };
 
   const handleConfirmDelete = (session: Session) => runSubtreeAction('delete', session);
@@ -1666,7 +1709,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // reorder) is on screen.
   const listActive = !normalizedQuery && !editingOrder;
   const compactZoneRows = sidebarViewMode !== 'timeline' && !detailedZoneRows;
-  const needsTimelineContext = timelineActive || (listActive && (workBucket.sessions.length > 0 || pinnedBucket.sessions.length > 0));
+  const needsTimelineContext = timelineActive || (listActive && (workBucket.sessions.length > 0 || pinnedBucket.sessions.length > 0 || priorityBucket.sessions.length > 0));
 
   // The git store only knows directories something asked about. The grouped
   // project tree never needs project root branches, so the timeline-style
@@ -1740,6 +1783,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const workTimelineEntries = React.useMemo(
     () => (listActive ? toTimelineEntries(workBucket.sessions.filter((session) => !getParentId(session))) : []),
     [listActive, toTimelineEntries, workBucket],
+  );
+  const priorityTimelineEntries = React.useMemo(
+    () => (listActive ? toTimelineEntries(priorityBucket.sessions.filter((session) => !getParentId(session))) : []),
+    [listActive, toTimelineEntries, priorityBucket],
   );
   const pinnedTimelineEntries = React.useMemo(
     () => (listActive ? toTimelineEntries(pinnedBucket.sessions.filter((session) => !getParentId(session))) : []),
@@ -1881,7 +1928,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     );
   };
 
-  /** Pinned or In work: a collapsible section over its timeline rows; nothing when empty. */
+  /** Priority, Pinned or In work: a collapsible section over its timeline rows; nothing when empty. */
   const renderZoneSection = (
     sectionId: string,
     icon: IconName,
@@ -1947,6 +1994,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     onToggleWork: sessionWorkEnabled ? (session, inWork) => { void handleToggleWork(session, inWork); } : undefined,
     isPinned,
     onTogglePin: handleTogglePin,
+    onTogglePriority: handleTogglePriority,
     descendantIdsOf,
   };
 
@@ -2203,6 +2251,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
+              {renderZoneSection(PRIORITY_SECTION_ID, 'flag', t('sessions.sidebar.activity.priorityTitle'), priorityTimelineEntries)}
               {(() => {
                 const chatsExpanded = projectExpandedMap[CHAT_DRAFT_PROJECT_ID] ?? true;
                 const chatsLabel = t('mobile.sessions.section.chats');

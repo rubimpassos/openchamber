@@ -122,7 +122,7 @@ import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-mem
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { isFilesystemError } from "@/lib/api/files-errors"
-import { formatMessage, useI18nStore } from "@/lib/i18n"
+import { showRestartInterruptedToast } from "./restart-interrupted-toast"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
 import { listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from "@/stores/globalSessions"
@@ -627,24 +627,7 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
   const tag = trimmedOrUndefined(notification.tag)
 
   if (kind === "opencode-restart-interrupted") {
-    const dictionary = useI18nStore.getState().dictionary
-    const title = formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.title")
-    const options = {
-      id: "opencode-restart-interrupted",
-      description: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.description"),
-      duration: Infinity,
-    }
-    if (sessionId && directory) {
-      toast.info(title, {
-        ...options,
-        action: {
-          label: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.openSession"),
-          onClick: () => openSessionFromToast(sessionId, directory),
-        },
-      })
-    } else {
-      toast.info(title, options)
-    }
+    showRestartInterruptedToast(notification, directory)
   } else if (notification.showWhenFocused === true && isUiFocused()) {
     showPluginNotificationToast(kind, title, body, tag)
   }

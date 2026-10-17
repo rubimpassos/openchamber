@@ -9,6 +9,7 @@ import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
+import { classifyRestartCause, readCgroupMemory } from './cgroup-memory.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -83,6 +84,20 @@ const sanitizeDiagnosticText = (value) => String(value ?? '')
     '$1$2[redacted]',
   );
 
+/**
+ * One line per distinct stderr line, in first-seen order, with a count for
+ * repeats: a plugin that logs the same warning on every config reload would
+ * otherwise fill the whole tail and hide the line that explains the restart.
+ */
+const collapseRepeatedLines = (text) => {
+  const counts = new Map();
+  for (const line of String(text).split('\n')) {
+    const key = line.trimEnd();
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts].map(([line, count]) => (count > 1 ? `${line} [repeated ${count}x]` : line)).join('\n');
+};
+
 const getHealthFailureDetail = (error) => {
   const name = String(error?.name || 'Error');
   const message = String(error?.message || error || 'Unknown error');
@@ -153,6 +168,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     now = Date.now,
     topUpV1SessionMigration = topUpV1Migration,
     checkOpenCodeBinary = requireOpenCodeV2,
+    // Memory counters of the server's own cgroup (shared with the managed
+    // OpenCode), or null where they cannot be read.
+    readMemory = readCgroupMemory,
   } = deps;
 
   let managedPreflight = null;
@@ -239,19 +257,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       pid: child.pid || null,
       exitCode: child.exitCode ?? null,
       signalCode: child.signalCode ?? null,
-      stderrTail: getBoundedTextTail(
+      stderrTail: collapseRepeatedLines(getBoundedTextTail(
         sanitizeDiagnosticText(child.stderrTail ?? ''),
         MANAGED_STDERR_TAIL_MAX_BYTES,
-      ),
+      )),
     };
     state.lastManagedOpenCodeProcess = snapshot;
     return snapshot;
   };
 
-  const captureRestartDiagnostics = (reason) => {
+  const captureRestartDiagnostics = (reason, { cause, memory }) => {
     const processSnapshot = snapshotManagedOpenCodeProcess();
     const diagnostics = {
       reason: sanitizeDiagnosticText(String(reason || 'managed-restart')).slice(0, HEALTH_FAILURE_DETAIL_MAX_LENGTH),
+      cause,
+      // cgroup memory counters when the failure window began and at the restart.
+      memory,
       healthFailure: state.lastOpenCodeHealthFailure ? { ...state.lastOpenCodeHealthFailure } : null,
       process: processSnapshot
         ? { ...processSnapshot, alive: isManagedOpenCodeProcessAlive() }
@@ -261,6 +282,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     };
     state.lastOpenCodeRestartDiagnostics = diagnostics;
     console.warn('[lifecycle] managed OpenCode restart diagnostics', diagnostics);
+    return diagnostics;
   };
 
   const waitForChildProcessClose = (child, timeoutMs) => new Promise((resolve) => {
@@ -887,7 +909,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw lastError;
   };
 
-  const restartOpenCode = async (reason = 'managed-restart') => {
+  const restartOpenCode = async (reason = 'managed-restart', { cause = 'unknown', memory = null } = {}) => {
     if (state.isShuttingDown) return;
     if (state.currentRestartPromise) {
       await state.currentRestartPromise;
@@ -927,7 +949,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return;
       }
 
-      captureRestartDiagnostics(reason);
+      captureRestartDiagnostics(reason, { cause, memory });
       const portToKill = state.openCodePort;
 
       if (state.openCodeProcess) {
@@ -977,7 +999,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // current port. Best effort: a failure here must not fail the restart
       // itself.
       try {
-        onOpenCodeRestarted?.();
+        onOpenCodeRestarted?.({ cause });
       } catch (error) {
         console.warn('Failed to rebind event stream after OpenCode restart:', error?.message ?? error);
       }
@@ -1397,11 +1419,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   let healthCheckCyclePromise = null;
   let lastHealthProbeResult = null;
   let healthFailureCountIntervalMs = 15_000;
+  // cgroup memory counters at the first counted failure of the current streak.
+  let memoryAtFirstFailure = null;
 
   const resetHealthFailureState = () => {
     consecutiveHealthFailures = 0;
     lastUnhealthyWithBusySessionsAt = 0;
     lastCountedHealthFailureAt = 0;
+    memoryAtFirstFailure = null;
+  };
+
+  const measureRestartCause = (trigger, healthFailureClass = null) => {
+    const current = readMemory();
+    const baseline = memoryAtFirstFailure;
+    memoryAtFirstFailure = null;
+    return {
+      cause: classifyRestartCause({ trigger, healthFailureClass, baseline, current }),
+      memory: baseline || current ? { atFirstFailure: baseline, atRestart: current } : null,
+    };
   };
 
   const probeOpenCodeHealth = async () => {
@@ -1461,7 +1496,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           console.log(`[lifecycle] ${source} health check: OpenCode process exited, restarting...`);
           consecutiveHealthFailures = 0;
           lastHealthProbeResult = null;
-          await restartOpenCode(`${source}-process-exited`);
+          await restartOpenCode(`${source}-process-exited`, measureRestartCause('process-exited'));
           return;
         }
         const checkedAt = now();
@@ -1469,6 +1504,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           return;
         }
         lastCountedHealthFailureAt = checkedAt;
+        if (consecutiveHealthFailures === 0) memoryAtFirstFailure = readMemory();
         consecutiveHealthFailures += 1;
         const healthFailure = healthResult.failure || {
           class: 'error',
@@ -1493,6 +1529,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           busyDecision.staleBusy
             ? `${source}-stale-busy-health-failure`
             : `${source}-health-failure`,
+          measureRestartCause('health-failure', healthFailure.class),
         );
       } else {
         resetHealthFailureState();

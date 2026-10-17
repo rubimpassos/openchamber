@@ -103,7 +103,10 @@ time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: worktree setup and a message
-waiting for its space (`ComposerStatusStrip`), the goal (`SessionGoalRow`), a
+waiting for its space (`ComposerStatusStrip`), the notice that an OpenCode
+restart cut off the last turn (`SessionRestartInterruptionRow`; its Continue
+fills the composer the way a suggestion does and sends nothing), the goal
+(`SessionGoalRow`), a
 running review loop (`AutoReviewStrip`), background commands, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),
 the "looks done" hint or the review offer, the suggestion
@@ -785,7 +788,7 @@ moves never fold it, and nothing folds while the keyboard is open. The fold and
 unfold tween the glass box height on the keyboard's hide timing (WAAPI, skipped
 under reduced motion).
 
-On a phone the top rows (worktree setup, space wait, goal, auto review,
+On a phone the top rows (worktree setup, space wait, restart interruption, goal, auto review,
 background commands, reverted, queue, done hint, suggestion) pass through
 `ui/MobileComposerTopRows.tsx`. Each row names itself with
 `useComposerStatusChip` (`state/composerStatusChips.ts`) while it renders. One

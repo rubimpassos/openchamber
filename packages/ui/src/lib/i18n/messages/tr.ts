@@ -17,6 +17,7 @@ import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
 import { suggestedTasksI18n } from './suggested-tasks.i18n';
 import { notificationCenterI18n } from './notification-center.i18n';
+import { sessionRestartInterruptionI18n } from './session-restart-interruption.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
@@ -95,6 +96,7 @@ export const dict = {
   ...projectActionsI18n.tr,
   ...suggestedTasksI18n.tr,
   ...notificationCenterI18n.tr,
+  ...sessionRestartInterruptionI18n.tr,
   ...environmentI18n.tr,
   ...providersI18n.tr,
   ...mcpGridI18n.tr,

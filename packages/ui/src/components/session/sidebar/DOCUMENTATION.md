@@ -266,6 +266,25 @@ its subsessions' requests. Row memoization
 compares `metadata` by reference and `time.idle`, so metadata-only changes
 (work, goal, recap) re-render the row.
 
+## Priority
+
+`metadata.openchamber.priority = { at }` marks a priority session
+(`lib/sessionPriority.ts`; the server reads it in
+`packages/web/server/lib/session-interruption/priority.js`). The row menu, the
+session header menu and the phone's swipe actions switch it on and off
+(`SessionPriorityMenuItem`, `setSessionPriority`). It lives on the session
+record, so it is the same on every device and runtime, VS Code included.
+
+Priority sessions get a `priority` activity zone above Chats, in both views,
+whatever the display toggles say. It lists top-level, unarchived project
+sessions in the shared lifecycle order; a priority session is listed there
+only, never also in Pinned or In work, and stays in its project like the other
+zones (`zoneSessionIds`). A priority chat stays in Chats. The phone sheet shows
+the same section above Chats. After an OpenCode restart cut a priority session
+off, the server resumes it on its own (see
+`packages/web/server/lib/session-interruption/DOCUMENTATION.md`), and its
+notice above the composer is the stronger, warning-coloured one.
+
 ## Pinned
 
 The display menu's Show pinned section toggle (`showPinnedSection`,

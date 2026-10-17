@@ -116,6 +116,10 @@ import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionInterruptionRuntime } from './lib/session-interruption/runtime.js';
+import { restartInterruptedNotification } from './lib/session-interruption/restart.js';
+import { OpenCode } from '@opencode/client';
+import { createAutoResumeRuntime } from './lib/session-interruption/auto-resume.js';
+import { readCgroupMemory } from './lib/opencode/cgroup-memory.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
@@ -1123,6 +1127,22 @@ const sessionWorkRuntime = createSessionWorkRuntime({
 
 const sessionInterruptionRuntime = createSessionInterruptionRuntime({
   persistMetadata: persistSessionMetadataPatch,
+  updateMetadata: updateSessionMetadataWith,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
+
+// Priority sessions a managed OpenCode restart cut off get one message that
+// resumes them; see lib/session-interruption/DOCUMENTATION.md.
+const autoResumeRuntime = createAutoResumeRuntime({
+  updateMetadata: updateSessionMetadataWith,
+  readMemory: () => readCgroupMemory(),
+  sendPrompt: ({ sessionId, directory, text }) => {
+    const headers = { ...getOpenCodeAuthHeaders() };
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
+    return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers })
+      .session.prompt({ sessionID: sessionId, text }, { signal: AbortSignal.timeout(15_000) });
+  },
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
@@ -1539,7 +1559,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // so the UI keeps receiving events instead of staying pinned to the old
   // process (#2638). The runtime is created later by the startup pipeline;
   // by the time any restart runs, it is assigned.
-  onOpenCodeRestarted: () => {
+  onOpenCodeRestarted: ({ cause }) => {
     // A restart reloads plugins: provider ports, credentials and the provider
     // list itself can all differ from what was cached.
     resetOpenCodeRuntimeProviders();
@@ -1548,23 +1568,19 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     } catch (error) {
       console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
     }
+    let sessionIds = [];
     try {
-      const { sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart();
-      if (sessionIds.length > 0) {
-        const multiple = sessionIds.length > 1;
-        broadcastUiNotification({
-          title: multiple ? 'Chats interrupted' : 'Chat interrupted',
-          body: multiple
-            ? 'OpenCode restarted during running responses. Send a message in each chat to continue.'
-            : 'OpenCode restarted during a running response. Send a message to continue.',
-          tag: 'opencode-restart-interrupted',
-          kind: 'opencode-restart-interrupted',
-          sessionId: sessionIds[0],
-        });
-      }
+      ({ sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart());
     } catch (error) {
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
+    if (sessionIds.length === 0) return;
+    void sessionInterruptionRuntime.recordRestartInterruptions({ sessionIds, cause })
+      .then((sessions) => {
+        broadcastUiNotification(restartInterruptedNotification(sessions));
+        return autoResumeRuntime.resume(sessions);
+      })
+      .catch((error) => console.warn('Failed to announce or resume sessions interrupted by the OpenCode restart:', error?.message ?? error));
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
@@ -2034,6 +2050,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   openCodeWatcherRuntime,
   sessionAssistRuntime,
   sessionWorkRuntime,
+  autoResumeRuntime,
   sessionGoalRuntime,
   contextObligatoryRuntime,
   messageQueueRuntime,

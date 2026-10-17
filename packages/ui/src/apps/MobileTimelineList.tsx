@@ -15,6 +15,7 @@ import { MobileProjectIcon, type MobileProjectIconProject } from './MobileProjec
 import { MobileSessionRenameForm } from './MobileSessionRenameForm';
 import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH, ROW_ACTIONS_WIDTH } from './MobileSessionSwipe';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isSessionPriority } from '@/lib/sessionPriority';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { CollapsedActivityIndicator } from '@/components/session/sidebar/sessions/collapsedActivityIndicator';
 import { useCollapsedSessionActivityState } from '@/components/session/sidebar/sessions/collapsedActivityState';
@@ -63,6 +64,7 @@ export type TimelineRowHandlers = {
   onToggleWork?: (session: Session, inWork: boolean) => void;
   isPinned: (session: Session) => boolean;
   onTogglePin: (session: Session) => void;
+  onTogglePriority: (session: Session, priority: boolean) => void;
   /** Subsessions of a row, for the requests they are waiting on. */
   descendantIdsOf: (sessionId: string) => readonly string[];
 };
@@ -171,6 +173,8 @@ const MobileTimelineRow: React.FC<{
   const work = onToggleWork ? { inWork, onToggle: () => onToggleWork(session, inWork) } : undefined;
   const pinned = handlers.isPinned(session);
   const pin = { pinned, onToggle: () => handlers.onTogglePin(session) };
+  const isPriority = isSessionPriority(session);
+  const priority = { priority: isPriority, onToggle: () => handlers.onTogglePriority(session, isPriority) };
   // Timeline rows never expand, so their subsessions' requests show here.
   const { descendantIdsOf } = handlers;
   const familyIds = React.useMemo(() => [session.id, ...descendantIdsOf(session.id)], [descendantIdsOf, session.id]);
@@ -178,8 +182,8 @@ const MobileTimelineRow: React.FC<{
 
   return (
     <MobileSwipeActionsRow
-      // Every timeline row is top-level, so Pin is always there.
-      actionsWidth={ROW_ACTIONS_WIDTH + ROW_ACTION_SLOT_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0)}
+      // Every timeline row is top-level, so Pin and Priority are always there.
+      actionsWidth={ROW_ACTIONS_WIDTH + 2 * ROW_ACTION_SLOT_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0)}
       revealed={revealed}
       onRevealedChange={(next) => handlers.onRevealedChange(session.id, next)}
       dataActiveSession={active}
@@ -200,6 +204,7 @@ const MobileTimelineRow: React.FC<{
           onRevealedChange={(next) => handlers.onRevealedChange(session.id, next)}
           work={work}
           pin={pin}
+          priority={priority}
         />
       )}
     >

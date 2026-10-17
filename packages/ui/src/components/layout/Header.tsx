@@ -58,6 +58,7 @@ import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
+import { SessionPriorityMenuItem } from '@/components/session/SessionPriorityMenuItem';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -1206,6 +1207,9 @@ export const Header: React.FC = () => {
                   <DropdownMenuContent align="end" className="min-w-[190px]">
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}><DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="me-1 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem></SessionMenuItemHint>
                     <SessionAiRenameMenuItem sessionID={currentSessionId} directory={sessionDirectory} open={isHeaderSessionMenuOpen} Item={DropdownMenuItem} />
+                    {currentSession && !currentSession.parentId ? (
+                      <SessionPriorityMenuItem sessionID={currentSessionId} directory={sessionDirectory} Item={DropdownMenuItem} />
+                    ) : null}
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}><DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="me-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem></SessionMenuItemHint>
                     <DropdownMenuSeparator />
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}><DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem></SessionMenuItemHint>

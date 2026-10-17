@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createSessionRuntime } from './session-runtime.js';
+import { restartInterruptedNotification } from '../session-interruption/restart.js';
 
 describe('managed OpenCode restart session recovery', () => {
-  it('settles busy sessions and broadcasts one interruption notification', () => {
+  it('settles busy sessions and broadcasts one interruption notification that lists every session', () => {
     const events = [];
     const broadcastUiNotification = vi.fn();
     const rebindUpstream = vi.fn();
@@ -16,16 +17,7 @@ describe('managed OpenCode restart session recovery', () => {
       rebindUpstream();
       const { sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart();
       if (sessionIds.length > 0) {
-        const multiple = sessionIds.length > 1;
-        broadcastUiNotification({
-          title: multiple ? 'Chats interrupted' : 'Chat interrupted',
-          body: multiple
-            ? 'OpenCode restarted during running responses. Send a message in each chat to continue.'
-            : 'OpenCode restarted during a running response. Send a message to continue.',
-          tag: 'opencode-restart-interrupted',
-          kind: 'opencode-restart-interrupted',
-          sessionId: sessionIds[0],
-        });
+        broadcastUiNotification(restartInterruptedNotification(sessionIds.map((sessionId) => ({ sessionId, directory: '/repo', title: null }))));
       }
     };
     const markBusy = (sessionID) => sessionRuntime.processOpenCodeSsePayload({
@@ -51,6 +43,11 @@ describe('managed OpenCode restart session recovery', () => {
       expect(broadcastUiNotification).toHaveBeenCalledWith(expect.objectContaining({
         kind: 'opencode-restart-interrupted',
         sessionId: 'session-1',
+        sessions: [
+          { sessionId: 'session-1', directory: '/repo' },
+          { sessionId: 'session-2', directory: '/repo' },
+          { sessionId: 'session-3', directory: '/repo' },
+        ],
       }));
     } finally {
       sessionRuntime.dispose();

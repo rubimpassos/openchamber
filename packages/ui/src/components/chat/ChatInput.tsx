@@ -227,6 +227,7 @@ import { RevertedMessagesStrip } from './RevertedMessagesStrip';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionDoneHintRow } from '@/components/chat/SessionDoneHintRow';
 import { SessionReviewHintRow } from '@/components/chat/SessionReviewHintRow';
+import { SessionRestartInterruptionRow } from '@/components/chat/SessionRestartInterruptionRow';
 import { BackgroundShellsStrip } from '@/components/chat/BackgroundShellsStrip';
 import { ComposerStatusStrip } from '@/components/chat/ComposerStatusStrip';
 import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
@@ -3920,6 +3921,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? <ComposerStatusStrip chipId="space" icon="time" text={t('spaces.draft.queued')} chipLabel={t('chat.composerStatus.chip.space')} />
         : null;
     const autoReviewRow = !isBtwActive && !newSessionDraftOpen ? <AutoReviewStrip /> : null;
+    // An OpenCode restart cut off this session's last turn; Continue fills the
+    // composer the way a suggestion does.
+    const restartInterruptionRow = !isBtwActive && !newSessionDraftOpen ? (
+        <SessionRestartInterruptionRow
+            sessionId={currentSessionId}
+            directory={currentSessionDirectoryForSync ?? currentDirectory}
+            onContinue={applyAssistSuggestion}
+        />
+    ) : null;
     // The session's goal, then what is still running, then what waits for it.
     const goalRow = !isBtwActive ? (
         <SessionGoalRow
@@ -3942,10 +3952,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRowsContent = worktreeSetupRow || spaceWaitRow || goalRow || autoReviewRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    const composerTopRowsContent = worktreeSetupRow || spaceWaitRow || restartInterruptionRow || goalRow || autoReviewRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {worktreeSetupRow}
             {spaceWaitRow}
+            {restartInterruptionRow}
             {goalRow}
             {autoReviewRow}
             {backgroundShellsRow}

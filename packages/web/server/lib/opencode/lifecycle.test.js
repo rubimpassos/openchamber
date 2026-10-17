@@ -122,6 +122,8 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     buildManagedOpenCodePath: vi.fn(() => '/home/user/.bun/bin:/usr/local/bin:/usr/bin'),
     // Never let a test touch the real `~/.local/share/opencode/opencode.db`.
     topUpV1SessionMigration: vi.fn(() => ({ status: 'skipped', missing: 0, revisited: 0, reason: 'no-database' })),
+    // The host's real cgroup would make restart causes depend on the machine.
+    readMemory: () => null,
     getManagedOpenCodeShellEnvSnapshot: vi.fn(() => ({
       PATH: '/home/user/.bun/bin:/usr/local/bin:/usr/bin',
       SHELL_ONLY: 'yes',
@@ -738,6 +740,96 @@ describe('OpenCode lifecycle', () => {
     // The restart completed on a (possibly new) port — the event-stream
     // upstreams must rebind so the UI keeps receiving events (#2638).
     expect(onOpenCodeRestarted).toHaveBeenCalledTimes(1);
+    expect(onOpenCodeRestarted).toHaveBeenCalledWith({ cause: 'process-exited' });
+  });
+
+  describe('restart cause after repeated health timeouts', () => {
+    const memory = (high, fullAvg60 = 0) => ({ events: { high, max: 0, oomKill: 0 }, pressure: { fullAvg60 } });
+
+    const restartAfterTimeouts = async (readings) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const replacement = createMockChild();
+      const onOpenCodeRestarted = vi.fn();
+      const readMemory = vi.fn(() => readings.shift() ?? null);
+      let now = 1;
+      globalThis.fetch = vi.fn(async () => {
+        const error = new Error('The operation was aborted due to timeout');
+        error.name = 'TimeoutError';
+        throw error;
+      });
+      spawnMock.mockImplementationOnce(() => {
+        queueMicrotask(() => replacement.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+        return replacement;
+      });
+      const runtime = createRuntime({ onOpenCodeRestarted, readMemory, now: () => now }, {
+        openCodePort: 45678,
+        openCodeProcess: { pid: process.pid, exitCode: null, signalCode: null, close: vi.fn(async () => {}) },
+        isOpenCodeReady: true,
+      });
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await runtime.triggerHealthCheck();
+        now += 15_000;
+      }
+      warn.mockRestore();
+      log.mockRestore();
+      return { runtime, onOpenCodeRestarted, readMemory };
+    };
+
+    it('blames memory when the cgroup hit its high limit during the failures', async () => {
+      const { runtime, onOpenCodeRestarted, readMemory } = await restartAfterTimeouts([memory(100), memory(5_000)]);
+
+      expect(readMemory).toHaveBeenCalledTimes(2);
+      expect(onOpenCodeRestarted).toHaveBeenCalledWith({ cause: 'memory-pressure' });
+      expect(runtime.testState.lastOpenCodeRestartDiagnostics).toMatchObject({
+        reason: 'immediate-health-failure',
+        cause: 'memory-pressure',
+        memory: { atFirstFailure: memory(100), atRestart: memory(5_000) },
+      });
+    });
+
+    it('reports a health timeout when memory stayed calm', async () => {
+      const { onOpenCodeRestarted } = await restartAfterTimeouts([memory(100), memory(100, 0.5)]);
+
+      expect(onOpenCodeRestarted).toHaveBeenCalledWith({ cause: 'health-timeout' });
+    });
+
+    it('reports a health timeout where the cgroup cannot be read', async () => {
+      const { runtime, onOpenCodeRestarted } = await restartAfterTimeouts([]);
+
+      expect(onOpenCodeRestarted).toHaveBeenCalledWith({ cause: 'health-timeout' });
+      expect(runtime.testState.lastOpenCodeRestartDiagnostics.memory).toBeNull();
+    });
+  });
+
+  it('collapses a stderr line repeated many times in the restart diagnostics', async () => {
+    const firstChild = createMockChild();
+    const replacement = createMockChild();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 503, json: async () => null }));
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => firstChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return firstChild;
+    });
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => replacement.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return replacement;
+    });
+    const runtime = createRuntime();
+    const server = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = server;
+
+    const migration = '[config-migration] legacy configuration changes were not applied';
+    firstChild.stderr.emit('data', `${`${migration}\n`.repeat(50)}worker crashed\n`);
+    firstChild.exitCode = 1;
+    firstChild.emit('exit', 1, null);
+    await runtime.triggerHealthCheck();
+
+    expect(runtime.testState.lastOpenCodeRestartDiagnostics.process.stderrTail)
+      .toBe(`${migration} [repeated 50x]\nworker crashed`);
+
+    await runtime.testState.openCodeProcess.close();
+    warn.mockRestore();
   });
 
   it('retains post-listen stderr and exited process diagnostics across restart', async () => {
@@ -781,6 +873,8 @@ describe('OpenCode lifecycle', () => {
 
     expect(runtime.testState.lastOpenCodeRestartDiagnostics).toEqual({
       reason: 'immediate-process-exited',
+      cause: 'process-exited',
+      memory: null,
       healthFailure: null,
       process: {
         pid: 12345,

@@ -22,10 +22,10 @@ export type SessionSidebarActivityItem = {
   searchMatchCount?: number;
 };
 
-export type SessionSidebarActivityKey = 'pinned' | 'work' | 'chats';
+export type SessionSidebarActivityKey = 'priority' | 'pinned' | 'work' | 'chats';
 
 /** Activity sections; the display menu's Collapse all / Expand all drive them with the projects. */
-export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'pinned', 'work'];
+export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['priority', 'chats', 'pinned', 'work'];
 
 // 'project' is a one-line file tree row of the grouped view. Timeline rows
 // have no left gutter and carry their status on the right: 'timeline' is a
@@ -134,7 +134,9 @@ export type SessionSidebarRowModelArgs = {
    */
   pinnedItems?: readonly SessionSidebarActivityItem[];
   workItems?: readonly SessionSidebarActivityItem[];
-  /** Every session listed in the Pinned or In work zone. */
+  /** Priority sessions: the first zone, above Chats. */
+  priorityItems?: readonly SessionSidebarActivityItem[];
+  /** Every session listed in the Priority, Pinned or In work zone. */
   zoneSessionIds?: ReadonlySet<string>;
   /** Pinned and In work rows in the Tree view: two lines when set, one otherwise. */
   detailedZoneRows?: boolean;
@@ -716,6 +718,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
+  // Priority, Pinned and In work list sessions of every project together:
+  // two-line rows with the project's icon in List, one-line rows in Tree
+  // unless the user asked for detailed rows.
+  const zoneRenderContext: SessionSidebarRenderContext = timelineMode || args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
+
+  // Priority sits above Chats; Pinned and then In work under Chats and above
+  // the projects. A tree is listed for its matching subsession too; the
+  // ancestors around it are context, so only real matches count.
+  const appendZone = (activityKey: 'priority' | 'pinned' | 'work', items: readonly SessionSidebarActivityItem[]): void => {
+    if (items.length === 0) return;
+    const collapsed = appendActivityHeader(activityKey);
+    if (!collapsed) appendActivityItems(items, `activity:${activityKey}`, zoneRenderContext, (item) => item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery));
+  };
+  appendZone('priority', args.priorityItems ?? []);
+
   if (args.chatGroup) {
     if (!search || groupSearchMatches(args.chatGroup) > 0) {
       const collapsed = appendActivityHeader('chats');
@@ -729,11 +746,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       }
     }
   }
-
-  // Pinned and In work list sessions of every project together: two-line
-  // rows with the project's icon in List, one-line rows in Tree unless the
-  // user asked for detailed rows.
-  const zoneRenderContext: SessionSidebarRenderContext = timelineMode || args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
 
   /**
    * A list that reveals `initial` entries, then `increment` more per Show
@@ -755,14 +767,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     else if (entries.length > initialLimit) push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: visibleEntries.length, increment, flat: true });
   };
 
-  // Pinned and then In work sit under Chats and above the projects. A tree
-  // is listed for its matching subsession too; the ancestors around it are
-  // context, so only real matches count.
-  const appendZone = (activityKey: 'pinned' | 'work', items: readonly SessionSidebarActivityItem[]): void => {
-    if (items.length === 0) return;
-    const collapsed = appendActivityHeader(activityKey);
-    if (!collapsed) appendActivityItems(items, `activity:${activityKey}`, zoneRenderContext, (item) => item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery));
-  };
   appendZone('pinned', args.pinnedItems ?? []);
   appendZone('work', args.workItems ?? []);
 

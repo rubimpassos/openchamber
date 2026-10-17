@@ -149,6 +149,11 @@ const openchamberNotificationSchema = z.object({
       desktopNotificationDelivered: z.boolean(),
       desktopStdoutActive: z.boolean(),
       guestId: z.string(),
+      sessions: z.array(z.object({
+        sessionId: z.string().min(1),
+        directory: z.string().optional(),
+        title: z.string().optional(),
+      })),
     })
     .partial(),
 })

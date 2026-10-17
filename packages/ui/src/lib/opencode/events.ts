@@ -169,6 +169,8 @@ export type OpenchamberNotification = {
   desktopStdoutActive?: boolean
   /** Guest id to reveal alongside the session (a `browser.requestHelp` deep link); desktop-only. */
   guestId?: string
+  /** Every session a restart interrupted (`opencode-restart-interrupted`); `sessionId` is the first. */
+  sessions?: Array<{ sessionId: string; directory?: string; title?: string }>
 }
 
 /** A translated event together with the directory it belongs to. */

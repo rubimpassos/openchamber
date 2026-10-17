@@ -75,6 +75,7 @@ import {
   forkFromMessage as forkFromMessageAction,
   forkAfterMessage as forkAfterMessageAction,
   fetchMessagesForSession,
+  retireRestartInterruptionAfterSend,
   type ArchiveSessionsOptions,
   type DeleteSessionOptions,
   type DeleteSessionsOptions,
@@ -2109,6 +2110,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         sessionKnowledge: knowledgeRequest?.then((knowledge) => knowledge.text),
         additionalParts: contextParts,
       })
+      if (targetSessionId) retireRestartInterruptionAfterSend(targetSessionId, currentSessionDirectory)
       const knowledge = knowledgeRequest && messageRoute !== 'shell' ? await knowledgeRequest : null
       if (knowledge?.text) {
         void reportSessionKnowledgeDelivered(currentSessionDirectory, targetSessionId || "", knowledge.signature)

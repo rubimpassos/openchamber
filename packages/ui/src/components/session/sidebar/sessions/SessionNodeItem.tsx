@@ -32,6 +32,7 @@ import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
+import { SessionPriorityMenuItem } from '@/components/session/SessionPriorityMenuItem';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useSessionBlockingRequests } from '@/sync/sync-context';
@@ -1318,6 +1319,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
       </Item>
       </SessionMenuItemHint>
+      {!archivedBucket && !node.session.parentID ? (
+        <SessionPriorityMenuItem sessionID={session.id} directory={sessionDirectory} Item={Item} />
+      ) : null}
       {canTrackWork ? (
         <SessionMenuItemHint hint={isInWork ? t('sessions.sidebar.session.menuHint.markDone') : t('sessions.sidebar.session.menuHint.track')}>
         <Item onClick={() => { void toggleSessionWork(); }} className="[&>svg]:me-1">

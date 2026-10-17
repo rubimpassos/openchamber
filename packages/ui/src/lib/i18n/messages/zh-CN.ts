@@ -18,6 +18,7 @@ import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
 import { suggestedTasksI18n } from './suggested-tasks.i18n';
 import { notificationCenterI18n } from './notification-center.i18n';
+import { sessionRestartInterruptionI18n } from './session-restart-interruption.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
@@ -157,6 +158,7 @@ export const dict: Record<I18nKey, string> = {
   ...projectActionsI18n['zh-CN'],
   ...suggestedTasksI18n['zh-CN'],
   ...notificationCenterI18n['zh-CN'],
+  ...sessionRestartInterruptionI18n['zh-CN'],
   ...environmentI18n['zh-CN'],
   ...providersI18n['zh-CN'],
   ...mcpGridI18n['zh-CN'],

@@ -40,6 +40,8 @@ import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/l
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
+import { getRestartInterruption, withoutRestartInterruption } from "@/lib/sessionRestartInterruption"
+import { withSessionPriority } from "@/lib/sessionPriority"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
@@ -1183,6 +1185,46 @@ export async function setSessionWorkState(
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
   }
+}
+
+/**
+ * Drops the notice an OpenCode restart left on the session. Bound to the
+ * server it was asked on, like `setSessionWorkState`.
+ */
+export async function dismissRestartInterruption(
+  sessionId: string,
+  directory: string | null | undefined,
+): Promise<Session | null> {
+  const runtimeKeyAtClick = getRuntimeKey()
+  try {
+    return await patchSessionMetadata(sessionId, directory, withoutRestartInterruption, runtimeKeyAtClick)
+  } catch (error) {
+    if (isStaleRuntime(runtimeKeyAtClick)) return null
+    throw error
+  }
+}
+
+/** Marks the session as a priority (`on`) or clears the mark. Bound to the server it was asked on. */
+export async function setSessionPriority(
+  sessionId: string,
+  directory: string | null | undefined,
+  on: boolean,
+): Promise<Session | null> {
+  const runtimeKeyAtClick = getRuntimeKey()
+  try {
+    return await patchSessionMetadata(sessionId, directory, (metadata) =>
+      withSessionPriority(metadata, on, Date.now()), runtimeKeyAtClick)
+  } catch (error) {
+    if (isStaleRuntime(runtimeKeyAtClick)) return null
+    throw error
+  }
+}
+
+/** A sent message answers the restart notice; costs nothing for a session without one. */
+export function retireRestartInterruptionAfterSend(sessionId: string, directory: string | null | undefined): void {
+  if (!getRestartInterruption(getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId))) return
+  void dismissRestartInterruption(sessionId, directory)
+    .catch((error) => console.warn("[session-interruption] could not clear the restart notice:", error))
 }
 
 export async function setContextObligatoryMessage(

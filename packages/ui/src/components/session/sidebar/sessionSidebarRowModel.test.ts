@@ -333,6 +333,24 @@ describe('buildSessionSidebarRowModel', () => {
     expect(headers).toEqual(['chats', 'work', 'project-a']);
   });
 
+  test('Priority opens above Chats, before Pinned and In work', () => {
+    const input = args([project([group([node('urgent'), node('pinned'), node('working')])])]);
+    input.chatGroup = group([node('chat')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
+    input.priorityItems = [timelineItem('urgent')];
+    input.pinnedItems = [timelineItem('pinned')];
+    input.workItems = [timelineItem('working')];
+    input.zoneSessionIds = new Set(['urgent', 'pinned', 'working']);
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const headers = rows.flatMap((row) => (
+      row.kind === 'activity-header' ? [row.activityKey] : row.kind === 'project-header' ? [row.section.project.id] : []
+    ));
+    const firstSession = rows.find((row) => row.kind === 'session');
+
+    expect(headers).toEqual(['priority', 'chats', 'pinned', 'work', 'project-a']);
+    expect(firstSession?.kind === 'session' && firstSession.node.session.id).toBe('urgent');
+  });
+
   test('no block while nothing is in work', () => {
     const input = args([project([group([node('other')])])]);
     input.workItems = [];

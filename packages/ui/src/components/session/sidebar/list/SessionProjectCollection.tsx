@@ -62,6 +62,7 @@ import { canRequestNativeDirectoryAccess } from '@/lib/desktop';
 import { useSidebarSpaces, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isSessionPriority } from '@/lib/sessionPriority';
 import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { selectBlockingBadgeSessionScopes } from '../sessions/sessionNodeItemUtils';
@@ -77,8 +78,8 @@ const EMPTY_STANDALONE_GROUPS: SessionGroup[] = [];
 
 const EMPTY_TIMELINE_ITEMS: ReturnType<typeof deriveTimelineActivityItems> = [];
 /** Top-level sessions listed in the Pinned and In work zones. */
-type ZoneSessions = { pinned: readonly Session[]; work: readonly Session[] };
-const EMPTY_ZONE_SESSIONS: ZoneSessions = { pinned: [], work: [] };
+type ZoneSessions = { priority: readonly Session[]; pinned: readonly Session[]; work: readonly Session[] };
+const EMPTY_ZONE_SESSIONS: ZoneSessions = { priority: [], pinned: [], work: [] };
 
 const isRootSession = (session: Session): boolean => {
   // SAFETY: OpenCode attaches parentID to hierarchical session records,
@@ -441,22 +442,25 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
+  // Priority sessions are always listed first, whatever the display toggles,
+  // and only there.
   const zoneSessions = React.useMemo((): ZoneSessions => {
     const showWork = sessionWorkEnabled && showWorkSection;
-    if (!showWork && !showPinnedSection) return EMPTY_ZONE_SESSIONS;
+    const priority: Session[] = [];
     const pinned: Session[] = [];
     const work: Session[] = [];
     for (const session of collection.orderedSessions) {
       if (session.parentID || session.time?.archived || isChatDirectoryPath(session.directory)) continue;
-      if (showPinnedSection && isSessionPinned(collection.pinnedSessionIds, session.directory, session.id)) pinned.push(session);
+      if (isSessionPriority(session)) priority.push(session);
+      else if (showPinnedSection && isSessionPinned(collection.pinnedSessionIds, session.directory, session.id)) pinned.push(session);
       else if (showWork && isSessionInWork(session)) work.push(session);
     }
-    if (pinned.length === 0 && work.length === 0) return EMPTY_ZONE_SESSIONS;
-    return { pinned, work };
+    if (priority.length === 0 && pinned.length === 0 && work.length === 0) return EMPTY_ZONE_SESSIONS;
+    return { priority, pinned, work };
   }, [collection.orderedSessions, collection.pinnedSessionIds, sessionWorkEnabled, showPinnedSection, showWorkSection]);
   const workSessions = zoneSessions.work;
   const zoneSessionIds = React.useMemo(
-    () => new Set([...zoneSessions.pinned, ...zoneSessions.work].map((session) => session.id)),
+    () => new Set([...zoneSessions.priority, ...zoneSessions.pinned, ...zoneSessions.work].map((session) => session.id)),
     [zoneSessions],
   );
   const buildZoneItems = React.useCallback((zone: readonly Session[]) => {
@@ -507,6 +511,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       };
     });
   }, [collection.childrenMap, ownership.bySessionId, spaceLabelById, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+  const priorityItems = React.useMemo(() => buildZoneItems(zoneSessions.priority), [buildZoneItems, zoneSessions.priority]);
   const pinnedItems = React.useMemo(() => buildZoneItems(zoneSessions.pinned), [buildZoneItems, zoneSessions.pinned]);
   const workItems = React.useMemo(() => buildZoneItems(zoneSessions.work), [buildZoneItems, zoneSessions.work]);
   // Worktree branches whose PR badge is on screen in the current mode:
@@ -547,6 +552,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       }
       node.children.forEach(addNode);
     };
+    priorityItems.forEach((item) => addNode(item.node));
     pinnedItems.forEach((item) => addNode(item.node));
     workItems.forEach((item) => addNode(item.node));
     if (timelineMode) {
@@ -568,7 +574,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       });
     });
     return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers], gitlabRefs: [...gitlabRefs.values()] };
-  }, [pinnedItems, projectSections, projectView.collapsedProjects, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, workItems]);
+  }, [pinnedItems, priorityItems, projectSections, projectView.collapsedProjects, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, workItems]);
   const shownPrTargets = shownPrs.targets;
   // The discovery effect below subscribes to bindings and reads them; keep its
   // input stable while the shown branches are the same, so ordinary sidebar
@@ -879,6 +885,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     // Hidden only from the list: folders and search keep the group.
     chatGroup: showChatsSection ? chatGroup : null,
     timelineItems,
+    priorityItems,
     pinnedItems,
     workItems,
     zoneSessionIds,
@@ -903,7 +910,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hideDirectoryControls: view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
-  }), [runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, timelineItems, timelineMode, pinnedItems, workItems, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+  }), [runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, timelineItems, timelineMode, priorityItems, pinnedItems, workItems, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);

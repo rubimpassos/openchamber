@@ -10,11 +10,12 @@ import { cn } from '@/lib/utils';
 export const ROW_ACTION_SLOT_WIDTH = 48;
 
 // Four slots every session row has: archive, delete, rename and Copy ID.
-// Top-level rows add one slot each for Pin and Track / Done when enabled.
+// Top-level rows add one slot each for Pin, Priority and Track / Done when enabled.
 export const ROW_ACTIONS_WIDTH = 4 * ROW_ACTION_SLOT_WIDTH;
 
 export type MobileSessionWorkAction = { inWork: boolean; onToggle: () => void };
 export type MobileSessionPinAction = { pinned: boolean; onToggle: () => void };
+export type MobileSessionPriorityAction = { priority: boolean; onToggle: () => void };
 const ROW_SWIPE_SNAP_MS = 180;
 
 /** Generic swipe-to-reveal wrapper for drawer rows (sessions, projects,
@@ -133,6 +134,8 @@ export const MobileSessionRowActions: React.FC<{
   work?: MobileSessionWorkAction;
   /** Pin / Unpin, on top-level rows. */
   pin?: MobileSessionPinAction;
+  /** Mark as priority / Remove priority, on top-level rows. */
+  priority?: MobileSessionPriorityAction;
 }> = ({
   sessionId,
   title,
@@ -145,6 +148,7 @@ export const MobileSessionRowActions: React.FC<{
   onRevealedChange,
   work,
   pin,
+  priority,
 }) => {
   const { t } = useI18n();
   const tabIndex = revealed ? 0 : -1;
@@ -184,6 +188,22 @@ export const MobileSessionRowActions: React.FC<{
           style={{ touchAction: 'manipulation' }}
         >
           <Icon name={pin.pinned ? 'unpin' : 'pushpin'} className="size-[18px]" />
+        </button>
+      ) : null}
+      {priority ? (
+        <button
+          type="button"
+          tabIndex={tabIndex}
+          className={cn(
+            'flex flex-1 items-center justify-center transition-colors active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+            priority.priority ? 'text-[var(--status-warning)]' : 'text-muted-foreground active:text-foreground',
+          )}
+          aria-label={priority.priority ? t('sessions.sidebar.session.menu.priorityOff') : t('sessions.sidebar.session.menu.priorityOn')}
+          aria-pressed={priority.priority}
+          onClick={() => { priority.onToggle(); onRevealedChange?.(false); }}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Icon name="flag" className="size-[18px]" />
         </button>
       ) : null}
       {work ? (
