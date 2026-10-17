@@ -67,6 +67,20 @@ while previewing, so same-length edits in the middle invalidate cached output.
 accepts comments and trailing commas for preview without changing the source
 text. `JsonTreeView` defaults to strict JSON parsing for other callers.
 
+## Stacked pull request creation
+
+`git/PullRequestSection.tsx` identifies a stacked create base with one GitHub
+lookup for the selected head branch, restricted to the destination repository.
+It shows the parent PR and registers a successfully created stacked PR through
+the stack registration route. A refused or unavailable native registration
+leaves the created PR valid and reports a quiet inferred-stack note.
+
+`git/StackedPullCreateDialog.tsx` reuses that form with the top open stack head
+prefilled. An existing PR on the checked-out branch disables creation and points
+to Git's branch controls. Web, Electron and both mobile shells share the form;
+VS Code exposes no stack creation entry point. The branch PR preview shares
+the live stack section documented in `../references/DOCUMENTATION.md`.
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`

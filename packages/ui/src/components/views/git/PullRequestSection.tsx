@@ -47,6 +47,7 @@ import {
 } from './sourceControlMutationOutcome';
 import { BranchPullRequestPreview } from './BranchPullRequestPreview';
 import { useBranchPush } from './useBranchPush';
+import { useStackedPullBase } from './useStackedPullBase';
 
 const statusColor = (state: string | undefined | null): string => {
   switch (state) {
@@ -241,8 +242,10 @@ export const PullRequestSection: React.FC<{
   /** Local commits the tracked remote branch does not have yet. */
   ahead?: number;
   remoteBranches?: string[];
+  /** Prefills the existing create flow when opened from a stack. */
+  stackBase?: { head: string; number: number };
   onGeneratedDescription?: () => void;
-}> = ({ directory, branch, baseBranch, trackingBranch, ahead = 0, remoteBranches = [], onGeneratedDescription }) => {
+}> = ({ directory, branch, baseBranch, trackingBranch, ahead = 0, remoteBranches = [], stackBase, onGeneratedDescription }) => {
   const { t: translate } = useI18n();
   // Named even when no account there can read the project, so a GitLab
   // project with a lapsed account asks for GitLab, not GitHub.
@@ -364,7 +367,7 @@ export const PullRequestSection: React.FC<{
   }, [directory]);
 
   const isFork = detectedUpstream !== null;
-  const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork));
+  const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork || stackBase));
 
   const prStatusKey = React.useMemo(
     () => readContext ? getSourceControlStatusKey(readContext, branch) : '',
@@ -475,10 +478,10 @@ export const PullRequestSection: React.FC<{
 
   // Set target base branch to upstream's default branch when using detected upstream
   React.useEffect(() => {
-    if (useDetectedUpstream && detectedUpstream?.defaultBranch) {
+    if (useDetectedUpstream && detectedUpstream?.defaultBranch && !stackBase) {
       setTargetBaseBranch(detectedUpstream.defaultBranch);
     }
-  }, [useDetectedUpstream, detectedUpstream?.defaultBranch]);
+  }, [useDetectedUpstream, detectedUpstream?.defaultBranch, stackBase]);
 
   const pr = status?.changeRequest ?? status?.pr ?? null;
   const statusIdentity = status?.identity ?? readContext;
@@ -490,6 +493,9 @@ export const PullRequestSection: React.FC<{
   // the panel offers creating the next PR instead of a read-only detail view.
   const isHistoricalPr = pr?.state === 'merged' || pr?.state === 'closed';
   const livePr = isHistoricalPr ? null : pr;
+  const stackedBase = useStackedPullBase(readContext, targetBaseBranch, {
+    enabled: !livePr && !isVSCodeRuntime(), project: useDetectedUpstream ? detectedUpstream : statusProject,
+  });
 
   const checks = status?.ci?.summary ?? status?.checks ?? null;
 
@@ -584,6 +590,10 @@ export const PullRequestSection: React.FC<{
     setDraft(snapshot?.draft ?? readCreateAsDraft());
     setTargetBaseBranch(snapshot?.targetBaseBranch ? normalizeBranchRef(snapshot.targetBaseBranch) : normalizeBranchRef(baseBranch));
   }, [baseBranch, branch, snapshotKey]);
+
+  React.useEffect(() => {
+    if (stackBase?.head) setTargetBaseBranch(stackBase.head);
+  }, [branch, stackBase?.head]);
 
   React.useEffect(() => {
     if (!readContext || !prStatusKey || !sourceControlAuth.connected) return;
@@ -789,6 +799,23 @@ export const PullRequestSection: React.FC<{
       finishMutation(signature, idempotencyKey, false);
       if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
       toast.success(t('gitView.pr.toast.prCreated'));
+      if (readContext.provider === 'github' && (stackedBase || stackBase?.head === trimmedBase) && receipt.target.number !== undefined) {
+        try {
+          const created = (await sourceControl.changeRequestStatus(readContext, branch, { force: true })).changeRequest;
+          if (!created?.headSha || created.number !== receipt.target.number) throw new Error(t('prStacks.registrationFailed'));
+          const registered = await sourceControl.githubPullStackRegister({ ...readContext,
+            idempotencyKey: `${idempotencyKey}:stack-register`,
+            target: { project: target, number: created.number, head: created.head, base: created.base, headSha: created.headSha },
+          }, {
+            owner: target.owner, repo: target.name, number: receipt.target.number,
+          });
+          if (isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey) && !registered.registered) toast.message(t('prStacks.registrationInferred'));
+        } catch (registrationError) {
+          if (isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) toast.message(t('prStacks.registrationFailed'), {
+            description: registrationError instanceof Error ? registrationError.message : String(registrationError),
+          });
+        }
+      }
       await refresh({ force: true });
       if (!isMutationScopeCurrent(capturedRuntimeKey, capturedStatusKey)) return;
       // The receipt names the number; the refreshed status has its address.
@@ -808,7 +835,7 @@ export const PullRequestSection: React.FC<{
       if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsCreating(false);
     }
-  }, [beginMutation, body, branch, branchPush, detectedUpstream, directory, draft, error, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
+  }, [beginMutation, body, branch, branchPush, detectedUpstream, directory, draft, error, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, stackedBase, stackBase, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
 
   const containerClassName = 'border-0 bg-transparent rounded-none px-4 py-3';
 
@@ -850,7 +877,7 @@ export const PullRequestSection: React.FC<{
         mergeableState: livePr.mergeableState,
       }
       : null;
-  if (liveChangeRequest && readContext) {
+  if (liveChangeRequest && readContext && !stackBase) {
     return (
       <div className="h-full min-h-0">
         <BranchPullRequestPreview
@@ -930,7 +957,7 @@ export const PullRequestSection: React.FC<{
     ? t(draft ? 'gitView.pr.actions.pushAndCreateDraftPr' : 'gitView.pr.actions.pushAndCreatePr')
     : t(draft ? 'gitView.pr.actions.createDraftPr' : 'gitView.pr.actions.createPr');
   const createDisabled = isCreating || !isConnected || sourceControlCapabilities?.changeRequests !== true
-    || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === branch);
+    || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === branch) || Boolean(stackBase && livePr);
 
   return (
     <section className={containerClassName}>
@@ -1116,6 +1143,11 @@ export const PullRequestSection: React.FC<{
                     {refreshButton}
                   </div>
                 </div>
+
+                {stackedBase || stackBase?.head === targetBaseBranch ? <p className="typography-meta text-muted-foreground">
+                  {t('prStacks.stackedOn', { number: stackedBase?.number ?? stackBase?.number ?? '' })}
+                </p> : null}
+                {stackBase && livePr ? <p className="typography-meta text-[var(--status-warning-text)]">{t('prStacks.chooseBranch')}</p> : null}
 
                 <label className="space-y-1">
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.title')}</div>

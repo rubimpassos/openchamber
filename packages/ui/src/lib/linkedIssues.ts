@@ -29,6 +29,8 @@ type LinkedRepositoryIssue = {
   title: string;
   url: string;
   kind: 'issue' | 'pull';
+  /** On PR links, resolve the stack's membership live. Never persist its members. */
+  followStack?: true;
   author?: string;
   authorAvatarUrl?: string;
   linkedAt: number;
@@ -101,6 +103,7 @@ const isLinkedRepositoryIssue = (value: unknown): value is LinkedRepositoryIssue
   && typeof value.title === 'string'
   && typeof value.url === 'string'
   && (value.kind === 'issue' || value.kind === 'pull')
+  && (value.followStack === undefined || (value.kind === 'pull' && value.followStack === true))
   && typeof value.linkedAt === 'number'
   && Number.isFinite(value.linkedAt)
 );
@@ -183,6 +186,7 @@ export const buildLinkedIssue = (input: {
   title: string;
   kind: 'issue' | 'pull';
   author?: { login?: string; avatarUrl?: string } | null;
+  followStack?: true;
   linkedAt: number;
 }): LinkedRepositoryIssue => {
   let project: { host: string; owner: string; name: string } | null = null;
@@ -207,7 +211,7 @@ export const buildLinkedIssue = (input: {
       ? buildLinkedIssueId(project.owner, project.name, input.number)
       : `${project.host}:${buildLinkedIssueId(project.owner, project.name, input.number)}`;
 
-  return {
+  const entry: LinkedRepositoryIssue = {
     id,
     number: input.number,
     title: input.title,
@@ -217,6 +221,9 @@ export const buildLinkedIssue = (input: {
     authorAvatarUrl: input.author?.avatarUrl ?? undefined,
     linkedAt: input.linkedAt,
   };
+  // Absent, not undefined: `withLinkedIssue` keeps a stored flag when the key is missing.
+  if (input.kind === 'pull' && input.followStack) entry.followStack = true;
+  return entry;
 };
 
 export const buildLinkedGuestIssue = (input: {
@@ -493,7 +500,11 @@ export const withLinkedIssue = (
   const withoutIssue = current.filter((entry) => !isSameLinkedEntry(entry, issue));
   // Re-linking an existing entry replaces it, so a stale title can be refreshed
   // by linking again.
-  const next = linked ? [...withoutIssue, issue] : withoutIssue;
+  const existing = current.find((entry) => isSameLinkedEntry(entry, issue));
+  const replacement = issue.kind === 'pull' && existing?.kind === 'pull' && existing.followStack && !('followStack' in issue)
+    ? { ...issue, followStack: true as const }
+    : issue;
+  const next = linked ? [...withoutIssue, replacement] : withoutIssue;
 
   return {
     ...metadata,

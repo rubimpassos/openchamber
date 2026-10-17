@@ -1,4 +1,5 @@
 import { settingsDict } from './de.settings';
+import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -8,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -76,6 +78,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} Unteragenten eingesetzt',
   'sessions.sidebar.projectAction.active': 'Projektaktion aktiv',
   ...settingsDict,
+  ...prStacksI18n.de,
   'gitView.operation.title': 'Git-Vorgang',
   'gitView.operation.recovery.storage': 'OpenChamber kann den Stand von Git-Übertragungen hier nicht speichern. Erlaube den Websitespeicher und lade neu; bis dahin sind Push und Pull pausiert.',
   'gitView.operation.recovery.capacity': 'Zu viele unfertige Git-Übertragungen sind gespeichert. Prüfe die unten, bevor du eine neue startest.',
@@ -146,6 +149,7 @@ export const dict = {
   ...pluginPanelI18n.de,
   ...surfacePanelI18n.de,
   ...browserServerPanelI18n.de,
+  ...prFixLoopI18n.de,
   ...fileArtifactsI18n.de,
   ...htmlRenderI18n.de,
   ...usageStatsI18n.de,

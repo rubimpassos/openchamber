@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import type { GitHubChecksSummary, GitHubIssueLabel, GitHubPullStatus, LinearIssueLabel, LinearSubIssueProgress } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import type { PullStackPosition } from '@/lib/source-control/pullStackInference';
 
 import {
     githubStateLook,
@@ -99,6 +100,7 @@ type RowProps = {
     item: ReferencePickerItem;
     /** An open PR's checks and mergeability, once they have arrived. */
     pullStatus: GitHubPullStatus | null;
+    stackPosition?: PullStackPosition;
     highlighted: boolean;
     /** Null in single-choice mode, where rows have no checkbox. */
     checked: boolean | null;
@@ -112,6 +114,7 @@ type RowProps = {
 export const ReferencePickerRow = React.memo(function ReferencePickerRow({
     item,
     pullStatus,
+    stackPosition,
     highlighted,
     checked,
     diffIncluded,
@@ -162,6 +165,9 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                 <div className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
                 <div className={cn('mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro', REFERENCE_META_TEXT)}>
                     <span className="font-mono">{id}</span>
+                    {stackPosition ? <span className="inline-flex items-center gap-1 rounded bg-surface-muted px-1 tabular-nums" title={t('prStacks.position', { index: stackPosition.index, total: stackPosition.total })}>
+                        <Icon name="stack" className="size-3.5" />{stackPosition.index}/{stackPosition.total}
+                    </span> : null}
                     {item.source === 'github' && item.reference.author ? (
                         <RowPerson name={item.reference.author.login} avatarUrl={item.reference.author.avatarUrl} />
                     ) : null}

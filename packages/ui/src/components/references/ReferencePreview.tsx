@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import type { GitHubChecksSummary, GitHubPullStatus, GitHubReference, GitHubReferenceComment, GitHubReferenceDetail, LinearIssue, LinearIssueSummary } from '@/lib/api/types';
+import type { GitHubChecksSummary, GitHubPullStatus, GitHubReference, GitHubReferenceComment, GitHubReferenceDetail, LinearIssue, LinearIssueSummary, PullStackMember } from '@/lib/api/types';
+import { PullStackSection } from './PullStackSection';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -282,7 +283,8 @@ const GitHubPreview: React.FC<{
     stateMenu?: React.ReactNode;
     onRefresh?: () => Promise<void>;
     threadActions?: ReferenceThreadActions;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions }) => {
+    stackSection?: React.ReactNode;
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, stackSection }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
     const refresh = onRefresh ? () => {
@@ -432,6 +434,8 @@ const GitHubPreview: React.FC<{
                     <MetaRow label={t('references.picker.preview.labels')}><ReferenceLabelChips labels={labels} /></MetaRow>
                 ) : null}
             </dl>
+
+            {stackSection}
 
             <div className="min-w-0 flex-1 border-t border-border/60 pt-4">
                 {body ? (
@@ -657,7 +661,10 @@ export const ReferencePreview: React.FC<{
     onRefresh?: () => Promise<void>;
     /** Answer and resolve a PR's review threads; without it they are read only. */
     threadActions?: ReferenceThreadActions;
-}> = ({ item, directory, pullStatus, linearDetail, githubDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, linearStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenLinearIssue, onRefresh, threadActions }) => {
+    /** Retained previews stop stack reads and subscriptions while hidden. */
+    stackEnabled?: boolean;
+    onOpenStackMember?: (member: PullStackMember) => void;
+}> = ({ item, directory, pullStatus, linearDetail, githubDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, linearStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenLinearIssue, onRefresh, threadActions, stackEnabled = true, onOpenStackMember }) => {
     const { t } = useI18n();
     const rewriteMarkdown = useGitLabUploadRewrite(directory, item?.source === 'github' ? item.reference : null);
     if (!item) {
@@ -691,6 +698,7 @@ export const ReferencePreview: React.FC<{
                 stateMenu={stateMenu}
                 onRefresh={onRefresh}
                 threadActions={threadActions}
+                stackSection={item.reference.kind === 'pull' && directory ? <PullStackSection reference={item.reference} directory={directory} enabled={stackEnabled} onOpenMember={onOpenStackMember} onChanged={onRefresh} /> : null}
             />
         </ReferenceMarkdownRewriteContext.Provider>
     );

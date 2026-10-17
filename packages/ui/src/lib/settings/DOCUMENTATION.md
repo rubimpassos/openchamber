@@ -24,6 +24,15 @@
 - **Two files on the instance.** `settings.json` keeps instance facts and legacy keys; `preferences.json` beside it holds every `profile` key as `{ value, updatedAt }` (`version: 1`). The server (`packages/web/server/lib/opencode/settings-files.js`) and the VS Code bridge (`packages/vscode/src/settings-files.ts`) seed `preferences.json` once from an existing `settings.json`, keep a copy of the profile's base values in `settings.json` on every write (a build from before the split reads only that file, so a rollback keeps the user's preferences; current builds ignore the copy because `preferences.json` wins), and never touch a `preferences.json` they cannot parse; clients see one merged document and never address the files. Server modules that read a profile key off the disk (small model, session goal/assist, walkthrough) use `readMergedSettingsSync`.
 - **Markers, not code, carry the special cases.** `adopt: 'bootstrap-only'` (workspace pointers), `derived` (computed by the writer from other fields), `secret` (accepted on write, never returned), `computed` (server-emitted, never persisted), `surfaces` (which surface kinds have the field).
 
+## PR automation settings
+
+`prFixLoopDefaults` is a profile-scoped partial `FixLoopConfig` object, parsed
+through the same schema as loop responses. Missing fields inherit the built-in
+defaults only when a new loop is configured. `prStackConflictMode` accepts
+`pause` or `agent`, with `pause` as the initial UI value. Both keys apply to web,
+desktop, and mobile, and are absent from VS Code controls and search. The UI
+store setters and registry bindings own their ordinary autosave round-trip.
+
 ## Adding a setting
 
 1. Add one entry to `SETTINGS_REGISTRY` with `scope`, a parser from `parsers.ts`, and a `ui` binding when a store holds the live value. Use an existing setter so its side effects run.

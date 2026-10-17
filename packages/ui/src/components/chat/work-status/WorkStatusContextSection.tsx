@@ -26,6 +26,8 @@ import { resolveDraftPinnedKnowledge } from './draftKnowledge';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
+import { LinkedPullStackFollow } from './LinkedPullStackFollow';
+import { LinkedPrFixLoopControl } from '@/components/session/PrFixLoopControl';
 
 
 type Props = {
@@ -364,6 +366,13 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           key={entry.id}
           leading={renderLinkedIcon(entry)}
           label={renderLinkedLabel(entry)}
+          value={(() => {
+            const pull = getGitHubThreadRef(entry);
+            return pull?.thread === 'pull' ? <>
+              <LinkedPullStackFollow entry={entry} sessionId={sessionId} directory={directory} />
+              <LinkedPrFixLoopControl pull={pull} sessionId={sessionId} directory={directory} />
+            </> : null;
+          })()}
           muted
           // On the board, selected, in this session's project; Cmd or Ctrl,
           // and anything the board does not list, opens the link.

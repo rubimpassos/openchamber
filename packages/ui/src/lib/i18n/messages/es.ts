@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './es.settings';
+import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -9,6 +10,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -77,6 +79,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} subagentes utilizados',
   'sessions.sidebar.projectAction.active': 'Acción del proyecto en curso',
   ...settingsDict,
+  ...prStacksI18n.es,
   'gitView.context.configure': 'Configurar repositorio',
   'gitView.context.description': 'Remotos que la identidad del repositorio no alcanza y acceso para submódulos y Git LFS. Las identidades están en los ajustes de Git.',
   'gitView.context.needsAttention': 'Requiere atención',
@@ -157,6 +160,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.es,
   ...surfacePanelI18n.es,
   ...browserServerPanelI18n.es,
+  ...prFixLoopI18n.es,
   ...fileArtifactsI18n.es,
   ...htmlRenderI18n.es,
   ...usageStatsI18n.es,
