@@ -15,11 +15,12 @@ export function useOrphanedQuestions(sessionId: string | null, directory: string
   const status = useSessionStatus(sessionId ?? '', directory);
   const statusReady = useSessionStatusSnapshotReady(directory, sessionId ?? undefined);
   const interruptedByInactivity = useSessionSelector(sessionId, directory, wasInterruptedByInactivity);
-  const [revision, refresh] = useReducer((value: number) => value + 1, 0);
-  const questions = useMemo(() => {
+  const [, refresh] = useReducer((value: number) => value + 1, 0);
+  // Dismissals live in localStorage; refresh must read them even when sync inputs are unchanged.
+  const questions = (() => {
     if (!sessionId || !lastMessage || !statusReady || (status && status.type !== 'idle')) return [];
     const live = forms.map(projectQuestionForm).filter((form) => form !== null);
     return collectOrphanedQuestionRequests(sessionId, [{ info: lastMessage, parts }], live, interruptedByInactivity);
-  }, [sessionId, lastMessage, parts, status, statusReady, forms, interruptedByInactivity, revision]);
+  })();
   return { questions, refresh };
 }
