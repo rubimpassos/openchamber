@@ -523,6 +523,12 @@ something other than "tools available".
 
 ### Linked issues and pull requests
 
+Linked GitHub PR rows also expose Start fix loop or Stop fix loop for this
+panel's session. Activation uses the session directory's bound read context and
+the same configuration dialog as board PR actions. Missing session, account
+context, or authoritative loop snapshot disables Start with a visible reason.
+These controls are absent in VS Code. Stack-following controls remain separate.
+
 Written by the flows that already attach a thread — sending a message with
 issues, PRs or guest items attached in the composer, and session creation from
 an issue or PR in `NewWorktreeDialog`. There is no manual "link this" control:
@@ -540,6 +546,13 @@ needs refreshing. A GitHub row opens github.com. A Linear row opens the
 right-hand Linear panel when Linear is connected on desktop/web; otherwise it
 opens the Linear URL (no rail in VS Code or the phone shell, and none while
 disconnected).
+
+A GitHub PR row also offers Follow whole stack. Its optional `followStack: true`
+flag stays on the anchor PR link; members are read live through the bound stack
+API and are never copied into session metadata. The button's tooltip names the
+current members. Reattaching a PR preserves an existing following choice;
+explicitly switching the toggle off removes it without unlinking the PR.
+`LinkedPullStackFollow.tsx` owns this control, leaving fix-loop controls separate.
 
 Writes happen **after** the send promise resolves and are deliberately
 swallowed on failure: the message went out, and a missing bookkeeping entry

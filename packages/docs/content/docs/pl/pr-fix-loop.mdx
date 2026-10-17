@@ -1,0 +1,94 @@
+---
+title: Pętla poprawek PR
+description: Pozwól sesji poprawiać pull request, aż CI będzie zielone, a przegląd zakończony.
+---
+
+# Pętla poprawek PR
+
+Pętla poprawek utrzymuje sesję przy jednym pull requeście, aż będzie gotowy do scalenia. OpenChamber obserwuje checki i przegląd PR-a. Gdy CI zawodzi, sesja dostaje nieudane checki z ich krokami, adnotacjami i liniami logów. Gdy ktoś robi przegląd lub komentuje, sesja dostaje tę opinię, wprowadza zmianę i odpowiada w PR-ze. Pętla działa na twoim serwerze OpenChamber, więc trwa także przy zamkniętej aplikacji.
+
+Kończy się, gdy PR jest gotowy: CI jest zielone, żaden wątek przeglądu nie został nierozwiązany i nikt nie czeka na zażądane zmiany. Dostajesz wtedy powiadomienie, a także gdy pętla zatrzyma się z innego powodu.
+
+## Uruchom pętlę
+
+1. Otwórz sesję, która ma wykonać pracę.
+2. Znajdź pull request na tablicy [Zgłoszenia i PR-y](/pl/issues-and-prs/), w widoku pull requesta lub na liście **Linked** sesji i wybierz **Start fix loop**.
+3. Sprawdź ustawienia w oknie i kliknij **Start fix loop**.
+
+Pętla widnieje na górze pola wiadomości sesji: PR, to, co pętla robi, liczba iteracji i stan CI. Stamtąd możesz zmienić jej ustawienia, otworzyć PR na tablicy albo ją zatrzymać przyciskiem **Stop**.
+
+## Co dostaje sesja
+
+- **Po pushu** pętla czeka na CI dla nowego commita. Jeśli zawiedzie, sesja dostaje nieudane checki raz na commit, nigdy dwa razy tej samej awarii.
+- **Przy każdym przeglądzie, komentarzu do przeglądu lub nowym komentarzu**, który liczy się według twoich ustawień, sesja dostaje jego treść i link. Ma odpowiedzieć w PR-ze i rozwiązać wątki, które naprawiła. Żeby odpowiadać i rozwiązywać wątki, sesja potrzebuje własnych, uwierzytelnionych narzędzi GitHub. Konto pętli służy tylko do czytania PR-a.
+
+Jeśli sesja jest zajęta, wiadomość czeka w jej kolejce i wychodzi po zakończeniu tury. Jeśli GitHub jest nieosiągalny, pętla zachowuje to, co wiedziała, i mówi, że nie mogła sprawdzić. Nigdy nie czyta nieudanego checka jako zielonego.
+
+## Ustawienia
+
+Wartości domyślne są w **Settings → Integrations → GitHub → Fix loop**, a każda pętla może je zmienić.
+
+- **Maximum iterations**: ile razy pętla może wysłać pracę do sesji (domyślnie 10).
+- **Token budget**: zatrzymuje, gdy sesja zużyje tyle tokenów od startu pętli. Puste oznacza brak budżetu. Budżet jest sprawdzany po każdej turze, więc jedna tura może go przekroczyć.
+- **Respond to**: **CI and reviews**, **CI only** lub **Reviews only**.
+- **Ignore my feedback**: pomija komentarze z konta GitHub, którym pętla czyta PR. W trybie automatycznym sesja odpowiada własnym kontem GitHub, a jeśli różni się ono od konta do odczytu, dodajesz je do **Blocked authors**. W trybie z zatwierdzaniem odpowiada serwer kontem GitHub powiązanym z pętlą, a worker nie ma konta GitHub.
+- **Ignore bots**: pomija komentarze botów.
+- **Allowed authors** i **Blocked authors**: loginy GitHub oddzielone przecinkami. Przy liście dozwolonych liczą się tylko te osoby.
+- **Only comments that mention this text**: liczy komentarz tylko wtedy, gdy zawiera tekst wzmianki (domyślnie `@openchamber`).
+- **Push changes**: **Push automatically** albo **Wait for my approval**. Tryb automatyczny zachowuje własny przepływ pracy sesji z GitHubem. Tryb z zatwierdzaniem wykonuje poprawki w ograniczonym workerze i wymaga osobnej konfiguracji.
+
+## Tryb z zatwierdzaniem
+
+Przy **Wait for my approval** sesja nie wypycha zmian. Ograniczony worker poprawia PR w izolowanej przestrzeni i żadna zmiana nie jest publikowana na GitHubie, dopóki nie zatwierdzisz dokładnie tego commita. Serwer nadal czyta PR z GitHuba, gdy pętla działa.
+
+### Konfiguracja workera
+
+1. Włącz izolowane przestrzenie i skonfiguruj dla nich miejsce. Pętla poprawek nigdy nie włącza tego za Ciebie.
+2. W oknie startu znajdź **Restricted worker**. Wybierz, gdzie działa worker, i jego model, a potem kliknij **Prepare new worker**. Powstaje nowa przestrzeń używana tylko przez tego workera. Istniejącej przestrzeni nie można użyć ponownie ani przekonwertować.
+3. Nadaj modelowi workera dostęp w oknie dostępu. Dostęp dostaje tylko wybrany model. Tokeny modelu trzyma gatekeeper, a worker ich nie widzi. Użycie modelu wlicza się do Twojego limitu.
+4. Repozytorium head PR, także fork, wymaga zarządzanego celu push Git dla dokładnie tego repozytorium. Jeśli go brakuje, okno odsyła do ustawień Git.
+5. Gdy okno pokaże, że worker jest gotowy, kliknij **Start fix loop**.
+
+Worker nie dociera do GitHuba ani do żadnej innej sieci, tylko do modelu. Nie ma awaryjnego przejścia na push systemowy lub środowiskowy. Pętla nie startuje, jeśli worker nie jest gotowy albo brakuje dostępu. Model lub własny endpoint, który nie został sprawdzony pod kątem ograniczonych workerów, jest odrzucany i nigdy nie zostaje podmieniony na inny.
+
+**Forget worker selection** usuwa tylko wybór. Przestrzeń i jej pliki zostają, a zarządzasz nimi w izolowanych przestrzeniach.
+
+### Przegląd i publikacja
+
+Gdy tura się kończy, serwer eksportuje commit workera i zachowuje go jako potwierdzenie z dokładnym repozytorium, gałęzią i oczekiwanym zdalnym head. Pętla pokazuje wtedy **Review publication**. Otwórz **Inspect exact changes**, sprawdź je i kliknij **Approve and publish commit**. Zwykły przycisk push Git nie zatwierdza potwierdzenia. Publikacja jest odrzucana, jeśli PR zamknięto albo zmienił się zdalny head, gałąź lub repozytorium. Potwierdzenie i praca zostają do wglądu.
+
+### Odpowiedzi po publikacji
+
+Okno przeglądu wymienia **Automatic GitHub replies**: wygenerowane odpowiedzi i wątki, które zostaną rozwiązane. To tekst workera, więc przeczytaj cytowany tekst przed zatwierdzeniem. Po publikacji commita serwer dodaje odpowiedzi i rozwiązuje wątki własnym dostępem zapisu do GitHuba, który nie pochodzi od workera. Dzieje się to przy zamkniętych wszystkich klientach. Jeśli zapis się nie uda, pętla to pokazuje i nie zgłasza PR jako gotowego.
+
+### Zatrzymanie, wznowienie i budżet
+
+**Stop** zatrzymuje workera i zachowuje kod oraz potwierdzenie. **Resume fix loop** ponownie sprawdza workera i uruchamia go na nowo, a dopiero potem można opublikować potwierdzenie zatrzymanej pętli. Zapomnienie zakończonej pętli nie usuwa jej przestrzeni.
+
+Tryb wykonania jest stały dla każdej pętli. Dokończ oczekujące publikacje i odpowiedzi na GitHubie przed zatrzymaniem pętli i uruchomieniem innego trybu. Ustawienia są też zablokowane, dopóki czeka potwierdzenie lub odpowiedzi na GitHubie.
+
+Budżet tokenów jest sprawdzany po każdej turze, więc tura może go przekroczyć. Po jego osiągnięciu nie startuje nowa tura modelu, ale oczekujący eksport, publikacja i odpowiedzi mogą się jeszcze zakończyć. Potem pętla pokazuje status budżetu tokenów.
+
+### Gdzie działa tryb z zatwierdzaniem
+
+Serwer prowadzi pętlę przy zamkniętych wszystkich klientach. Aplikacja webowa, desktopowa i mobilne dzielą ten serwer. Rozszerzenie VS Code nie oferuje trybu z zatwierdzaniem.
+
+## Kiedy pętla się zatrzymuje
+
+| Stan | Powód |
+| --- | --- |
+| PR gotowy | CI zielone, brak nierozwiązanych wątków, brak zażądanych zmian |
+| PR zamknięty | PR został scalony lub zamknięty |
+| Limit iteracji | Pętla wysłała pracę tyle razy, ile wolno |
+| Budżet tokenów | Sesja wyczerpała budżet |
+| Zatrzymana | Zatrzymałeś ją lub sesję usunięto |
+
+Zatrzymana pętla zostaje na górze pola wiadomości, dopóki jej nie zamkniesz. W trybie z zatwierdzaniem, gdy czeka potwierdzenie lub odpowiedzi na GitHubie, praca zostaje zachowana, a pętla pozostaje; użyj **Resume fix loop**, żeby kontynuować istniejącą pętlę. Ponowne uruchomienie na tym samym PR-ze zaczyna nową pętlę dopiero, gdy nie czeka żadna publikacja ani odpowiedzi.
+
+## Stosy
+
+Każdy pull request ma własną pętlę. W [stosie](/pl/stacked-prs/) uruchom pętlę na każdym PR-ze, który chcesz poprawić; awaria jednego PR-a nie wstrzymuje pozostałych.
+
+## Gdzie to działa
+
+Pętla działa na serwerze OpenChamber za aplikacją webową, desktopową i aplikacjami mobilnymi. Rozszerzenie VS Code jej nie oferuje.

@@ -131,6 +131,19 @@ const plan: GitNetworkOperationPlan = {
 
 const getNetworkOperation = async (): Promise<GitNetworkOperation> => { throw new Error('Unexpected operation recovery'); };
 
+test('stack branch pushes retain the exact GitHub lease while targeting that branch', () => {
+  const request = buildBoundBranchPushRequest({ bindingRead: boundRead, branch: 'feature/second', directory: '/repo',
+    remoteName: 'upstream', destinationRef: 'refs/heads/feature/second', forceWithLease: { expectedRemoteSha: 'b'.repeat(40) } });
+  expect(request).toMatchObject({ operation: 'push', sourceRef: 'refs/heads/feature/second', destinationRef: 'refs/heads/feature/second',
+    forceWithLease: { expectedRemoteSha: 'b'.repeat(40) }, repositoryId: 'repository-one', bindingRevision: 7 });
+});
+
+test('ordinary branch pushes have no force lease unless the caller requests one', () => {
+  const request = buildBoundBranchPushRequest({ bindingRead: boundRead, branch: 'feature/second', directory: '/repo',
+    remoteName: 'upstream', destinationRef: 'refs/heads/feature/second' });
+  expect('forceWithLease' in request).toBe(false);
+});
+
 const captureBoundErrorCode = (callback: () => void): BoundGitNetworkOperationError['code'] | null => {
   try {
     callback();

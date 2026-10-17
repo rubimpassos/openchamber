@@ -1,0 +1,56 @@
+---
+title: Gestapelde pull requests
+description: Bekijk, bouw en merge een keten van pull requests die op elkaar voortbouwen.
+---
+
+# Gestapelde pull requests
+
+Een stack is een keten van pull requests waarin elke PR voortbouwt op die eronder: de basebranch van de tweede PR is de branch van de eerste, en zo verder. Als u een grote wijziging zo opsplitst, blijft elke PR klein genoeg om te reviewen. OpenChamber toont de hele stack overal waar een PR eruit verschijnt en helpt u de keten in orde te houden.
+
+Stacks werken met GitHub. Kent GitHub de stack zelf (de eigen gestapelde pull requests), dan leest OpenChamber de GitHub-stack. Anders vindt het de keten via de basebranches van de PR's, wat ook forks en GitHub Enterprise Server dekt.
+
+## Een stack bekijken
+
+Open een pull request uit een stack op het bord [Issues en PR's](/nl/issues-and-prs/), in de pull-requestweergave of in de **Git**-weergave. De preview heeft een sectie **Pull request stack** die alle PR's van onder naar boven toont. Elke rij toont de status van de PR, de checks en of er conflicten zijn, en markeert de PR waar u naar kijkt. Een rij die niet gelezen kan worden zegt dat, in plaats van een kleur te tonen.
+
+In de lijst van het bord heeft een gestapelde PR een kleine badge met zijn plek in de stack, zoals **2/3**. Klik op een rij in de stack om die PR te openen.
+
+Een rij kan u ook waarschuwen:
+
+- **Behind base by N commits**: de PR eronder is gewijzigd, dus deze heeft een restack nodig.
+- **Base was merged. Retarget to main.**: de PR eronder is gemerged en deze wijst nog naar de oude branch.
+- **Still carries the commits of merged #N**: de PR eronder is gesquasht in de trunk en deze bevat nog de oude commits.
+
+## Een PR boven op een andere openen
+
+1. Check de branch voor de nieuwe PR uit, met de branch van de bovenste PR als startpunt.
+2. Klik in de stacksectie op **Open stacked PR on top**, of kies de branch van de bovenste PR als basis in het aanmaakformulier van de **Git**-weergave.
+3. Het formulier zegt **Stacked on #N**. Schrijf titel en beschrijving en maak de PR aan.
+
+Op GitHub.com registreert OpenChamber de nieuwe PR ook in de eigen stack van GitHub. Weigert GitHub dat (een fork, een oudere server), dan wordt de PR toch aangemaakt en blijft de stack zichtbaar.
+
+## Restack na een wijziging lager in de stack
+
+Krijgt een PR laag in de stack nieuwe commits, dan zijn de PR's erboven verouderd. Klik op **Fetch and restack**. OpenChamber haalt de remote op, rebaset elke branch in volgorde op die eronder en pusht daarna de branches die zijn verschoven. De push wordt geweigerd als iemand anders ondertussen naar een branch heeft gepusht, zodat er geen werk wordt overschreven.
+
+Alleen de eigen commits van elke branch verschuiven. Na een squashmerge lager in de stack blijven de oude commits van de gemergede PR buiten beschouwing.
+
+### Als een restack een conflict raakt
+
+De restack stopt bij de PR met het conflict. De branches eronder blijven gerestackt, die erboven wachten. Wat er daarna gebeurt, hangt af van **Instellingen → Integraties → GitHub → Restack conflicts**:
+
+- **Pause and let me choose** (standaard): los het conflict op in de map die de stacksectie noemt, stage de bestanden en klik op **Continue**. **Abort** zet die branch terug waar hij was en slaat de rest over. **Ask the session to resolve** geeft het conflict aan de sessie waarin u zit.
+- **Let the session resolve it**: het conflict gaat direct naar de sessie. Zodra haar beurt eindigt zonder openstaande conflicten, gaat de restack vanzelf verder.
+
+## Een stack mergen
+
+Merge van onder naar boven. De stacksectie biedt **Merge bottom PR #N** alleen aan voor de laagste open PR, met uw gebruikelijke mergemethode. Na het mergen gaat de volgende PR naar de trunk, en een **Fetch and restack** haalt de gemergede commits eruit. Merge daarna de volgende.
+
+## Aan een hele stack werken in een sessie
+
+- **Attach whole stack** in de stacksectie voegt de diff, checks en opmerkingen van elke PR toe aan het berichtenveld, met een samenvatting van de volgorde en de branches. Kan één PR niet gelezen worden, dan worden de andere toch toegevoegd en hoort u welke is mislukt.
+- Zet in de **Linked**-lijst van een sessie **Follow whole stack** aan voor een gekoppelde PR. De sessie volgt de stack dan terwijl hij verandert: nieuwe PR's bovenop, merges en retargets verschijnen zonder opnieuw te koppelen.
+
+## Waar het werkt
+
+Stacks werken in de webapp, de desktopapp en de mobiele apps. De VS Code-extensie toont geen stacks.

@@ -16,6 +16,7 @@
  */
 import { isRecord } from '../shared/guards.js';
 import { RENDER_PAGE_WHEN } from '../openchamber-control/render-page.js';
+import { buildPullStackSignature, buildPullStackText } from './pull-stacks.js';
 
 const KNOWLEDGE_METADATA_KEY = 'knowledge_context_delivered';
 const PINS_METADATA_KEY = 'project_context_pins';
@@ -34,7 +35,7 @@ const WORKTREE_MOVE_SIGNATURE = { off: [], ask: ['w:ask'], auto: ['w:auto'] };
  * Identity of everything the session should be carrying, content revisions
  * included: editing a pinned note must re-send it, not merely renaming one.
  */
-export const buildKnowledgeSignature = ({ notes, plans, memory, linking = false, worktreeMove = 'off', rendering = false }) => {
+export const buildKnowledgeSignature = ({ notes, plans, memory, linking = false, worktreeMove = 'off', rendering = false, pullStacks = [] }) => {
   const parts = [
     ...notes.map((note) => `n:${note.id}:${note.updatedAt}`),
     ...plans.map((plan) => `p:${plan.id}:${plan.title}`),
@@ -47,8 +48,9 @@ export const buildKnowledgeSignature = ({ notes, plans, memory, linking = false,
     ...(rendering ? ['r:on'] : []),
     // Flipping the setting changes the rule, so the session hears it again.
     ...WORKTREE_MOVE_SIGNATURE[worktreeMove],
+    buildPullStackSignature(pullStacks),
   ];
-  return parts.length === 0 ? '' : parts.sort().join('|');
+  return parts.filter(Boolean).sort().join('|');
 };
 
 const renderMemorySection = (entries) => entries
@@ -175,7 +177,7 @@ const buildPinnedBlock = ({ notes, plans }) => {
   ].join('\n\n');
 };
 
-export const buildKnowledgeText = ({ notes, plans, memory, linking = false, worktreeMove = 'off', rendering = false }) => {
+export const buildKnowledgeText = ({ notes, plans, memory, linking = false, worktreeMove = 'off', rendering = false, pullStacks = [] }) => {
   const blocks = [
     buildPinnedBlock({ notes, plans }),
     buildMemoryBlock(memory),
@@ -183,12 +185,17 @@ export const buildKnowledgeText = ({ notes, plans, memory, linking = false, work
     worktreeMove === 'off' ? '' : WORKTREE_MOVE_GUIDANCE[worktreeMove],
     rendering ? RENDER_PAGE_GUIDANCE : '',
   ].filter(Boolean);
-  if (blocks.length === 0) return '';
-
   const assembled = blocks.join('\n\n');
-  return assembled.length <= KNOWLEDGE_MAX_LENGTH
+  const knowledge = assembled.length <= KNOWLEDGE_MAX_LENGTH
     ? assembled
     : `${truncate(assembled, KNOWLEDGE_MAX_LENGTH)}\n\n(project knowledge truncated)`;
+  // Membership must stay complete even when a pinned plan uses the knowledge budget.
+  return [knowledge, buildPullStackText(pullStacks)].filter(Boolean).join('\n\n');
+};
+
+const pendingKnowledge = (collected, deliveredSignature) => {
+  const signature = buildKnowledgeSignature(collected);
+  return { text: !signature || signature === deliveredSignature ? '' : buildKnowledgeText(collected), signature };
 };
 
 export const createSessionKnowledgeRuntime = (dependencies) => {
@@ -208,6 +215,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     // metadata store: OpenCode 2.x accepts session metadata only at create time.
     readSessionMetadata = null,
     persistSessionMetadata = null,
+    collectFollowedPullStacks = async () => [],
   } = dependencies;
 
   const requireMetadataStore = () => {
@@ -357,20 +365,17 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * carrying it. `deliveredSignature` comes from the session's metadata.
    */
   const resolvePending = async (directory, deliveredSignature, pins = { notes: [], plans: [] }) => {
-    const collected = await collect(directory, pins);
-    const signature = buildKnowledgeSignature(collected);
-    if (!signature || signature === deliveredSignature) {
-      return { text: '', signature };
-    }
-    return { text: buildKnowledgeText(collected), signature };
+    return pendingKnowledge(await collect(directory, pins), deliveredSignature);
   };
 
   /**
    * What this session still owes, read from its own stored signature.
    */
-  const resolvePendingForSession = async (sessionId, directory) => {
-    const session = await readStoredSession(sessionId).catch(() => null);
-    return resolvePending(directory, readDeliveredSignature(session), readPins(session));
+  const resolvePendingForSession = async (sessionId, directory, { force = false } = {}) => {
+    const session = await readStoredSession(sessionId);
+    const collected = await collect(directory, readPins(session));
+    const pullStacks = await collectFollowedPullStacks(directory, session);
+    return pendingKnowledge({ ...collected, pullStacks }, force ? '' : readDeliveredSignature(session));
   };
 
   const collectSummaryForSession = async (sessionId, directory) => {

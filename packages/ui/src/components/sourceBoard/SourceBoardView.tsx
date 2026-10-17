@@ -263,6 +263,7 @@ const SourceBoardBody: React.FC<{
     const isMobile = layout === 'mobile';
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
+    const desktopBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
     const source = tab === 'linear' ? 'linear' : 'github';
     // An item another surface asked to show: an issue or PR by its link, a
     // Linear issue by its identifier. It is read on its own, not typed into the
@@ -440,6 +441,15 @@ const SourceBoardBody: React.FC<{
             footer={actions}
             linearStateControl={previewItem?.source === 'linear' ? <SourceBoardLinearStatus issue={previewItem.issue} onChanged={browser.list.retry} /> : undefined}
             onOpenLinearIssue={(issue) => browser.openItem({ source: 'linear', issue })}
+            stackEnabled={isMobile || desktopBoardOpen}
+            onOpenStackMember={(member) => {
+                const listed = browser.items.find((item) => item.source === 'github' && isSameRepositoryItemLink(item.reference.url, member.url));
+                if (listed) browser.showItem(referencePickerItemKey(listed));
+                else {
+                    setPinRequest((request) => request + 1);
+                    setPinnedLink({ kind: 'pull', url: member.url });
+                }
+            }}
             onOpenChecks={previewPull && context ? () => setChecksOpenFor(previewKey) : undefined}
             onRefresh={previewItem?.source === 'github' && context ? refreshFromHost : undefined}
             threadActions={threadActions}

@@ -93,6 +93,17 @@ describe('gatekeeper channel: control requests', () => {
     expect(JSON.parse(JSON.parse(data.slice('data-raw = '.length)))).toEqual({ id: 'open-0a1b2c3d4e5f', upstream: 'https://registry.example.com/npm/' });
   });
 
+  it('delivers the host-selected model in a protected grant body', async () => {
+    // Given the host control channel and an explicit reviewed selection.
+    const { channel, calls } = channelWith(ok(http(200, '{"ok":true}')));
+    const model = { providerID: 'openai', modelID: 'gpt-4.1' };
+    // When the host delivers a credential bound to that model.
+    await channel.addGrant(ID, { id: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', secret: SECRET, model });
+    // Then the serialized control request retains the binding.
+    const data = calls[0].options.stdin.split('\n').find((line) => line.startsWith('data-raw = '));
+    expect(JSON.parse(JSON.parse(data.slice('data-raw = '.length)))).toMatchObject({ model });
+  });
+
   it('sends a grant\'s own headers in the body beside the secret, and only when there are any', async () => {
     const { channel, calls } = channelWith(ok(http(200, '{"ok":true}')));
     await channel.addGrant(ID, { id: 'lighthouse', upstream: 'https://lighthouse-gw.example.dev/v1', header: 'authorization', secret: SECRET, headers: { 'x-team': 'platform' } });

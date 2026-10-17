@@ -448,6 +448,40 @@
           }
         },
         {
+          "label": "Stacked pull requests",
+          "link": "/stacked-prs/",
+          "translations": {
+            "nl": "Gestapelde pull requests",
+            "uk": "Стеки pull request",
+            "zh-CN": "堆叠式拉取请求",
+            "es": "Pull requests apilados",
+            "pt-BR": "Pull requests empilhados",
+            "ko": "스택 풀 리퀘스트",
+            "pl": "Stosy pull requestów",
+            "fr": "Pull requests empilées",
+            "ja": "スタック型プルリクエスト",
+            "de": "Gestapelte Pull Requests",
+            "tr": "Yığılmış pull request'ler"
+          }
+        },
+        {
+          "label": "PR fix loop",
+          "link": "/pr-fix-loop/",
+          "translations": {
+            "nl": "PR-herstellus",
+            "uk": "Цикл виправлення PR",
+            "zh-CN": "PR 修复循环",
+            "es": "Bucle de corrección de PR",
+            "pt-BR": "Loop de correção de PR",
+            "ko": "PR 수정 루프",
+            "pl": "Pętla poprawek PR",
+            "fr": "Boucle de correction de PR",
+            "ja": "PR 修正ループ",
+            "de": "PR-Korrekturschleife",
+            "tr": "PR düzeltme döngüsü"
+          }
+        },
+        {
           "label": "Magic Prompts",
           "link": "/magic-prompts/",
           "translations": {

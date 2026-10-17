@@ -60,6 +60,52 @@ Arrows and Ctrl+N/P move the highlight from the search field. Enter attaches the
 checked items, or the highlighted one when nothing is checked; Shift+Enter
 checks the highlighted item. Double-click attaches a row.
 
+## Pull request stacks
+
+`PullStackSection` appears in the shared PR preview on the board and in the Git
+PR view. It reads the bound GitHub stack through `usePullStack`, uses the
+server's bottom-to-top order, and labels native and inferred chains. A missing
+live summary stays neutral and explicitly unknown. The server also supplies
+behind-base counts, retarget destinations, and other dependent branches.
+Members open in the board. The board reuses an already-listed item when it can.
+
+`pullStackInference.ts` derives compact page-local positions from loaded open
+PRs without requests. It joins heads and bases only within the same repository.
+Fork heads, missing parents, trees, ambiguous parents, and cycles grant no
+position. This badge describes only the items loaded on the page.
+
+`useRestackRun` recovers the latest local run on mount and stream reconnect and
+subscribes to `openchamber:pr-stack.restack`. Failed reads retain the prior run;
+a newer event survives an older GET. Hidden board previews release these
+subscriptions. `PullStackRestack` shows branch steps, conflict paths, and the
+continue, abort, and session-handoff actions. Fetch uses the everyday bound
+network operation before the server starts its local rebase.
+
+Publication uses `publishRestack.ts` and the shared bound push runner. Leases
+come from the GitHub heads captured before the local rebase. Only changed
+branches are pushed, in order. Successful branches stay complete after another
+push fails; an unknown transfer blocks further transfers through the existing
+Git recovery owner. After remount, a branch is eligible only when its remote
+head still matches the pre-rebase head, or is already at the completed head.
+An unprovable original head is reported and never force-pushed speculatively.
+
+The stack's merge control offers only the bottom open member and uses the
+existing merge preference and confirmation dialog. Opening a PR on top reuses
+`PullRequestSection` in an on-demand dialog with the top open head as its base.
+The user selects a branch without an open PR before creating it. This dialog
+also provides the create flow in the phone shell, which has no PR rail.
+
+Whole-stack attachment goes through `pullAttachments.ts` and
+`resolvePullStackReferences.ts`. Each member gets its diff, checks, and comments
+through `changeRequestContext`; a failed member does not stop later members.
+The composer also receives a short ordered stack summary. The selected PR's
+successful context marks its session link as following the live stack. A
+runtime or destination-session change discards the unfinished attachment.
+
+Web, Electron, hosted mobile, and Capacitor use the web runtime adapter. VS Code
+shows neither the stack section nor badges and rejects all stack API methods
+as unsupported. GitLab keeps its existing preview without stack requests.
+
 ## Runtimes
 
 Web, desktop and hosted mobile use it as above; Capacitor mobile gets the
@@ -182,4 +228,3 @@ preview's footer holds actions instead of what the agent gets.
   the button says so. The PR comes from the branch status; on GitHub
   `#N` is also looked up for its labels and comment count, which the status
   does not carry.
-

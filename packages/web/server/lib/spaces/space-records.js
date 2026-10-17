@@ -12,6 +12,8 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { requireSpaceId } from './labels.js';
+import { approvalModelSchema, requireProfileGrants, spacePurposeSchema } from './approval-profile.js';
+import { SpaceError } from './errors.js';
 import { MAX_KEPT_OUTPUT_CHARACTERS, MAX_SETUP_COMMAND_LENGTH, MAX_SETUP_COMMANDS } from './space-setup.js';
 
 const RECORDS_DIRECTORY = path.join('spaces', 'records');
@@ -108,6 +110,8 @@ const setupSchema = z.discriminatedUnion('state', [
 
 const recordSchema = z.object({
   version: z.literal(1),
+  purpose: spacePurposeSchema.default('general'),
+  approvalModel: approvalModelSchema.nullable().default(null),
   /** The place the space was made on. A record from before there were two names the local Docker place. */
   placeId: z.string().min(1).default('docker'),
   /** The display name and the creation time, as the labels hold them, for a list while the place cannot be asked. */
@@ -174,7 +178,10 @@ export function createSpaceRecords({ dataDir, logger = console }) {
     }
     try {
       const parsed = recordSchema.safeParse(withReadableSetup(spaceId, withReadableGrants(spaceId, JSON.parse(text))));
-      if (parsed.success) return { status: 'ok', record: parsed.data };
+      if (parsed.success) {
+        requireProfileGrants(parsed.data);
+        return { status: 'ok', record: parsed.data };
+      }
     } catch {
       // Reported below.
     }
@@ -184,6 +191,12 @@ export function createSpaceRecords({ dataDir, logger = console }) {
 
   const write = (spaceId, record) => {
     const checked = recordSchema.parse({ version: 1, ...record });
+    requireProfileGrants(checked);
+    const current = read(spaceId);
+    if (current.status === 'unreadable') throw new SpaceError('space_record_unreadable', 'The existing space record cannot be replaced. Remove the space and create it again.');
+    if (current.record && (current.record.purpose !== checked.purpose || current.record.approvalModel?.providerID !== checked.approvalModel?.providerID || current.record.approvalModel?.modelID !== checked.approvalModel?.modelID)) {
+      throw new SpaceError('space_purpose_immutable', 'The purpose and selected approval model are permanent. Create a fresh space for the approval worker.');
+    }
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const file = fileOf(spaceId);
     // Through a temporary name, so a crash in the middle never leaves half a record.

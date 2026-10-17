@@ -1,6 +1,7 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
+import type { PullStackResult, PullStackRegistration, PullStackMerge, RestackInput, RestackRun } from './pull-stacks';
 import type {
   ChangeRequest,
   ChangeRequestContext,
@@ -27,6 +28,8 @@ import type {
   SourceControlEmptyMutationResult,
   SourceControlMergeMutationResult,
   SourceControlMutationReceipt,
+  SourceControlMutationContext,
+  SourceControlExistingMutationTarget,
   SourceControlReadyMutationResult,
   SourceControlReviewMutationResult,
   SourceControlStateMutationResult,
@@ -1865,6 +1868,10 @@ export type GitHubDeviceFlowComplete =
   | { connected: true; user: GitHubUserSummary; scope?: string }
   | { connected: false; status?: string; error?: string };
 
+export type { PullStack, PullStackMember, RestackRun } from './pull-stacks';
+
+type GitHubStackMutationContext = SourceControlMutationContext<SourceControlExistingMutationTarget & { headSha: string }>;
+
 export interface SourceControlAPI {
   repositoryContext(directory: string): Promise<SourceControlRepositoryContext>;
   repositoryBinding(directory: string): Promise<SourceControlBindingRead>;
@@ -1946,6 +1953,16 @@ export interface SourceControlAPI {
   githubReferenceDetail(context: SourceControlReadContext, item: GitHubPullRequestRef): Promise<GitHubReferenceDetailResult>;
   /** GitHub only: checks and mergeability of up to 30 listed PRs, for their colour. Throws on failure. */
   githubPullStatuses(context: SourceControlReadContext, pulls: GitHubPullRequestRef[]): Promise<GitHubPullStatusesResult>;
+  /** GitHub's native stack, or a live inferred chain; null means this PR is not stacked. */
+  githubPullStack(context: SourceControlReadContext, pull: GitHubPullRequestRef): Promise<PullStackResult>;
+  githubPullStackRegister(context: GitHubStackMutationContext, pull: GitHubPullRequestRef): Promise<PullStackRegistration>;
+  githubPullStackRetarget(context: GitHubStackMutationContext, pull: GitHubPullRequestRef & { base: string }): Promise<{ ok: true }>;
+  githubPullStackMerge(context: GitHubStackMutationContext, pull: GitHubPullRequestRef & { method: 'merge' | 'squash' | 'rebase' }): Promise<PullStackMerge>;
+  prStackRestack(input: RestackInput): Promise<RestackRun>;
+  prStackRestackGet(directory: string): Promise<{ run: RestackRun | null }>;
+  prStackRestackContinue(id: string): Promise<RestackRun>;
+  prStackRestackAbort(id: string): Promise<RestackRun>;
+  prStackRestackAskSession(id: string): Promise<RestackRun>;
 }
 
 export interface RemoteClientRecord {

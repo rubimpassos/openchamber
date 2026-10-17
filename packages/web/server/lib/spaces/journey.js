@@ -41,6 +41,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { SpaceError } from './errors.js';
+import { approvalModelSchema, approvalPolicy, requireApprovalModel, requireApprovalModelWindow, requireProfileGrants, requireProfileNetwork, spacePurposeSchema } from './approval-profile.js';
 import { DEFAULT_IDLE_STOP, idleStopSchema } from './idle-stop.js';
 import { headerOfPackage, windowUpstreamOf } from './host-providers.js';
 import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
@@ -53,6 +54,8 @@ import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
 // The four choices of the create dialog, parsed at the boundary. Each field refuses with a code
 // of its own, so the dialog can point at the field.
 const createRequestSchema = z.object({
+  purpose: spacePurposeSchema.default('general'),
+  approvalModel: approvalModelSchema.nullable().default(null),
   // The place the space is made on; the first configured place, local Docker, unless the dialog says another.
   placeId: z.string().min(1).optional(),
   projectDirectory: z.string().min(1),
@@ -64,6 +67,8 @@ const createRequestSchema = z.object({
   setupCommands: setupCommandsSchema.default([]),
 });
 const CREATE_REFUSALS = {
+  purpose: ['invalid_space_purpose', 'Choose general or pr-fix-loop-approval when creating a new space.'],
+  approvalModel: ['space_approval_model_unreviewed', 'An approval worker needs a reviewed providerID and modelID selected by the host.'],
   placeId: ['place_not_found', 'A space is made on one of the configured places.'],
   projectDirectory: ['project_not_registered', 'A space is made for a project this OpenChamber knows. Add the project first, then create the space.'],
   name: ['invalid_space_name', 'A space needs a name.'],
@@ -326,7 +331,7 @@ export function createSpaceJourney({
       });
   };
 
-  const prepare = async (entry, { placeId, projectDirectory, name, start, network, setupCommands }) => {
+  const prepare = async (entry, { placeId, projectDirectory, name, start, network, setupCommands, purpose, approvalModel }) => {
     let created = false;
     try {
       progress(entry, 'checking_place');
@@ -336,10 +341,10 @@ export function createSpaceJourney({
         throw new SpaceError('place_cannot_restrict_network', 'This place cannot keep a space away from the machine it runs on, so an allowlist would not hold. Use a newer Docker engine, or choose the open network with that in mind.');
       }
       progress(entry, 'creating');
-      await manager.createSpace({ id: entry.id, placeId, projectDirectory, name });
+      await manager.createSpace({ id: entry.id, placeId, projectDirectory, name, purpose });
       created = true;
       // With the place, the name and the time, so the space is still listed while its place cannot be asked.
-      records.write(entry.id, { placeId, name: entry.name, created: entry.created, network, repository: projectDirectory });
+      records.write(entry.id, { placeId, name: entry.name, created: entry.created, purpose, approvalModel, network, repository: projectDirectory });
       progress(entry, 'setting_network');
       await gatekeeper.setNetwork(entry.id, network);
       progress(entry, 'bringing_code');
@@ -377,7 +382,9 @@ export function createSpaceJourney({
       const [code, message] = CREATE_REFUSALS[parsed.error.issues[0]?.path?.[0]] ?? CREATE_REFUSALS.network;
       throw new SpaceError(code, message);
     }
-    const { name, start, network, setupCommands } = parsed.data;
+    const { name, start, network, setupCommands, purpose } = parsed.data;
+    requireProfileNetwork(purpose, network);
+    const approvalModel = requireApprovalModel(purpose, parsed.data.approvalModel);
     const placeId = parsed.data.placeId ?? places.list()[0]?.id;
     requirePlace(placeId);
     const projectDirectory = await requireRegisteredProject(parsed.data.projectDirectory);
@@ -393,10 +400,12 @@ export function createSpaceJourney({
       step: 'checking_place',
       failure: null,
       network,
+      purpose,
+      approvalModel,
       setupTotal: setupCommands.length,
     };
     pending.set(entry.id, entry);
-    void prepare(entry, { placeId, projectDirectory, name, start, network, setupCommands });
+    void prepare(entry, { placeId, projectDirectory, name, start, network, setupCommands, purpose, approvalModel });
     return describePending(entry);
   };
 
@@ -470,6 +479,13 @@ export function createSpaceJourney({
     try {
       const said = { id: grant.id, upstream, header, secret };
       if (headers) said.headers = headers;
+      const { record } = records.read(spaceId);
+      if (!record) return false;
+      requireProfileGrants(record);
+      if (record.purpose === approvalPolicy.purpose) {
+        said.model = record.approvalModel;
+        requireApprovalModelWindow(said);
+      }
       await gatekeeper.addGrant(spaceId, said);
       return true;
     } catch (error) {
@@ -700,6 +716,8 @@ export function createSpaceJourney({
     step: entry.step,
     failure: entry.failure,
     network: entry.network,
+    purpose: entry.purpose,
+    approvalModel: entry.approvalModel,
     history: 'pending',
     // The client waits for the setup only when the host said it will run one; a host before 5d-4 never says so.
     setup: entry.setupTotal > 0 ? { state: 'queued', total: entry.setupTotal } : null,
@@ -755,6 +773,8 @@ export function createSpaceJourney({
           ? { code: 'space_code_never_arrived', message: 'OpenChamber closed before the code arrived. Delete the space and create it again.', details: null }
           : space.state === 'unreachable' ? placeFailureOf(space.placeId) : null,
         network: record?.network ?? null,
+        purpose: space.purpose ?? record?.purpose ?? 'general',
+        approvalModel: record?.approvalModel ?? null,
         history: record?.history ?? 'unknown',
         setup: setup.describe(space.id, record),
         grants: grants.map(describeGrant),
@@ -809,8 +829,9 @@ export function createSpaceJourney({
     if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     requireNotPending(spaceId);
     await strayStops.get(spaceId);
-    await manager.startSpace({ spaceId });
     const { record } = records.read(spaceId);
+    if (record) requireProfileGrants(record);
+    await manager.startSpace({ spaceId });
     let networkRestored = false;
     let grants = { restored: [], needsAccess: [] };
     if (record) {
@@ -892,6 +913,11 @@ export function createSpaceJourney({
     if (current.status !== 'ok') throw new SpaceError('space_record_unreadable', 'The host\'s record of this space cannot be read, so a grant could not be remembered. Remove the space and create it again.');
 
     const asked = parsed.data;
+    requireProfileGrants(current.record);
+    if (space.purpose !== current.record.purpose) throw new SpaceError('space_purpose_immutable', 'The runtime and host record purposes differ. Remove this space and create it again.');
+    if (current.record.purpose === approvalPolicy.purpose && !['model', 'login'].includes(asked.kind)) {
+      throw new SpaceError('space_approval_grant_denied', 'Approval workers accept only supported model keys or host logins. Domain and custom grants are unavailable.');
+    }
     if (asked.kind === 'model' && !HEADER_BY_PROVIDER.has(asked.provider)) {
       throw new SpaceError('provider_not_supported', `A key for ${asked.provider} cannot be given through the network filter yet: it reads its key in a way the network filter does not know.`);
     }
@@ -927,6 +953,10 @@ export function createSpaceJourney({
     // A key that replaces a login takes the login's row with it first, or OpenCode inside would
     // keep the login's headers and model list for requests the window now sends with the key; a
     // removal that fails answers the grant before anything changed.
+    if (current.record.purpose === approvalPolicy.purpose) {
+      window.model = current.record.approvalModel;
+      requireApprovalModelWindow({ id: grant.id, ...window });
+    }
     const replaced = current.record.grants.find((entry) => entry.id === grant.id);
     if (grant.kind !== 'login' && replaced?.kind === 'login') await spaceOpenCode.removeLogin(spaceId, grant.provider);
     await gatekeeper.addGrant(spaceId, { id: grant.id, ...window });
@@ -957,6 +987,9 @@ export function createSpaceJourney({
     if (space.state !== 'running') throw new SpaceError('space_not_running', 'A domain is opened by the gatekeeper of a running space. Start the space, then open it.');
     const current = records.read(spaceId);
     if (current.status !== 'ok') throw new SpaceError('space_record_unreadable', 'The host\'s record of this space cannot be read, so an opened domain could not be remembered. Remove the space and create it again.');
+    if (space.purpose === approvalPolicy.purpose || current.record.purpose === approvalPolicy.purpose) {
+      throw new SpaceError('space_approval_network_locked', 'An approval worker permanently keeps an empty allowlist. Create a separate ordinary space for network access.');
+    }
     const { network } = current.record;
     if (network.mode === 'open') throw new SpaceError('network_is_open', 'The network of this space is open, so there is no list to add a domain to.');
     if (network.domains.includes(domain)) return { network };

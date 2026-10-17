@@ -35,6 +35,7 @@ import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
+import { fixLoopConfigSchema } from '@/lib/prFixLoop';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -552,6 +553,16 @@ export const SETTINGS_REGISTRY = {
     ui: uiStore('sessionGoalMaxAutoTurns', (v) => useUIStore.getState().setSessionGoalMaxAutoTurns(v)),
   }),
   sessionGoalDefaultBudgetEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalDefaultBudgetEnabled', (v) => useUIStore.getState().setSessionGoalDefaultBudgetEnabled(v)) }),
+  prFixLoopDefaults: field({
+    scope: 'profile', surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(fixLoopConfigSchema.partial()),
+    ui: uiStore('prFixLoopDefaults', (v) => useUIStore.getState().setPrFixLoopDefaults(v)),
+  }),
+  prStackConflictMode: field({
+    scope: 'profile', surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseOneOf(['pause', 'agent']),
+    ui: uiStore('prStackConflictMode', (v) => useUIStore.getState().setPrStackConflictMode(v)),
+  }),
   sessionGoalDefaultBudget: field({ scope: 'profile', parse: parsePositiveInteger, ui: uiStore('sessionGoalDefaultBudget', (v) => useUIStore.getState().setSessionGoalDefaultBudget(v)) }),
   summarizeLastMessage: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('summarizeLastMessage', (v) => useUIStore.getState().setSummarizeLastMessage(v)) }),
   summaryThreshold: field({ scope: 'profile', parse: parseIntegerAtLeast(0), ui: uiStore('summaryThreshold', (v) => useUIStore.getState().setSummaryThreshold(v)) }),

@@ -217,6 +217,16 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
 
 ### Message parts
 
+- `markdown/markdownLexicalBounds.ts` owns lexer work bounds for every Markdown
+  parser in `markdownCore.ts`. Extension hints stop at the current paragraph;
+  native tokenizers reject impossible prefixes before running marked's regexes
+  on the remaining message. Possible matches use marked's original tokenizer
+  with the complete source. Without reference definitions, reference labels
+  follow marked's literal-character fallback. These guards also apply to block
+  splitting and synchronous first paint. The horizontal-rule regex stays bounded
+  to its first line even inside marked's list tokenizer, while preserving the
+  matched rule's trailing newlines and raw offsets. Each lexer owns that rule
+  replacement; caches and sanitization stay unchanged.
 - Assistant markdown treats raw HTML as inert visible text. The final generated
   HTML is sanitized as defense in depth, with script and style elements
   forbidden, so message content cannot inject active DOM or application-wide

@@ -54,6 +54,9 @@ export default defineConfig({
     // that need them set them themselves.
     env: {
       OPENCHAMBER_ENTERPRISE_MODE: '',
+      OPENCHAMBER_UPDATE_REPO: '',
+      OPENCHAMBER_UPDATE_RELEASE_TAG: '',
+      OPENCHAMBER_UPDATE_API_URL: '',
       OPENCHAMBER_RELAY_URL: '',
       OPENCHAMBER_JEV_URL: '',
       OPENCHAMBER_JEV_MODEL: '',

@@ -20,13 +20,59 @@ afterEach(() => {
 });
 
 describe('space records', () => {
+  it('preserves an approval purpose across host reconstruction and rejects relabeling in either direction', () => {
+    // Given a fresh protected record and a separate ordinary space with an irrevocable grant.
+    const dataDir = temporary();
+    const records = createSpaceRecords({ dataDir, logger: quiet });
+    const protectedRecord = { purpose: 'pr-fix-loop-approval', approvalModel: { providerID: 'openai', modelID: 'gpt-4.1' }, network: { mode: 'allowlist', domains: [] } };
+    records.write(ID, protectedRecord);
+    const ordinaryId = '112233445566';
+    records.write(ordinaryId, { network: { mode: 'open' }, grants: [{ kind: 'domain', id: 'github', upstream: 'https://api.github.com' }] });
+    const reopened = createSpaceRecords({ dataDir, logger: quiet });
+    // When a record update or a whole replacement tries to change either purpose.
+    for (const mutate of [
+      () => reopened.update(ID, { purpose: 'general' }),
+      () => reopened.write(ID, { network: { mode: 'open' } }),
+      () => reopened.write(ordinaryId, protectedRecord),
+      () => reopened.update(ID, { approvalModel: { providerID: 'openai', modelID: 'gpt-5.4' } }),
+    ]) expect(mutate).toThrow(expect.objectContaining({ code: 'space_purpose_immutable' }));
+    // Then unrelated progress can still be persisted without weakening the purpose.
+    expect(reopened.update(ID, { history: 'sent' }).record).toMatchObject({ purpose: protectedRecord.purpose, history: 'sent' });
+  });
+
+  it.each([
+    { network: { mode: 'open' } },
+    { network: { mode: 'allowlist', domains: ['api.github.com'] } },
+    { grants: [{ kind: 'domain', id: 'github', upstream: 'https://api.github.com' }] },
+    { grants: [{ kind: 'custom', id: 'proxy', provider: 'proxy' }] },
+  ])('refuses unsafe persisted approval permissions %j', (changes) => {
+    // Given an approval record with no publishing capability.
+    const records = createSpaceRecords({ dataDir: temporary(), logger: quiet });
+    records.write(ID, { purpose: 'pr-fix-loop-approval', approvalModel: { providerID: 'openai', modelID: 'gpt-4.1' }, network: { mode: 'allowlist', domains: [] } });
+    // When a generic persistence mutation adds unsafe access.
+    expect(() => records.update(ID, changes)).toThrow();
+    // Then the original valid profile remains usable.
+    expect(records.read(ID).record).toMatchObject({ purpose: 'pr-fix-loop-approval', network: { mode: 'allowlist', domains: [] }, grants: [] });
+  });
+
+  it.each([undefined, { providerID: 'openai', modelID: 'gpt-5-search-api' }])('restores no permissions from a protected record with an unreviewed model %j', (approvalModel) => {
+    // Given a legacy or altered protected record with an otherwise supported model grant.
+    const dataDir = temporary();
+    const directory = path.join(dataDir, 'spaces', 'records');
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, `${ID}.json`), JSON.stringify({ version: 1, purpose: 'pr-fix-loop-approval', approvalModel, network: { mode: 'allowlist', domains: [] }, grants: [{ kind: 'model', id: 'openai', provider: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', source: { kind: 'env', name: 'MODEL_KEY' } }] }));
+    // When a host reconstructs its records.
+    const read = createSpaceRecords({ dataDir, logger: quiet }).read(ID);
+    // Then it cannot restore access using an implicit or hosted-search selection.
+    expect(read).toEqual({ status: 'unreadable', record: null });
+  });
   it('writes a record readable by the user only, reads it back, changes a field and removes it', () => {
     const dataDir = temporary();
     const records = createSpaceRecords({ dataDir, logger: quiet });
     expect(records.read(ID)).toEqual({ status: 'missing', record: null });
 
     const written = records.write(ID, { network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project' });
-    expect(written).toEqual({ version: 1, placeId: 'docker', name: null, created: null, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
+    expect(written).toEqual({ version: 1, purpose: 'general', approvalModel: null, placeId: 'docker', name: null, created: null, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
     const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
     if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.readdirSync(path.dirname(file))).toEqual([`${ID}.json`]);

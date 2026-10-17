@@ -27,7 +27,8 @@ const KINDS = [
 const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];
 const TERMINAL_STATES = ['succeeded', 'failed'];
 const TARGET_OPTIONAL_KEYS = ['number', 'head', 'base', 'headSha'];
-const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'ready', 'commented', 'failureStatus', 'failureCode'];
+const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'ready', 'commented', 'failureStatus', 'failureCode',
+  'ok', 'registered', 'nativeNumber', 'status', 'retargeted'];
 
 const emptyState = () => ({ version: VERSION, records: {} });
 const isBoolean = (value) => Object.prototype.toString.call(value) === '[object Boolean]';
@@ -96,6 +97,11 @@ const isTerminalResult = (value) => isPlainObject(value)
   && (value.merged === undefined || isBoolean(value.merged))
   && (value.commented === undefined || isBoolean(value.commented))
   && (value.ready === undefined || isBoolean(value.ready))
+  && (value.ok === undefined || value.ok === true)
+  && (value.registered === undefined || isBoolean(value.registered))
+  && (value.nativeNumber === undefined || value.nativeNumber === null || isPositiveInteger(value.nativeNumber))
+  && (value.status === undefined || ['merged', 'pending', 'enqueued'].includes(value.status))
+  && (value.retargeted === undefined || value.retargeted === null || isPositiveInteger(value.retargeted))
   && (value.failureStatus === undefined || isFailureStatus(value.failureStatus))
   && (value.failureCode === undefined || isNonEmptyString(value.failureCode));
 

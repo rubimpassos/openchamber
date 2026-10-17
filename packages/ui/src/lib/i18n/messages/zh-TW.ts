@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-TW.settings';
+import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -9,6 +10,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -77,6 +79,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '使用了 {count} 個子代理',
   'sessions.sidebar.projectAction.active': '專案操作正在執行',
   ...settingsDict,
+  ...prStacksI18n['zh-TW'],
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber 無法在這裡儲存 Git 傳輸的狀態。請允許網站儲存空間並重新載入；在那之前 push 和 pull 會暫停。',
   'gitView.operation.recovery.capacity': '已儲存太多未完成的 Git 傳輸。開始新的傳輸前，請先檢查下面這些。',
@@ -147,6 +150,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n['zh-TW'],
   ...surfacePanelI18n['zh-TW'],
   ...browserServerPanelI18n['zh-TW'],
+  ...prFixLoopI18n['zh-TW'],
   ...fileArtifactsI18n['zh-TW'],
   ...htmlRenderI18n['zh-TW'],
   ...usageStatsI18n['zh-TW'],

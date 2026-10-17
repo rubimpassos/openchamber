@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMessageQueueRuntime, parseQueuedItemInput } from './runtime.js';
+import { createFixLoopRuntime } from '../pr-fix-loop/runtime.js';
 
 const SESSION = 'ses_queue_test_1';
 const DIRECTORY = '/repo';
@@ -86,7 +87,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, assertFixLoopHostDispatch } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -107,6 +108,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     abortHoldMs: 50,
     beforeScheduledTaskSend,
     onScheduledTaskResult,
+    assertFixLoopHostDispatch,
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
@@ -127,6 +129,38 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
 const settle = async (ms = 30) => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
+
+describe('fix-loop dispatch admission', () => {
+  it.each([
+    { pushMode: 'approval', feedbackTrustVersion: undefined, allowed: false },
+    { pushMode: 'auto', feedbackTrustVersion: undefined, allowed: false },
+    { pushMode: 'auto', feedbackTrustVersion: 1, allowed: true },
+  ])('loads $pushMode authority with trust version $feedbackTrustVersion before loop startup', async ({ pushMode, feedbackTrustVersion, allowed }) => {
+    const dataDir = makeDataDir();
+    const loop = { id: 'fixloop_legacy', sessionId: SESSION, directory: DIRECTORY, config: { pushMode }, status: 'working', internal: { feedbackTrustVersion } };
+    fs.writeFileSync(path.join(dataDir, 'pr-fix-loops.json'), JSON.stringify({ version: 1, loops: [loop] }));
+    const first = createRuntime({ dataDir }); first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    await first.runtime.enqueue(SESSION, DIRECTORY, item({ origin: { kind: 'pr-fix-loop', id: loop.id } }));
+    await first.runtime.flush(); first.runtime.stop();
+    const fixLoop = createFixLoopRuntime({ dataDir });
+    const second = createRuntime({ dataDir, assertFixLoopHostDispatch: (...args) => fixLoop.assertHostDispatch(...args) });
+    // The queue starts first. No fixLoop.start() has run to reject the legacy approval record.
+    second.runtime.start(); await settle();
+    expect(second.openCode.state.sent).toHaveLength(allowed ? 1 : 0);
+    expect(second.runtime.sessionSnapshot(SESSION).items).toHaveLength(allowed ? 0 : 1);
+    second.runtime.stop(); await fixLoop.stop();
+  });
+
+  it('cannot deliver a fix-loop item while its dispatch authority is unavailable', async () => {
+    const { runtime, openCode } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ origin: { kind: 'pr-fix-loop', id: 'fixloop_legacy' } }));
+    await settle();
+    expect(openCode.state.sent).toEqual([]); expect(openCode.state.switched).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    runtime.stop();
+  });
+});
 
 describe('scheduled task items', () => {
   const scheduled = (projectId = 'project-1', overrides = {}) => item({
@@ -375,6 +409,13 @@ describe('parseQueuedItemInput', () => {
     ]);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'context', text: 'no metadata' }] }))).toThrow(TypeError);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'other', text: 'x' }] }))).toThrow(TypeError);
+  });
+
+  it('lets a server feature queue an item that keeps the session model', () => {
+    const parsed = parseQueuedItemInput({ content: 'Fix loop', text: 'fix CI', origin: { kind: 'pr-fix-loop', id: 'fixloop_1' } });
+    expect(parsed.origin).toEqual({ kind: 'pr-fix-loop', id: 'fixloop_1' });
+    expect(parsed.sendConfig).toEqual({});
+    expect(() => parseQueuedItemInput({ content: 'x', origin: { kind: 'other', id: '1' } })).toThrow(TypeError);
   });
 
   it('accepts an item that is only context', () => {

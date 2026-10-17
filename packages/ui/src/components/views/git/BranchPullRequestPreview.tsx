@@ -95,6 +95,7 @@ export const BranchPullRequestPreview: React.FC<{
                 // This branch is already checked out here: no new session or worktree from it.
                 footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={refresh} />}
                 onOpenChecks={() => setChecksOpen(true)}
+                onRefresh={async () => { refresh(); }}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}
                 labelsControl={<SourceBoardLabels reference={reference} context={context} onChanged={refresh} />}

@@ -84,4 +84,13 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   githubReferences: unsupported,
   githubReferenceDetail: unsupported,
   githubPullStatuses: unsupported,
+  githubPullStack: unsupported,
+  githubPullStackRegister: unsupported,
+  githubPullStackRetarget: unsupported,
+  githubPullStackMerge: unsupported,
+  prStackRestack: unsupported,
+  prStackRestackGet: unsupported,
+  prStackRestackContinue: unsupported,
+  prStackRestackAbort: unsupported,
+  prStackRestackAskSession: unsupported,
 });

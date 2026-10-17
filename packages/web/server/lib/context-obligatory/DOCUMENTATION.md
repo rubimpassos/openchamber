@@ -11,7 +11,7 @@ The runtime finds the newest completed `compaction` message,
 fetches every pinned message by ID, keeps non-empty text content, sorts them by
 the stored creation time, and posts one message to
 `/api/session/:id/synthetic` with `resume: false`, together with the session's
-pinned project knowledge. Missing individual messages are skipped without
+pinned project knowledge and followed GitHub pull request stacks. Missing individual messages are skipped without
 discarding the remaining context. Other events perform no work and make no
 requests.
 
@@ -20,3 +20,10 @@ After a successful send, the runtime merge-writes
 replayed compaction event from reinjecting the same summary. The runtime is
 owned by the OpenChamber web backend and therefore is not available in
 extension-only VS Code mode.
+
+Knowledge resolves through `resolvePendingForSession` with forced delivery, so
+the session's followed anchors are read again after compaction. Before attempting
+restoration, the runtime clears the knowledge delivery signature. A failed
+synthetic write therefore leaves context pending on the next ordinary turn.
+Successful restoration records the new signature with the compaction cursor.
+Replayed compaction events stop at that cursor before reading stack membership.

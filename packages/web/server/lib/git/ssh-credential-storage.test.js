@@ -90,10 +90,12 @@ describe('managed SSH credential storage', () => {
     directories.push(directory);
     const filePath = path.join(directory, 'git-ssh-credentials.json');
     await fs.writeFile(filePath, JSON.stringify({ version: 1, keys: [] }), { mode: 0o644 });
+    await fs.chmod(filePath, 0o644);
     const store = createManagedSshCredentialStore({ filePath });
     await expect(store.read()).rejects.toMatchObject({ code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE' });
 
     await fs.writeFile(filePath, JSON.stringify({ version: 1, keys: [], token: 'nope' }), { mode: 0o600 });
+    await fs.chmod(filePath, 0o600);
     await expect(store.read()).rejects.toMatchObject({ code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE' });
   });
 });

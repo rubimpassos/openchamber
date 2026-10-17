@@ -63,12 +63,14 @@ L'aperçu d'une pull request montre aussi sa branche, sa taille (lignes ajoutée
 
 Deux boutons se trouvent à côté de la taille. **Changes** ouvre le diff de la pull request dans le panneau latéral, et **Walkthrough** ouvre sa [parcours des modifications](/fr/walkthrough/). Si l'app est sur un autre projet, elle passe d'abord au projet de la PR. Sur le téléphone, **Changes** ouvre la PR dans l'onglet **Git** du panneau de travail ; **Walkthrough** n'existe que sur le bureau et le web.
 
-En bas, **Merge** demande confirmation avant de fusionner et utilise ta méthode de merge habituelle. Un brouillon a aussi **Ready for review**.
+En bas, **Merge** demande confirmation avant de fusionner et utilise ta méthode de merge habituelle. Un brouillon a aussi **Ready for review**. **Start fix loop** confie la PR à la session ouverte jusqu'à ce qu'elle soit prête à fusionner ; voir [Boucle de correction de PR](/fr/pr-fix-loop/). Une PR qui fait partie d'une pile affiche toute la chaîne ; voir [Pull requests empilées](/fr/stacked-prs/).
 
 Une issue ou une pull request ouverte a aussi en bas **Close issue** ou **Close pull request** (**Close merge request** sur GitLab), et une fermée a **Reopen issue** ou **Reopen pull request** (**Reopen merge request**). Aucune confirmation n'est demandée, puisqu'on peut annuler. Une pull request fusionnée ne peut être ni fermée ni rouverte. Sur GitHub, une issue est fermée comme terminée.
 
 ## Pages liées
 
 - [Issues et PR GitHub](/fr/github/) : connecter GitHub et joindre des issues aux messages
+- [Pull requests empilées](/fr/stacked-prs/) : voir, restacker et fusionner une chaîne de PR
+- [Boucle de correction de PR](/fr/pr-fix-loop/) : laisser une session corriger une PR jusqu'à ce que la CI soit verte et la relecture terminée
 - [Sessions worktree](/fr/worktrees/) : où démarrent les sessions worktree
 - [Intégrations](/fr/integrations/) : connecter Linear et associer les équipes aux projets

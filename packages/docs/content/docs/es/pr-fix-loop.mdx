@@ -1,0 +1,94 @@
+---
+title: Bucle de corrección de PR
+description: Deja que una sesión siga corrigiendo un pull request hasta que CI esté en verde y la revisión termine.
+---
+
+# Bucle de corrección de PR
+
+El bucle de corrección mantiene a una sesión trabajando en un pull request hasta que está listo para fusionar. OpenChamber vigila los checks y la revisión del PR. Cuando CI falla, la sesión recibe los checks fallidos con sus pasos, anotaciones y líneas de log. Cuando alguien revisa o comenta, la sesión recibe ese feedback, hace el cambio y responde en el PR. El bucle corre en tu servidor de OpenChamber, así que sigue con la app cerrada.
+
+Termina cuando el PR está listo: CI en verde, ningún hilo de revisión sin resolver y nadie esperando cambios solicitados. Entonces recibes una notificación, y también cuando el bucle se detiene por otro motivo.
+
+## Iniciar el bucle
+
+1. Abre la sesión que debe hacer el trabajo.
+2. Busca el pull request en el tablero de [Issues y PRs](/es/issues-and-prs/), en la vista de pull request o en la lista **Linked** de la sesión, y elige **Start fix loop**.
+3. Revisa los ajustes del diálogo y haz clic en **Start fix loop**.
+
+El bucle aparece arriba del cuadro de mensaje de la sesión: el PR, lo que está haciendo el bucle, el número de iteraciones y el estado de CI. Desde ahí puedes cambiar sus ajustes, abrir el PR en el tablero o detenerlo con **Stop**.
+
+## Qué recibe la sesión
+
+- **Tras un push**, el bucle espera a CI en el commit nuevo. Si falla, la sesión recibe los checks fallidos una vez por commit, nunca el mismo fallo dos veces.
+- **Por cada revisión, comentario de revisión o comentario nuevo** que cuente según tus ajustes, la sesión recibe su texto y un enlace. Se le pide que responda en el PR y resuelva los hilos que corrigió. Para responder y resolver hilos, la sesión necesita sus propias herramientas de GitHub autenticadas. La cuenta del bucle solo sirve para leer el PR.
+
+Si la sesión está ocupada, el mensaje espera en su cola y sale cuando termina el turno. Si no se puede llegar a GitHub, el bucle conserva lo que sabía y avisa de que no pudo comprobar. Nunca lee un check fallido como verde.
+
+## Ajustes
+
+Los valores por defecto están en **Settings → Integrations → GitHub → Fix loop**, y cada bucle puede cambiarlos.
+
+- **Maximum iterations**: cuántas veces puede el bucle enviar trabajo a la sesión (10 por defecto).
+- **Token budget**: se detiene cuando la sesión ha usado esta cantidad de tokens desde que empezó el bucle. Vacío significa sin presupuesto. El presupuesto se comprueba después de cada turno, así que un turno puede superarlo.
+- **Respond to**: **CI and reviews**, **CI only** o **Reviews only**.
+- **Ignore my feedback**: omite los comentarios de la cuenta de GitHub con la que el bucle lee el PR. En modo automático la sesión responde con su propia cuenta de GitHub, y si es distinta de la cuenta de lectura, la añades a **Blocked authors**. En modo con aprobación responde el servidor con la cuenta de GitHub vinculada al ciclo, y el agente no tiene cuenta de GitHub.
+- **Ignore bots**: omite los comentarios de bots.
+- **Allowed authors** y **Blocked authors**: logins de GitHub separados por comas. Con una lista de permitidos, solo cuentan esas personas.
+- **Only comments that mention this text**: cuenta un comentario solo si contiene el texto de mención (`@openchamber` por defecto).
+- **Push changes**: **Push automatically** o **Wait for my approval**. El modo automático mantiene el flujo de GitHub de la sesión. El modo con aprobación ejecuta las correcciones en un agente restringido y necesita su propia configuración.
+
+## Modo con aprobación
+
+Con **Wait for my approval**, la sesión no hace push. Un agente restringido corrige la PR en un espacio aislado y no se publica ningún cambio en GitHub hasta que apruebes el commit exacto. El servidor sigue leyendo la PR desde GitHub mientras el ciclo corre.
+
+### Configurar el agente
+
+1. Activa los espacios aislados y configura una ubicación para ellos. El ciclo de corrección nunca lo activa por ti.
+2. En el diálogo de inicio, busca **Restricted worker**. Elige dónde se ejecuta el agente y su modelo, y haz clic en **Prepare new worker**. Esto crea un espacio nuevo usado solo por este agente. Un espacio existente no se puede reutilizar ni convertir.
+3. Concede acceso al modelo del agente en el diálogo de acceso. Solo se concede el modelo que elegiste. El gatekeeper guarda los tokens del modelo y el agente nunca los ve. El uso del modelo consume tu cuota.
+4. El repositorio head de la PR, también un fork, necesita un destino de push de Git administrado para ese repositorio exacto. Si falta, el diálogo te lleva a los ajustes de Git.
+5. Cuando el diálogo indique que el agente está listo, haz clic en **Start fix loop**.
+
+El agente no puede llegar a GitHub ni a ninguna otra red, solo al modelo. No hay alternativa con un push del sistema o del entorno. El ciclo no arranca si el agente no está listo o falta el acceso. Un modelo o endpoint personalizado que no se haya revisado para agentes restringidos se rechaza y nunca se sustituye por otro.
+
+**Forget worker selection** quita solo la selección. El espacio y sus archivos permanecen y se gestionan en los espacios aislados.
+
+### Revisar y publicar
+
+Cuando termina un turno, el servidor exporta el commit del agente y lo guarda como recibo con el repositorio, la rama y el head remoto esperado exactos. Entonces el ciclo muestra **Review publication**. Abre **Inspect exact changes**, revísalos y haz clic en **Approve and publish commit**. El botón normal de push de Git no aprueba un recibo. La publicación se rechaza si la PR se cerró o cambió el head remoto, la rama o el repositorio, y el recibo y el trabajo se conservan para que los revises.
+
+### Respuestas tras publicar
+
+El diálogo de revisión lista **Automatic GitHub replies**: las respuestas generadas y qué hilos se resuelven. Son texto del agente, así que lee el texto citado antes de aprobar. Tras publicar el commit, el servidor publica las respuestas y resuelve los hilos con su propio acceso de escritura a GitHub, que no viene del agente. Esto ocurre con todos los clientes cerrados. Si una escritura falla, el ciclo lo muestra y no marca la PR como lista.
+
+### Detener, reanudar y presupuesto
+
+**Stop** detiene al agente y conserva el código y el recibo. **Resume fix loop** vuelve a comprobar al agente y lo reinicia, y solo después se puede publicar un recibo de un ciclo detenido. Olvidar un ciclo terminado no borra su espacio.
+
+El modo de ejecución es fijo para cada ciclo. Completa las publicaciones y respuestas de GitHub pendientes antes de detener el ciclo e iniciar otro modo. Los ajustes también quedan bloqueados mientras haya un recibo o respuestas de GitHub pendientes.
+
+El presupuesto de tokens se comprueba después de cada turno, así que un turno puede pasarse. Al alcanzarlo no empieza ningún turno de modelo nuevo, pero una exportación, una publicación y unas respuestas pendientes todavía pueden terminar. Después el ciclo muestra el estado de presupuesto de tokens.
+
+### Dónde funciona el modo con aprobación
+
+El servidor ejecuta el ciclo con todos los clientes cerrados. La app web, la de escritorio y las móviles comparten ese servidor. La extensión de VS Code no ofrece el modo con aprobación.
+
+## Cuándo se detiene el bucle
+
+| Estado | Motivo |
+| --- | --- |
+| PR listo | CI en verde, sin hilos sin resolver, sin cambios solicitados |
+| PR cerrado | El PR se fusionó o se cerró |
+| Límite de iteraciones | El bucle envió trabajo tantas veces como se permite |
+| Presupuesto de tokens | La sesión agotó el presupuesto |
+| Detenido | Lo detuviste tú o se eliminó la sesión |
+
+Un bucle detenido permanece arriba del cuadro de mensaje hasta que lo descartes. En modo con aprobación, con un recibo o respuestas de GitHub pendientes, el trabajo se conserva y el bucle permanece; usa **Resume fix loop** para continuar el bucle existente. Iniciarlo de nuevo en el mismo PR empieza un bucle nuevo solo cuando no hay publicación ni respuestas pendientes.
+
+## Stacks
+
+Cada pull request tiene su propio bucle. En un [stack](/es/stacked-prs/), inicia un bucle en cada PR que quieras corregir; un fallo en un PR no frena a los demás.
+
+## Dónde funciona
+
+El bucle corre en el servidor de OpenChamber detrás de la app web, la app de escritorio y las apps móviles. La extensión de VS Code no lo ofrece.

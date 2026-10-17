@@ -48,6 +48,9 @@ const ATTACHMENT_SOURCES = new Set(['local', 'server', 'vscode']);
 // store): attached context items carry metadata the timeline renders back;
 // the other kinds are plain synthetic text.
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
+// Server features that queue messages themselves. Their items keep the
+// session's own model, like scheduled tasks.
+const SERVER_ORIGIN_KINDS = new Set(['pr-fix-loop', 'pr-stack']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 
 const getQueuedSendRetryDelayMs = (failures) =>
@@ -138,7 +141,12 @@ export const parseQueuedItemInput = (value) => {
   const projectId = asNonEmptyString(provenance?.projectId);
   const taskId = asNonEmptyString(provenance?.taskId);
   if (provenance && (!projectId || !taskId)) throw new TypeError('invalid scheduledTask provenance');
-  if (!sendConfig && !provenance) throw new TypeError('item sendConfig with providerID and modelID is required');
+  const originRecord = asRecord(raw.origin);
+  const origin = originRecord && SERVER_ORIGIN_KINDS.has(originRecord.kind) && asNonEmptyString(originRecord.id)
+    ? { kind: originRecord.kind, id: asNonEmptyString(originRecord.id) }
+    : null;
+  if (originRecord && !origin) throw new TypeError('invalid origin');
+  if (!sendConfig && !provenance && !origin) throw new TypeError('item sendConfig with providerID and modelID is required');
   const item = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
@@ -152,6 +160,7 @@ export const parseQueuedItemInput = (value) => {
     const agent = asNonEmptyString(raw.sendConfig?.agent);
     if (agent) item.sendConfig.agent = agent;
   }
+  if (origin) item.origin = origin;
   return item;
 };
 
@@ -188,6 +197,7 @@ const toPublicItem = (item) => {
   }
   publicItem.sendConfig = { ...item.sendConfig };
   if (item.scheduledTask) publicItem.scheduledTask = { ...item.scheduledTask };
+  if (item.origin) publicItem.origin = { ...item.origin };
   return publicItem;
 };
 
@@ -241,6 +251,7 @@ export function createMessageQueueRuntime({
   onPromptSent,
   beforeScheduledTaskSend,
   validateScheduledTaskTarget,
+  assertFixLoopHostDispatch,
   onScheduledTaskResult,
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
@@ -509,6 +520,10 @@ export function createMessageQueueRuntime({
   };
 
   const sendItem = async (sessionId, directory, item) => {
+    if (item.origin?.kind === 'pr-fix-loop') {
+      if (!assertFixLoopHostDispatch) throw httpError('Fix-loop host dispatch authority is unavailable', 409);
+      await assertFixLoopHostDispatch(sessionId, directory, item.origin);
+    }
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
@@ -531,7 +546,7 @@ export function createMessageQueueRuntime({
 
     // v2 selects model and agent on the session, not per prompt: the choice is
     // switched once and then persists.
-    if (!item.scheduledTask || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+    if ((!item.scheduledTask && !item.origin) || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
       directory,
       method: 'POST',
       body: { model },
@@ -980,6 +995,7 @@ export function registerMessageQueueRoutes(app, runtime) {
   app.post('/api/message-queue/sessions/:sessionId/items', async (req, res) => {
     try {
       if (req.body?.item?.scheduledTask) throw new TypeError('scheduledTask is server-owned');
+      if (req.body?.item?.origin) throw new TypeError('origin is server-owned');
       res.json(await runtime.enqueue(req.params.sessionId, req.body?.directory, req.body?.item));
     } catch (error) {
       respondError(res, error, 'Failed to queue message');

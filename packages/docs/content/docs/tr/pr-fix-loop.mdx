@@ -1,0 +1,94 @@
+---
+title: PR düzeltme döngüsü
+description: Bir oturumun, CI yeşil olup inceleme bitene kadar bir pull request'i düzeltmeye devam etmesini sağlayın.
+---
+
+# PR düzeltme döngüsü
+
+Düzeltme döngüsü, bir oturumu tek bir pull request üzerinde, merge'e hazır olana kadar çalışır tutar. OpenChamber PR'ın check'lerini ve incelemesini izler. CI başarısız olduğunda oturum, başarısız check'leri adımları, açıklamaları ve log satırlarıyla birlikte alır. Biri inceleme yaptığında veya yorum yazdığında oturum bu geri bildirimi alır, değişikliği yapar ve PR'da yanıtlar. Döngü OpenChamber sunucunuzda çalışır, bu yüzden uygulama kapalıyken de sürer.
+
+PR hazır olduğunda biter: CI yeşil, çözülmemiş inceleme thread'i yok ve kimse istenen değişiklikleri beklemiyor. O zaman bildirim alırsınız; döngü başka bir nedenle durduğunda da alırsınız.
+
+## Döngüyü başlatın
+
+1. İşi yapacak oturumu açın.
+2. Pull request'i [Issue'lar ve PR'lar](/tr/issues-and-prs/) panosunda, pull request görünümünde veya oturumun **Linked** listesinde bulun ve **Start fix loop**'u seçin.
+3. Diyalogdaki ayarları kontrol edin ve **Start fix loop**'a tıklayın.
+
+Döngü oturumun mesaj kutusunun en üstünde görünür: PR, döngünün ne yaptığı, yineleme sayısı ve CI durumu. Buradan ayarlarını değiştirebilir, PR'ı panoda açabilir veya **Stop** ile durdurabilirsiniz.
+
+## Oturumun aldıkları
+
+- **Bir push'tan sonra** döngü yeni commit için CI'ı bekler. Başarısız olursa oturum başarısız check'leri commit başına bir kez alır, aynı hatayı asla iki kez almaz.
+- Ayarlarınıza göre sayılan **her inceleme, inceleme yorumu veya yeni yorum için** oturum metnini ve bir bağlantıyı alır. Oturumdan PR'da yanıt vermesi ve düzelttiği thread'leri çözmesi istenir. Yanıt vermek ve thread'leri çözmek için oturumun kendi kimliği doğrulanmış GitHub araçlarına ihtiyacı vardır. Döngünün hesabı yalnızca PR'ı okumak için kullanılır.
+
+Oturum meşgulse mesaj kuyruğunda bekler ve tur bittiğinde gider. GitHub'a ulaşılamazsa döngü bildiği durumu korur ve kontrol edemediğini söyler. Başarısız bir check'i asla yeşil olarak okumaz.
+
+## Ayarlar
+
+Varsayılanlar **Settings → Integrations → GitHub → Fix loop** altındadır ve her döngü bunları değiştirebilir.
+
+- **Maximum iterations**: Döngünün oturuma kaç kez iş gönderebileceği (varsayılan 10).
+- **Token budget**: Oturum döngü başladığından beri bu kadar token kullandığında durur. Boş, bütçe yok demektir. Bütçe her turdan sonra kontrol edilir, bu yüzden bir tur bütçeyi aşabilir.
+- **Respond to**: **CI and reviews**, **CI only** veya **Reviews only**.
+- **Ignore my feedback**: Döngünün PR'ı okumak için kullandığı GitHub hesabının yorumlarını atlar. Otomatik modda oturum kendi GitHub hesabıyla yanıt verir ve bu hesap okuma hesabından farklıysa onu **Blocked authors** listesine eklersiniz. Onaylı modda sunucu, döngüye bağlı GitHub hesabıyla yanıt verir; worker'ın GitHub hesabı yoktur.
+- **Ignore bots**: Botların yorumlarını atlar.
+- **Allowed authors** ve **Blocked authors**: Virgülle ayrılmış GitHub kullanıcı adları. İzin listesi varsa yalnızca o kişiler sayılır.
+- **Only comments that mention this text**: Bir yorumu yalnızca anma metnini içeriyorsa sayar (varsayılan `@openchamber`).
+- **Push changes**: **Push automatically** veya **Wait for my approval**. Otomatik mod oturumun kendi GitHub akışını korur. Onaylı mod düzeltmeleri kısıtlı bir worker içinde yapar ve ayrı bir kurulum ister.
+
+## Onaylı mod
+
+**Wait for my approval** ile oturum push yapmaz. Kısıtlı bir worker PR'ı yalıtılmış bir alanda düzeltir ve tam commit'i sen onaylamadan GitHub'da hiçbir değişiklik yayınlanmaz. Sunucu, döngü çalışırken PR'ı GitHub'dan okumaya devam eder.
+
+### Worker'ı kurma
+
+1. Yalıtılmış alanları aç ve onlar için bir yer yapılandır. Düzeltme döngüsü bunu senin yerine asla açmaz.
+2. Başlatma penceresinde **Restricted worker** bölümünü bul. Worker'ın nerede çalışacağını ve modelini seç, sonra **Prepare new worker** düğmesine tıkla. Bu, yalnızca bu worker'ın kullandığı yeni bir alan oluşturur. Var olan bir alan yeniden kullanılamaz ya da dönüştürülemez.
+3. Erişim penceresinde worker'ın modeline erişim ver. Yalnızca seçtiğin modele erişim verilir. Model token'larını gatekeeper tutar, worker onları hiç görmez. Model kullanımı kotandan düşer.
+4. PR'ın head deposu, fork dahil, tam o depo için yönetilen bir Git push hedefi ister. Yoksa pencere seni Git ayarlarına yönlendirir.
+5. Pencere worker'ın hazır olduğunu söyleyince **Start fix loop** düğmesine tıkla.
+
+Worker GitHub'a ya da başka bir ağa erişemez, yalnızca modele erişir. Sistem veya ortam push'una geri dönüş yoktur. Worker hazır değilse veya erişim eksikse döngü başlamaz. Kısıtlı worker'lar için incelenmemiş bir model veya özel uç nokta reddedilir, başka biriyle değiştirilmez.
+
+**Forget worker selection** yalnızca seçimi kaldırır. Alan ve dosyaları kalır, onları yalıtılmış alanlardan yönetirsin.
+
+### İncele ve yayınla
+
+Bir tur bitince sunucu worker'ın commit'ini dışa aktarır ve tam depo, dal ve beklenen uzak head ile bir makbuz olarak saklar. Döngü sonra **Review publication** gösterir. **Inspect exact changes** bölümünü aç, değişiklikleri kontrol et ve **Approve and publish commit** düğmesine tıkla. Her zamanki Git push düğmesi bir makbuzu onaylamaz. PR kapandıysa ya da uzak head, dal veya depo değiştiyse yayın reddedilir. Makbuz ve iş bakman için saklanır.
+
+### Yayından sonraki yanıtlar
+
+İnceleme penceresi **Automatic GitHub replies** başlığı altında üretilen yanıtları ve hangi konuşmaların çözüleceğini listeler. Bunlar worker'ın metnidir, bu yüzden onaylamadan önce alıntı metni oku. Commit yayınlandıktan sonra sunucu yanıtları gönderir ve konuşmaları worker'dan gelmeyen kendi GitHub yazma erişimiyle çözer. Bu, tüm istemciler kapalıyken de olur. Bir yazma başarısız olursa döngü bunu gösterir ve PR'ı hazır diye bildirmez.
+
+### Durdurma, sürdürme ve bütçe
+
+**Stop** worker'ı durdurur, kodu ve makbuzu saklar. **Resume fix loop** worker'ı yeniden doğrular ve başlatır, durmuş bir döngünün makbuzu ancak bundan sonra yayınlanabilir. Bitmiş bir döngüyü unutmak alanını silmez.
+
+Yürütme modu her döngü için sabittir. Döngüyü durdurup başka bir mod başlatmadan önce bekleyen yayımlamaları ve GitHub yanıtlarını tamamlayın. Bekleyen bir makbuz veya GitHub yanıtı varken ayarlar da kilitlidir.
+
+Token bütçesi her turdan sonra kontrol edilir, bu yüzden bir tur bütçeyi aşabilir. Bütçeye ulaşılınca yeni model turu başlamaz, ama bekleyen dışa aktarma, yayın ve yanıtlar yine de bitebilir. Sonra döngü token bütçesi durumunu gösterir.
+
+### Onaylı modun çalıştığı yerler
+
+Sunucu döngüyü tüm istemciler kapalıyken de çalıştırır. Web uygulaması, masaüstü uygulaması ve mobil uygulamalar bu sunucuyu paylaşır. VS Code uzantısı onaylı modu sunmaz.
+
+## Döngü ne zaman durur
+
+| Durum | Neden |
+| --- | --- |
+| PR hazır | CI yeşil, çözülmemiş thread yok, istenen değişiklik yok |
+| PR kapandı | PR birleştirildi veya kapatıldı |
+| Yineleme sınırı | Döngü izin verilen sayıda iş gönderdi |
+| Token bütçesi | Oturum bütçeyi tüketti |
+| Durduruldu | Siz durdurdunuz veya oturum silindi |
+
+Duran bir döngü, siz kapatana kadar mesaj kutusunun üstünde kalır. Onaylı modda bekleyen bir makbuz veya GitHub yanıtı varsa iş saklanır ve döngü kalır; mevcut döngüye devam etmek için **Resume fix loop** kullanın. Aynı PR'da yeniden başlatmak, ancak bekleyen yayın ya da yanıt kalmadığında yeni bir döngü başlatır.
+
+## Stack'ler
+
+Her pull request'in kendi döngüsü vardır. Bir [stack](/tr/stacked-prs/) içinde düzeltilmesini istediğiniz her PR'da bir döngü başlatın; bir PR'daki hata diğerlerini bekletmez.
+
+## Nerede çalışır
+
+Döngü, web uygulamasının, masaüstü uygulamasının ve mobil uygulamaların arkasındaki OpenChamber sunucusunda çalışır. VS Code uzantısı bunu sunmaz.

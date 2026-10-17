@@ -1,0 +1,56 @@
+---
+title: 堆叠式拉取请求
+description: 查看、创建并合并一条层层叠加的拉取请求链。
+---
+
+# 堆叠式拉取请求
+
+堆叠（stack）是一条拉取请求链，其中每个 PR 都建立在下面那个之上：第二个 PR 的基础分支是第一个 PR 的分支，依此类推。把大改动这样拆开，每个 PR 都能小到便于评审。OpenChamber 会在这个堆叠中的任何 PR 出现的地方显示整个堆叠，并帮你保持链条的顺序。
+
+堆叠适用于 GitHub。当 GitHub 自己知道这个堆叠（它原生的堆叠式拉取请求）时，OpenChamber 读取 GitHub 的堆叠。否则，它会根据各 PR 的基础分支找出这条链，这也涵盖 fork 和 GitHub Enterprise Server。
+
+## 查看堆叠
+
+在 [Issue 与 PR](/zh-cn/issues-and-prs/) 看板、拉取请求视图或 **Git** 视图中打开堆叠里的某个拉取请求。它的预览里有一个 **Pull request stack** 区块，从下到上列出所有 PR。每一行显示 PR 的状态、检查结果以及是否有冲突，并标出你正在看的那个。无法读取的行会明说，而不是显示一个颜色。
+
+在看板列表中，堆叠里的 PR 带有一个小徽章，标明它在堆叠中的位置，例如 **2/3**。点击堆叠中的某一行即可打开对应的 PR。
+
+某一行还可能给出警告：
+
+- **Behind base by N commits**：下面的 PR 有了变化，所以这个 PR 需要 restack。
+- **Base was merged. Retarget to main.**：下面的 PR 已合并，而这个 PR 仍指向它原来的分支。
+- **Still carries the commits of merged #N**：下面的 PR 已通过 squash 合入主干，而这个 PR 仍包含它的旧提交。
+
+## 在另一个 PR 之上开 PR
+
+1. 以最上面 PR 的分支为起点，检出新 PR 的分支。
+2. 在堆叠区块中点击 **Open stacked PR on top**，或在 **Git** 视图的创建表单中选择最上面 PR 的分支作为基础分支。
+3. 表单会显示 **Stacked on #N**。填写标题和描述，然后创建 PR。
+
+在 GitHub.com 上，OpenChamber 还会把新 PR 登记到 GitHub 自己的堆叠中。如果 GitHub 拒绝（fork 或较旧的服务器），PR 仍会创建，堆叠也仍会显示。
+
+## 下层变更后的 restack
+
+当堆叠下层的某个 PR 有了新提交，它上面的 PR 就过时了。点击 **Fetch and restack**。OpenChamber 会 fetch 远程，按顺序把每个分支 rebase 到它下面的分支上，然后 push 发生了移动的分支。如果期间有别人向某个分支 push 了内容，push 会被拒绝，因此不会覆盖任何工作。
+
+只有各分支自己的提交会移动。下层发生 squash 合并之后，已合并 PR 的旧提交会被排除在外。
+
+### restack 遇到冲突时
+
+restack 会停在有冲突的 PR 上。它下面的分支保持已 restack 的状态，上面的分支等待。接下来发生什么取决于 **Settings → Integrations → GitHub → Restack conflicts**：
+
+- **Pause and let me choose**（默认）：在堆叠区块指明的文件夹里解决冲突，暂存文件，然后点击 **Continue**。**Abort** 会把该分支恢复原状并跳过其余部分。**Ask the session to resolve** 会把冲突交给你当前所在的会话。
+- **Let the session resolve it**：冲突直接交给会话。等它的一轮结束且没有未解决的内容后，restack 会自动继续。
+
+## 合并堆叠
+
+从下往上合并。堆叠区块只对最下面的开放 PR 提供 **Merge bottom PR #N**，使用你平常的合并方式。合并之后，下一个 PR 移到主干上，再点一次 **Fetch and restack** 即可清掉其中已合并的提交。然后合并下一个。
+
+## 在会话中处理整个堆叠
+
+- 堆叠区块中的 **Attach whole stack** 会把每个 PR 的 diff、检查和评论附加到消息框，并附上顺序和分支的摘要。如果某个 PR 无法读取，其余的仍会附加，并告诉你哪个失败了。
+- 在会话的 **Linked** 列表中，为某个已关联的 PR 打开 **Follow whole stack**。之后会话会随堆叠的变化而跟进：上方的新 PR、合并和改基都会出现，无需重新关联。
+
+## 适用范围
+
+堆叠适用于 Web 应用、桌面应用和移动应用。VS Code 扩展不显示堆叠。

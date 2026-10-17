@@ -28,6 +28,7 @@ import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
 import { newMutationKey } from './mutationKey';
+import { PrFixLoopControl } from '@/components/session/PrFixLoopControl';
 
 /** A project the board acts in: its id and root folder. */
 export type SourceBoardProject = { id: string; path: string };
@@ -252,6 +253,10 @@ export const SourceBoardActions: React.FC<{
                 {startIn}
                 {maintenance}
             </div>
+            {openPull && openPull.provider !== 'gitlab' ? <PrFixLoopControl
+                pull={{ owner: openPull.sourceRepo.owner, repo: openPull.sourceRepo.repo, number: openPull.number }}
+                sessionId={currentSessionId} context={context}
+            /> : null}
             {project || currentSessionId ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>

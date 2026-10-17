@@ -1,5 +1,6 @@
 import net from 'node:net';
 
+import { requireSpacePurpose } from '../approval-profile.js';
 import { SpaceError } from '../errors.js';
 import { createGatekeeperChannel } from '../gatekeeper-channel.js';
 import {
@@ -237,10 +238,14 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
    * uncontrolled way out, so it is a violation like any other and the manager removes it.
    */
   const verify = async (spaceId) => {
-    const violations = await verifyContainer(spaceId, await requireSpaceContainer(spaceId));
+    const spaceContainer = await requireSpaceContainer(spaceId);
+    const violations = await verifyContainer(spaceId, spaceContainer);
     const gatekeeperContainer = await inspectOwnContainer(spaceId, spaceResourceName(spaceId, ROLE_GATEKEEPER));
     if (!gatekeeperContainer) {
       return [...violations, { check: 'gatekeeper_missing', message: 'The space has no gatekeeper container' }];
+    }
+    if (requireSpacePurpose(parseSpaceLabels(spaceContainer.Config?.Labels)?.purpose) !== requireSpacePurpose(parseSpaceLabels(gatekeeperContainer.Config?.Labels)?.purpose)) {
+      violations.push({ check: 'purpose', message: 'The space and its gatekeeper have different permanent purposes' });
     }
     return [...violations, ...(await verifyGatekeeperContainer(spaceId, gatekeeperContainer))];
   };
@@ -255,9 +260,21 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     }
   };
 
-  const requireVerified = async (spaceId, container) => requireNoViolations(await verifyContainer(spaceId, container), 'container');
+  const requireVerified = async (spaceId, container, purpose) => {
+    await requireNoViolations(await verifyContainer(spaceId, container), 'container');
+    if (purpose !== undefined) requirePurpose(container, purpose);
+  };
 
-  const requireGatekeeperVerified = async (spaceId, container) => requireNoViolations(await verifyGatekeeperContainer(spaceId, container), 'gatekeeper');
+  const requireGatekeeperVerified = async (spaceId, container, purpose) => {
+    await requireNoViolations(await verifyGatekeeperContainer(spaceId, container), 'gatekeeper');
+    if (purpose !== undefined) requirePurpose(container, purpose);
+  };
+
+  const requirePurpose = (container, purpose) => {
+    if (requireSpacePurpose(parseSpaceLabels(container.Config?.Labels)?.purpose) !== purpose) {
+      throw new SpaceError('space_purpose_immutable', 'The runtime did not preserve the requested space purpose. Create the space again.');
+    }
+  };
 
   const remove = async (spaceId) => {
     const resources = await findResources(requireSpaceId(spaceId));
@@ -302,11 +319,11 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   const server = createSpaceServerChannel({ exec: execInContainer, wait, now: () => now().getTime() });
   const gatekeeper = createGatekeeperChannel({ exec: execInContainer, wait, now: () => now().getTime() });
 
-  const create = async ({ id, name, project, created, memoryBytes }) => {
+  const create = async ({ id, name, project, created, memoryBytes, purpose = 'general' }) => {
     requireMemoryBytes(memoryBytes);
     // Built first, so a bad spec is rejected before Docker is asked anything.
     const labelArguments = new Map([ROLE_NETWORK, ROLE_OUTER_NETWORK, ROLE_VOLUME, ROLE_SETUP, ROLE_GATEKEEPER, ROLE_SPACE].map((role) => (
-      [role, labelArgs(buildSpaceLabels({ id, role, owner, project, name, created }))]
+      [role, labelArgs(buildSpaceLabels({ id, role, owner, project, name, created, purpose }))]
     )));
     const labelsFor = (role) => labelArguments.get(role);
     const resources = {
@@ -364,9 +381,9 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       }), CHANGE_TIMEOUT_MS);
       // A second network needs its own call: Docker refuses `--network-alias` with two `--network`.
       await docker(['network', 'connect', outerNetwork, gatekeeperName], CHANGE_TIMEOUT_MS);
-      await requireGatekeeperVerified(id, await inspectOwnContainer(id, gatekeeperName) ?? {});
+      await requireGatekeeperVerified(id, await inspectOwnContainer(id, gatekeeperName) ?? {}, purpose);
       await docker(['start', gatekeeperName], CHANGE_TIMEOUT_MS);
-      await gatekeeper.writeProgram(id, { bindAddress: await innerAddressOf(id) });
+      await gatekeeper.writeProgram(id, { bindAddress: await innerAddressOf(id), purpose });
       await gatekeeper.waitUntilReady(id);
       // Create, verify, then start: a container that fails the check never runs.
       await docker(buildSpaceCreateArgs({
@@ -376,7 +393,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
         toolsVolume,
         memoryBytes,
       }), CHANGE_TIMEOUT_MS);
-      await requireVerified(id, await inspectOwnContainer(id, containerName) ?? {});
+      await requireVerified(id, await inspectOwnContainer(id, containerName) ?? {}, purpose);
       await docker(['start', containerName], CHANGE_TIMEOUT_MS);
       // The server inside waits for its token. It arrives on stdin, after the start,
       // so it is in no argument, no container env and no label.
@@ -419,7 +436,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       // A move to new tools that died half way leaves two containers. The one with the plain name is the space.
       const containers = group.filter((resource) => resource.labels.role === ROLE_SPACE);
       const space = containers.find((resource) => resource.name === spaceResourceName(id, ROLE_SPACE)) ?? containers[0];
-      const { name, project, created } = (space ?? group[0]).labels;
+      const { name, project, created, purpose } = (space ?? group[0]).labels;
       let state = 'missing';
       if (space) {
         state = space.entry.State?.Running === true ? 'running' : 'exited';
@@ -444,7 +461,9 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       // its gatekeeper still runs, which the host stops when it finds one beside a stopped space.
       const stoppedIdle = state === 'exited' && space.entry.State?.ExitCode === SPACE_IDLE_EXIT_CODE;
       const gatekeeperRunning = guard?.entry.State?.Running === true;
-      return { id, name, project, created, state, stoppedIdle, gatekeeperRunning, orphans, damaged: missing.length > 0, missing };
+      const listed = { id, name, project, created, state, stoppedIdle, gatekeeperRunning, orphans, damaged: missing.length > 0, missing };
+      if (purpose !== undefined) listed.purpose = purpose;
+      return listed;
     });
   };
 
@@ -544,7 +563,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       await requireGatekeeperVerified(spaceId, container);
       await docker(['start', name], CHANGE_TIMEOUT_MS);
     }
-    await gatekeeper.writeProgram(spaceId, { bindAddress: await innerAddressOf(spaceId) });
+    await gatekeeper.writeProgram(spaceId, { bindAddress: await innerAddressOf(spaceId), purpose: parseSpaceLabels(container.Config?.Labels)?.purpose });
     await gatekeeper.waitUntilReady(spaceId);
   };
 
@@ -616,6 +635,10 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     const waiting = await inspectOwnContainer(spaceId, aside);
     if (!container && !waiting) {
       throw new SpaceError('space_not_found', `Space ${spaceId} has no container in Docker`);
+    }
+    const guard = await requireGatekeeperContainer(spaceId);
+    if (requireSpacePurpose(parseSpaceLabels((container ?? waiting).Config?.Labels)?.purpose) !== requireSpacePurpose(parseSpaceLabels(guard.Config?.Labels)?.purpose)) {
+      throw new SpaceError('space_purpose_immutable', 'The space and gatekeeper purposes differ. Remove this space and create it again.');
     }
     if (container?.State?.Running === true) {
       // The space runs, so its own container and its tools are left alone. Its way out is not

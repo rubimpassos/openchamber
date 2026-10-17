@@ -40,6 +40,8 @@ export type ComposerReference =
         head: string;
         base: string;
         includeDiff: boolean;
+        /** The user attached the whole live stack through this anchor PR. */
+        followStack?: true;
         contextText: string;
         author?: ComposerReferenceAuthor;
     }
@@ -111,6 +113,7 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
                 title: reference.title,
                 kind: reference.kind === 'change-request' ? 'pull' : 'issue',
                 author: reference.author,
+                followStack: reference.kind === 'change-request' && reference.followStack ? true : undefined,
                 linkedAt,
             });
         case 'linear-issue':

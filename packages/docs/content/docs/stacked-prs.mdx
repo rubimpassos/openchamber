@@ -1,0 +1,56 @@
+---
+title: Stacked pull requests
+description: See, build and merge a chain of pull requests that sit on top of each other.
+---
+
+# Stacked pull requests
+
+A stack is a chain of pull requests where each one builds on the one below it: the second PR's base branch is the first PR's branch, and so on. Splitting a big change this way keeps every PR small enough to review. OpenChamber shows the whole stack wherever a PR from it appears and helps you keep the chain in order.
+
+Stacks work for GitHub. When GitHub knows the stack itself (its native stacked pull requests), OpenChamber reads GitHub's stack. Otherwise it finds the chain from the PRs' base branches, which also covers forks and GitHub Enterprise Server.
+
+## See a stack
+
+Open a pull request from a stack in the [Issues and PRs](/issues-and-prs/) board, in the pull request view, or in the **Git** view. Its preview has a **Pull request stack** section that lists every PR from the bottom to the top. Each row shows the PR's state, its checks and whether it conflicts, and marks the one you're looking at. A row that can't be read says so instead of showing a colour.
+
+In the board's list, a stacked PR has a small badge with its place in the stack, such as **2/3**. Click a row in the stack to open that PR.
+
+A row can also warn you:
+
+- **Behind base by N commits**: the PR below it changed, so this one needs a restack.
+- **Base was merged. Retarget to main.**: the PR below it was merged, and this one still points at its old branch.
+- **Still carries the commits of merged #N**: the PR below it was squashed into the trunk, and this one still contains its old commits.
+
+## Open a PR on top of another
+
+1. Check out the branch for the new PR, with the top PR's branch as its starting point.
+2. In the stack section, click **Open stacked PR on top**, or pick the top PR's branch as the base in the **Git** view's create form.
+3. The form says **Stacked on #N**. Write the title and description and create the PR.
+
+On GitHub.com, OpenChamber also registers the new PR in GitHub's own stack. If GitHub refuses (a fork, an older server), the PR is still created and the stack still shows.
+
+## Restack after a change below
+
+When a PR low in the stack gets new commits, the PRs above it are out of date. Click **Fetch and restack**. OpenChamber fetches the remote, rebases each branch onto the one below it in order, and then pushes the branches that moved. The push is refused if someone else pushed to a branch in the meantime, so no work gets overwritten.
+
+Only each branch's own commits move. After a squash merge below, the old commits of the merged PR are left out.
+
+### When a restack hits a conflict
+
+The restack stops on the PR that conflicts. Branches below it stay restacked; branches above it wait. What happens next depends on **Settings → Integrations → GitHub → Restack conflicts**:
+
+- **Pause and let me choose** (the default): resolve the conflict in the folder the stack section names, stage the files, and click **Continue**. **Abort** puts that branch back where it was and skips the rest. **Ask the session to resolve** hands the conflict to the session you're in.
+- **Let the session resolve it**: the conflict goes straight to the session. Once its turn ends with nothing left unresolved, the restack continues by itself.
+
+## Merge a stack
+
+Merge from the bottom up. The stack section offers **Merge bottom PR #N** only for the lowest open PR, with your usual merge method. After it merges, the next PR moves onto the trunk, and a **Fetch and restack** clears the merged commits out of it. Then merge the next one.
+
+## Work on a whole stack in a session
+
+- **Attach whole stack** in the stack section attaches every PR's diff, checks and comments to the message box, with a summary of the order and the branches. If one PR can't be read, the others still attach and you're told which one failed.
+- In a session's **Linked** list, turn on **Follow whole stack** for a linked PR. The session then keeps up with the stack as it changes: new PRs on top, merges and retargets show up without linking again.
+
+## Where it works
+
+Stacks work in the web app, the desktop app and the mobile apps. The VS Code extension doesn't show stacks.

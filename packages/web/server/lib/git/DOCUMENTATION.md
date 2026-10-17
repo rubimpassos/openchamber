@@ -26,6 +26,8 @@ This module provides Git repository operations for the web server runtime, inclu
 
 ## Public API
 
+The server-only `networkOperations.publishApprovedCommit(input, expectedCommit)` admits an existing managed push plan only when its captured source object equals the approved object and it has an exact expected-head lease. Contributor worktrees issue the existing provenance-bound destination selection from the host's already approved target. Registration and execution reuse the normal binding, audit, revalidation, credential and hook restrictions. No Git HTTP route exposes this admission method.
+
 The following functions are exported and used by the web server:
 
 ### Repository Operations
