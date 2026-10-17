@@ -1,5 +1,4 @@
-import { Marked, type MarkedExtension, type Tokens, type TokenizerAndRendererExtension } from 'marked';
-import markedLinkifyIt from 'marked-linkify-it';
+import { Marked, type Tokens, type TokenizerAndRendererExtension } from 'marked';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify, { type DOMPurify as DOMPurifyInstance } from 'dompurify';
@@ -29,6 +28,8 @@ import {
   MARKDOWN_FORBIDDEN_TAGS,
 } from './markdownSecurity';
 import { isBareVideoUrl, isVideoSource, renderMarkdownVideo } from './markdownVideo';
+import { boundedLinkify, boundedMarkdownTokenizer, untilParagraphEnd } from './markdownLexicalBounds';
+export { __scanStatsForTests, LINKIFY_SOURCE_LIMIT, resetScanStatsForTests } from './markdownLexicalBounds';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -551,17 +552,6 @@ const createInlineMathExtension = (render: MathRender) => ({
 const BLOCK_MATH_RE = /^[ \t]*\\\[([\s\S]+?)\\\][ \t]*(?:\n|$)/;
 const BLOCK_MATH_LINE_START_RE = /(?:^|\n)[ \t]*\\\[/;
 
-// Characters the `start` searches below have read, so tests can show that a
-// large message costs work in proportion to its length.
-const scanStats = { linkify: 0, blockStart: 0 };
-
-/** Test-only: reset and read the `start` search counters. */
-export const resetScanStatsForTests = (): void => {
-  scanStats.linkify = 0;
-  scanStats.blockStart = 0;
-};
-export const __scanStatsForTests = () => ({ ...scanStats });
-
 // A block extension's `start` only tells marked where to end the paragraph it
 // is lexing. marked's paragraph never continues past a line that is empty or
 // holds only spaces (a tab-only line does not end it), so the search stops
@@ -573,13 +563,6 @@ export const __scanStatsForTests = () => ({ ...scanStats });
 // messages turn every newline into "  \n", so their empty lines hold two
 // spaces. The newline before the ending line stays in, so patterns that end at
 // a line break still match.
-const untilParagraphEnd = (src: string): string => {
-  const end = /\n *\n/.exec(src);
-  const window = end ? src.slice(0, end.index + 1) : src;
-  scanStats.blockStart += window.length;
-  return window;
-};
-
 const createBlockMathExtension = (render: MathRender) => ({
   name: 'blockMath',
   level: 'block' as const,
@@ -670,51 +653,6 @@ const detailsExtension: TokenizerAndRendererExtension = {
 // marked's GFM autolink swallows CJK punctuation after a bare URL, so switch
 // to marked-linkify-it, which treats Unicode punctuation as a URL boundary.
 // Plain CJK characters right after a URL are still consumed, matching GitHub.
-//
-// marked-linkify-it searches all the remaining inline text at every inline
-// token, so one long paragraph costs the square of its length: a 250 KB data
-// dump without blank lines froze the window for most of a minute
-// (openchamber/openchamber#4204). While more than LINKIFY_SOURCE_LIMIT
-// characters of inline text remain, it steps aside and marked's own GFM
-// autolink, which is linear, links bare URLs without the CJK boundary.
-export const LINKIFY_SOURCE_LIMIT = 5_000;
-
-// A pasted session or message link (`openchamber://session/<id>?message=<id>`)
-// becomes a link too; other `openchamber:` routes stay text.
-const OPENCHAMBER_SESSION_LINK_TAIL = /^\/\/session\/[A-Za-z0-9_-]{1,128}(?:\?message=[A-Za-z0-9_-]{1,128})?/;
-const OPENCHAMBER_SESSION_LINK_SCHEMA = {
-  // Length of the link after `openchamber:` at `pos`, or 0 when it is not one.
-  validate: (text: string, pos: number): number => OPENCHAMBER_SESSION_LINK_TAIL.exec(text.slice(pos))?.[0].length ?? 0,
-};
-
-// Streamed prose with many bold or emphasis tokens made linkify search the rest
-// of the paragraph at each token on every update (openchamber/openchamber#4648).
-// With fuzzyLink off, linkify only finds links that hold `:`, `/` or `@`: every
-// scheme, `openchamber:` included, ends in `:`, a protocol-relative link starts
-// with `//`, and an email needs `@`. Text without any of them skips the search.
-// Recheck these characters when the options or schemas below change.
-const LINK_MARKER = /[:/@]/;
-
-const boundedLinkify = (): MarkedExtension => ({
-  extensions: (markedLinkifyIt({ fuzzyLink: false, schemas: { 'openchamber:': OPENCHAMBER_SESSION_LINK_SCHEMA } }).extensions ?? []).map((extension) => {
-    if (!('tokenizer' in extension)) return extension;
-    const { start, tokenizer } = extension;
-    return {
-      ...extension,
-      start(src) {
-        if (src.length > LINKIFY_SOURCE_LIMIT || !LINK_MARKER.test(src)) return undefined;
-        scanStats.linkify += src.length;
-        return start?.call(this, src);
-      },
-      tokenizer(src, tokens) {
-        if (src.length > LINKIFY_SOURCE_LIMIT || !LINK_MARKER.test(src)) return undefined;
-        scanStats.linkify += src.length;
-        return tokenizer.call(this, src, tokens);
-      },
-    };
-  }),
-});
-
 const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
   const renderMath = rawHtml === 'sanitize' ? renderMathPlaceholder : renderKatex;
   return new Marked().use(
@@ -722,6 +660,7 @@ const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode
     {
       gfm: true,
       breaks: false,
+      tokenizer: boundedMarkdownTokenizer,
       extensions: [createInlineMathExtension(renderMath), createBlockMathExtension(renderMath), detailsExtension],
       renderer: {
         // Assistant output is untrusted. Markdown constructs still render as
