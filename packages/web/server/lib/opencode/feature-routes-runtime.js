@@ -1,4 +1,5 @@
 import { registerFsRoutes } from '../fs/routes.js';
+import { createRipgrepResolver } from '../fs/ripgrep.js';
 import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { createSystemStatsCollector } from '../system-stats/collect.js';
@@ -360,7 +361,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerMarkdownImageGrantRoutes(app, {
       fsPromises,
       path,
-      os,
       crypto,
       validateDirectoryPath,
       buildOpenCodeUrl,
@@ -761,6 +761,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       path,
       openchamberDataDir,
     });
+    // Content search looks for ripgrep on the same PATH user commands get, so
+    // a desktop app launched from the Dock still finds a Homebrew install.
+    const { resolveRipgrepBinary } = createRipgrepResolver({ fs, path, buildSearchPath: buildAugmentedPath });
     registerFsRoutes(app, {
       os,
       path,
@@ -771,6 +774,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveProjectDirectory,
       buildAugmentedPath,
       resolveGitBinaryForSpawn,
+      resolveRipgrepBinary,
       openchamberUserConfigRoot,
       cloneRepository: networkOperations.cloneRepository,
       managedChatsRoot,

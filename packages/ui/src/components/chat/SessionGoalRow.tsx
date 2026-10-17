@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useGoalDriverName } from '@/lib/guests/goal-driver';
+import { Spinner } from '@/components/ui/spinner';
 
 interface SessionGoalRowProps {
   sessionId: string | null;
@@ -30,6 +31,9 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
   // An extension plugin running this goal (e.g. Oh-My-OpenAgent) continues it
   // itself: there is no quiet-window audit to show, and the strip names it.
   const driverName = useGoalDriverName(goal?.driver);
+  // The agent stopped but the goal is still active: the server is sitting out
+  // the quiet window and running the audit.
+  const evaluating = Boolean(sessionId && enabled && goal?.status === 'active' && !goal.driver && (!sessionStatus || sessionStatus.type === 'idle'));
 
   const handleToggleStatus = React.useCallback(async (nextStatus: 'active' | 'paused') => {
     if (!sessionId || busy) return;
@@ -94,12 +98,10 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
           {driverName}
         </span>
       ) : null}
-      {goal.status === 'active' && !driverName && (!sessionStatus || sessionStatus.type === 'idle') ? (
-        // The agent stopped but the goal is still active: the server is
-        // sitting out the quiet window and running the audit — show that
-        // instead of a static "Active" that looks stuck.
+      {evaluating ? (
+        // Show the audit instead of a static "Active" that looks stuck.
         <span className="flex flex-shrink-0 items-center gap-1 typography-meta text-muted-foreground">
-          <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
+          <Spinner className="h-3 w-3" aria-hidden="true" />
           {t('chat.goal.status.evaluating')}
         </span>
       ) : (

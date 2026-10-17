@@ -192,7 +192,7 @@ jobs:
         id: opencode_cli_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
@@ -213,6 +213,8 @@ jobs:
         run: |
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
+          # Windows arm64 builds on an x64 runner; ripgrep needs the target arch.
+          OPENCHAMBER_TARGET_ARCH=${{ matrix.arch }} bun run prepare:ripgrep
 
       - name: Bundle main process
         working-directory: packages/electron
@@ -304,7 +306,7 @@ jobs:
         id: opencode_cli_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
@@ -330,6 +332,7 @@ jobs:
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
+          bun run prepare:ripgrep
           bun run bundle:main
           bun run rebuild:native
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never

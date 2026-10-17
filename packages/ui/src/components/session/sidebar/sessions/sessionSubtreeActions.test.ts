@@ -5,6 +5,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import {
+  buildActiveSessionTreeFromCache,
   collectSessionMoveDescendants,
   collectSessionSubtreeIds,
   runSessionSubtreeAction,
@@ -166,6 +167,26 @@ describe('collectSessionSubtreeIds', () => {
     useGlobalSessionsStore.getState().upsertSessions([linked('root', null), linked('cached-child', 'root')]);
 
     expect(collectSessionSubtreeIds('root', ['live-child', 'cached-child'], false)).toEqual(['live-child', 'cached-child']);
+  });
+});
+
+describe('buildActiveSessionTreeFromCache', () => {
+  beforeEach(resetGlobalSessions);
+
+  test('builds the nested active tree a flat row does not render', () => {
+    useGlobalSessionsStore.getState().upsertSessions([
+      linked('root', null),
+      linked('child', 'root'),
+      linked('grandchild', 'child'),
+      linked('archived-child', 'root', 5),
+      linked('below-archived', 'archived-child'),
+    ]);
+
+    const tree = buildActiveSessionTreeFromCache(linked('root', null));
+    expect(tree.session.id).toBe('root');
+    expect(tree.children.map((child) => child.session.id)).toEqual(['child']);
+    expect(tree.children[0].children.map((child) => child.session.id)).toEqual(['grandchild']);
+    expect(tree.children[0].children[0].children).toEqual([]);
   });
 });
 

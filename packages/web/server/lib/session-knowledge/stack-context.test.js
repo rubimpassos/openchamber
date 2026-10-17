@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import express from 'express';
 import request from 'supertest';
 
-import { createSessionKnowledgeRuntime } from './runtime.js';
+import { KNOWLEDGE_ENTRY_KEYS, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
 import { registerSessionKnowledgeRoutes } from './routes.js';
 import { createFollowedPullStackContext } from './pull-stacks.js';
 
@@ -17,6 +17,15 @@ const member = (number, head, base, state = 'open') => ({ number, head, base, st
 const fixture = () => {
   let metadata = { openchamber: { project_context_pins: { notes: ['n1'], plans: [] } } };
   let stacks = [snapshot([member(1, 'first', 'main'), member(2, 'second', 'first')])];
+  const held = new Map();
+  let failWrite = false;
+  const instructionEntries = {
+    put: async (_sessionId, _directory, key, value) => {
+      if (failWrite && key === KNOWLEDGE_ENTRY_KEYS.pullStacks) throw new Error('entry unavailable');
+      held.set(key, value);
+    },
+    remove: async (_sessionId, _directory, key) => { held.delete(key); },
+  };
   const collectFollowedPullStacks = createFollowedPullStackContext({
     readBinding: async () => ({
       repository: { repositoryId: 'repo_1', remotes: [{ name: 'upstream', fetch: { fingerprint: 'fp' } }] },
@@ -45,89 +54,124 @@ const fixture = () => {
       metadata = { ...metadata, openchamber: { ...metadata.openchamber, ...patch.openchamber } };
     },
     collectFollowedPullStacks,
+    instructionEntries,
   });
   const app = express();
   registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime: runtime });
   return {
     runtime,
     setStacks,
-    pending: () => request(app).get('/api/session-knowledge').query({ sessionId: 'ses_1', directory: DIRECTORY }),
-    delivered: (signature) => request(app).post('/api/session-knowledge/delivered').send({ sessionId: 'ses_1', directory: DIRECTORY, signature }),
+    held,
+    failWrite: (value) => { failWrite = value; },
+    text: () => held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks),
+    sync: () => request(app).post('/api/session-knowledge/sync').send({ sessionId: 'ses_1', directory: DIRECTORY }),
   };
 };
 
 const stackData = (text) => JSON.parse(text.split('<openchamber-pull-stacks>\n')[1].split('\n</openchamber-pull-stacks>')[0]);
 
 describe('followed stack context through the session knowledge HTTP routes', () => {
+  test('keeps complete stack JSON beside a pinned plan over its text budget', () => {
+    const members = Array.from({ length: 150 }, (_, index) => member(index + 1, `branch-${index}`, 'main'));
+    const entries = buildKnowledgeEntries({
+      notes: [], plans: [{ title: 'Long plan', body: 'x'.repeat(12_000) }],
+      memory: { global: [], project: [] }, pullStacks: [snapshot(members)],
+    });
+    expect(entries[KNOWLEDGE_ENTRY_KEYS.pinned]).toContain('(truncated)');
+    expect(stackData(entries[KNOWLEDGE_ENTRY_KEYS.pullStacks])[0].stack.members).toEqual(members);
+  });
+
+  test('preserves the previous stack entry on collection failure while syncing pinned knowledge', async () => {
+    const held = new Map([[KNOWLEDGE_ENTRY_KEYS.pullStacks, 'previous snapshot']]);
+    const runtime = createSessionKnowledgeRuntime({
+      resolveProjectId: async () => 'project',
+      readSessionMetadata: async () => ({ openchamber: { project_context_pins: { notes: ['n1'] } } }),
+      projectContextRuntime: { readContext: async () => ({ notes: [{ id: 'n1', body: 'Project fact', createdAt: 1 }] }) },
+      isAgentMemoryEnabled: async () => false,
+      collectFollowedPullStacks: async () => { throw new Error('collection failed'); },
+      instructionEntries: {
+        put: async (_id, _directory, key, value) => { held.set(key, value); },
+        remove: async (_id, _directory, key) => { held.delete(key); },
+      },
+    });
+    await runtime.sync('ses_1', DIRECTORY);
+    expect(held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks)).toBe('previous snapshot');
+    expect(held.get(KNOWLEDGE_ENTRY_KEYS.pinned)).toContain('Project fact');
+  });
   test('delivers changed membership on the next turn when the anchor remains linked', async () => {
     // Given a session that has received its original stack.
     const driver = fixture();
-    const first = (await driver.pending()).body;
-    await driver.delivered(first.signature);
+    await driver.sync();
+    const first = driver.text();
     driver.setStacks([snapshot([member(1, 'first', 'main', 'merged'), member(3, 'third', 'main')])]);
 
     // When a later turn asks for its pending context.
-    const next = await driver.pending();
+    const next = await driver.sync();
 
     // Then the complete replacement membership and current branches reach it.
     expect(next.status).toBe(200);
-    expect(stackData(next.body.text)[0].stack.members).toEqual([member(1, 'first', 'main', 'merged'), member(3, 'third', 'main')]);
-    expect(next.body.signature).not.toBe(first.signature);
+    expect(next.body.synced).toBe(true);
+    expect(stackData(driver.text())[0].stack.members).toEqual([member(1, 'first', 'main', 'merged'), member(3, 'third', 'main')]);
+    expect(driver.text()).not.toBe(first);
   });
 
-  test('deduplicates unchanged context when delivery has been accepted', async () => {
+  test('writes identical entries for OpenCode to deduplicate unchanged context', async () => {
     // Given a delivered stack snapshot.
     const driver = fixture();
-    const first = (await driver.pending()).body;
-    await driver.delivered(first.signature);
+    await driver.sync();
+    const first = driver.text();
 
     // When another turn resolves the same snapshot.
-    const next = await driver.pending();
+    const next = await driver.sync();
 
-    // Then it owes no context.
-    expect(next.body).toEqual({ text: '', signature: first.signature });
+    // Then OpenCode receives the same value and announces no change.
+    expect(next.body).toEqual({ synced: true });
+    expect(driver.text()).toBe(first);
   });
 
-  test('keeps context pending when a send never records delivery', async () => {
+  test('retries a failed instruction write on the next send', async () => {
     // Given a snapshot whose first attempted send was not accepted.
     const driver = fixture();
-    const first = (await driver.pending()).body;
+    driver.failWrite(true);
+    expect((await driver.sync()).body.synced).toBe(false);
+    expect(driver.text()).toBeUndefined();
 
     // When the caller retries without recording delivery.
-    const retry = await driver.pending();
+    driver.failWrite(false);
+    const retry = await driver.sync();
 
     // Then it still receives that complete snapshot.
-    expect(stackData(retry.body.text)[0].stack.members).toHaveLength(2);
-    expect(retry.body.signature).toBe(first.signature);
+    expect(retry.body.synced).toBe(true);
+    expect(stackData(driver.text())[0].stack.members).toHaveLength(2);
   });
 
   test('delivers a changed status when membership stays the same', async () => {
     // Given the old stack has been delivered.
     const driver = fixture();
-    const first = (await driver.pending()).body;
-    await driver.delivered(first.signature);
+    await driver.sync();
+    const first = driver.text();
     driver.setStacks([snapshot([member(1, 'first', 'main'), { ...member(2, 'renamed', 'main'), checks: { failed: 1 }, summary: 'ok' }])]);
 
     // When a turn asks after a branch and CI change.
-    const next = await driver.pending();
+    await driver.sync();
 
     // Then the current branch and failed CI are delivered.
-    expect(stackData(next.body.text)[0].stack.members[1]).toMatchObject({ head: 'renamed', base: 'main', checks: { failed: 1 } });
-    expect(next.body.signature).not.toBe(first.signature);
+    expect(stackData(driver.text())[0].stack.members[1]).toMatchObject({ head: 'renamed', base: 'main', checks: { failed: 1 } });
+    expect(driver.text()).not.toBe(first);
   });
 
-  test('restores the same snapshot when compaction invalidates delivery', async () => {
+  test('removes the stack entry after the last followed anchor is unlinked', async () => {
     // Given context already recorded as delivered.
     const driver = fixture();
-    const first = (await driver.pending()).body;
-    await driver.delivered(first.signature);
+    await driver.sync();
+    expect(stackData(driver.text())[0].stack.members).toHaveLength(2);
 
-    // When compaction requests a fresh delivery.
-    const restored = await driver.runtime.resolvePendingForSession('ses_1', DIRECTORY, { force: true });
+    // When the next send has no followed anchors.
+    driver.setStacks([]);
+    await driver.sync();
 
-    // Then the stack is included even though its data has not changed.
-    expect(stackData(restored.text)[0].stack.members).toHaveLength(2);
-    expect(restored.signature).toBe(first.signature);
+    // Then the old snapshot is explicitly removed.
+    expect(driver.text()).toBeUndefined();
   });
 
   test('keeps successful siblings and pinned knowledge when one stack read fails', async () => {
@@ -139,29 +183,36 @@ describe('followed stack context through the session knowledge HTTP routes', () 
     ]);
 
     // When a turn resolves its context.
-    const result = await driver.pending();
+    const result = await driver.sync();
 
     // Then failure remains distinct from an authoritative unstacked response.
-    const data = stackData(result.body.text);
+    expect(result.body.synced).toBe(true);
+    const data = stackData(driver.text());
     const failed = data.find((entry) => entry.anchor.number === 9);
     expect(failed).toMatchObject({ status: 'unavailable', reason: 'read-failed' });
     expect(failed).not.toHaveProperty('stack');
     expect(data.find((entry) => entry.anchor.number === 1).stack.members).toHaveLength(2);
-    expect(result.body.text).toContain('Project fact');
+    expect(driver.held.get(KNOWLEDGE_ENTRY_KEYS.pinned)).toContain('Project fact');
   });
 
   test('marks context unavailable when the linked-anchor metadata cannot be read', async () => {
     // Given an unreadable session record.
+    let writes = 0;
     const runtime = createSessionKnowledgeRuntime({
       readSessionMetadata: async () => { throw new Error('metadata unavailable'); },
+      instructionEntries: {
+        put: async () => { writes += 1; },
+        remove: async () => { writes += 1; },
+      },
     });
     const app = express();
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime: runtime });
 
     // When a sender asks for the session's pending context.
-    const result = await request(app).get('/api/session-knowledge').query({ sessionId: 'ses_1', directory: DIRECTORY });
+    const result = await request(app).post('/api/session-knowledge/sync').send({ sessionId: 'ses_1', directory: DIRECTORY });
 
     // Then the existing route reports failure rather than successful emptiness.
-    expect(result.body.unavailable).toBe(true);
+    expect(result.body.synced).toBe(false);
+    expect(writes).toBe(0);
   });
 });

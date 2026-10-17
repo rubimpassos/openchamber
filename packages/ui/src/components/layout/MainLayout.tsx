@@ -35,6 +35,7 @@ import { useSessionListSync } from '@/components/session/sidebar/list/useSession
 import { setChatCovered } from './rightSlot';
 
 import { ChatView } from '@/components/views/ChatView';
+import { DiagnosticDialogAvailableContext } from '@/lib/diagnostics/dialog-availability';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
 
@@ -174,7 +175,7 @@ export const MainLayout: React.FC = () => {
     }, [isMobile, setIsMobile]);
 
     return (
-        <DiffWorkerProvider>
+        <DiagnosticDialogAvailableContext.Provider value><DiffWorkerProvider>
             <ProjectActionsProvider>
             <div
                 data-page-scroll-lock="true"
@@ -267,6 +268,6 @@ export const MainLayout: React.FC = () => {
                 ) : null}
             </div>
             </ProjectActionsProvider>
-        </DiffWorkerProvider>
+        </DiffWorkerProvider></DiagnosticDialogAvailableContext.Provider>
     );
 };

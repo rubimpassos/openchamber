@@ -25,6 +25,7 @@ import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
 import { useOpenSuggestionCount } from '@/stores/useSuggestedTasksStore';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -156,6 +157,9 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const openSuggestions = useOpenSuggestionCount();
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
+  // The bundled catalog offers outside services; enterprise mode waits for
+  // administrator-curated sources instead.
+  const enterpriseMode = useEnterpriseMode();
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
 
   const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
@@ -355,7 +359,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   onClick={() => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen)}
                   className={headerActionButtonClass}
                 >
-                  <Icon name="todo" className={headerActionIconClass} />
+                  <Icon name="git-pull-request" className={headerActionIconClass} />
                 </SidebarPageButton>
               ) : null}
 
@@ -391,14 +395,16 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <Icon name="archive" className={headerActionIconClass} />
               </SidebarPageButton>
 
-              <SidebarPageButton
-                label={t('integrationsCatalog.sidebar.open')}
-                pressed={isIntegrationsCatalogOpen}
-                onClick={() => useUIStore.getState().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen)}
-                className={headerActionButtonClass}
-              >
-                <Icon name="plug-2" className={headerActionIconClass} />
-              </SidebarPageButton>
+              {enterpriseMode ? null : (
+                <SidebarPageButton
+                  label={t('integrationsCatalog.sidebar.open')}
+                  pressed={isIntegrationsCatalogOpen}
+                  onClick={() => useUIStore.getState().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen)}
+                  className={headerActionButtonClass}
+                >
+                  <Icon name="store-2" className={headerActionIconClass} />
+                </SidebarPageButton>
+              )}
             </div>
             {guestPagesInline ? guestPages.map((guest) => {
               const pressed = openGuestPageId === guest.id;

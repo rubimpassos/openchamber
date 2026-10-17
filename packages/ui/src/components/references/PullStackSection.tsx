@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
+import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { newMutationKey } from '@/components/sourceBoard/mutationKey';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
@@ -47,7 +47,7 @@ function StackContents({ reference, context, onOpenMember, onChanged }: {
   const pull = React.useMemo(() => ({ ...reference.sourceRepo, number: reference.number }), [reference.number, reference.sourceRepo]);
   const state = usePullStack(context, pull);
   const { refresh: refreshStack } = state;
-  const openOnBoard = useOpenOnBoard();
+  const openTrackerItem = useOpenTrackerItem();
   const attachments = usePullAttachments(reference);
   const [busy, setBusy] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -87,7 +87,7 @@ function StackContents({ reference, context, onOpenMember, onChanged }: {
           {stack.nativeUnavailable ? <p className="typography-meta text-muted-foreground">{t('prStacks.nativeUnavailable')}</p> : null}
           <ol className="flex min-w-0 flex-col gap-1" aria-label={t('prStacks.order')}>
             {stack.members.map((member) => <PullStackMemberRow key={member.number} member={member} reference={reference} current={member.number === stack.current} busy={busy || state.status !== 'ready'}
-              onOpen={() => onOpenMember ? onOpenMember(member) : openOnBoard(member.url, context.directory)} onRetarget={() => void retarget(member)} />)}
+              onOpen={() => onOpenMember ? onOpenMember(member) : openTrackerItem(member.url, context.directory)} onRetarget={() => void retarget(member)} />)}
           </ol>
           {stack.branches.length ? <p className="break-words typography-meta text-muted-foreground">{t('prStacks.extraBranches', { branches: stack.branches.map((branch) => `#${branch.number} ${branch.title}`).join(', ') })}</p> : null}
           <PullStackRestack context={context} stack={stack} pull={pull} onChanged={refresh} enabled={state.status === 'ready'} />

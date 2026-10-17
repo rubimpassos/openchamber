@@ -31,14 +31,15 @@ afterEach(() => {
 })
 
 test("preserves ordered context records and IDs when one context slot is deferred", async () => {
-  // Given attached context, delayed response settings, and goal context.
+  // Given attached context, delayed response settings, goal context and a knowledge write.
   const style = deferSessionOperation<SyntheticContextInput | null>()
+  const knowledge = deferSessionOperation<void>()
   const submit = spyOn(opencodeClient, "sendMessage").mockResolvedValue("accepted")
   const requests: Array<{ id: string; context: SyntheticContextInput[] }> = []
   // When the prompt is inserted before the middle context slot resolves.
   const sending = optimisticSend({
     sessionId, directory, content: "input",
-    leadingContext: Promise.resolve({ text: "k", description: "knowledge" }),
+    ready: knowledge.promise,
     context: [{ text: "a", description: "attached" }, style.promise, { text: "g", description: "goal" }],
     send: async (id, context) => { requests.push({ id, context }); await opencodeClient.sendMessage({ id: sessionId, providerID: "provider", text: "input", context }) },
   })
@@ -46,18 +47,22 @@ test("preserves ordered context records and IDs when one context slot is deferre
     expect(stores.getChild(directory)?.getState().message[sessionId]?.some((message) => message.role === "user")).toBe(true)
     expect(submit.mock.calls).toHaveLength(0)
     style.resolve({ text: "s", description: "response-style" })
+    await style.promise
+    expect(submit.mock.calls).toHaveLength(0)
+    knowledge.resolve()
     await sending
-    // Then each source remains its own ordered synthetic record before the prompt.
+    // Then prompt context keeps its order while knowledge stays server-owned.
     const request = requests.at(0)
-    expect(request?.context.map((item) => item.description)).toEqual(["knowledge", "attached", "response-style", "goal"])
+    expect(request?.context.map((item) => item.description)).toEqual(["attached", "response-style", "goal"])
     const ids = request?.context.map((item) => item.id) ?? []
-    expect(new Set(ids).size).toBe(4)
+    expect(new Set(ids).size).toBe(3)
     expect(ids).toEqual([...ids].sort())
     expect(ids.every((id) => id && request && id < request.id)).toBe(true)
     expect(stores.getChild(directory)?.getState().message[sessionId]?.map((message) => message.role))
-      .toEqual(["synthetic", "synthetic", "synthetic", "synthetic", "user"])
+      .toEqual(["synthetic", "synthetic", "synthetic", "user"])
   } finally {
     style.resolve(null)
+    knowledge.resolve()
     submit.mockRestore()
   }
 })

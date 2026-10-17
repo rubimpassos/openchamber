@@ -1,6 +1,6 @@
 import { GUEST_SURFACE_DOCK_DEFAULT, GUEST_SURFACE_DOCK_SIZE_DEFAULT, hasGuestPage, serviceProvides, type GuestSurfaceDock } from '@openchamber/sdk';
 
-import { GUEST_SURFACE_DEFAULT_WIDTH, type ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
+import type { ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 
 import { isGuestActive } from './capabilities.ts';
@@ -53,5 +53,5 @@ const guestSurfaceFromInstalled = (
   labelKey: 'contextRail.surface.plugin',
   descriptionKey: 'contextRail.surface.plugin.description',
   availability: 'always',
-  defaultWidth: GUEST_SURFACE_DEFAULT_WIDTH,
+  width: 'regular',
 });

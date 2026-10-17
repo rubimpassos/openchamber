@@ -52,7 +52,7 @@ import { useExpandedParents } from '../sessions/useExpandedParents';
 import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useChatsRoot } from '@/hooks/useChatsRoot';
 import { isCapacitorApp } from '@/lib/platform';
-import { countSessionTreeQueryMatches, deriveTimelineActivityItems, sessionTreeMatchesSidebarQuery } from '../recent/activitySections';
+import { countSessionTreeQueryMatches, deriveTimelineActivityItems, pruneSessionTreeForSidebarQuery, sessionTreeMatchesSidebarQuery } from '../recent/activitySections';
 import { resolveSidebarSessionLocations } from '../recent/sessionLocation';
 import { buildSessionSidebarRowModel, timelineProjectContainerKey } from '../sessionSidebarRowModel';
 import { useSidebarGroupStatus } from './useSidebarGroupStatus';
@@ -63,7 +63,7 @@ import { useSidebarSpaces, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { isSessionPriority } from '@/lib/sessionPriority';
-import { isSessionPinned } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned } from '@/lib/sessionPins';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { selectBlockingBadgeSessionScopes } from '../sessions/sessionNodeItemUtils';
 
@@ -442,6 +442,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
+  // Priority, Pinned and In work in Tree, on one line: the rows the row model renders
+  // as 'mixed-compact', which open to their subsessions.
+  const zoneRowsExpand = !timelineMode && !detailedZoneRows;
   // Priority sessions are always listed first, whatever the display toggles,
   // and only there.
   const zoneSessions = React.useMemo((): ZoneSessions => {
@@ -476,18 +479,25 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       rootBranchByProjectId: topology.projectRootBranches,
       hideBranchMatchingProjectLabel: false,
     });
-    // The rows never expand, but search looks through the whole tree: these
-    // sessions are nowhere else in the sidebar, so a matching subsession
-    // keeps its root listed.
+    // Tree's one-line rows expand to their subsessions like the project tree,
+    // and a search shows the branches that lead to a match. List and detailed
+    // rows never expand: they keep a flat node and carry their subsessions'
+    // requests as badges. Search still looks through the whole tree, since
+    // these sessions are nowhere else in the sidebar.
+    const query = view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '';
     const badgeScopesBySessionId = new Map<string, ReturnType<typeof selectBlockingBadgeSessionScopes>>();
     const trees = new Map(zone.map((session) => [session.id, buildActiveSessionNode(collection.childrenMap, session)]));
     const nodes = new Map(zone.map((session) => {
       const tree = trees.get(session.id) ?? buildActiveSessionNode(collection.childrenMap, session);
+      const worktree = locations.get(session.id)?.worktree ?? null;
+      if (zoneRowsExpand) {
+        const shown = query ? pruneSessionTreeForSidebarQuery(tree, query) ?? tree : tree;
+        return [session.id, { ...shown, worktree }];
+      }
       badgeScopesBySessionId.set(session.id, selectBlockingBadgeSessionScopes(tree, false, locations.get(session.id)?.groupDirectory ?? session.directory ?? null));
-      const node: SessionNode = { ...tree, children: [], worktree: locations.get(session.id)?.worktree ?? null };
+      const node: SessionNode = { ...tree, children: [], worktree };
       return [session.id, node];
     }));
-    const query = view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '';
     const listed = query
       ? zone.filter((session) => {
         const tree = trees.get(session.id);
@@ -500,8 +510,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       getSessionNode: (session) => nodes.get(session.id) ?? buildActiveSessionNode(collection.childrenMap, session),
       query: '',
     });
-    // The rows drop their children, so the search count comes from the tree:
-    // the project subtracts every match in a tree that moved here.
+    // A flat row drops its children, so the search count comes from the tree:
+    // the project subtracts every match in a tree that moved here. An
+    // expanding row works its badges out from its own expansion.
     return items.map((item) => {
       const tree = trees.get(item.node.session.id);
       return {
@@ -510,7 +521,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         searchMatchCount: query && tree ? countSessionTreeQueryMatches(tree, query) : undefined,
       };
     });
-  }, [collection.childrenMap, ownership.bySessionId, spaceLabelById, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+  }, [zoneRowsExpand, collection.childrenMap, ownership.bySessionId, spaceLabelById, topology.availableWorktreesByProject, topology.gitBranches, topology.projectRootBranches, topology.projects, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
   const priorityItems = React.useMemo(() => buildZoneItems(zoneSessions.priority), [buildZoneItems, zoneSessions.priority]);
   const pinnedItems = React.useMemo(() => buildZoneItems(zoneSessions.pinned), [buildZoneItems, zoneSessions.pinned]);
   const workItems = React.useMemo(() => buildZoneItems(zoneSessions.work), [buildZoneItems, zoneSessions.work]);

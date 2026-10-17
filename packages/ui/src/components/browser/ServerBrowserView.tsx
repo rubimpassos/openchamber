@@ -3,6 +3,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
+import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -263,6 +264,7 @@ const useServerBrowserDownloads = (scope: ServerBrowserScope | null) => {
 
 const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, tabID }) => {
   const { t } = useI18n();
+  const visible = useZoneInteractive();
   const { currentTheme } = useThemeSystem();
   const canvasHandleRef = React.useRef<ServerBrowserCanvasHandle | null>(null);
 
@@ -645,7 +647,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         ) : null}
         {!loaded && (showingMine || !serverBrowser.loading) ? (
           <div className="absolute inset-0">
-            <BrowserEmptyState onOpen={(url) => void serverBrowser.navigate(normalizeBrowserUrl(url))} directory={directory} />
+            <BrowserEmptyState onOpen={(url) => void serverBrowser.navigate(normalizeBrowserUrl(url))} directory={directory} visible={visible} />
           </div>
         ) : null}
       </div>

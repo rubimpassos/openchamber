@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { hostOf } from '../source-control/binding-service.js';
 
@@ -70,10 +69,6 @@ export const createFollowedPullStackContext = ({ readBinding, readPullStack, rea
   }
   return snapshots;
 };
-
-export const buildPullStackSignature = (snapshots) => snapshots.length > 0
-  ? `s:${createHash('sha256').update(JSON.stringify(snapshots)).digest('hex')}`
-  : '';
 
 export const buildPullStackText = (snapshots) => snapshots.length > 0
   ? [

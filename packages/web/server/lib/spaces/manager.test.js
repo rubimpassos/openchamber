@@ -12,6 +12,21 @@ const REQUEST = { placeId: 'memory', projectDirectory: '/home/me/project', name:
 const managerFor = (place) => createSpaceManager({ registry: createPlaceRegistry([place]), now: () => NOW });
 
 describe('createSpaceManager', () => {
+  it('forwards progress while preserving the requested approval purpose', async () => {
+    const memory = createMemoryPlace();
+    const place = {
+      ...memory,
+      create: async (spec, { onStep }) => {
+        onStep('preparing_tools');
+        await memory.create(spec);
+      },
+    };
+    const steps = [];
+    const created = await managerFor(place).createSpace({ ...REQUEST, purpose: 'pr-fix-loop-approval', onStep: (step) => steps.push(step) });
+    expect(steps).toEqual(['preparing_tools']);
+    expect((await place.list()).find((space) => space.id === created.id).purpose).toBe('pr-fix-loop-approval');
+    await place.remove(created.id);
+  });
   it('removes a space when a place reports clean verification but discarded the requested purpose', async () => {
     // Given a place that otherwise implements the contract but drops this security request.
     const memory = createMemoryPlace();

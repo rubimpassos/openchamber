@@ -16,7 +16,7 @@ import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
 import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
-import type { PermissionMode } from "@/stores/utils/permissionAutoAccept"
+import { permissionModeForNewSession, type PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions, type SyntheticContextInput } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
@@ -25,10 +25,11 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
-import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from "@/lib/sessionKnowledgeApi"
+import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
+import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
 import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
 import { selectSkillsForDirectory, useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
@@ -37,6 +38,7 @@ import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
+import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
@@ -174,7 +176,6 @@ type RoutedContextPart = {
   readonly synthetic?: boolean
   readonly metadata?: ContextPartMetadata
   readonly files?: ReadonlyArray<{ readonly type: "file"; readonly mime: string; readonly url: string; readonly filename: string }>
-  readonly systemContext?: 'session-knowledge'
 }
 
 export async function routeMessage(params: {
@@ -195,22 +196,21 @@ export async function routeMessage(params: {
   delivery?: 'steer'
   skills?: SkillMentions
   /**
-   * Project knowledge the session still owes, still being fetched. It goes
-   * ahead of every other context item, and a prompt's message appears
-   * without waiting for it. Resolves to '' when nothing is owed.
+   * The session's project knowledge being written into it. A prompt's message
+   * appears without waiting for it; only the request does. Never rejects.
    */
-  sessionKnowledge?: Promise<string>
   ready?: Promise<MaterializedDraftSession>
+  knowledgeSync?: Promise<void>
 }): Promise<'command' | 'prompt' | 'shell'> {
   const sdk = opencodeClient.getSdkClient()
   let requestDirectory = params.directory ?? undefined
   const continuation = params.ready ? undefined : waitForFirstSessionSubmission(params.sessionId) ?? waitForSessionCreation(params.sessionId)
   const readiness = params.ready ?? continuation?.then((session) => ({ sessionId: session.id, directory: session.directory }))
-  const ready = readiness?.then((confirmed) => {
+  const ready = readiness || params.knowledgeSync ? Promise.all([readiness, params.knowledgeSync]).then(([confirmed]) => {
     if (sdk !== opencodeClient.getSdkClient()) throw new SessionCreationError("runtime-changed")
-    requestDirectory = confirmed.directory ?? undefined
+    if (confirmed) requestDirectory = confirmed.directory ?? undefined
     return requestDirectory
-  })
+  }) : undefined
   const desiredSelection = {
     providerID: params.providerID,
     modelID: params.modelID,
@@ -284,7 +284,7 @@ export async function routeMessage(params: {
 
     if (matchedCommand) {
       // The command route takes files only, so attached context (a quoted
-      // selection, pinned knowledge, prepared conflict instructions) is
+      // selection, prepared conflict instructions) is
       // admitted ahead of it as synthetic messages. Sending "/name args" as
       // a prompt instead would skip the command's template entirely: OpenCode
       // 2.x expands it only on the command route.
@@ -293,10 +293,9 @@ export async function routeMessage(params: {
       // hang an optimistic user message on. The command's message arrives
       // through the stream instead.
       params.appendSubmissions?.()
-      const knowledgeText = await params.sessionKnowledge
+      await params.knowledgeSync
       const resolvedContext = (await Promise.all(contextItems)).flatMap((part) => part?.text.trim() ? [part] : [])
       const commandContext = [
-        ...(knowledgeText ? [{ text: knowledgeText }] : []),
         ...resolvedContext,
         ...skillInstructionContext(),
       ]
@@ -335,7 +334,6 @@ export async function routeMessage(params: {
     directory: requestDirectory,
     files: sendFiles,
     context: contextItems,
-    leadingContext: params.sessionKnowledge?.then((text) => (text ? { text } : null)),
     ready,
     appendSubmissions: params.appendSubmissions,
     send: (messageID, context) => {
@@ -514,7 +512,7 @@ export type SessionUIState = {
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
     /** `null` is an explicit `Default` thinking level. */
     variant?: string | null,
     inputMode?: "normal" | "shell",
@@ -1174,10 +1172,14 @@ export async function materializeOpenDraftSession(selection: {
       persistLastActiveSession(runtimeKey, { sessionId: created.id, directory: createdDirectory })
     }
 
-    // Without a choice in the draft the server writes the default mode itself.
-    if (draftPermissionMode) {
+    const permissionMode = permissionModeForNewSession(
+      draftPermissionMode,
+      isSpaceDirectory(createdDirectory),
+      useUIStore.getState().permissionDefaultMode,
+    )
+    if (permissionMode) {
       void import("@/stores/permissionStore")
-        .then(({ usePermissionStore }) => isCurrent() ? usePermissionStore.getState().setSessionMode(created.id, draftPermissionMode) : undefined)
+        .then(({ usePermissionStore }) => isCurrent() ? usePermissionStore.getState().setSessionMode(created.id, permissionMode) : undefined)
         .catch((error) => {
           console.warn("Failed to apply the draft permission mode to the new session:", error)
         })
@@ -1846,7 +1848,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
     /** `null` is an explicit `Default` thinking level. */
     variant?: string | null,
     inputMode?: "normal" | "shell",
@@ -1867,7 +1869,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         text: part.text,
         synthetic: part.synthetic,
         metadata: part.metadata,
-        systemContext: part.systemContext,
         files: part.attachments?.map((file) => ({ type: "file", mime: file.mimeType, url: file.dataUrl, filename: file.filename })),
       }))
       // FORK: response settings keep their own context slot after attached context and before goal context.
@@ -1934,7 +1935,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             metadata: part.metadata,
             files: part.attachments?.map((file) => ({ type: "file", mime: file.mimeType, url: file.dataUrl, filename: file.filename })),
           }))]
-          // Knowledge is fetched while the message is visible; only submission waits for it.
+          // Knowledge is written while the message is visible; only submission waits for it.
           let historyIdentity: ReturnType<typeof createInputHistoryIdentity> = null
           const confirmedDraft = (createdDraftSession.ready ?? Promise.resolve(createdDraftSession)).then((confirmed) => {
             // FORK: prompt recall and restorable files belong to the server's canonical owner.
@@ -1942,9 +1943,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             options?.onSessionReady?.(confirmed)
             return confirmed
           })
-          const draftKnowledgeRequest = inputMode === "shell"
-            ? null
-            : confirmedDraft.then((confirmed) => fetchSessionKnowledge(confirmed.directory, confirmed.sessionId))
+          const draftKnowledgeSync = inputMode === "shell"
+            ? undefined
+            : confirmedDraft.then((confirmed) => syncSessionKnowledge(confirmed.directory, confirmed.sessionId))
           const historySubmissions = options?.historySubmissions
           const appendSubmissions = historySubmissions?.length
             ? () => {
@@ -1959,10 +1960,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           const ready = confirmedDraft.then(async (confirmed) => {
             if (capturedRuntimeKey !== getRuntimeKey()) throw new SessionCreationError("runtime-changed")
             notifyMessageSent(confirmed.sessionId)
+            useSessionTabsStore.getState().pinTab(confirmed.sessionId)
             await applyArmedGoal(confirmed.sessionId, confirmed.directory)
             return confirmed
           })
-          const messageRoute = await routeMessage({
+          await routeMessage({
             runtimeKey: capturedRuntimeKey,
             ready,
             sessionId: createdDraftSession.sessionId,
@@ -1978,19 +1980,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             appendSubmissions,
             delivery: options?.delivery,
             skills: options?.skills,
-            sessionKnowledge: draftKnowledgeRequest?.then((knowledge) => knowledge.text),
+            knowledgeSync: draftKnowledgeSync,
             additionalParts: draftParts,
           })
-          // Report only after submission; failure must carry pinned knowledge again on retry.
-          const draftKnowledge = draftKnowledgeRequest && messageRoute !== 'shell' ? await draftKnowledgeRequest : null
-          if (draftKnowledge?.text) {
-            void reportSessionKnowledgeDelivered(
-              (await confirmedDraft).directory,
-              createdDraftSession.sessionId,
-              draftKnowledge.signature,
-            )
-          }
-          // FORK: knowledge delivery must be registered before a follow-up can request its context.
+          // Follow-ups and server queues can proceed after the first submission.
           submission.resolve(true)
           return
         } catch (error) {
@@ -2052,6 +2045,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         : null
       if (targetSessionId) {
         notifyMessageSent(targetSessionId)
+        useSessionTabsStore.getState().pinTab(targetSessionId)
       }
 
       if (targetSessionId) {
@@ -2065,18 +2059,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         filename: a.filename,
       }))
 
-      // Standing project context — pinned notes and plans, and the memory index.
-      // Admitted ahead of the message as background, and empty unless the
-      // session is actually missing it. Fetched alongside the goal write and
-      // while the optimistic message is already on screen: only the prompt
-      // request waits for it.
-      const knowledgeRequest = inputMode === "shell"
-        ? null
+      // Write standing project context while the optimistic message is visible.
+      const knowledgeSync = inputMode === "shell"
+        ? undefined
         : (() => {
           const firstSubmission = targetSessionId ? waitForFirstSessionSubmission(targetSessionId) : undefined
           return firstSubmission
-            ? firstSubmission.then((confirmed) => fetchSessionKnowledge(confirmed.directory, confirmed.id))
-            : fetchSessionKnowledge(currentSessionDirectory, targetSessionId || "")
+            ? firstSubmission.then((confirmed) => syncSessionKnowledge(confirmed.directory, confirmed.id))
+            : syncSessionKnowledge(currentSessionDirectory, targetSessionId)
         })()
 
       if (targetSessionId) {
@@ -2092,7 +2082,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
         : undefined
 
-      const messageRoute = await routeMessage({
+      await routeMessage({
         runtimeKey: capturedTarget?.runtimeKey,
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
@@ -2107,14 +2097,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         appendSubmissions,
         delivery: options?.delivery,
         skills: options?.skills,
-        sessionKnowledge: knowledgeRequest?.then((knowledge) => knowledge.text),
+        knowledgeSync,
         additionalParts: contextParts,
       })
       if (targetSessionId) retireRestartInterruptionAfterSend(targetSessionId, currentSessionDirectory)
-      const knowledge = knowledgeRequest && messageRoute !== 'shell' ? await knowledgeRequest : null
-      if (knowledge?.text) {
-        void reportSessionKnowledgeDelivered(currentSessionDirectory, targetSessionId || "", knowledge.signature)
-      }
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })

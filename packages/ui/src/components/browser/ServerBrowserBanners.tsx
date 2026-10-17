@@ -1,11 +1,11 @@
 import React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
 import type { ServerBrowserChromeStatus, ServerBrowserHelp } from '@/lib/browser/serverBrowser/types';
 
@@ -46,7 +46,7 @@ const ControlBar: React.FC<{
   if (control.controller === 'agent') {
     return (
       <div className="flex items-center gap-2 border-b border-border bg-[var(--surface-elevated)] px-3 py-1.5">
-        <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" aria-hidden="true" />
+        <Spinner className="size-3.5 text-muted-foreground" aria-hidden="true" />
         <span className="typography-meta text-muted-foreground">{t('contextPanel.browser.server.control.agentWorking')}</span>
       </div>
     );
@@ -111,14 +111,11 @@ const ChromeStatusBanner: React.FC<{ chrome: ServerBrowserChromeStatus }> = ({ c
   return (
     <div className="flex flex-col gap-1 border-b border-border bg-[color-mix(in_srgb,var(--status-error)_10%,var(--surface-elevated))] px-3 py-2">
       <div className="flex items-center gap-2">
-        <Icon
-          name={chrome.status === 'installing' ? 'download-cloud' : 'error-warning'}
-          className={cn(
-            'size-3.5 shrink-0',
-            chrome.status === 'installing' ? 'animate-pulse text-muted-foreground' : 'text-[var(--status-error)]',
-          )}
-          aria-hidden="true"
-        />
+        {chrome.status === 'installing' ? (
+          <Spinner className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        ) : (
+          <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" aria-hidden="true" />
+        )}
         <span className="typography-meta text-foreground">{title}</span>
       </div>
       {chrome.message ? (

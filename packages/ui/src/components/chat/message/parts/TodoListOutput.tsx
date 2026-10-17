@@ -1,8 +1,10 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useI18n } from '@/lib/i18n';
 import { typography } from '@/lib/typography';
+import { cn } from '@/lib/utils';
 import { coerceToText } from '../toolRenderers';
 import type { Todo } from './todoList';
 
@@ -24,6 +26,12 @@ const PriorityDot: React.FC<{ priority?: string }> = ({ priority }) => (
             : { backgroundColor: 'var(--muted-foreground)', opacity: 0.5 }}
     />
 );
+
+// Keep clock updates in the indicator so they do not re-render the todo list.
+function InProgressDot() {
+    const blink = useWaitingBlink(true);
+    return <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-foreground', blink)} />;
+}
 
 /**
  * The expanded body of a `todowrite` / `todoread` call (OpenCode 1.x, or a
@@ -70,7 +78,7 @@ export const TodoListOutput: React.FC<{ todos: readonly Todo[] }> = ({ todos }) 
             {groups.in_progress.length > 0 && (
                 <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 animate-pulse rounded-full" style={{ backgroundColor: 'var(--foreground)' }} />
+                        <InProgressDot />
                         <span className="typography-meta font-semibold uppercase tracking-wide text-foreground">{label.in_progress}</span>
                     </div>
                     <div className="space-y-1.5 ps-4">

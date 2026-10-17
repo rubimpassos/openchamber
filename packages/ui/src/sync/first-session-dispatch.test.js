@@ -1,8 +1,7 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID } from '@/lib/routing/autoModel';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import * as knowledgeApi from '@/lib/sessionKnowledgeApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -111,25 +110,21 @@ test('rolls back a waiting follow-up when the acknowledged initial submission fa
   expect(useGlobalSessionsStore.getState().entityById.has(prompt.sessionID)).toBe(true);
 });
 
-test('makes waiting follow-up knowledge wait for the initial delivery report', async () => {
-  // Given knowledge owed until the server acknowledges its held delivery report.
-  const report = deferSessionOperation(); const reportStarted = deferSessionOperation();
+test('serializes knowledge writes behind the initial submission and before each prompt', async () => {
+  // Given held server-side knowledge writes and two optimistic prompts.
+  const initialSync = deferSessionOperation(); const initialSyncStarted = deferSessionOperation();
+  const nextSync = deferSessionOperation(); const nextSyncStarted = deferSessionOperation();
   const delivery = deferSessionOperation(); const started = deferSessionOperation();
-  let knowledgeReads = 0; let reported = false;
-  const originalReport = knowledgeApi.reportSessionKnowledgeDelivered;
-  const heldAtReport = [];
-  const observeReport = spyOn(knowledgeApi, 'reportSessionKnowledgeDelivered').mockImplementation((scope, id, signature) => {
-    heldAtReport.push(waitForFirstSessionSubmission(id) !== undefined);
-    return originalReport(scope, id, signature);
-  });
-  globalThis.fetch = async (input) => {
+  const knowledgeWrites = [];
+  globalThis.fetch = async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
-    if (url.includes('/session-knowledge/delivered')) {
-      reportStarted.resolve(); await report.promise; reported = true; return Response.json({});
-    }
-    if (url.includes('/session-knowledge?')) {
-      knowledgeReads += 1;
-      return Response.json(reported ? { text: '', signature: '' } : { text: 'context', signature: 'v1' });
+    if (url.endsWith('/api/session-knowledge/sync')) {
+      knowledgeWrites.push({ method: init.method, body: JSON.parse(init.body) });
+      if (knowledgeWrites.length === 1) {
+        initialSyncStarted.resolve(); await initialSync.promise;
+      } else {
+        nextSyncStarted.resolve(); await nextSync.promise;
+      }
     }
     return Response.json({});
   };
@@ -140,17 +135,27 @@ test('makes waiting follow-up knowledge wait for the initial delivery report', a
   };
   const first = send(); const prompt = await inserted.promise;
   inserted = deferSessionOperation(); const next = followUp(prompt.sessionID); await inserted.promise;
-  // When the first prompt is accepted but its knowledge report is still in flight.
-  response.resolve(current(prompt.sessionID)); await started.promise; delivery.resolve();
-  await first; await reportStarted.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  const canonical = '/canonical-knowledge';
+  response.resolve({ ...current(prompt.sessionID), directory: canonical });
   try {
-    // Then the first send resolves promptly, but its follower cannot read and resend stale knowledge.
-    expect(heldAtReport).toEqual([true]);
-    expect(knowledgeReads).toBe(1);
+    await initialSyncStarted.promise;
+    expect(waitForFirstSessionSubmission(prompt.sessionID)).toBeDefined();
+    expect(messages).toHaveLength(0);
+    initialSync.resolve(); await started.promise;
+    expect(knowledgeWrites).toHaveLength(1);
+    // When the initial prompt is accepted and the follower's knowledge write starts.
+    delivery.resolve(); await first; await nextSyncStarted.promise;
+    // Then that write targets the confirmed owner and gates the second prompt.
+    expect(knowledgeWrites).toEqual([
+      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID } },
+      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID } },
+    ]);
     expect(messages).toHaveLength(1);
   } finally {
-    report.resolve(); await next; observeReport.mockRestore();
+    initialSync.resolve(); delivery.resolve(); nextSync.resolve();
+    await Promise.all([first, next]);
   }
+  expect(messages).toHaveLength(2);
+  expect(messages[0].context ?? []).toEqual([]);
   expect(messages[1].context ?? []).toEqual([]);
 });

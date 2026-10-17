@@ -60,17 +60,13 @@ export const collectSessionSubtreeIds = (
 };
 
 /**
- * Every descendant a move to another worktree takes along, resolved when the
- * user acts rather than while rows render.
- *
- * `knownDescendants` is the row's rendered tree. In work, Pinned and the List
- * view render a root with no children, so a move from those rows took the root
- * alone and left its subagents behind. The global cache holds the whole active
- * tree, walked here the way the project tree builds it: a move stops at an
- * archived session and leaves everything below it, as moving from the project
- * tree always did.
+ * A session's active subtree from the global cache, built the way the project
+ * tree builds it: it stops at an archived session and everything below it.
+ * In work, Pinned and the List view render a root with no children, so an
+ * action that needs the subagents of such a row resolves them here when the
+ * user acts.
  */
-export const collectSessionMoveDescendants = (root: Session, knownDescendants: readonly Session[]): Session[] => {
+export const buildActiveSessionTreeFromCache = (root: Session): SessionNode => {
   const childrenByParentId = new Map<string, Session[]>();
   for (const session of useGlobalSessionsStore.getState().activeSessions) {
     const parentId = session.parentID;
@@ -79,6 +75,16 @@ export const collectSessionMoveDescendants = (root: Session, knownDescendants: r
     siblings.push(session);
     childrenByParentId.set(parentId, siblings);
   }
+  return buildActiveSessionNode(childrenByParentId, root);
+};
+
+/**
+ * Every descendant a move to another worktree takes along: the row's rendered
+ * tree (`knownDescendants`) plus the active subtree from the global cache, so
+ * a move from a flat row takes the subagents along as a move from the project
+ * tree always did.
+ */
+export const collectSessionMoveDescendants = (root: Session, knownDescendants: readonly Session[]): Session[] => {
   const descendants = new Map(knownDescendants.map((session) => [session.id, session]));
   const walk = (node: SessionNode): void => {
     for (const child of node.children) {
@@ -86,7 +92,7 @@ export const collectSessionMoveDescendants = (root: Session, knownDescendants: r
       walk(child);
     }
   };
-  walk(buildActiveSessionNode(childrenByParentId, root));
+  walk(buildActiveSessionTreeFromCache(root));
   descendants.delete(root.id);
   return [...descendants.values()];
 };

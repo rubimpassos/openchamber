@@ -49,7 +49,7 @@ const space: SpaceEntry = {
   projectDirectory: '/repo', directory: '/spaces/012345abcdef/repo', projectFolder: { path: '/repo', found: true },
   state: 'running', step: null, failure: null, stoppedIdle: false, network: { mode: 'allowlist', domains: [] },
   grants: [{ kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing', url: 'http://gatekeeper/model/openai' }],
-  access: 'granted', needsAccess: [], damage: null, setup: null,
+  access: 'granted', needsAccess: [], accessFailures: [], damage: null, setup: null,
 };
 const target = { sessionId: 'ses_host', directory: '/repo' };
 

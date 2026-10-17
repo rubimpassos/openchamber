@@ -11,6 +11,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -20,6 +21,7 @@ import { projectActionsI18n } from './project-actions.i18n';
 import { suggestedTasksI18n } from './suggested-tasks.i18n';
 import { notificationCenterI18n } from './notification-center.i18n';
 import { sessionRestartInterruptionI18n } from './session-restart-interruption.i18n';
+import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
@@ -153,6 +155,7 @@ export const dict = {
   ...browserServerPanelI18n.fr,
   ...prFixLoopI18n.fr,
   ...fileArtifactsI18n.fr,
+  ...fileContentSearchI18n.fr,
   ...htmlRenderI18n.fr,
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
@@ -162,6 +165,7 @@ export const dict = {
   ...suggestedTasksI18n.fr,
   ...notificationCenterI18n.fr,
   ...sessionRestartInterruptionI18n.fr,
+  ...gitIdentityEditorI18n.fr,
   ...environmentI18n.fr,
   ...providersI18n.fr,
   ...mcpGridI18n.fr,
@@ -531,6 +535,8 @@ export const dict = {
   'sessions.sidebar.session.work.markDone': 'Marquer comme terminé',
   'sessions.sidebar.session.work.doneSuggested': 'Semble terminé',
   'sessions.sidebar.session.work.updateFailed': 'Impossible de mettre à jour la session',
+  'sessions.sidebar.session.pin.pinFailed': 'Impossible d\'épingler la session',
+  'sessions.sidebar.session.pin.unpinFailed': 'Impossible de désépingler la session',
   'chat.work.doneHint.text': 'Ce travail semble terminé.',
   'chat.work.doneHint.action': 'Marquer comme terminé',
   'chat.work.reviewHint.text': 'Les modifications sont prêtes à être relues.',
@@ -1157,8 +1163,10 @@ export const dict = {
   "contextPanel.mode.diff": "Changements",
   'contextPanel.mode.stagedDiff': 'Diff indexé',
   'contextPanel.mode.workingDiff': 'Diff de travail',
-  'contextPanel.mode.pr': 'Pull Request',
-  'contextPanel.mode.mr': 'Merge Request',
+  'contextPanel.mode.pr': "Suivi",
+  'contextPanel.tracker.branchTab': "Branche actuelle",
+  'contextPanel.tracker.loadFailed': "Impossible de charger cet élément.",
+  'contextPanel.tracker.unavailable': "OpenChamber ne peut pas lire cet élément ici.",
   'gitView.mergeRequest.title': 'MR',
   'gitView.mergeRequest.availableOnFeatureBranches': 'Disponible lorsque la branche actuelle peut ouvrir une MR.',
   'gitView.mr.openMergeRequest': 'Ouvrir la merge request',
@@ -1287,8 +1295,7 @@ export const dict = {
   'walkthrough.blocked.serverUnsupported.description': "Le serveur OpenChamber auquel cette application est connectée n'a pas répondu à l'API walkthrough : il est donc plus ancien que l'application. Mettez le serveur à jour en 1.18 ou plus récent, puis actualisez.",
   'walkthrough.blocked.contextTooSmall.descriptionUnknownModel': 'Le petit modèle accepte environ {available} k caractères et ce diff en demande environ {required} k. Rien n’est tronqué : choisissez un modèle au contexte plus large.',
   'walkthrough.blocked.structuredOutput.descriptionUnknownModel': 'Le petit modèle ne prend pas en charge les réponses structurées nécessaires à un parcours.',
-  'contextRail.surface.pr.description': 'Créer, relire et fusionner la pull request de la branche actuelle',
-  'contextRail.surface.mr.description': 'Créer, relire et fusionner la merge request de la branche actuelle',
+  'contextRail.surface.pr.description': "La pull request de la branche actuelle, et les issues, pull requests et tickets ouverts depuis vos sessions",
   'contextRail.surface.notes.description': 'Notes, tâches, plans et mémoire de l’agent pour le projet',
   'contextRail.surface.context.description': 'Contexte de session et utilisation des tokens',
   'contextRail.surface.browser.description': 'Navigateur web intégré',
@@ -1593,6 +1600,12 @@ export const dict = {
   'diffView.unavailable.missingDescription': 'Il a été supprimé après le chargement de la liste des modifications. La liste est en cours d’actualisation.',
   'diffView.unavailable.nestedRepositoryTitle': 'Dépôt Git distinct',
   'diffView.unavailable.nestedRepositoryDescription': 'Ce dossier a son propre historique Git. Ouvrez-le comme projet pour voir ses modifications.',
+  'diffView.nestedRepository.description': 'Ce dossier a son propre historique Git. Ouvrez-le comme projet pour committer ces modifications.',
+  'diffView.nestedRepository.openAsProject': 'Ouvrir comme projet',
+  'diffView.nestedRepository.openFailed': "Impossible d'ouvrir ce dossier comme projet",
+  'diffView.nestedRepository.loading': 'Lecture des modifications du dépôt…',
+  'diffView.nestedRepository.loadFailed': 'Impossible de lire les modifications du dépôt',
+  'diffView.nestedRepository.noChanges': 'Aucune modification dans ce dépôt',
   'diffView.unavailable.untrackedDirectoryTitle': 'Dossier de nouveaux fichiers',
   'diffView.unavailable.untrackedDirectoryDescription': 'Ce dossier contient trop de nouveaux fichiers pour les lister un par un. Indexez-le ou ajoutez-le à .gitignore s’il n’a pas sa place dans le dépôt.',
   'diffView.submodule.title': 'Sous-module',
@@ -1787,7 +1800,7 @@ export const dict = {
   'chat.recap.label': 'Récap :',
   'chat.sessionError.title': 'OpenCode a interrompu cette réponse',
   'chat.sessionError.noDetails': 'OpenCode n’a fourni aucun détail. Le rapport d’état affiche les erreurs récentes.',
-  'chat.sessionError.showStatus': 'Afficher le statut OpenCode',
+  'chat.sessionError.showStatus': 'Afficher la chronologie des diagnostics',
   'chat.sessionError.noReply': 'OpenCode n\'a pas commencé de réponse à ce message.',
   'chat.sessionError.interrupted': 'OpenCode a interrompu cette réponse.',
   'chat.longError.expand': 'Afficher l’erreur complète',
@@ -2509,7 +2522,7 @@ export const dict = {
   'commandPalette.item.showContextUsage': 'Afficher l\'utilisation du contexte',
   'commandPalette.item.toggleTerminal': 'Basculer le terminal',
   'commandPalette.item.cycleTheme': 'Changer de thème',
-  'commandPalette.item.showOpenCodeStatus': 'Afficher le statut OpenCode',
+  'commandPalette.item.showOpenCodeStatus': 'Afficher la chronologie des diagnostics',
   'commandPalette.item.restartOpenCode': 'Redémarrer OpenCode',
   'commandPalette.item.toggleMemoryDebug': 'Basculer le panneau de débogage mémoire',
   'commandPalette.item.pinSession': 'Épingler ou désépingler la session',
@@ -2562,13 +2575,15 @@ export const dict = {
   'commandPalette.footer.navigate': 'naviguer',
   'commandPalette.footer.open': 'ouvrir',
   'commandPalette.footer.close': 'fermer',
-  'openCodeStatusDialog.title': 'Statut OpenCode',
-  'openCodeStatusDialog.description': 'Inspectez l’état et les diagnostics actuels du OpenCode.',
+  'openCodeStatusDialog.title': 'Chronologie des diagnostics',
+  'openCodeStatusDialog.description': 'Événements locaux classés par date. Les textes privés et les sources distantes sont exclus.',
+  'openCodeStatusDialog.actions.download': 'Télécharger le journal',
+  'openCodeStatusDialog.toast.collectFailed': 'Impossible de collecter les diagnostics',
   'openCodeStatusDialog.actions.copy': 'Copie',
   'openCodeStatusDialog.empty.noData': 'Aucune donnée.',
   'openCodeStatusDialog.toast.copiedTitle': 'Copié',
-  'openCodeStatusDialog.toast.copiedDescription': 'Statut copié dans le presse-papiers',
-  'openCodeStatusDialog.toast.copyFailed': 'Échec de la copie du statut',
+  'openCodeStatusDialog.toast.copiedDescription': 'Journal de diagnostic copié dans le presse-papiers',
+  'openCodeStatusDialog.toast.copyFailed': 'Impossible de copier le journal de diagnostic',
   'saveProjectPlanDialog.title': 'Enregistrer le plan de projet',
   'saveProjectPlanDialog.description': 'Enregistrez ce plan dans votre projet en tant que fichier Markdown.',
   'saveProjectPlanDialog.field.title': 'Titre',

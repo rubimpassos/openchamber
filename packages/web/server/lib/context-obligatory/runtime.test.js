@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createContextObligatoryRuntime } from './runtime.js';
-import { createSessionKnowledgeRuntime } from '../session-knowledge/runtime.js';
+import { KNOWLEDGE_ENTRY_KEYS, createSessionKnowledgeRuntime } from '../session-knowledge/runtime.js';
 
 /**
  * Pinned messages and the compaction cursor live in OpenChamber's own session
@@ -71,6 +71,7 @@ const pinnedMetadata = (extra = {}) => ({
 
 const stackKnowledge = () => {
   let metadata = { openchamber: { knowledge_context_delivered: 'previously-delivered' } };
+  const held = new Map();
   const readSessionMetadata = async () => metadata;
   const persistContextCursor = async (_id, _directory, patch) => {
     metadata = { openchamber: { ...metadata.openchamber, ...patch.openchamber } };
@@ -80,13 +81,17 @@ const stackKnowledge = () => {
     isAgentMemoryEnabled: async () => false,
     readSessionMetadata,
     persistSessionMetadata: persistContextCursor,
+    instructionEntries: {
+      put: async (_sessionId, _directory, key, value) => { held.set(key, value); },
+      remove: async (_sessionId, _directory, key) => { held.delete(key); },
+    },
     collectFollowedPullStacks: async () => [{
       anchor: { owner: 'acme', repo: 'app', number: 1 },
       status: 'available',
       stack: { members: [{ number: 1, head: 'first', base: 'main' }, { number: 2, head: 'second', base: 'first' }] },
     }],
   });
-  return { runtime, readSessionMetadata, persistContextCursor };
+  return { runtime, readSessionMetadata, persistContextCursor, held };
 };
 
 afterEach(() => {
@@ -173,14 +178,14 @@ describe('context obligatory runtime', () => {
     expect(persistContextCursor).not.toHaveBeenCalled();
   });
 
-  it('restores followed stack context alone when a compaction removes an already delivered snapshot', async () => {
+  it('leaves followed stack instruction entries intact without a synthetic message after compaction', async () => {
     // Given a session carrying a delivered stack and no pinned messages.
     const { synthetic } = fakeOpenCode();
     const knowledge = stackKnowledge();
-    const before = await knowledge.runtime.resolvePendingForSession('ses_1', '/repo');
-    await knowledge.runtime.recordDelivered('ses_1', '/repo', before.signature);
+    expect(await knowledge.runtime.sync('ses_1', '/repo')).toBe(true);
+    const before = knowledge.held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks);
+    expect(before).toContain('"head":"second"');
     const { runtime } = makeRuntime({
-      sessionKnowledgeRuntime: knowledge.runtime,
       readSessionMetadata: knowledge.readSessionMetadata,
       persistContextCursor: knowledge.persistContextCursor,
     });
@@ -188,13 +193,13 @@ describe('context obligatory runtime', () => {
     // When OpenCode completes compaction.
     await runtime.processPayload(compactionEvent(), '/repo');
 
-    // Then one background message restores the whole snapshot and records delivery again.
-    expect(synthetic).toEqual([{ text: before.text, resume: false }]);
-    expect((await knowledge.runtime.resolvePendingForSession('ses_1', '/repo')).text).toBe('');
-    expect((await knowledge.readSessionMetadata()).openchamber.context_obligatory_last_compaction_message_id).toBe('msg_compact');
+    // Then the complete stack stays in its entry and nothing impersonates a user message.
+    expect(synthetic).toEqual([]);
+    expect(knowledge.held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks)).toBe(before);
+    expect((await knowledge.readSessionMetadata()).openchamber.knowledge_context_delivered).toBe('previously-delivered');
   });
 
-  it('keeps stack restoration pending when the compaction synthetic message fails', async () => {
+  it('keeps stack entries intact when pinned-message restoration fails', async () => {
     // Given a delivered snapshot and an upstream refusing synthetic context.
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { fetchMock } = fakeOpenCode();
@@ -203,10 +208,10 @@ describe('context obligatory runtime', () => {
       ? new Response('unavailable', { status: 503 })
       : upstream(input, init));
     const knowledge = stackKnowledge();
-    const before = await knowledge.runtime.resolvePendingForSession('ses_1', '/repo');
-    await knowledge.runtime.recordDelivered('ses_1', '/repo', before.signature);
+    await knowledge.persistContextCursor('ses_1', '/repo', pinnedMetadata());
+    expect(await knowledge.runtime.sync('ses_1', '/repo')).toBe(true);
+    const before = knowledge.held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks);
     const { runtime } = makeRuntime({
-      sessionKnowledgeRuntime: knowledge.runtime,
       readSessionMetadata: knowledge.readSessionMetadata,
       persistContextCursor: knowledge.persistContextCursor,
     });
@@ -214,8 +219,11 @@ describe('context obligatory runtime', () => {
     // When the compaction restoration fails.
     await runtime.processPayload(compactionEvent(), '/repo');
 
-    // Then the next ordinary send still owes the same complete snapshot.
-    expect(await knowledge.runtime.resolvePendingForSession('ses_1', '/repo')).toEqual(before);
+    // Then the unrelated instruction entry remains and the pinned-message cursor can retry.
+    expect(fetchMock.mock.calls.some(([url]) => new URL(url).pathname.endsWith('/synthetic'))).toBe(true);
+    expect(knowledge.held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks)).toBe(before);
+    expect(await knowledge.runtime.sync('ses_1', '/repo')).toBe(true);
+    expect(knowledge.held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks)).toBe(before);
     expect((await knowledge.readSessionMetadata()).openchamber.context_obligatory_last_compaction_message_id).toBeUndefined();
   });
 });

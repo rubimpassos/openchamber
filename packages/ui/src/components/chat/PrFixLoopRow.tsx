@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { PrFixLoopDialog } from '@/components/session/PrFixLoopDialog';
-import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
+import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { Button } from '@/components/ui/button';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { PrFixLoopWorkerStatus } from '@/components/session/pr-fix-loop/PrFixLoopWorkerStatus';
@@ -20,7 +20,7 @@ const reviewStatusKeys = {
 export const PrFixLoopRow = React.memo(function PrFixLoopRow({ loop, projectionFailed }: { loop: FixLoop; projectionFailed: boolean }) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
-  const openOnBoard = useOpenOnBoard();
+  const openTrackerItem = useOpenTrackerItem();
   const [editing, setEditing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
@@ -81,7 +81,7 @@ export const PrFixLoopRow = React.memo(function PrFixLoopRow({ loop, projectionF
         {active ? <Button size={size} variant="chip" disabled={busy || isFixLoopConfigLocked(loop)} aria-pressed={editing} onClick={() => setEditing((value) => !value)}>
           {t('prFixLoop.action.settings')}
         </Button> : null}
-        <Button size={size} variant="ghost" onClick={() => openOnBoard(loop.url, loop.directory)}>{t('prFixLoop.action.open')}</Button>
+        <Button size={size} variant="ghost" onClick={() => openTrackerItem(loop.url, loop.directory)}>{t('prFixLoop.action.open')}</Button>
         {!active && !loop.pendingApproval ? <Button size={size} variant="ghost" disabled={busy} onClick={() => void act(() => prFixLoopStore.getState().dismiss(loop.id))}>
           {t('prFixLoop.action.dismiss')}
         </Button> : null}

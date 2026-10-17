@@ -11,6 +11,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -20,6 +21,7 @@ import { projectActionsI18n } from './project-actions.i18n';
 import { suggestedTasksI18n } from './suggested-tasks.i18n';
 import { notificationCenterI18n } from './notification-center.i18n';
 import { sessionRestartInterruptionI18n } from './session-restart-interruption.i18n';
+import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
@@ -153,6 +155,7 @@ export const dict = {
   ...pluginPanelI18n.nl,
   ...surfacePanelI18n.nl,
   ...fileArtifactsI18n.nl,
+  ...fileContentSearchI18n.nl,
   ...htmlRenderI18n.nl,
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
@@ -162,6 +165,7 @@ export const dict = {
   ...suggestedTasksI18n.nl,
   ...notificationCenterI18n.nl,
   ...sessionRestartInterruptionI18n.nl,
+  ...gitIdentityEditorI18n.nl,
   ...environmentI18n.nl,
   ...providersI18n.nl,
   ...mcpGridI18n.nl,
@@ -701,6 +705,8 @@ export const dict = {
   'sessions.sidebar.session.work.markDone': 'Markeer als afgerond',
   'sessions.sidebar.session.work.doneSuggested': 'Lijkt afgerond',
   'sessions.sidebar.session.work.updateFailed': 'Sessie kon niet worden bijgewerkt',
+  'sessions.sidebar.session.pin.pinFailed': 'Sessie kon niet worden vastgezet',
+  'sessions.sidebar.session.pin.unpinFailed': 'Sessie kon niet worden losgemaakt',
   'chat.work.doneHint.text': 'Dit werk lijkt afgerond.',
   'chat.work.doneHint.action': 'Markeer als afgerond',
   'chat.work.reviewHint.text': 'De wijzigingen zijn klaar om te bekijken.',
@@ -1342,8 +1348,10 @@ export const dict = {
   'contextPanel.mode.diff': 'Wijzigingen',
   'contextPanel.mode.stagedDiff': 'Gestagede diff',
   'contextPanel.mode.workingDiff': 'Werkdiff',
-  'contextPanel.mode.pr': 'Pull request',
-  'contextPanel.mode.mr': 'Merge request',
+  'contextPanel.mode.pr': "Tracker",
+  'contextPanel.tracker.branchTab': "Huidige branch",
+  'contextPanel.tracker.loadFailed': "Dit item kon niet worden geladen.",
+  'contextPanel.tracker.unavailable': "OpenChamber kan dit item hier niet lezen.",
   'gitView.mergeRequest.title': 'Merge request',
   'gitView.mergeRequest.availableOnFeatureBranches': 'Beschikbaar wanneer de huidige branch een merge request kan openen.',
   'gitView.mr.openMergeRequest': 'Merge request openen',
@@ -1472,8 +1480,7 @@ export const dict = {
   'walkthrough.blocked.serverUnsupported.description': 'De OpenChamber-server waarmee deze app verbonden is, gaf geen antwoord op de API voor rondleidingen. Dat betekent dat hij ouder is dan de app. Werk de server bij naar 1.18 of nieuwer en vernieuw daarna.',
   'walkthrough.blocked.contextTooSmall.descriptionUnknownModel': 'Het kleine model past ongeveer {available}K tekens en deze diff heeft ongeveer {required}K nodig. Er wordt niets afgekapt — kies in plaats daarvan een model met een grotere context.',
   'walkthrough.blocked.structuredOutput.descriptionUnknownModel': 'Het kleine model ondersteunt de gestructureerde antwoorden die een rondleiding nodig heeft.',
-  'contextRail.surface.pr.description': 'Maak, beoordeel en merge de pull request voor de huidige branch',
-  'contextRail.surface.mr.description': 'Maak, beoordeel en merge de merge request voor de huidige branch',
+  'contextRail.surface.pr.description': "De pull request van de huidige branch, en issues, pull requests en tickets die je vanuit je sessies opent",
   'contextRail.surface.notes.description': 'Notities, taken, plannen en agentgeheugen voor het project',
   'contextRail.surface.context.description': 'Sessiecontext en tokenverbruik',
   'contextRail.surface.browser.description': 'Ingebouwde webbrowser',
@@ -1841,6 +1848,12 @@ export const dict = {
   'diffView.unavailable.missingDescription': 'Het is verwijderd nadat de lijst met wijzigingen is geladen. De lijst wordt vernieuwd.',
   'diffView.unavailable.nestedRepositoryTitle': 'Aparte Git-repository',
   'diffView.unavailable.nestedRepositoryDescription': 'Deze map heeft een eigen Git-historie. Open hem als project om de wijzigingen te zien.',
+  'diffView.nestedRepository.description': 'Deze map heeft een eigen Git-historie. Open hem als project om deze wijzigingen te committen.',
+  'diffView.nestedRepository.openAsProject': 'Openen als project',
+  'diffView.nestedRepository.openFailed': 'Kan deze map niet als project openen',
+  'diffView.nestedRepository.loading': 'Wijzigingen in de repository lezen…',
+  'diffView.nestedRepository.loadFailed': 'Kan de wijzigingen in de repository niet lezen',
+  'diffView.nestedRepository.noChanges': 'Geen wijzigingen in deze repository',
   'diffView.unavailable.untrackedDirectoryTitle': 'Map met nieuwe bestanden',
   'diffView.unavailable.untrackedDirectoryDescription': 'Deze map bevat te veel nieuwe bestanden om ze één voor één te tonen. Stage de map, of voeg hem toe aan .gitignore als hij niet in de repository thuishoort.',
   'diffView.submodule.title': 'Submodule',
@@ -2087,7 +2100,7 @@ export const dict = {
   'chat.recap.label': 'Samenvatting:',
   'chat.sessionError.title': 'OpenCode heeft dit antwoord gestopt',
   'chat.sessionError.noDetails': 'OpenCode heeft geen details gemeld. Het statusrapport bevat recente fouten.',
-  'chat.sessionError.showStatus': 'OpenCode-status tonen',
+  'chat.sessionError.showStatus': 'Diagnostische tijdlijn tonen',
   'chat.sessionError.noReply': 'OpenCode is geen antwoord op dit bericht begonnen.',
   'chat.sessionError.interrupted': 'OpenCode heeft dit antwoord onderbroken.',
   'chat.longError.expand': 'Volledige fout tonen',
@@ -2867,7 +2880,7 @@ export const dict = {
   'commandPalette.item.showContextUsage': 'Contextgebruik tonen',
   'commandPalette.item.toggleTerminal': 'Terminal tonen of verbergen',
   'commandPalette.item.cycleTheme': 'Thema wisselen',
-  'commandPalette.item.showOpenCodeStatus': 'OpenCode-status tonen',
+  'commandPalette.item.showOpenCodeStatus': 'Diagnostische tijdlijn tonen',
   'commandPalette.item.restartOpenCode': 'OpenCode herstarten',
   'commandPalette.item.toggleMemoryDebug': 'Debugpaneel voor geheugen tonen of verbergen',
   'commandPalette.item.pinSession': 'Sessie vastzetten of opheffen',
@@ -2920,13 +2933,15 @@ export const dict = {
   'commandPalette.footer.navigate': 'navigeren',
   'commandPalette.footer.open': 'openen',
   'commandPalette.footer.close': 'sluiten',
-  'openCodeStatusDialog.title': 'OpenCode-status',
-  'openCodeStatusDialog.description': 'Bekijk de huidige OpenCode-status en diagnostiek.',
+  'openCodeStatusDialog.title': 'Diagnostische tijdlijn',
+  'openCodeStatusDialog.description': 'Lokale gebeurtenissen in chronologische volgorde. Privélogtekst en externe bronnen worden niet opgenomen.',
+  'openCodeStatusDialog.actions.download': 'Logbestand downloaden',
+  'openCodeStatusDialog.toast.collectFailed': 'Kan diagnostische gegevens niet verzamelen',
   'openCodeStatusDialog.actions.copy': 'Kopiëren',
   'openCodeStatusDialog.empty.noData': 'Geen gegevens.',
   'openCodeStatusDialog.toast.copiedTitle': 'Gekopieerd',
-  'openCodeStatusDialog.toast.copiedDescription': 'Status naar klembord gekopieerd',
-  'openCodeStatusDialog.toast.copyFailed': 'Kan status niet kopiëren',
+  'openCodeStatusDialog.toast.copiedDescription': 'Diagnostisch logbestand naar klembord gekopieerd',
+  'openCodeStatusDialog.toast.copyFailed': 'Kan diagnostisch logbestand niet kopiëren',
   'saveProjectPlanDialog.title': 'Projectplan opslaan',
   'saveProjectPlanDialog.description': 'Sla dit plan op in uw project als Markdown-bestand.',
   'saveProjectPlanDialog.field.title': 'Titel',

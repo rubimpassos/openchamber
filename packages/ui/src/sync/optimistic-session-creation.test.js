@@ -20,19 +20,22 @@ const directory = '/optimistic-repo';
 const draft = { draftId: 2026, open: true, target: 'project', directoryOverride: directory, parentID: null, preserveDirectoryOverride: true,
   projectContextPins: { notes: ['note-1'], plans: [] } };
 let stores, loader, response, inserted, originalConfig, originals, originalFetch;
-let sent, requests, historyReads, aborts;
+let sent, requests, knowledgeSyncs, historyReads, aborts;
 
 beforeEach(() => {
   response = Promise.withResolvers();
   inserted = Promise.withResolvers();
-  sent = []; requests = []; historyReads = []; aborts = [];
+  sent = []; requests = []; knowledgeSyncs = []; historyReads = []; aborts = [];
   originals = { createSession: opencodeClient.createSession, sendMessage: opencodeClient.sendMessage,
     listSessionsPage: opencodeClient.listSessionsPage, getFilesystemHomeInfo: opencodeClient.getFilesystemHomeInfo,
     abortSession: opencodeClient.abortSession };
   originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input) => {
+  globalThis.fetch = async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
     requests.push(url);
+    if (url.endsWith('/api/session-knowledge/sync')) {
+      knowledgeSyncs.push({ method: init.method, body: JSON.parse(init.body) });
+    }
     return Response.json(url.includes('session-knowledge') ? { text: '', signature: '' } : {});
   };
   opencodeClient.createSession = async () => response.promise;
@@ -118,7 +121,7 @@ test('moves the prompt and its shadow when creation canonicalizes the directory'
   expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/canonical-repo');
   expect(stores.getChild(directory).getState().message[prompt.sessionID]).toBeUndefined();
   expect(stores.getChild('/canonical-repo').getState().message[prompt.sessionID]).toEqual([prompt]);
-  expect(requests.some((url) => url.includes('directory=%2Fcanonical-repo'))).toBe(true);
+  expect(knowledgeSyncs).toEqual([{ method: 'POST', body: { directory: '/canonical-repo', sessionId: prompt.sessionID } }]);
 });
 
 test('records first-prompt history and restorable files under the confirmed directory', async () => {

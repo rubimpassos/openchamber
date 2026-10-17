@@ -42,6 +42,7 @@ import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
 import { getRestartInterruption, withoutRestartInterruption } from "@/lib/sessionRestartInterruption"
 import { withSessionPriority } from "@/lib/sessionPriority"
+import { withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
@@ -1220,6 +1221,26 @@ export async function setSessionPriority(
   }
 }
 
+/**
+ * Pin or unpin a session for every client of the server. Bound to the server
+ * it was clicked on, like the work state: a runtime switch mid-request writes
+ * nothing to the new server and resolves null.
+ */
+export async function setSessionPinned(
+  sessionId: string,
+  directory: string | null | undefined,
+  pinned: boolean,
+): Promise<Session | null> {
+  const runtimeKeyAtClick = getRuntimeKey()
+  try {
+    return await patchSessionMetadata(sessionId, directory, (metadata) =>
+      withSessionPinned(metadata, pinned, Date.now()), runtimeKeyAtClick)
+  } catch (error) {
+    if (isStaleRuntime(runtimeKeyAtClick)) return null
+    throw error
+  }
+}
+
 /** A sent message answers the restart notice; costs nothing for a session without one. */
 export function retireRestartInterruptionAfterSend(sessionId: string, directory: string | null | undefined): void {
   if (!getRestartInterruption(getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId))) return
@@ -2023,13 +2044,11 @@ export async function optimisticSend(input: {
   /** Context admitted ahead of the prompt; shown in the optimistic message until the server echoes it. */
   context?: Array<SyntheticContextInput | Promise<SyntheticContextInput | null>>
   /**
-   * Context still being fetched, admitted ahead of `context` once it resolves
-   * (the session's project knowledge). The user message is inserted without
-   * waiting for it; only the request waits. Null means there is nothing to add;
-   * an owning preparation failure rejects and rolls back the send.
+   * Session creation and knowledge preparation. The user message is inserted
+   * without waiting; the request waits for the confirmed directory. Failure
+   * rejects and rolls back the send.
    */
-  leadingContext?: Promise<SyntheticContextInput | null>
-  ready?: Promise<string | undefined>
+  ready?: Promise<string | void>
   appendSubmissions?: () => void
   onOptimisticInsert?: () => void
   onMessageID?: (messageID: string) => void
@@ -2098,9 +2117,6 @@ export async function optimisticSend(input: {
 
   // Context ids come first so they sort before the prompt the way the server
   // admits them. The client skips blank items, so they get no record here.
-  // The leading item's id is reserved now, before it is known, so it still
-  // sorts ahead of everything else when it arrives after the insert.
-  const leadingContextID = input.leadingContext ? ascendingId("msg") : null
   // FORK: reserve deferred context IDs in place, ahead of the visible prompt.
   const contextSlots = (input.context ?? [])
     .filter((item) => item instanceof Promise || item.text.trim())
@@ -2181,32 +2197,22 @@ export async function optimisticSend(input: {
 
   try {
     // FORK: rendering stays synchronous; only server-dependent work waits for creation.
-    const prepared = await Promise.all([input.ready, input.leadingContext, resolvedContext])
+    const prepared = await Promise.all([input.ready, resolvedContext])
     if (input.ready) {
-      targetDirectory = prepared[0]
+      targetDirectory = prepared[0] ?? targetDirectory
       assertRuntimeUnchanged()
       store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
       input.appendSubmissions?.()
     }
     const deferredIDs = new Set(contextSlots.filter(({ item }) => item instanceof Promise).map(({ id }) => id))
-    const completeContext = prepared[2].filter((item) => item !== null)
+    const completeContext = prepared[1].filter((item) => item !== null)
     for (const item of completeContext) {
       if (deferredIDs.has(item.id)) addSyntheticContext(item)
-    }
-    let sentContext = completeContext
-    if (input.leadingContext && leadingContextID) {
-      const leading = prepared[1]
-      if (leading?.text.trim()) {
-        const leadingItem = { ...leading, id: leadingContextID }
-        addSyntheticContext(leadingItem)
-        optimisticIDs.unshift(leadingContextID)
-        sentContext = [leadingItem, ...completeContext]
-      }
     }
     assertRuntimeUnchanged()
     await waitForConnectionOrThrow()
     assertRuntimeUnchanged()
-    await input.send(messageID, sentContext)
+    await input.send(messageID, completeContext)
   } catch (error) {
     if (input.ready && input.runtimeKey && input.runtimeKey !== getRuntimeKey()) throw error
     if (error instanceof SessionCreationError) {

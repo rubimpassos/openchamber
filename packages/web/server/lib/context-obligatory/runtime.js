@@ -42,7 +42,6 @@ const buildContextPrompt = (entries) => {
 export const createContextObligatoryRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  sessionKnowledgeRuntime = null,
   persistContextCursor = null,
   readSessionMetadata = null,
 }) => {
@@ -78,6 +77,9 @@ export const createContextObligatoryRuntime = ({
     const stored = { metadata: await readSessionMetadata(sessionId) };
     const state = readContextState(stored);
 
+    // Knowledge and followed stacks live in instruction entries, kept through compaction.
+    if (state.messages.length === 0) return;
+
     const recent = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
@@ -88,25 +90,6 @@ export const createContextObligatoryRuntime = ({
     if (!summary?.id) return;
     if (state.openchamber.context_obligatory_last_compaction_message_id === summary.id) return;
 
-    // Invalidate before attempting restoration. A failed read or synthetic send
-    // must leave the next ordinary turn able to restore the context too.
-    if (sessionKnowledgeRuntime) {
-      await sessionKnowledgeRuntime.recordDelivered(sessionId, directory, '');
-    }
-
-    /**
-     * Project knowledge rides along with the pinned messages. Compaction takes
-     * both away, and both are restored for the same reason, so they travel as
-     * one message: two synthetic turns back to back would read as the agent
-     * being interrupted twice.
-     */
-    const knowledge = sessionKnowledgeRuntime
-      ? await sessionKnowledgeRuntime
-        .resolvePendingForSession(sessionId, directory, { force: true })
-        .catch(() => ({ text: '', signature: '' }))
-      : { text: '', signature: '' };
-
-    if (state.messages.length === 0 && !knowledge.text) return;
 
     const fetched = await Promise.allSettled(state.messages.map(async (pinned) => {
       const message = await openCodeFetch(
@@ -128,7 +111,7 @@ export const createContextObligatoryRuntime = ({
       .filter((result) => result.status === 'fulfilled' && result.value.text)
       .map((result) => result.value)
       .sort((left, right) => left.pinned.createdAt - right.pinned.createdAt);
-    if (entries.length === 0 && !knowledge.text) return;
+    if (entries.length === 0) return;
 
     // v2 has no inline synthetic parts, and the model/agent selection lives on
     // the session, so the restored context is simply its own synthetic message.
@@ -136,9 +119,7 @@ export const createContextObligatoryRuntime = ({
       directory,
       method: 'POST',
       body: {
-        text: [knowledge.text, entries.length > 0 ? buildContextPrompt(entries) : '']
-          .filter(Boolean)
-          .join('\n\n---\n\n'),
+        text: buildContextPrompt(entries),
         resume: false,
       },
     });
@@ -146,13 +127,9 @@ export const createContextObligatoryRuntime = ({
     // A merge patch: the store folds this into whatever else the session's
     // `openchamber` namespace holds, so a concurrent goal or assist write is
     // not clobbered.
-    const patch = { context_obligatory_last_compaction_message_id: summary.id };
-    if (knowledge.signature) {
-      // Recorded together with the cursor: the session now carries this
-      // knowledge again, so the next send must not repeat it.
-      patch[sessionKnowledgeRuntime.metadataKey] = knowledge.signature;
-    }
-    await persistContextCursor(sessionId, directory, { openchamber: patch });
+    await persistContextCursor(sessionId, directory, {
+      openchamber: { context_obligatory_last_compaction_message_id: summary.id },
+    });
   };
 
   let parkedNoticeLogged = false;

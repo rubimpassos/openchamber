@@ -1,5 +1,6 @@
 import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
 import { registerIntegrationControlRoutes } from '../integration-control/routes.js';
+import { registerHttpResponseDiagnostics } from './core-routes.js';
 
 export const createBootstrapRuntime = (dependencies) => {
   const {
@@ -75,6 +76,8 @@ export const createBootstrapRuntime = (dependencies) => {
       sanitizeProjects,
       validateDirectoryPath,
     } = options;
+
+    registerHttpResponseDiagnostics(app);
 
     const uiAuthController = createUiAuth({
       password: uiPassword,
