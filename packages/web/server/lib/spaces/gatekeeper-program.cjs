@@ -1,5 +1,8 @@
 'use strict';
 
+// allow: SIZE_OK: The installed gatekeeper is a single standard-library-only script, including
+// the policy the host imports. Its standalone dependency contract is regression-tested.
+
 // The program of the gatekeeper container: the space's only way out.
 //
 // It runs on the Node of the base image, with nothing but the standard library, and it is
@@ -22,14 +25,193 @@
 // Everything the space sends is hostile input. Nothing it can send may end the process:
 // a crash of the gatekeeper is a denial of service the agent could trigger at will.
 
+const { Buffer } = require('node:buffer');
 const dns = require('node:dns');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
 const os = require('node:os');
+// The host imports this same policy through the exports at the end. The installed script
+// remains standalone and depends only on Node's standard library.
+function createApprovalPolicy() {
+  // Operational nodes come from JSON.parse in the installed program, or the host's
+  // decoded grant. Keep these guards private: the script cannot import shared/guards.js
+  // or Zod. The shared string guard accepts boxed strings; JSON text must be primitive.
+  // valueOf checks the built-in string brand without coercing other values to text.
+  const jsonString = (value) => {
+    try {
+      return Object.prototype.toString.call(value) === '[object String]' && String.prototype.valueOf.call(value) === value;
+    } catch { return false; }
+  };
+  const jsonObject = (value) => Object.prototype.toString.call(value) === '[object Object]'
+    && Object.getPrototypeOf(value) === Object.prototype;
+  const purpose = 'pr-fix-loop-approval';
+  const protocols = new Map([
+    ['openai|https://api.openai.com/v1|authorization', 'openai'],
+    ['openai|https://chatgpt.com/backend-api/codex|authorization', 'codex'],
+    ['anthropic|https://api.anthropic.com/v1|x-api-key', 'anthropic'],
+    ...['api.githubcopilot.com', 'api.individual.githubcopilot.com', 'api.business.githubcopilot.com', 'api.enterprise.githubcopilot.com']
+      .map((host) => [`github-copilot|https://${host}|authorization`, 'copilot']),
+  ]);
+  const loginMethods = new Set([
+    'openai/chatgpt-token-sharing', 'openai/chatgpt-browser', 'openai/chatgpt-headless', 'github-copilot/device',
+  ]);
+  // Reviewed model IDs and endpoint formats, not a name-prefix heuristic. Search and unknown
+  // models stay excluded even when the caller omits every explicit hosted-tool option.
+  const reviewedModels = new Map([
+    ['openai/gpt-4.1', ['openai:responses', 'openai:chat']],
+    ['openai/gpt-5.3-codex', ['openai:responses', 'codex:responses']],
+    ['openai/gpt-5.4', ['openai:responses', 'openai:chat', 'codex:responses']],
+    ['openai/gpt-6-luna', ['openai:responses', 'codex:responses']],
+    ['anthropic/claude-opus-4-6', ['anthropic:messages']],
+    ['anthropic/claude-sonnet-4-6', ['anthropic:messages']],
+    ['github-copilot/gpt-5.3-codex', ['copilot:responses']],
+    ['github-copilot/gpt-5.4', ['copilot:responses', 'copilot:chat']],
+  ]);
+  const reviewedModel = (model) => model && reviewedModels.get(`${model.providerID}/${model.modelID}`);
+  const supportsProtocol = (protocol, model) => Boolean(reviewedModel(model)?.some((entry) => entry.startsWith(`${protocol}:`)));
+  const protocolOf = ({ id, upstream, header }) => {
+    // Match the spelling too: credentials, queries, ports and encoded paths cannot normalize
+    // into a different destination after this check.
+    if (!jsonString(upstream)) return null;
+    return protocols.get(`${id}|${upstream.replace(/\/$/, '')}|${header}`) ?? null;
+  };
+  const networkAllowed = (network) => network.mode === 'allowlist'
+    && Array.isArray(network.domains) && network.domains.length === 0;
+  const grantAllowed = (grant) => {
+    if (grant.id !== grant.provider) return false;
+    switch (grant.kind) {
+      case 'model': return protocolOf(grant) !== null;
+      case 'login': return loginMethods.has(`${grant.provider}/${grant.method}`);
+      default: return false;
+    }
+  };
+  const requestAllowed = (protocol, { method, rest, model }) => {
+    if (!supportsProtocol(protocol, model)) return false;
+    if (method === 'GET') return rest === '/models' && ['openai', 'anthropic', 'copilot'].includes(protocol);
+    if (method !== 'POST') return false;
+    if (!reviewedModel(model).includes(`${protocol}:${formatOf(rest)}`)) return false;
+    switch (protocol) {
+      case 'openai': return ['/responses', '/responses/compact', '/chat/completions'].includes(rest);
+      case 'codex': return ['/responses', '/responses/compact'].includes(rest);
+      case 'anthropic': return ['/messages', '/messages/count_tokens'].includes(rest);
+      case 'copilot': return ['/responses', '/chat/completions', '/messages'].includes(rest);
+      default: return false;
+    }
+  };
+  const fieldsOf = (text) => new Set(text.split(' '));
+  const fieldsAllowed = (value, fields) => jsonObject(value) && Object.keys(value).every((key) => fields.has(key));
+  const sharedFields = 'model tools tool_choice stream temperature top_p metadata service_tier';
+  const bodyFields = {
+    responses: fieldsOf(`${sharedFields} input instructions parallel_tool_calls stream_options max_output_tokens max_tool_calls reasoning text truncation store background include prompt_cache_key prompt_cache_retention safety_identifier user`),
+    chat: fieldsOf(`${sharedFields} messages functions function_call parallel_tool_calls stream_options max_tokens max_completion_tokens stop presence_penalty frequency_penalty logit_bias logprobs top_logprobs seed user store reasoning_effort verbosity response_format prediction prompt_cache_key prompt_cache_retention safety_identifier`),
+    messages: fieldsOf(`${sharedFields} messages system max_tokens stop_sequences top_k thinking output_config betas`),
+  };
+  const formatOf = (rest) => rest === '/chat/completions' ? 'chat' : rest.startsWith('/messages') ? 'messages' : 'responses';
+  const functionFields = fieldsOf('name description parameters strict');
+  const toolFields = {
+    responses: fieldsOf('type name description parameters strict format'),
+    messages: fieldsOf('type name description input_schema cache_control'),
+  };
+  const localTool = (tool, format) => {
+    if (!jsonObject(tool)) return false;
+    switch (format) {
+      case 'chat': return fieldsAllowed(tool, fieldsOf('type function')) && tool.type === 'function' && fieldsAllowed(tool.function, functionFields) && jsonString(tool.function.name);
+      case 'messages': return fieldsAllowed(tool, toolFields.messages) && [undefined, 'custom'].includes(tool.type) && jsonString(tool.name) && jsonObject(tool.input_schema);
+      case 'responses': return fieldsAllowed(tool, toolFields.responses) && ['function', 'custom'].includes(tool.type) && jsonString(tool.name);
+      default: return false;
+    }
+  };
+  // Only operational protocol nodes are interpreted. Function schemas, tool inputs/outputs,
+  // metadata and text are inert data, even when they contain names such as container or tools.
+  const contentFields = Object.fromEntries(Object.entries({
+    text: 'type text cache_control citations', input_text: 'type text', output_text: 'type text annotations logprobs',
+    summary_text: 'type text', reasoning_text: 'type text', input_image: 'type image_url detail', image_url: 'type image_url',
+    input_file: 'type filename file_data', file: 'type file', input_audio: 'type input_audio',
+    image: 'type source cache_control', document: 'type source title context citations cache_control',
+    thinking: 'type thinking signature', redacted_thinking: 'type data',
+    tool_use: 'type id name input cache_control', tool_result: 'type tool_use_id content is_error cache_control',
+  }).map(([type, fields]) => [type, fieldsOf(fields)]));
+  const partsAllowed = (content, format) => jsonString(content) || (Array.isArray(content) && content.every((part) => {
+    if (!jsonObject(part) || !Object.hasOwn(contentFields, part.type) || !fieldsAllowed(part, contentFields[part.type])) return false;
+    switch (part.type) {
+      case 'text': case 'input_text': case 'output_text': case 'summary_text': case 'reasoning_text': return jsonString(part.text);
+      case 'input_image': return jsonString(part.image_url) && part.image_url.startsWith('data:');
+      case 'image_url': return fieldsAllowed(part.image_url, fieldsOf('url detail')) && jsonString(part.image_url.url) && part.image_url.url.startsWith('data:');
+      case 'input_file': return jsonString(part.file_data);
+      case 'file': return fieldsAllowed(part.file, fieldsOf('filename file_data')) && jsonString(part.file.file_data);
+      case 'input_audio': return fieldsAllowed(part.input_audio, fieldsOf('data format')) && jsonString(part.input_audio.data);
+      case 'image': case 'document': return fieldsAllowed(part.source, fieldsOf('type media_type data')) && part.source.type === 'base64' && jsonString(part.source.data);
+      case 'thinking': return jsonString(part.thinking);
+      case 'redacted_thinking': return jsonString(part.data);
+      case 'tool_use': return format === 'messages' && jsonString(part.name) && jsonObject(part.input);
+      case 'tool_result': return format === 'messages' && partsAllowed(part.content, format);
+      default: return false;
+    }
+  }));
+  const callFields = fieldsOf('name arguments');
+  const chatCallsAllowed = (calls) => Array.isArray(calls) && calls.every((call) => fieldsAllowed(call, fieldsOf('id type function')) && call.type === 'function' && fieldsAllowed(call.function, callFields));
+  const messageFields = {
+    responses: fieldsOf('type id role content status'),
+    chat: fieldsOf('role content name tool_calls tool_call_id function_call refusal'),
+    messages: fieldsOf('role content'),
+  };
+  const inputAllowed = (input, format) => {
+    if (jsonString(input)) return format === 'responses';
+    return Array.isArray(input) && input.every((item) => {
+      if (!jsonObject(item)) return false;
+      switch (item.type) {
+        case undefined: case 'message': return fieldsAllowed(item, messageFields[format]) && partsAllowed(item.content ?? '', format)
+          && (item.tool_calls === undefined || chatCallsAllowed(item.tool_calls))
+          && (item.function_call === undefined || fieldsAllowed(item.function_call, callFields));
+        case 'function_call': case 'custom_tool_call': return format === 'responses' && fieldsAllowed(item, fieldsOf('type id call_id name arguments input status')) && jsonString(item.name);
+        case 'function_call_output': case 'custom_tool_call_output': return format === 'responses' && fieldsAllowed(item, fieldsOf('type id call_id output status')) && (jsonString(item.output) || partsAllowed(item.output, format));
+        case 'reasoning': return format === 'responses' && fieldsAllowed(item, fieldsOf('type id summary content encrypted_content status'))
+          && (item.summary === undefined || partsAllowed(item.summary, format)) && (item.content === undefined || partsAllowed(item.content, format));
+        default: return false;
+      }
+    });
+  };
+  const optionFields = Object.fromEntries(Object.entries({
+    reasoning: 'effort summary generate_summary', stream_options: 'include_usage include_obfuscation',
+    text: 'format verbosity', response_format: 'type json_schema', thinking: 'type budget_tokens display',
+    output_config: 'effort format', prediction: 'type content',
+  }).map(([name, fields]) => [name, fieldsOf(fields)]));
+  const outputFormatAllowed = (value) => fieldsAllowed(value, fieldsOf('type name description schema strict')) && ['text', 'json_object', 'json_schema'].includes(value.type);
+  const bodyAllowed = (body, { protocol, rest, model }) => {
+    const format = formatOf(rest);
+    if (!fieldsAllowed(body, bodyFields[format])) return false;
+    if (!reviewedModel(model)?.includes(`${protocol}:${format}`) || body.model !== model.modelID) return false;
+    if ((body.store !== undefined && body.store !== false) || (body.background !== undefined && body.background !== false)) return false;
+    for (const [name, fields] of Object.entries(optionFields)) {
+      if (body[name] !== undefined && !fieldsAllowed(body[name], fields)) return false;
+    }
+    if (body.text?.format !== undefined && !outputFormatAllowed(body.text.format)) return false;
+    if (body.output_config?.format !== undefined && !outputFormatAllowed(body.output_config.format)) return false;
+    if (body.response_format !== undefined && (!['text', 'json_object', 'json_schema'].includes(body.response_format.type)
+      || (body.response_format.json_schema !== undefined && !fieldsAllowed(body.response_format.json_schema, fieldsOf('name description schema strict'))))) return false;
+    if (body.prediction !== undefined && (body.prediction.type !== 'content' || !partsAllowed(body.prediction.content, format))) return false;
+    if (body.tools !== undefined && (!Array.isArray(body.tools) || !body.tools.every((tool) => localTool(tool, format)))) return false;
+    if (body.functions !== undefined && (!Array.isArray(body.functions) || !body.functions.every((tool) => fieldsAllowed(tool, functionFields)))) return false;
+    if (jsonObject(body.tool_choice)) {
+      const choices = format === 'messages' ? ['auto', 'any', 'none', 'tool'] : ['function', 'custom'];
+      if (!fieldsAllowed(body.tool_choice, fieldsOf('type name function disable_parallel_tool_use')) || !choices.includes(body.tool_choice.type)) return false;
+      if (body.tool_choice.function !== undefined && !fieldsAllowed(body.tool_choice.function, fieldsOf('name'))) return false;
+    } else if (body.tool_choice !== undefined && !['auto', 'none', 'required'].includes(body.tool_choice)) return false;
+    if (body.function_call !== undefined && !['auto', 'none'].includes(body.function_call) && !fieldsAllowed(body.function_call, fieldsOf('name'))) return false;
+    if (body.include !== undefined && (!Array.isArray(body.include) || !body.include.every((value) => value === 'reasoning.encrypted_content'))) return false;
+    if (body.system !== undefined && !partsAllowed(body.system, format)) return false;
+    return inputAllowed(format === 'responses' ? body.input : body.messages, format);
+  };
+  return { purpose, protocolOf, networkAllowed, grantAllowed, requestAllowed, bodyAllowed, reviewedModel, supportsProtocol };
+}
+const approval = createApprovalPolicy();
+// The trusted host prelude sets this module field from immutable runtime labels at
+// every start. Capture it once; neither requests nor later exports can change it.
+const protectedApproval = module.exports.spacePurpose === approval.purpose;
 
-const [bindArgument, corridorPort, windowPort, controlPort, windowDeadline, corridorCap, windowCap, controlCap] = process.argv.slice(2);
+const [bindArgument, corridorPort, windowPort, controlPort, windowDeadline, corridorCap, windowCap, controlCap, bodyMaximum, bodyTotal, bodyDeadline, bodyTokens, bodyDepth] = process.argv.slice(2);
 
 /**
  * A cap given on the command line, or the production number when there is none.
@@ -95,6 +277,100 @@ const HEADERS_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 60_000;
 const CONTROL_BODY_BYTES = 1024 * 1024;
 
+// Two full body reservations fit under the gatekeeper's 256 MiB limit with room for UTF-8
+// decoding, one synchronous JSON parse, bounded objects, sockets and the upstream write.
+function createApprovalBodies({ maximum = 4 * 1024 * 1024, total = 8 * 1024 * 1024, deadline = 30000, tokens = 16384, depth = 32 } = {}) {
+  const state = { active: 0, reservedBytes: 0, bufferedBytes: 0, peakReservedBytes: 0, peakBufferedBytes: 0, parses: 0 };
+  const structureFits = (text) => {
+    let nesting = 0;
+    let count = 0;
+    let quoted = false;
+    let escaped = false;
+    for (const character of text) {
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === '"') quoted = false;
+      } else if (character === '"') { quoted = true; count += 1; }
+      else if (character === '{' || character === '[') { nesting += 1; count += 1; }
+      else if (character === '}' || character === ']') nesting -= 1;
+      else if (character === ',' || character === ':') count += 1;
+      if (nesting > depth || count > tokens) return false;
+    }
+    return true;
+  };
+  const acquire = () => {
+    if (state.reservedBytes + maximum > total) return null;
+    state.active += 1;
+    state.reservedBytes += maximum;
+    state.peakReservedBytes = Math.max(state.peakReservedBytes, state.reservedBytes);
+    let released = false;
+    // A fixed byte buffer also bounds per-chunk overhead when the sender fragments its upload.
+    let buffer = Buffer.allocUnsafe(maximum);
+    let retained = 0;
+    let cancelRead = () => {};
+    const clear = () => { state.bufferedBytes -= retained; retained = 0; buffer = null; };
+    const release = () => {
+      if (released) return;
+      released = true;
+      clear();
+      state.active -= 1;
+      state.reservedBytes -= maximum;
+      cancelRead();
+    };
+    const read = (request) => new Promise((resolve) => {
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        request.removeListener('data', data);
+        request.removeListener('end', end);
+        request.removeListener('aborted', abort);
+        request.removeListener('error', abort);
+        cancelRead = () => {};
+        clear();
+        if (result.error) { request.pause(); release(); }
+        resolve(result);
+      };
+      const data = (chunk) => {
+        if (retained + chunk.length > maximum) { finish({ error: 'size' }); return; }
+        chunk.copy(buffer, retained);
+        retained += chunk.length;
+        state.bufferedBytes += chunk.length;
+        state.peakBufferedBytes = Math.max(state.peakBufferedBytes, state.bufferedBytes);
+      };
+      const end = () => {
+        const text = buffer.toString('utf8', 0, retained);
+        clear();
+        if (!structureFits(text)) { finish({ error: 'structure' }); return; }
+        try {
+          state.parses += 1;
+          const body = JSON.parse(text);
+          // Forward the value this parser validates. Repeated JSON keys must not let an
+          // upstream parser choose a different model, tool declaration or content source.
+          const canonical = JSON.stringify(body);
+          if (Buffer.byteLength(canonical) > maximum) { finish({ error: 'size' }); return; }
+          finish({ text: canonical, body });
+        } catch { finish({ error: 'json' }); }
+      };
+      const abort = () => finish({ error: 'aborted' });
+      const timer = setTimeout(() => finish({ error: 'deadline' }), deadline);
+      cancelRead = abort;
+      request.on('data', data);
+      request.once('end', end);
+      request.once('aborted', abort);
+      request.once('error', abort);
+    });
+    return { read, release };
+  };
+  return { acquire, inspect: () => ({ ...state }) };
+}
+const approvalBodies = createApprovalBodies({
+  maximum: cap(bodyMaximum, 4 * 1024 * 1024), total: cap(bodyTotal, 8 * 1024 * 1024),
+  deadline: cap(bodyDeadline, 30000), tokens: cap(bodyTokens, 16384), depth: cap(bodyDepth, 32),
+});
+
 // The journal is small on purpose: it is a record of attempts, not a log.
 const JOURNAL_RECORDS = 500;
 // The same field caps the host channel reads back with, so a full ring always fits its answer.
@@ -147,6 +423,7 @@ function readBindHost(argument) {
 let networkMode = 'allowlist';
 let allowedDomains = new Set();
 const grants = new Map();
+let approvalModel = null;
 
 // When this program started, for the journal: nothing before it is on record.
 const STARTED_AT = new Date().toISOString();
@@ -366,6 +643,7 @@ const normalizeName = (host) => String(host).trim().toLowerCase().replace(/\.$/,
  * library exactly like the name it imitates, and today only the HTTP parser stands in the way.
  */
 function refuseTarget(host, port) {
+  if (protectedApproval) return 'deny:approval-profile';
   const name = normalizeName(host);
   if (ALWAYS_REFUSED.includes(name)) return 'deny:always-refused';
   if (parseIPv4(name) || parseIPv6(name) || !isDomainName(name)) return 'deny:not-a-name';
@@ -667,6 +945,14 @@ const isOwnListener = (address, port) => (isLoopback(address) || ownAddresses.ha
 
 async function serveWindow(request, response) {
   request.on('error', () => {});
+  let reservation = null;
+  let outgoing = null;
+  response.once('close', () => {
+    if (outgoing) {
+      if (protectedApproval || !response.writableFinished) outgoing.destroy();
+    } else reservation?.release();
+  });
+  try {
   const match = WINDOW_PATH.exec(request.url || '');
   if (match && walksOutOfGrant(match[2] || '')) {
     // Its own decision, because the journal is the user's only view: "tried to walk out of its
@@ -684,6 +970,39 @@ async function serveWindow(request, response) {
     return;
   }
 
+  let modelBody = null;
+  if (protectedApproval) {
+    if (!approval.requestAllowed(grant.protocol, { method: request.method, rest: match[2] || '', model: grant.model }) || request.headers.upgrade) {
+      record('window', 'model-protocol', 0, 'deny:model-protocol');
+      answerJson(response, 403, { error: 'refused model request' });
+      return;
+    }
+    if (request.method === 'POST') {
+      reservation = approvalBodies.acquire();
+      if (!reservation) {
+        record('window', 'model-protocol', 0, 'deny:model-body-budget');
+        response.setHeader('connection', 'close');
+        answerJson(response, 503, { error: 'model body capacity is full' });
+        return;
+      }
+      const received = await reservation.read(request);
+      if (response.destroyed) return;
+      if (received.error) {
+        record('window', 'model-protocol', 0, `deny:model-body-${received.error}`);
+        response.setHeader('connection', 'close');
+        const status = received.error === 'deadline' ? 408 : received.error === 'json' ? 403 : 413;
+        answerJson(response, status, { error: 'refused model body' });
+        return;
+      }
+      if (!approval.bodyAllowed(received.body, { protocol: grant.protocol, rest: match[2] || '', model: grant.model })) {
+        record('window', 'model-protocol', 0, 'deny:model-body');
+        answerJson(response, 403, { error: 'refused model request' });
+        return;
+      }
+      modelBody = received.text;
+    }
+  }
+
   const upstream = new URL(grant.upstream);
   const port = Number(upstream.port || (upstream.protocol === 'https:' ? 443 : 80));
   if (ALWAYS_REFUSED.includes(normalizeName(upstream.hostname))) {
@@ -692,6 +1011,7 @@ async function serveWindow(request, response) {
     return;
   }
   const resolved = await lookupAll(upstream.hostname);
+  if (response.destroyed) return;
   if (resolved.addresses.length === 0) {
     record('window', normalizeName(upstream.hostname), port, `deny:unresolved:${resolved.reason}`);
     answerJson(response, 502, { error: 'the upstream of this grant does not resolve' });
@@ -709,7 +1029,16 @@ async function serveWindow(request, response) {
   // space made it, less the credential headers. The grant's own extra headers are set last, over
   // whatever the space sent under their names (Node lowercases and joins incoming names, so the
   // names match), and the space can neither read nor override them.
-  const headers = { ...request.headers };
+  // A protected request cannot supply proxy routing or method-override headers. These are the
+  // protocol headers used by the existing model/login paths; everything else stays inside.
+  const modelHeaders = new Set(['accept', 'content-type', 'anthropic-version', 'anthropic-beta', 'chatgpt-account-id', 'openai-beta', 'session_id', 'conversation_id', 'originator', 'copilot-integration-id', 'editor-version', 'editor-plugin-version', 'openai-intent', 'x-initiator', 'x-request-id']);
+  const headers = protectedApproval
+    ? Object.fromEntries(Object.entries(request.headers).filter(([name]) => modelHeaders.has(name)))
+    : { ...request.headers };
+  if (protectedApproval) {
+    headers['content-length'] = modelBody === null ? '0' : String(Buffer.byteLength(modelBody));
+    if (modelBody !== null) headers['content-type'] = 'application/json';
+  }
   for (const name of Object.keys(headers)) {
     const lower = name.toLowerCase();
     if (['authorization', 'x-api-key', 'proxy-authorization'].includes(lower) || lower === grant.header) delete headers[name];
@@ -722,7 +1051,7 @@ async function serveWindow(request, response) {
 
   record('window', normalizeName(upstream.hostname), port, 'allow');
   const transport = upstream.protocol === 'https:' ? https : http;
-  const outgoing = transport.request({
+  outgoing = transport.request({
     hostname: upstream.hostname,
     port,
     method: request.method,
@@ -732,10 +1061,17 @@ async function serveWindow(request, response) {
     // The address was checked a moment ago, and this is the address the request goes to.
     lookup: fixedLookup(chosen.address, chosen.family),
   }, (answer) => {
+    if (protectedApproval && answer.statusCode >= 300 && answer.statusCode < 400) {
+      record('window', normalizeName(upstream.hostname), port, 'deny:model-redirect');
+      answer.resume();
+      answerJson(response, 502, { error: 'the model endpoint redirected' });
+      return;
+    }
     response.writeHead(answer.statusCode || 502, answer.headers);
     answer.on('error', () => { response.destroy(); });
     answer.pipe(response);
   });
+  outgoing.once('close', () => reservation?.release());
   // The deadline covers the whole exchange, silence by silence. `given` keeps the record to one
   // per request: the destroy below makes the socket error, and that is this timeout, not news.
   let given = false;
@@ -756,31 +1092,31 @@ async function serveWindow(request, response) {
     if (!response.headersSent) answerJson(response, 502, { error: 'the upstream did not answer' });
     else response.destroy();
   });
-  response.on('close', () => {
-    // A finished answer has already ended this socket; destroying then would be the same defect
-    // the corridor had. This is for an answer that stopped short, where the client went away.
-    if (!response.writableFinished) outgoing.destroy();
-  });
-  request.pipe(outgoing);
+  if (protectedApproval) outgoing.end(modelBody ?? undefined);
+  else request.pipe(outgoing);
+  } finally {
+    if (!outgoing) reservation?.release();
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Control, on loopback only
 // ---------------------------------------------------------------------------------------------
 
-const readBody = (request) => new Promise((resolve) => {
-  let text = '';
+const readBody = (request, maximum = CONTROL_BODY_BYTES) => new Promise((resolve) => {
+  let chunks = [];
+  let bytes = 0;
   let tooLarge = false;
   request.on('data', (chunk) => {
     if (tooLarge) return;
-    text += chunk;
-    if (text.length > CONTROL_BODY_BYTES) {
+    bytes += chunk.length;
+    if (bytes > maximum) {
       tooLarge = true;
-      text = '';
-    }
+      chunks = [];
+    } else chunks.push(chunk);
   });
   request.on('error', () => resolve(null));
-  request.on('end', () => resolve(tooLarge ? null : text));
+  request.on('end', () => resolve(tooLarge ? null : Buffer.concat(chunks).toString('utf8')));
 });
 
 /**
@@ -791,6 +1127,7 @@ const readBody = (request) => new Promise((resolve) => {
 const asText = (value) => (value === null || value === undefined || value instanceof Object ? '' : String(value));
 
 function setNetwork(body) {
+  if (protectedApproval && !approval.networkAllowed(body)) return 'approval profile requires an empty allowlist';
   if (body.mode !== 'allowlist' && body.mode !== 'open') return 'mode is "allowlist" or "open"';
   const domains = Array.isArray(body.domains) ? body.domains : [];
   if (domains.length > MAX_ALLOWED_DOMAINS) return `at most ${MAX_ALLOWED_DOMAINS} domains`;
@@ -851,7 +1188,15 @@ function addGrant(body) {
     return 'the upstream of a grant is a URL';
   }
   if (upstream.protocol !== 'http:' && upstream.protocol !== 'https:') return 'the upstream of a grant is http or https';
-  grants.set(id, { upstream: upstream.toString(), header, secret, headers: extra.headers });
+  const protocol = approval.protocolOf({ id, upstream: asText(body.upstream), header });
+  if (protectedApproval && (!protocol || !withSecret || Object.keys(extra.headers).length > 0)) return 'approval profile accepts supported model credentials only';
+  if (protectedApproval && (body.model?.providerID !== id || !approval.supportsProtocol(protocol, body.model))) return 'approval profile requires the host-selected reviewed inference model';
+  const model = protectedApproval ? { providerID: body.model.providerID, modelID: body.model.modelID } : null;
+  if (protectedApproval) {
+    if (approvalModel && (approvalModel.providerID !== model.providerID || approvalModel.modelID !== model.modelID)) return 'the approval model binding cannot change';
+    approvalModel = model;
+  }
+  grants.set(id, { upstream: upstream.toString(), header, secret, headers: extra.headers, protocol, model });
   return null;
 }
 
@@ -941,23 +1286,6 @@ function makeServer(listener, maxConnections, handler) {
   return server;
 }
 
-const corridor = makeServer('corridor', MAX_CORRIDOR_CONNECTIONS, refusePlainProxy);
-corridor.on('connect', (request, socket, head) => {
-  openTunnel(request, socket, head).catch(() => { socket.destroy(); });
-});
-const windowServer = makeServer('window', MAX_WINDOW_CONNECTIONS, (request, response) => {
-  serveWindow(request, response).catch(() => {
-    if (!response.headersSent) answerJson(response, 502, { error: 'the window could not serve this request' });
-    else response.destroy();
-  });
-});
-const control = makeServer('control', MAX_CONTROL_CONNECTIONS, (request, response) => {
-  serveControl(request, response).catch(() => {
-    if (!response.headersSent) answerJson(response, 500, { error: 'the control channel could not serve this request' });
-    else response.destroy();
-  });
-});
-
 const listen = (server, port, host) => new Promise((resolve) => { server.listen(Number(port), host, resolve); });
 
 async function main() {
@@ -967,6 +1295,26 @@ async function main() {
     console.error('gatekeeper: arguments are <bind host> <corridor port> <window port> <control port>');
     process.exit(2);
   }
+  const corridor = makeServer('corridor', MAX_CORRIDOR_CONNECTIONS, refusePlainProxy);
+  corridor.on('connect', (request, socket, head) => {
+    openTunnel(request, socket, head).catch(() => { socket.destroy(); });
+  });
+  const windowServer = makeServer('window', MAX_WINDOW_CONNECTIONS, (request, response) => {
+    serveWindow(request, response).catch(() => {
+      if (!response.headersSent) answerJson(response, 502, { error: 'the window could not serve this request' });
+      else response.destroy();
+    });
+  });
+  windowServer.on('connect', (request, socket) => {
+    record('window', 'model-protocol', 0, 'deny:model-protocol');
+    refuse(socket, 403, 'Forbidden', REFUSED);
+  });
+  const control = makeServer('control', MAX_CONTROL_CONNECTIONS, (request, response) => {
+    serveControl(request, response).catch(() => {
+      if (!response.headersSent) answerJson(response, 500, { error: 'the control channel could not serve this request' });
+      else response.destroy();
+    });
+  });
   await listen(corridor, corridorPort, bindHost);
   await listen(windowServer, windowPort, bindHost);
   // Last, and on loopback only: an answer from here means all three are up.
@@ -999,5 +1347,5 @@ function describeFailure(error) {
 if (require.main === module) {
   main();
 } else {
-  module.exports = { addGrant, chooseAddress, isBlockedAddress, isDomainName, joinSockets, parseIPv4, parseIPv6, refuseTarget, setNetwork, splitTarget, walksOutOfGrant };
+  module.exports = { approvalPolicy: approval, createApprovalBodies, addGrant, chooseAddress, isBlockedAddress, isDomainName, joinSockets, parseIPv4, parseIPv6, refuseTarget, setNetwork, splitTarget, walksOutOfGrant };
 }

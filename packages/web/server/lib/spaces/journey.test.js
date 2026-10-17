@@ -135,6 +135,124 @@ const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt =
 const REQUEST = { projectDirectory: PROJECT, name: ' Fix login ', start: 'uncommitted', network: NETWORK };
 const steps = (events, spaceId) => events.filter((event) => event.spaceId === spaceId).map((event) => event.step);
 
+describe('approval worker journey', () => {
+  const purpose = 'pr-fix-loop-approval';
+  const request = { ...REQUEST, purpose, approvalModel: { providerID: 'openai', modelID: 'gpt-5.4' }, network: { mode: 'allowlist', domains: [] } };
+  const keyRequest = { kind: 'model', provider: 'openai', upstream: 'https://api.openai.com/v1', secret: { kind: 'env', name: 'MODEL_KEY' } };
+
+  it.each([null, { providerID: 'openai', modelID: 'gpt-5-search-api' }, { providerID: 'openai', modelID: 'unreviewed-model' }])('refuses an absent or unreviewed worker model %j before creating anything', async (approvalModel) => {
+    // Given the protected creation API.
+    const { journey, place } = journeyWith();
+    // When the host-selected pair has no reviewed inference-only capability rule.
+    await expect(journey.createSpace({ ...request, approvalModel })).rejects.toMatchObject({ code: 'space_approval_model_unreviewed' });
+    // Then no worker is created with implicit or guessed model capabilities.
+    expect(await place.list()).toEqual([]);
+  });
+
+  it.each([{ mode: 'open' }, { mode: 'allowlist', domains: ['api.github.com'] }])('rejects an unsafe creation network %j before creating anything', async (network) => {
+    // Given the ordinary create API.
+    const { journey, place } = journeyWith();
+    // When a protected purpose asks for wider access.
+    await expect(journey.createSpace({ ...request, network })).rejects.toMatchObject({ code: 'space_approval_network_locked' });
+    // Then no space was started.
+    expect(await place.list()).toEqual([]);
+  });
+
+  it('creates a fresh protected worker, lists its purpose and preserves it through all repair paths and host reconstruction', async () => {
+    // Given a host-selected environment key and a new protected worker.
+    const original = journeyWith({ hostEnvironment: { MODEL_KEY: 'disposable-key' } });
+    const created = await original.journey.createSpace(request);
+    expect(created.purpose).toBe(purpose);
+    expect(created.approvalModel).toEqual(request.approvalModel);
+    expect(await until(() => steps(original.events, created.id).includes('ready'))).toBe(true);
+    await original.journey.grantAccess(created.id, keyRequest);
+    expect(original.calls.filter(([name]) => name === 'addGrant')).toEqual([
+      ['addGrant', created.id, expect.objectContaining({ model: request.approvalModel })],
+    ]);
+    // When a new journey reads the persisted worker and exercises start and both repair paths.
+    const restored = journeyWith({ place: original.place, dataDir: original.dataDir, hostEnvironment: { MODEL_KEY: 'disposable-key' } });
+    await restored.journey.stopSpace(created.id);
+    expect((await restored.journey.startSpace(created.id)).purpose).toBe(purpose);
+    expect((await restored.journey.restartSpace(created.id)).purpose).toBe(purpose);
+    expect((await restored.journey.restartOpenCode(created.id)).purpose).toBe(purpose);
+    await restored.journey.restoreLostGrants();
+    // Then every delivered network stays empty and model grants are still restored.
+    expect(restored.calls.filter(([name]) => name === 'setNetwork').every(([, , network]) => network.mode === 'allowlist' && network.domains.length === 0)).toBe(true);
+    expect(restored.calls.some(([name, , window]) => name === 'addGrant' && window.upstream === keyRequest.upstream)).toBe(true);
+    expect((await restored.journey.listSpaces())[0]).toMatchObject({ purpose, approvalModel: request.approvalModel, network: request.network });
+    for (const [, , window] of restored.calls.filter(([name]) => name === 'addGrant')) expect(window.model).toEqual(request.approvalModel);
+    await restored.journey.removeSpace(created.id);
+  });
+
+  it.each([
+    [{ kind: 'domain', upstream: 'https://api.github.com' }, 'space_approval_grant_denied'],
+    [{ kind: 'custom', provider: 'proxy' }, 'space_approval_grant_denied'],
+    [{ ...keyRequest, upstream: 'https://api.github.com' }, 'space_approval_model_unsupported'],
+    [{ ...keyRequest, provider: 'anthropic', upstream: 'https://api.anthropic.com/v1' }, 'space_approval_model_unsupported'],
+  ])('refuses unsafe generic grants %j with %s', async (unsafe, code) => {
+    // Given a ready protected worker.
+    const { journey, events, records, calls } = journeyWith({ hostEnvironment: { MODEL_KEY: 'disposable-key' } });
+    const { id } = await journey.createSpace(request);
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    // When a generic grant endpoint tries to give it publishing access.
+    await expect(journey.grantAccess(id, unsafe)).rejects.toMatchObject({ code });
+    // Then no grant was delivered or persisted, while a supported model key still works.
+    expect(calls.filter(([name]) => name === 'addGrant')).toEqual([]);
+    expect(records.read(id).record.grants).toEqual([]);
+    await expect(journey.grantAccess(id, keyRequest)).resolves.toMatchObject({ grant: { provider: 'openai' } });
+    await journey.removeSpace(id);
+  });
+
+  it('refuses a generic domain mutation even when the name is a model endpoint', async () => {
+    // Given a protected worker with an empty corridor.
+    const { journey, events } = journeyWith();
+    const { id } = await journey.createSpace(request);
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    // When a generic endpoint adds a domain.
+    await expect(journey.openDomain(id, { domain: 'api.openai.com' })).rejects.toMatchObject({ code: 'space_approval_network_locked' });
+    // Then the worker remains protected.
+    expect((await journey.listSpaces())[0].network).toEqual(request.network);
+    await journey.removeSpace(id);
+  });
+
+  it.each(['missing', 'unreadable'])('keeps the runtime purpose when its host record is %s', async (state) => {
+    // Given a protected worker whose host record cannot restore permissions.
+    const { journey, events, records, calls, dataDir } = journeyWith();
+    const { id } = await journey.createSpace(request);
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    await journey.stopSpace(id);
+    if (state === 'missing') records.remove(id);
+    else fs.writeFileSync(path.join(dataDir, 'spaces', 'records', `${id}.json`), JSON.stringify({ version: 1, purpose, network: { mode: 'open' } }));
+    const previousDeliveries = calls.filter(([name]) => name === 'setNetwork').length;
+    // When the worker starts with that record.
+    const started = await journey.startSpace(id);
+    // Then its runtime purpose survives and nothing is granted from the unreadable record.
+    expect(started).toMatchObject({ purpose, networkRestored: false, network: null });
+    expect(calls.filter(([name]) => name === 'setNetwork')).toHaveLength(previousDeliveries);
+    await expect(journey.grantAccess(id, keyRequest)).rejects.toMatchObject({ code: 'space_record_unreadable' });
+    await journey.removeSpace(id);
+  });
+
+  it.each([
+    ['openai', 'chatgpt-token-sharing'], ['openai', 'chatgpt-browser'], ['openai', 'chatgpt-headless'], ['github-copilot', 'device'],
+  ])('grants and refreshes the supported host login %s/%s without changing its profile', async (provider, methodID) => {
+    // Given a host login selected explicitly for a fresh protected worker.
+    const login = { methodID, access: 'disposable-login-token', expires: Date.UTC(2100, 0, 1), metadata: {} };
+    const { journey, events, records, calls } = journeyWith({ readHostLogin: async () => login });
+    const { id } = await journey.createSpace({ ...request, approvalModel: { providerID: provider, modelID: 'gpt-5.4' } });
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    // When the existing login path grants it and the keeper refreshes its token.
+    const { grant } = await journey.grantAccess(id, { kind: 'login', provider });
+    await expect(journey.sayLogin(id, grant, { ...login, access: 'renewed-disposable-token' })).resolves.toBe(true);
+    // Then both deliveries stay model-only and no token lands in the host record.
+    expect(calls.filter(([name]) => name === 'addGrant')).toHaveLength(2);
+    for (const [, , window] of calls.filter(([name]) => name === 'addGrant')) expect(window.model).toEqual({ providerID: provider, modelID: 'gpt-5.4' });
+    expect(JSON.stringify(records.read(id).record)).not.toContain('disposable');
+    expect(records.read(id).record.purpose).toBe(purpose);
+    await journey.removeSpace(id);
+  });
+});
+
 describe('the journey: create', () => {
   it('answers at once, then makes the space, sets its network, brings the code in and sends the history behind it', async () => {
     const { journey, place, records, calls, events, changes } = journeyWith();

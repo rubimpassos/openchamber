@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import net from 'node:net';
 
+import { requireSpacePurpose } from './approval-profile.js';
 import { SpaceError } from './errors.js';
 import {
   EXEC_FAILED_CODES,
@@ -88,11 +89,12 @@ export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) 
    * program listens there and nowhere else. It is an address and not a secret, so it may be an
    * argument of the script.
    */
-  const writeProgram = async (spaceId, { bindAddress }) => {
+  const writeProgram = async (spaceId, { bindAddress, purpose = 'general' }) => {
     if (net.isIP(bindAddress) === 0 || bindAddress === '0.0.0.0' || bindAddress === '::') {
       throw new SpaceError('gatekeeper_address_unknown', 'The address of the network filter on the space\'s network is not known, so its listeners cannot be bound to it.');
     }
-    const result = await execInGatekeeper(spaceId, [IMAGE_SH, '-c', WRITE_PROGRAM_SCRIPT, 'sh', bindAddress], { stdin: GATEKEEPER_PROGRAM });
+    const program = requireSpacePurpose(purpose) === 'general' ? GATEKEEPER_PROGRAM : `'use strict';\nmodule.exports.spacePurpose = ${JSON.stringify(purpose)};\n${GATEKEEPER_PROGRAM}`;
+    const result = await execInGatekeeper(spaceId, [IMAGE_SH, '-c', WRITE_PROGRAM_SCRIPT, 'sh', bindAddress], { stdin: program });
     if (result.code !== 0) {
       throw new SpaceError('gatekeeper_setup_failed', `Could not store the network filter's program: ${tail(result.stderr) || `exit code ${result.code}`}`);
     }
@@ -180,10 +182,11 @@ export function createGatekeeperChannel({ exec, wait = pause, now = Date.now }) 
    * as the space sent it. `headers` are the provider's own, set on every request beside the
    * credential; they travel in the body like the secret, and only when there are any.
    */
-  const addGrant = (spaceId, { id, upstream, header = null, secret = null, headers = {} }) => {
+  const addGrant = (spaceId, { id, upstream, header = null, secret = null, headers = {}, model = null }) => {
     const body = { id, upstream };
     if (secret !== null) Object.assign(body, { header, secret });
     if (Object.keys(headers).length > 0) body.headers = headers;
+    if (model !== null) body.model = model;
     return command(spaceId, '/grants', body, `add the grant '${id}'`);
   };
 

@@ -1,4 +1,5 @@
 import { SpaceError } from './errors.js';
+import { requireSpacePurpose } from './approval-profile.js';
 import { createSpaceId, hashProjectDirectory, normalizeSpaceName, requireSpaceId } from './labels.js';
 
 // Memory limit of a new space. Swap adds nothing on top of it.
@@ -94,7 +95,7 @@ export function createSpaceManager({ registry, locate = async () => null, recall
   };
 
   // `id` may be given, so a caller that announces a creation before it is done names the same space.
-  const createSpace = async ({ placeId, projectDirectory, name, id = createSpaceId() }) => {
+  const createSpace = async ({ placeId, projectDirectory, name, id = createSpaceId(), purpose = 'general' }) => {
     const place = requirePlace(placeId);
     const spec = {
       id: requireSpaceId(id),
@@ -103,6 +104,7 @@ export function createSpaceManager({ registry, locate = async () => null, recall
       created: now().toISOString(),
       memoryBytes: DEFAULT_SPACE_MEMORY_BYTES,
     };
+    if (requireSpacePurpose(purpose) !== 'general') spec.purpose = purpose;
     await place.create(spec);
 
     // A space that cannot be verified is never handed out. It is removed instead.
@@ -117,6 +119,9 @@ export function createSpaceManager({ registry, locate = async () => null, recall
     let violations;
     try {
       violations = await place.verify(spec.id);
+      if (purpose !== 'general' && (await place.list()).find((space) => space.id === spec.id)?.purpose !== purpose) {
+        violations.push({ check: 'purpose', message: 'The place did not preserve the requested approval profile' });
+      }
     } catch (error) {
       const removal = await discard();
       const wrapped = new SpaceError(error.code ?? 'space_verification_failed', `The space was removed because it could not be verified. ${error.message}`, { removal });

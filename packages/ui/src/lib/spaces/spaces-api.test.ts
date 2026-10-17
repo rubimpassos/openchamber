@@ -48,6 +48,17 @@ describe('spaces-api', () => {
     expect(space).toMatchObject({ id: ID, state: 'preparing', step: 'checking_place', network: { mode: 'allowlist' } });
   });
 
+  test('preserves the protected purpose without upgrading ordinary or legacy spaces', async () => {
+    // Given
+    const approvalModel = { providerID: 'openai', modelID: 'gpt-4.1' };
+    answer(200, JSON.stringify({ spaces: [entry, { ...entry, id: 'b2c3d4e5f6a7', purpose: 'pr-fix-loop-approval', approvalModel }] }));
+    // When
+    const spaces = await listSpaces();
+    // Then
+    expect(spaces.map((space) => space.purpose)).toEqual([undefined, 'pr-fix-loop-approval']);
+    expect(spaces[1]?.approvalModel).toEqual(approvalModel);
+  });
+
   test('parses a failed creation in the list, whose step is "failed", with the rest of the list', async () => {
     // The host lists a creation that failed, here or in a host that quit before the code arrived,
     // with `step: 'failed'`. A list this version could not read would freeze every group's status.
