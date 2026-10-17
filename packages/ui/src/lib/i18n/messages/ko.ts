@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
+import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -9,6 +10,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -79,6 +81,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '하위 에이전트 {count}개 사용',
   'sessions.sidebar.projectAction.active': '프로젝트 작업 실행 중',
   ...settingsDict,
+  ...prStacksI18n.ko,
   'gitView.operation.title': 'Git 작업',
   'gitView.operation.recovery.storage': 'OpenChamber가 여기에 Git 전송 상태를 저장할 수 없습니다. 사이트 저장소를 허용하고 새로 고치세요. 그때까지 push와 pull은 일시 중지됩니다.',
   'gitView.operation.recovery.capacity': '끝나지 않은 Git 전송이 너무 많이 저장되어 있습니다. 새로 시작하기 전에 아래 항목을 확인하세요.',
@@ -149,6 +152,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.ko,
   ...surfacePanelI18n.ko,
   ...browserServerPanelI18n.ko,
+  ...prFixLoopI18n.ko,
   ...fileArtifactsI18n.ko,
   ...htmlRenderI18n.ko,
   ...usageStatsI18n.ko,

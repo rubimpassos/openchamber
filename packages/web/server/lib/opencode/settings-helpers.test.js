@@ -132,6 +132,7 @@ describe('settings helpers', () => {
       execFileSync('npm', ['pack', '--silent', '--pack-destination', packDir], {
         cwd: packagesWebDir,
         stdio: 'pipe',
+        timeout: 60_000,
       });
 
       const tarballName = readdirSync(packDir).find((entry) => entry.endsWith('.tgz'));
@@ -188,7 +189,7 @@ describe('settings helpers', () => {
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it('accepts only booleans for draft starter visibility', () => {
     const helpers = createTestHelpers();
@@ -861,6 +862,8 @@ describe('settings registry gate', () => {
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
     sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    prFixLoopDefaults: { maxIterations: 10, tokenBudget: null, triggers: 'both', ignoreSelf: true, ignoreBots: true, allowAuthors: [], blockAuthors: [], mentionOnly: false, mentionText: '@openchamber', pushMode: 'auto' },
+    prStackConflictMode: 'pause',
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true, notificationClassifierEnabled: false,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,

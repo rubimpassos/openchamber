@@ -5,7 +5,11 @@ import { referenceNumberLabel } from '@/components/references/referencePickerIte
 import type { ReferenceCommentItem } from '@/components/references/referenceTimeline';
 import { isFailedConclusion } from '@/components/views/git/checkRunState';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import type { GitHubReference } from '@/lib/api/types';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import type { GitHubReference, PullStack, SourceControlReadContext } from '@/lib/api/types';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { resolvePullStackReferences } from '@/components/references/resolvePullStackReferences';
+import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
 import { useI18n } from '@/lib/i18n';
 import type { CIRun } from '@/lib/source-control/types';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
@@ -41,6 +45,7 @@ const failedRunText = (run: CIRun): string => {
 export function usePullAttachments(reference: GitHubReference | null) {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
+    const { sourceControl } = useRuntimeAPIs();
 
     const target = React.useCallback((): InlineCommentDraftTarget | null => {
         const session = useSessionUIStore.getState();
@@ -110,5 +115,31 @@ export function usePullAttachments(reference: GitHubReference | null) {
         }
     }, [label, pin, t, target]);
 
-    return { attachComment, attachComments, attachFailedChecks };
+    const attachStack = React.useCallback(async (stack: PullStack, context: SourceControlReadContext) => {
+        if (!reference || reference.kind !== 'pull') return;
+        const into = target();
+        if (!into) return;
+        const runtime = getRuntimeKey();
+        const initialDraft = useSessionUIStore.getState().newSessionDraft;
+        const isCurrent = () => {
+            const state = useSessionUIStore.getState();
+            return getRuntimeKey() === runtime && (into.sessionKey === 'draft'
+                ? state.newSessionDraft === initialDraft && state.newSessionDraft.open
+                : state.currentSessionId === into.sessionKey && !state.newSessionDraft.open);
+        };
+        const result = await resolvePullStackReferences(stack, reference.sourceRepo, { context, sourceControl, isCurrent });
+        if (!isCurrent()) {
+            toast.message(t('prStacks.attachTargetChanged'));
+            return;
+        }
+        pin(into, { source: 'pr-comment', fileLabel: t('prStacks.title'), startLine: 0, endLine: 0,
+            code: result.summary, language: 'text', text: '' });
+        usePendingComposerReferences.getState().push(result.references);
+        if (result.failures.length) toast.error(t('prStacks.attachPartial', { members: result.failures.map((failure) => `#${failure.number}`).join(', ') }), {
+            description: result.failures.map((failure) => `#${failure.number}: ${failure.error}`).join('\n'),
+        });
+        else toast.success(t('prStacks.attached'));
+    }, [pin, reference, sourceControl, t, target]);
+
+    return { attachComment, attachComments, attachFailedChecks, attachStack };
 }

@@ -14,6 +14,7 @@
 //   list that then rots.
 //
 // Usage: node scripts/run-isolated-tests.mjs <root> [...roots]
+// OPENCHAMBER_TEST_WORKERS=1 runs serially on memory-constrained hosts.
 
 import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -23,7 +24,11 @@ import { resolveBunExecutable } from './lib/bun-executable.mjs';
 
 const TEST_FILE = /\.(test|spec)\.(js|cjs|mjs|jsx|ts|tsx)$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-bundle', 'build', 'out', '.git', 'ios', 'android']);
-const MAX_PARALLEL = 4;
+const MAX_PARALLEL = Number(process.env.OPENCHAMBER_TEST_WORKERS ?? 4);
+if (!Number.isInteger(MAX_PARALLEL) || MAX_PARALLEL < 1 || MAX_PARALLEL > 4) {
+  console.error('OPENCHAMBER_TEST_WORKERS must be an integer from 1 to 4');
+  process.exit(1);
+}
 const bunExecutable = resolveBunExecutable();
 
 const collect = (root, found = []) => {

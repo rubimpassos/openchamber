@@ -631,6 +631,22 @@
     "sessionGoalDefaultBudgetEnabled": {
       "scope": "profile"
     },
+    "prFixLoopDefaults": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "prStackConflictMode": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "sessionGoalDefaultBudget": {
       "scope": "profile"
     },

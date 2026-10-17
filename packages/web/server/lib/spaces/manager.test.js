@@ -12,6 +12,15 @@ const REQUEST = { placeId: 'memory', projectDirectory: '/home/me/project', name:
 const managerFor = (place) => createSpaceManager({ registry: createPlaceRegistry([place]), now: () => NOW });
 
 describe('createSpaceManager', () => {
+  it('removes a space when a place reports clean verification but discarded the requested purpose', async () => {
+    // Given a place that otherwise implements the contract but drops this security request.
+    const memory = createMemoryPlace();
+    const place = { ...memory, create: ({ purpose: _purpose, ...spec }) => memory.create(spec) };
+    // When the manager asks it for a protected approval worker.
+    await expect(managerFor(place).createSpace({ ...REQUEST, purpose: 'pr-fix-loop-approval' })).rejects.toMatchObject({ code: 'space_verification_failed', details: { violations: [{ check: 'purpose' }] } });
+    // Then the unprotected result is not handed out or retained.
+    expect(await place.list()).toEqual([]);
+  });
   it('creates a space with a fresh id, the project hash and the creation time', async () => {
     const manager = managerFor(createMemoryPlace());
 

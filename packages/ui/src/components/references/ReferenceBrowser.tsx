@@ -17,6 +17,8 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Input } from '@/components/ui/input';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useI18n } from '@/lib/i18n';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { inferPullStackPositions, pullStackReferenceKey, type PullStackPosition } from '@/lib/source-control/pullStackInference';
 import { cn } from '@/lib/utils';
 
 import { ReferencePickerRow } from './ReferencePickerRow';
@@ -205,6 +207,9 @@ export const ReferenceBrowserList: React.FC<{
 }> = ({ browser, label, multiselectable, onOpenSettings, rowSelection, onActivate, onShow }) => {
     const { t } = useI18n();
     const { source, sourceStatus, list, items, isGitLab, isMobile, directory, debouncedQuery, githubKind } = browser;
+    const stackPositions = React.useMemo(() => isVSCodeRuntime() ? new Map<string, PullStackPosition>() : inferPullStackPositions(
+        items.flatMap((item) => item.source === 'github' ? [item.reference] : []),
+    ), [items]);
 
     // Load the next page when the end of the list scrolls into view.
     const sentinelRef = React.useRef<HTMLDivElement>(null);
@@ -277,6 +282,7 @@ export const ReferenceBrowserList: React.FC<{
                         key={key}
                         item={item}
                         pullStatus={item.source === 'github' ? readyValue(browser.pullStatusOf(item.reference)) : null}
+                        stackPosition={item.source === 'github' ? stackPositions.get(pullStackReferenceKey(item.reference)) : undefined}
                         highlighted={!isMobile && key === browser.effectiveHighlightKey}
                         checked={selection?.checked ?? null}
                         diffIncluded={selection?.diffIncluded ?? false}

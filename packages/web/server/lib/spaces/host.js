@@ -171,7 +171,7 @@ export function createSpacesHost({
     registry,
     locate: async (spaceId) => records.read(spaceId).record?.placeId ?? null,
     recall: async () => records.list()
-      .map(({ id, record }) => ({ placeId: record.placeId, id, name: record.name ?? id, project: record.repository === null ? '' : hashProjectDirectory(record.repository), created: record.created ?? '' })),
+      .map(({ id, record }) => ({ placeId: record.placeId, id, purpose: record.purpose, name: record.name ?? id, project: record.repository === null ? '' : hashProjectDirectory(record.repository), created: record.created ?? '' })),
   });
   const serverInside = createSpaceServerChannel({ exec: manager.exec });
   const gatekeeper = createGatekeeperChannel({ exec: manager.exec });

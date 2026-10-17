@@ -6,9 +6,11 @@ import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
+import { restackEventSchema, type RestackEvent } from './api/pull-stacks';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
 import { notificationCenterChangeSchema, type NotificationCenterChange } from './notificationCenter';
+import { prFixLoopUpdatedEventSchema, type PrFixLoopUpdatedEvent } from './prFixLoop';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -193,6 +195,8 @@ type OpenChamberEvent =
   | RoutingPermissionHeldEvent
   | RoutingSafetySkippedEvent
   | MessageQueueUpdatedEvent
+  | RestackEvent
+  | PrFixLoopUpdatedEvent
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
@@ -408,11 +412,23 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:pr-stack.restack') {
+    const parsed = restackEventSchema.safeParse(envelope);
+    if (parsed.success) for (const listener of listeners) listener(parsed.data);
+    return;
+  }
+
   if (envelope.type === 'openchamber:message-queue.updated') {
     const parsed = messageQueueUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) {
       for (const listener of listeners) listener(parsed.data);
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:pr-fix-loop.updated') {
+    const parsed = prFixLoopUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) for (const listener of listeners) listener(parsed.data);
     return;
   }
 

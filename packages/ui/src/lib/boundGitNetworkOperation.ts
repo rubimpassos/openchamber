@@ -447,6 +447,7 @@ export const buildBoundBranchPushRequest = ({
   remoteName,
   destinationRef,
   configureUpstream = false,
+  forceWithLease,
 }: {
   bindingRead: SourceControlBindingRead;
   branch: string;
@@ -454,7 +455,8 @@ export const buildBoundBranchPushRequest = ({
   remoteName: string;
   destinationRef: string;
   configureUpstream?: boolean;
-}): GitNetworkOperationRequest => {
+  forceWithLease?: { expectedRemoteSha: string };
+}): Extract<GitNetworkOperationRequest, { operation: 'push' }> => {
   const binding = effectiveRepositoryBinding(bindingRead);
   const localBranch = branch.trim();
   if (!localBranch || localBranch === 'HEAD') fail('branch-required');
@@ -462,7 +464,7 @@ export const buildBoundBranchPushRequest = ({
   const selectedRemote = remoteName.trim();
   const boundRemote = requireRemoteReady(bindingRead, selectedRemote);
   if (boundRemote.mode === 'anonymous') fail('anonymous-read-only');
-  return {
+  const request: Extract<GitNetworkOperationRequest, { operation: 'push' }> = {
     operation: 'push',
     directory,
     repositoryId: binding.repositoryId,
@@ -474,6 +476,9 @@ export const buildBoundBranchPushRequest = ({
     transportMode: boundRemote.mode,
     configureUpstream,
   };
+  // An ordinary push carries no lease key at all; the plan's digest covers the request shape.
+  if (forceWithLease) request.forceWithLease = forceWithLease;
+  return request;
 };
 
 export type GitPublishTargets = {
@@ -644,25 +649,38 @@ export const runBoundGitNetworkOperation = async ({
   runtimeKey = getRuntimeKey,
   targets,
   onOperation,
+  pushRequest,
 }: {
-  action: BoundGitNetworkAction;
   directory: string;
   fetchTarget?: GitFetchTarget;
   remoteName: string;
-  status: GitStatus;
+  status?: GitStatus;
   targets?: GitPublishTargets;
-} & BoundGitNetworkDependencies): Promise<GitNetworkOperation> => {
+} & (
+  | { action: BoundGitNetworkAction; status: GitStatus; pushRequest?: never }
+  | { action: 'push'; pushRequest: Extract<GitNetworkOperationRequest, { operation: 'push' }> }
+) & BoundGitNetworkDependencies): Promise<GitNetworkOperation> => {
   const capturedRuntime = runtimeKey();
   const bindingRead = await sourceControl.repositoryBinding(directory);
   requireCurrentRuntime(runtimeKey, capturedRuntime);
 
-  const request = buildBoundGitNetworkOperationRequest({ action, bindingRead, directory, fetchTarget, remoteName, status, targets });
+  if (action === 'push' && (pushRequest.directory !== directory
+    || pushRequest.repositoryId !== bindingRead.repository.repositoryId
+    || pushRequest.bindingRevision !== bindingRead.revision
+    || pushRequest.configRevision !== bindingRead.repository.configRevision)) fail('binding-needs-attention');
+  const request = action === 'push'
+    ? buildBoundBranchPushRequest({
+      bindingRead, directory, branch: requireHeadRef(pushRequest.sourceRef), remoteName,
+      destinationRef: pushRequest.destinationRef, configureUpstream: pushRequest.configureUpstream,
+      forceWithLease: pushRequest.forceWithLease,
+    })
+    : buildBoundGitNetworkOperationRequest({ action, bindingRead, directory, fetchTarget, remoteName, status, targets });
   const plan = await planOperation(git, request, runtimeKey, capturedRuntime, onOperation);
   requireCurrentRuntime(runtimeKey, capturedRuntime);
 
   const completion = await executePlan(git, plan, runtimeKey, capturedRuntime, onOperation);
-  interpretGitNetworkTerminalOperation(completion, action);
-  if (action === 'sync') announcePush(directory, capturedRuntime);
+  if (action !== 'push') interpretGitNetworkTerminalOperation(completion, action);
+  if (action === 'sync' || action === 'push') announcePush(directory, capturedRuntime);
   return completion;
 };
 

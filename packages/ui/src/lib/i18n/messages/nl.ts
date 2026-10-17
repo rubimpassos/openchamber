@@ -1,5 +1,7 @@
 import { settingsDict } from './nl.settings';
+import { prStacksI18n } from './pr-stacks.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -139,12 +141,14 @@ export const dict = {
   'gitView.publish.cancelled': 'Push geannuleerd. Er is niets verzonden.',
   'gitView.publish.succeeded': 'Gepusht',
   ...settingsDict,
+  ...prStacksI18n.nl,
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...sessionMenuHintsI18n.nl,
   ...projectKnowledgeI18n.nl,
   ...linearPanelI18n.nl,
   ...browserServerPanelI18n.nl,
+  ...prFixLoopI18n.nl,
   ...routingI18n.nl,
   ...pluginPanelI18n.nl,
   ...surfacePanelI18n.nl,

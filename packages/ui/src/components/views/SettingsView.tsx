@@ -406,6 +406,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
+    if (result.id.startsWith('integrations.pr-fix-loop') || result.id === 'integrations.pr-stack-conflict') {
+      useUIStore.setState({ settingsGitHubOpenRequested: true });
+    }
     if (result.id.startsWith('agents.')) {
       const store = useAgentsStore.getState();
       const name = nextUniqueName('new-agent', store.agents.map((agent) => agent.name));

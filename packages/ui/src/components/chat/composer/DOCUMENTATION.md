@@ -3,6 +3,12 @@
 The chat composer: the prompt language, the editor that renders it, and
 everything between typing and sending.
 
+A whole-stack attachment creates ordinary change-request chips and one inline
+stack-summary draft. Each member's context includes its diff, checks, and
+comments. The anchor chip carries `followStack: true` into `toLinkedIssue`, so
+recording sent or queued references preserves the live-stack link. Individual
+member failures remain visible while the other chips attach.
+
 `ChatInput.tsx` (one directory up) is the orchestrator. It holds the composer's
 own state and wires these modules together; it should not grow logic that
 belongs to one of them.
@@ -106,13 +112,26 @@ the surface stays one shape. Top to bottom: worktree setup and a message
 waiting for its space (`ComposerStatusStrip`), the notice that an OpenCode
 restart cut off the last turn (`SessionRestartInterruptionRow`; its Continue
 fills the composer the way a suggestion does and sends nothing), the goal
-(`SessionGoalRow`), a
-running review loop (`AutoReviewStrip`), background commands, a staged revert
+(`SessionGoalRow`), review and PR fix loops (`AutoReviewStrip`), background
+commands, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),
 the "looks done" hint or the review offer, the suggestion
 (`SessionSuggestionChip`). BTW hides all of them. A pending form, a nonempty
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
+
+`AutoReviewStrip` retains the foreground review loop's Open and Stop actions and
+adds the current column session's server-owned PR fix loops in the same strip.
+Each PR row names the PR, status, iteration count, CI state, unresolved thread
+count, and read error. A failed GitHub or projection read displays unknown CI,
+even when the last successful sample was green. Active loops offer Stop and a
+configuration dialog; terminal loops remain until dismissed on the server.
+Open PR uses the existing board navigation on desktop and mobile. Approval-mode
+Push uses the loop's directory and branch through bound Git publication, with
+its existing operation recovery and no force push. Mobile actions wrap and use
+touch-size buttons; multiple rows scroll within the strip. The shared mobile
+status chip continues to use the existing `autoReview` slot. VS Code keeps the
+foreground review loop and hides all server-owned fix loops.
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,

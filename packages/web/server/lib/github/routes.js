@@ -1,5 +1,6 @@
 import { digestMutationInput, mutationReceipt } from '../source-control/mutation-executor.js';
 import { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } from './checks-summary.js';
+import { registerFixLoopRoutes } from '../pr-fix-loop/runtime.js';
 
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
@@ -478,7 +479,13 @@ export function registerGitHubRoutes(app, options = {}) {
     return [...new Set(value)].sort();
   };
   const sameNames = (left, right) => left.length === right.length && [...left].sort().every((entry, index) => entry === right[index]);
-  const mutationRecordKind = (kind) => (ISSUE_KINDS.has(kind) ? kind : `change-request-${kind}`);
+  // Stack registration and retarget are PR updates. The operation digest
+  // distinguishes them from ordinary updates within the existing store schema.
+  const mutationRecordKind = (kind) => {
+    if (kind === 'stack-register' || kind === 'stack-retarget') return 'change-request-update';
+    if (kind === 'stack-merge') return 'change-request-merge';
+    return ISSUE_KINDS.has(kind) ? kind : `change-request-${kind}`;
+  };
   const requiredMutationText = (value, name) => {
     if (!isProviderString(value) || !value.trim()) throw canonicalMutationError(`${name} is required`);
     return value.trim();
@@ -556,6 +563,18 @@ export function registerGitHubRoutes(app, options = {}) {
     return { ...receipt, target: { ...receipt.target, number }, result };
   };
   const reconcileExistingMutation = async (octokit, kind, target, operation) => {
+    // Membership and merge-plus-retarget have no atomic provider receipt.
+    // A merged PR alone cannot prove the follow-up retarget completed.
+    if (kind === 'stack-register' || kind === 'stack-merge') return { state: 'outcome-unknown' };
+    if (kind === 'stack-retarget') {
+      const current = requireMutationPullRequest((await octokit.rest.pulls.get({
+        owner: target.project.owner, repo: target.project.name, pull_number: target.number,
+      }))?.data, 'GitHub returned an invalid pull request');
+      return sameProject(pullTargetProject(current), target.project)
+        && mutationTargetMatches({ ...target, base: operation.base }, current)
+        ? { state: 'succeeded', result: { ok: true, base: operation.base } }
+        : { state: 'outcome-unknown' };
+    }
     // A comment or a review leaves nothing that tells a lost write from one
     // never sent short of guessing from its text, so the outcome stays unknown.
     if (kind === 'comment' || kind === 'review' || kind === 'issue-comment' || kind === 'thread-reply') return { state: 'outcome-unknown' };
@@ -794,6 +813,27 @@ export function registerGitHubRoutes(app, options = {}) {
     if (!Number.isSafeInteger(context.target.number) || context.target.number < 1) {
       throw canonicalMutationError('target number is required');
     }
+    if (kind === 'stack-register' || kind === 'stack-retarget' || kind === 'stack-merge') {
+      requiredMutationText(context.target.headSha, 'target headSha');
+      // Legacy selectors may accompany the canonical context, but grant no
+      // authority and must never name a different PR or repository.
+      if ((req.body.owner !== undefined && req.body.owner !== context.target.project.owner)
+        || (req.body.repo !== undefined && req.body.repo !== context.target.project.name)
+        || (req.body.number !== undefined && req.body.number !== context.target.number)) {
+        throw canonicalMutationError('Stack selectors do not match the mutation target', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+      }
+      if (kind === 'stack-retarget') {
+        const base = requiredMutationText(req.body?.base, 'base');
+        if (base.length > 255) throw canonicalMutationError('base is invalid');
+        return { base, digest: (target) => digestMutationInput({ kind, actor, credential, target, base }) };
+      }
+      if (kind === 'stack-merge') {
+        const method = requiredMutationText(req.body?.method, 'method');
+        if (!['merge', 'squash', 'rebase'].includes(method)) throw canonicalMutationError('merge method is invalid');
+        return { method, digest: (target) => digestMutationInput({ kind, actor, credential, target, method }) };
+      }
+      return { digest: (target) => digestMutationInput({ kind, actor, credential, target }) };
+    }
     if (kind === 'update') {
       const title = requiredMutationText(req.body?.title, 'title');
       const body = optionalMutationText(req.body?.body, 'body');
@@ -897,15 +937,11 @@ export function registerGitHubRoutes(app, options = {}) {
     invalidateRepoPullsCache(target.project.owner, target.project.name, accountContext.octokit);
   };
 
-  const runCanonicalMutation = async (kind, req, res) => {
-    try {
+  const executeCanonicalMutation = async (kind, req, { replayOnly = false, onDispatch } = {}) => {
       if (!(options.validateMutationContext instanceof Function)
         || !(options.mutationExecutor?.execute instanceof Function)
         || !(options.mutationExecutor?.read instanceof Function)) {
-        return res.status(501).json({
-          error: 'Bound source control mutations are unavailable',
-          code: 'SOURCE_CONTROL_MUTATION_UNAVAILABLE',
-        });
+        throw canonicalMutationError('Bound source control mutations are unavailable', 'SOURCE_CONTROL_MUTATION_UNAVAILABLE', 501);
       }
       const context = await options.validateMutationContext(req.body ?? {});
       const accountContext = await getOctokitForRequest(req, context.accountId);
@@ -923,6 +959,9 @@ export function registerGitHubRoutes(app, options = {}) {
       };
       const operation = normalizeMutationOperation(kind, req, context, actor, credential);
       const stored = await options.mutationExecutor.read(context.idempotencyKey);
+      if (replayOnly && !stored) {
+        throw canonicalMutationError('The review write has no durable result. Its outcome requires repair.', 'SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN', 409);
+      }
       const resolveDirectoryRepo = async (...args) => {
         const resolver = options.resolveGitHubRepoFromDirectory
           ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
@@ -957,9 +996,13 @@ export function registerGitHubRoutes(app, options = {}) {
           classifyError: classifyMutationError,
         });
         await invalidateCanonicalMutationCaches(context, accountContext, execution.record.target);
-        return res.json(changeRequestReceipt(execution.record, execution.replayed, accountContext.providerUserId));
+        return changeRequestReceipt(execution.record, execution.replayed, accountContext.providerUserId);
       }
 
+      if (kind === 'stack-register' || kind === 'stack-retarget' || kind === 'stack-merge') {
+        const { isGitHubRateLimited } = await import('./rate-limit.js');
+        if (isGitHubRateLimited()) throw canonicalMutationError('GitHub rate limited', 'SOURCE_CONTROL_MUTATION_REJECTED', 503);
+      }
       const resolveNetwork = options.resolveRepoNetwork
         ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
       const primaryResolved = await resolveDirectoryRepo(context.directory, context.primaryRemote);
@@ -976,6 +1019,7 @@ export function registerGitHubRoutes(app, options = {}) {
       let target;
       let perform;
       let reconcile;
+      let stackMergeDispatched = false;
 
       if (kind === 'create') {
         const { title, body, draft, remote, headRemote, head, base } = operation;
@@ -1051,7 +1095,73 @@ export function registerGitHubRoutes(app, options = {}) {
         }
         target = actualMutationTarget(context, expectedProject, pr);
 
-        if (kind === 'update') {
+        if (kind === 'stack-retarget') {
+          perform = async () => {
+            const updated = requireMutationPullRequest((await octokit.rest.pulls.update({
+              owner: expectedProject.owner, repo: expectedProject.name, pull_number: target.number, base: operation.base,
+            }))?.data, 'GitHub returned an invalid retargeted pull request');
+            if (!sameProject(pullTargetProject(updated), expectedProject)
+              || !mutationTargetMatches({ ...target, base: operation.base }, updated)) {
+              throw invalidProviderPayload('GitHub returned a retargeted pull request with an unexpected target');
+            }
+            return { ok: true, base: operation.base };
+          };
+          reconcile = () => reconcileExistingMutation(octokit, kind, target, operation);
+        } else if (kind === 'stack-register' || kind === 'stack-merge') {
+          const stacks = await import('./pr-stacks.js');
+          // The stack helpers read another snapshot. Check its target and pin
+          // both native and inferred merge dispatches to the admitted commit.
+          const assertMergeTarget = (input) => {
+            if (input.owner !== expectedProject.owner || input.repo !== expectedProject.name
+              || input.pull_number !== target.number || input.sha !== target.headSha) {
+              throw canonicalMutationError('GitHub pull request no longer matches the mutation target', 'SOURCE_CONTROL_MUTATION_TARGET_CHANGED', 409);
+            }
+            stackMergeDispatched = true;
+          };
+          const stackOctokit = {
+            ...octokit,
+            request: (route, input) => {
+              if (route === 'PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async') assertMergeTarget(input);
+              return octokit.request(route, input);
+            },
+            rest: { ...octokit.rest, pulls: { ...octokit.rest.pulls,
+              list: async (input) => {
+                const response = await octokit.rest.pulls.list(input);
+                if (input.state === 'open') {
+                  const current = requireProviderArray(response?.data, 'GitHub returned an invalid pull request list')
+                    .find((pull) => pull.number === target.number);
+                  if (current) {
+                    // List entries omit the single-PR endpoint's `merged` flag.
+                    // Validate the list shape and the exact admitted target.
+                    const pull = requireGitHubPullRequest(current, 'GitHub returned an invalid pull request');
+                    const project = pull.base.repo;
+                    if (!sameProject({ owner: project?.owner?.login, name: project?.name }, expectedProject)
+                      || !matchesGitHubRepositoryUrl(project.html_url, expectedProject.owner, expectedProject.name)
+                      || !mutationTargetMatches(target, pull)) {
+                      throw canonicalMutationError('GitHub pull request no longer matches the mutation target', 'SOURCE_CONTROL_MUTATION_TARGET_CHANGED', 409);
+                    }
+                  }
+                }
+                return response;
+              },
+              merge: async (input) => {
+                assertMergeTarget(input);
+                const response = await octokit.rest.pulls.merge(input);
+                if (response?.data?.merged !== true) throw invalidProviderPayload('GitHub did not confirm the stack merge');
+                return response;
+              },
+            } },
+          };
+          const input = { octokit: stackOctokit, owner: expectedProject.owner, repo: expectedProject.name, number: target.number };
+          perform = kind === 'stack-register' ? async () => {
+            const result = await stacks.registerPullStack(input);
+            return { ok: true, registered: result.registered, nativeNumber: result.nativeNumber };
+          } : async () => {
+            const result = await stacks.mergeStackBottom({ ...input, method: operation.method });
+            return { ok: true, ...result };
+          };
+          reconcile = () => reconcileExistingMutation(octokit, kind, target, operation);
+        } else if (kind === 'update') {
           const { title, body } = operation;
           perform = async () => {
             const updateInput = { owner: expectedProject.owner, repo: expectedProject.name, pull_number: target.number, title };
@@ -1066,6 +1176,26 @@ export function registerGitHubRoutes(app, options = {}) {
           reconcile = () => reconcileExistingMutation(octokit, kind, target);
         } else if (kind === 'merge') {
           const { method } = operation;
+          // Only an open PR in this repository whose head is our base can
+          // block bottom-up merging. A bounded, incomplete read grants nothing.
+          const parents = await octokit.rest.pulls.list({
+            owner: expectedProject.owner, repo: expectedProject.name,
+            state: 'open', head: `${expectedProject.owner}:${pr.base.ref}`, per_page: 100,
+          });
+          const candidates = requireProviderArray(parents?.data, 'GitHub returned an invalid parent pull request list');
+          if (candidates.length >= 100 || /rel="next"/.test(parents.headers?.link ?? '')) {
+            throw invalidProviderPayload('GitHub returned an incomplete parent pull request list');
+          }
+          for (const candidate of candidates) {
+            const parent = requireGitHubPullRequest(candidate, 'GitHub returned an invalid parent pull request');
+            if (parent.state !== 'open' || parent.head.ref !== pr.base.ref || !parent.head.repo) {
+              throw invalidProviderPayload('GitHub returned an invalid parent pull request');
+            }
+            if (parent.head.repo.owner.login.toLowerCase() === expectedProject.owner.toLowerCase()
+              && parent.head.repo.name.toLowerCase() === expectedProject.name.toLowerCase()) {
+              throw canonicalMutationError('Only the bottom pull request of a stack can be merged', 'SOURCE_CONTROL_MUTATION_STACK_ORDER', 409);
+            }
+          }
           perform = async () => {
             const merged = await octokit.rest.pulls.merge({
               owner: expectedProject.owner,
@@ -1157,12 +1287,19 @@ export function registerGitHubRoutes(app, options = {}) {
           target,
         },
         providerAccountId: accountContext.providerUserId,
-        perform,
+        perform: async (...args) => { onDispatch?.(); return perform(...args); },
         reconcile,
-        classifyError: classifyMutationError,
+        // A follow-up retarget can fail after a confirmed merge, including
+        // with a definite 4xx. The multi-step operation is still incomplete.
+        classifyError: (error) => stackMergeDispatched ? 'outcome-unknown' : classifyMutationError(error),
       });
       await invalidateCanonicalMutationCaches(context, accountContext, execution.record.target);
-      return res.json(changeRequestReceipt(execution.record, execution.replayed, accountContext.providerUserId));
+      return changeRequestReceipt(execution.record, execution.replayed, accountContext.providerUserId);
+  };
+
+  const runCanonicalMutation = async (kind, req, res) => {
+    try {
+      return res.json(await executeCanonicalMutation(kind, req));
     } catch (error) {
       // A refusal from any GitHub request on the way, the preflight reads as
       // much as the write, answers with GitHub's reason. The failed record is
@@ -2299,6 +2436,113 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
+  // Stack reads retain read admission; writes use canonical durable execution.
+  const runStackRead = (handler) => async (req, res) => {
+    const directory = readQueryString(req, 'directory');
+    const source = req.query;
+    const owner = String(source.owner ?? '').trim();
+    const repoName = String(source.repo ?? '').trim();
+    const number = Number(source.number);
+    if (!directory || !owner || !repoName || !Number.isSafeInteger(number) || number < 1) {
+      return res.status(400).json({ error: 'directory, owner, repo and number are required' });
+    }
+    try {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) return res.status(501).json({ error: 'Bound source control read is unavailable' });
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
+      if (!octokit) return res.json({ connected: false });
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) return res.status(503).json({ error: 'GitHub rate limited' });
+      const repo = await resolveRepoForRequest(octokit, directory, { owner, repo: repoName }, trustedContext.primaryRemote, {
+        resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+        resolveRepoNetwork: options.resolveRepoNetwork,
+        strictNetworkErrors: true,
+        strictMetadataErrors: true,
+        requireResolvedRepo: true,
+      });
+      if (!repo) return res.status(400).json({ error: 'Repository is not part of this project' });
+      const stacks = await import('./pr-stacks.js');
+      return res.json(await handler({ stacks, octokit, owner: repo.owner, repo: repo.repo, number }));
+    } catch (error) {
+      if (isReadContextError(error)) return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
+      if (error?.status === 401) {
+        await invalidateRequestAccount(error);
+        return res.json({ connected: false });
+      }
+      const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
+      const { isGitHubRateLimitError, noteGitHubRateLimit } = await import('./rate-limit.js');
+      if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) {
+        noteGitHubRateLimit(error);
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.expected || [403, 404, 405, 409, 422].includes(error?.status)) {
+        return res.status(error.status ?? 409).json({ error: error?.response?.data?.message || error.message, code: 'SOURCE_CONTROL_MUTATION_REJECTED' });
+      }
+      console.error('GitHub stack request failed:', error?.status, error?.name);
+      return res.status(500).json({ error: 'GitHub stack request failed' });
+    }
+  };
+
+  app.get(canonicalGitHubRoutePath('/pulls/stack'), runStackRead(async ({ stacks, octokit, owner, repo, number }) => (
+    { connected: true, stack: await stacks.resolvePullStack({ octokit, owner, repo, number }) }
+  )));
+  app.post(canonicalGitHubRoutePath('/pulls/stack/register'), (req, res) => runCanonicalMutation('stack-register', req, res));
+  app.post(canonicalGitHubRoutePath('/pulls/stack/retarget'), (req, res) => runCanonicalMutation('stack-retarget', req, res));
+  app.post(canonicalGitHubRoutePath('/pulls/stack/merge'), (req, res) => runCanonicalMutation('stack-merge', req, res));
+
+  if (options.prFixLoopRuntime) {
+    registerFixLoopRoutes(app, {
+      runtime: options.prFixLoopRuntime,
+      // The loop reads with the account the project's repository is bound to,
+      // for a PR in that repository's network.
+      createWithContext: async (req, { prepareWorker = false } = {}) => {
+        const directory = readQueryString(req, 'directory');
+        const body = req.body ?? {};
+        const owner = String(body.owner ?? '').trim();
+        const repoName = String(body.repo ?? '').trim();
+        const number = Number(body.number);
+        if (!directory || !owner || !repoName || !Number.isSafeInteger(number) || number < 1) {
+          throw Object.assign(new Error('directory, owner, repo and number are required'), { statusCode: 400 });
+        }
+        const trustedContext = await validateReadContext(req, directory);
+        if (!trustedContext) throw Object.assign(new Error('Bound source control read is unavailable'), { statusCode: 501 });
+        const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
+        if (!octokit) throw Object.assign(new Error('GitHub is not connected'), { statusCode: 409 });
+        const repo = await resolveRepoForRequest(octokit, directory, { owner, repo: repoName }, trustedContext.primaryRemote, {
+          resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+          resolveRepoNetwork: options.resolveRepoNetwork,
+          strictNetworkErrors: true,
+          strictMetadataErrors: true,
+          requireResolvedRepo: true,
+        });
+        if (!repo) throw Object.assign(new Error('Repository is not part of this project'), { statusCode: 400 });
+        const pull = requireGitHubPullRequest((await octokit.rest.pulls.get({ owner: repo.owner, repo: repo.repo, pull_number: number }))?.data, 'GitHub returned an invalid pull request');
+        if (pull?.state !== 'open') throw Object.assign(new Error('The pull request is not open'), { statusCode: 409 });
+        if (prepareWorker) return options.prFixLoopRuntime.prepareWorker({ sessionId: body.sessionId, directory,
+          model: body.model, name: body.name, placeId: body.placeId });
+        return options.prFixLoopRuntime.create({
+          sessionId: body.sessionId,
+          directory,
+          accountId: trustedContext.accountId,
+          owner: repo.owner,
+          repo: repo.repo,
+          number,
+          title: String(pull.title ?? ''),
+          url: String(pull.html_url ?? ''),
+          branch: String(pull.head?.ref ?? ''),
+          config: body.config,
+          workerId: body.workerId,
+          readContext: { directory, repositoryId: trustedContext.repositoryId, bindingRevision: trustedContext.bindingRevision,
+            provider: 'github', instance: 'github.com', accountId: trustedContext.accountId, primaryRemote: trustedContext.primaryRemote },
+          snapshot: { state: pull.state, branch: pull.head.ref, headSha: pull.head.sha,
+            headRepo: pull.head.repo ? { id: pull.head.repo.node_id, owner: pull.head.repo.owner.login, repo: pull.head.repo.name } : null },
+        });
+      },
+    });
+  }
+
   app.get(canonicalGitHubRoutePath('/issues/list'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');
@@ -3291,11 +3535,55 @@ export function registerGitHubRoutes(app, options = {}) {
   });
 
   return Object.freeze({
-    /**
-     * The account GitHub reads use when none is named: the gh login while the
-     * user has switched to it, else OpenChamber's active account. Null when
-     * neither is there.
-     */
+    /** Session context reads keep the same binding, account and network gates as HTTP stack reads. */
+    readPullStack: async ({ context, owner, repo, number }) => {
+      const trusted = await options.validateReadContext(context);
+      if (!trusted) throw new Error('Bound source control read is unavailable');
+      const { octokit } = await getOctokitForRequest({}, trusted.accountId);
+      const { isGitHubRateLimited, noteGitHubRateLimit, isGitHubRateLimitError } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) throw new Error('GitHub rate limited');
+      try {
+        const target = await resolveRepoForRequest(octokit, trusted.directory, { owner, repo }, trusted.primaryRemote, {
+          resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+          resolveRepoNetwork: options.resolveRepoNetwork,
+          strictNetworkErrors: true,
+          strictMetadataErrors: true,
+          requireResolvedRepo: true,
+        });
+        if (!target) throw new Error('Repository is not part of this project');
+        const { resolvePullStack } = await import('./pr-stacks.js');
+        return await resolvePullStack({ octokit, owner: target.owner, repo: target.repo, number });
+      } catch (error) {
+        await invalidateRequestAccount(error);
+        const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
+        if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) noteGitHubRateLimit(error);
+        throw error;
+      }
+    },
+    /** Host-only review operations for one published fix-loop result. */
+    applyFixLoopReviewOperation: async ({ loop, receipt, operation, replayOnly }) => {
+      if (!['thread-reply', 'thread-resolve', 'comment'].includes(operation.kind)) {
+        throw canonicalMutationError('Unsupported fix-loop review operation');
+      }
+      // Coordinates, binding, commit and operation key come from the persisted host turn.
+      // No credential, URL, request method or repository can come from worker text.
+      const body = { ...loop.readContext, idempotencyKey: operation.idempotencyKey,
+        target: { project: { owner: loop.owner, name: loop.repo }, number: loop.number,
+          head: receipt.destination.ref.slice('refs/heads/'.length), headSha: receipt.commit } };
+      if (operation.kind === 'thread-reply') Object.assign(body, { threadId: operation.threadId, body: operation.body });
+      else if (operation.kind === 'thread-resolve') Object.assign(body, { threadId: operation.threadId, resolved: true });
+      else body.body = operation.body;
+      let dispatched = false;
+      try {
+        return await executeCanonicalMutation(operation.kind, { body }, { replayOnly, onDispatch: () => { dispatched = true; } });
+      } catch (error) {
+        // Only this live invocation can prove a refusal preceded dispatch. A restarted
+        // job with no durable record remains ambiguous, including after record expiry.
+        if (!replayOnly && !dispatched) error.fixLoopReviewNotDispatched = true;
+        throw error;
+      }
+    },
+    /** The gh account while explicitly selected, else the active saved account. */
     readCurrentAccountId: async () => {
       const { getGitHubAuth, githubCliAccountId, isGhCliActive, isGhCliDisabled, createOctokit } = await getGitHubLibraries();
       if (isGhCliActive() && !isGhCliDisabled()) {

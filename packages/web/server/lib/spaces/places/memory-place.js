@@ -53,11 +53,13 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
     // Memory has no image to download: a pull ends at once and none is ever under way.
     pullImage: async () => {},
     imagePulling: () => false,
-    create: async ({ id: spaceId, name, project, created }) => {
+    create: async ({ id: spaceId, name, project, created, purpose = 'general' }) => {
       if (spaces.has(requireSpaceId(spaceId))) {
         throw new SpaceError('space_name_taken', `Space ${spaceId} already exists`);
       }
-      spaces.set(spaceId, { id: spaceId, name, project, created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] });
+      const space = { id: spaceId, name, project, created, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] };
+      if (purpose !== 'general') space.purpose = purpose;
+      spaces.set(spaceId, space);
       for (const target of TARGETS) {
         // A container has a hostname of its own, as a real one does, so a caller can tell them apart.
         containers.set(`${spaceId}:${target}`, { hostname: crypto.randomBytes(6).toString('hex') });

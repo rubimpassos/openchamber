@@ -139,6 +139,8 @@ export type SpaceSetup = z.infer<typeof setupSchema>;
 
 const spaceEntrySchema = z.object({
   id: spaceIdSchema,
+  purpose: z.enum(['general', 'pr-fix-loop-approval']).optional(),
+  approvalModel: z.object({ providerID: z.string().min(1).max(64), modelID: z.string().min(1).max(128) }).strict().nullable().optional(),
   name: z.string(),
   // The place the space lives on, as the host names it; the browser panel's container mark says it.
   placeId: z.string(),

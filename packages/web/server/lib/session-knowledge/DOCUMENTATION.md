@@ -1,7 +1,7 @@
 # Session Knowledge
 
-What a session must be told about the project — that session's pinned notes and
-plans, and the index of what the agent has remembered — and whether it has been
+What a session must be told about the project, including its pinned notes and
+plans, memory index and followed pull request stacks, and whether it has been
 told yet.
 
 ## Why it is here and not in the UI
@@ -32,6 +32,41 @@ tab closing and is visible to every sender, including the ones with no tab.
 
 The signature covers content revisions, not just identity: editing a pinned note
 must re-send it, not merely renaming one.
+
+## Followed pull request stacks
+
+`pull-stacks.js` reads GitHub PR links with `followStack: true` from the session's
+`openchamber.linked_issues` metadata. It parses their URLs into anchor coordinates and
+deduplicates equivalent links. Unlinked PRs, ordinary PR links and other services
+make no binding or provider requests.
+
+Each session-context resolution reads the current repository binding and resolves
+each followed anchor through the GitHub module's bound reader. A ready GitHub
+provider association supplies the exact account and primary remote. An unbound
+GitHub remote or unavailable bound account uses the host's current account,
+matching the reference picker. Confirmation-required and config-changed bindings
+never fall back. Unavailable authority produces `binding-unavailable`.
+The GitHub reader revalidates the captured authority and checks the anchor's
+repository against the bound fork network before reading membership.
+
+The synthetic context contains JSON snapshots in `openchamber-pull-stacks` tags.
+They include the current members, head and base branches, status and available CI
+summaries. A successful null stack means no stack was detected. A failed anchor
+has `status: unavailable` and no stack value. Successful siblings and pinned
+project context remain deliverable. Inferred answers retain `nativeUnavailable`
+and unreadable member summaries remain `unknown`.
+
+The delivery signature includes a digest of these snapshots. Changed membership,
+branches or status is sent on the next turn; unchanged delivered snapshots are
+deduplicated. Only the anchor and delivery digest are persisted. Membership is
+read again on demand, without an idle poll or a membership cache. The stack block
+stays outside the pinned-knowledge text budget so a large plan cannot truncate
+its JSON or silently remove members.
+
+Web, Electron, hosted mobile and Capacitor use this backend path. Extension-only
+VS Code has no server knowledge injection. Compaction clears the delivery cursor
+before resolving the session again, so a failed restoration remains pending for
+the next ordinary send.
 
 ## Three moments, two deliveries
 

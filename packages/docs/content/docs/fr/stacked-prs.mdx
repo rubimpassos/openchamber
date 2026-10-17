@@ -1,0 +1,56 @@
+---
+title: Pull requests empilées
+description: Visualise, construis et fusionne une chaîne de pull requests qui s'appuient les unes sur les autres.
+---
+
+# Pull requests empilées
+
+Une pile (stack) est une chaîne de pull requests où chacune s'appuie sur celle du dessous : la branche de base de la deuxième PR est la branche de la première, et ainsi de suite. Découper un gros changement de cette façon garde chaque PR assez petite pour être relue. OpenChamber affiche la pile entière partout où une de ses PR apparaît et t'aide à garder la chaîne en ordre.
+
+Les piles fonctionnent avec GitHub. Quand GitHub connaît lui-même la pile (ses pull requests empilées natives), OpenChamber lit la pile de GitHub. Sinon, il retrouve la chaîne à partir des branches de base des PR, ce qui couvre aussi les forks et GitHub Enterprise Server.
+
+## Voir une pile
+
+Ouvre une pull request d'une pile dans le tableau [Issues et PR](/fr/issues-and-prs/), dans la vue pull request ou dans la vue **Git**. Son aperçu contient une section **Pull request stack** qui liste toutes les PR de bas en haut. Chaque ligne indique l'état de la PR, ses checks et si elle a des conflits, et repère celle que tu regardes. Une ligne illisible le dit au lieu d'afficher une couleur.
+
+Dans la liste du tableau, une PR empilée porte un petit badge avec sa place dans la pile, comme **2/3**. Clique sur une ligne de la pile pour ouvrir cette PR.
+
+Une ligne peut aussi t'avertir :
+
+- **Behind base by N commits** : la PR du dessous a changé, celle-ci a donc besoin d'un restack.
+- **Base was merged. Retarget to main.** : la PR du dessous a été fusionnée, et celle-ci pointe toujours vers son ancienne branche.
+- **Still carries the commits of merged #N** : la PR du dessous a été fusionnée en squash dans le tronc, et celle-ci contient encore ses anciens commits.
+
+## Ouvrir une PR au-dessus d'une autre
+
+1. Récupère (checkout) la branche de la nouvelle PR, avec la branche de la PR du haut comme point de départ.
+2. Dans la section de la pile, clique sur **Open stacked PR on top**, ou choisis la branche de la PR du haut comme base dans le formulaire de création de la vue **Git**.
+3. Le formulaire indique **Stacked on #N**. Écris le titre et la description, puis crée la PR.
+
+Sur GitHub.com, OpenChamber enregistre aussi la nouvelle PR dans la pile propre à GitHub. Si GitHub refuse (un fork, un serveur plus ancien), la PR est quand même créée et la pile s'affiche toujours.
+
+## Restack après un changement plus bas
+
+Quand une PR du bas de la pile reçoit de nouveaux commits, les PR au-dessus sont périmées. Clique sur **Fetch and restack**. OpenChamber fait un fetch du dépôt distant, rebase chaque branche sur celle du dessous dans l'ordre, puis pousse les branches qui ont bougé. Le push est refusé si quelqu'un d'autre a poussé sur une branche entre-temps, donc aucun travail n'est écrasé.
+
+Seuls les commits propres à chaque branche bougent. Après une fusion en squash plus bas, les anciens commits de la PR fusionnée sont laissés de côté.
+
+### Quand un restack rencontre un conflit
+
+Le restack s'arrête sur la PR qui est en conflit. Les branches en dessous restent restackées ; celles au-dessus attendent. La suite dépend de **Paramètres → Intégrations → GitHub → Restack conflicts** :
+
+- **Pause and let me choose** (par défaut) : résous le conflit dans le dossier indiqué par la section de la pile, indexe (stage) les fichiers et clique sur **Continue**. **Abort** remet cette branche où elle était et saute le reste. **Ask the session to resolve** confie le conflit à la session dans laquelle tu es.
+- **Let the session resolve it** : le conflit va directement à la session. Quand son tour se termine sans rien de non résolu, le restack reprend tout seul.
+
+## Fusionner une pile
+
+Fusionne de bas en haut. La section de la pile propose **Merge bottom PR #N** uniquement pour la PR ouverte la plus basse, avec ta méthode de merge habituelle. Une fois fusionnée, la PR suivante passe sur le tronc, et un **Fetch and restack** en retire les commits déjà fusionnés. Fusionne ensuite la suivante.
+
+## Travailler sur toute une pile dans une session
+
+- **Attach whole stack** dans la section de la pile joint au champ de message le diff, les checks et les commentaires de chaque PR, avec un résumé de l'ordre et des branches. Si une PR est illisible, les autres sont jointes quand même et on te dit laquelle a échoué.
+- Dans la liste **Linked** d'une session, active **Follow whole stack** pour une PR liée. La session suit alors la pile au fil de ses changements : nouvelles PR au-dessus, fusions et changements de cible apparaissent sans avoir à lier à nouveau.
+
+## Où ça fonctionne
+
+Les piles fonctionnent dans l'app web, l'app de bureau et les apps mobiles. L'extension VS Code n'affiche pas les piles.

@@ -78,6 +78,22 @@ export const createContextObligatoryRuntime = ({
     const stored = { metadata: await readSessionMetadata(sessionId) };
     const state = readContextState(stored);
 
+    const recent = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
+      directory,
+      query: { limit: String(MESSAGE_FETCH_LIMIT) },
+    });
+    // v2 pages messages newest first; a finished compaction has its own role.
+    const recentMessages = Array.isArray(recent?.data) ? recent.data : [];
+    const summary = recentMessages.find((message) => message?.type === 'compaction' && message?.status === 'completed');
+    if (!summary?.id) return;
+    if (state.openchamber.context_obligatory_last_compaction_message_id === summary.id) return;
+
+    // Invalidate before attempting restoration. A failed read or synthetic send
+    // must leave the next ordinary turn able to restore the context too.
+    if (sessionKnowledgeRuntime) {
+      await sessionKnowledgeRuntime.recordDelivered(sessionId, directory, '');
+    }
+
     /**
      * Project knowledge rides along with the pinned messages. Compaction takes
      * both away, and both are restored for the same reason, so they travel as
@@ -86,31 +102,11 @@ export const createContextObligatoryRuntime = ({
      */
     const knowledge = sessionKnowledgeRuntime
       ? await sessionKnowledgeRuntime
-        .resolvePending(
-          directory,
-          // Compaction removed the previously delivered block, so its stored
-          // signature is no longer evidence that the session still carries it.
-          '',
-          sessionKnowledgeRuntime.readPins(stored),
-        )
+        .resolvePendingForSession(sessionId, directory, { force: true })
         .catch(() => ({ text: '', signature: '' }))
       : { text: '', signature: '' };
 
     if (state.messages.length === 0 && !knowledge.text) return;
-
-    const recent = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
-      directory,
-      query: { limit: String(MESSAGE_FETCH_LIMIT) },
-    });
-    // v2 pages messages as `{ data, cursor }`, newest first, and a compaction
-    // is its own message role rather than an assistant message flagged
-    // `summary`.
-    const recentMessages = Array.isArray(recent?.data) ? recent.data : [];
-    if (recentMessages.length === 0) return;
-    const summary = recentMessages.find((message) => message?.type === 'compaction' && message?.status === 'completed');
-    // A v2 compaction message has only `time.created`; `status` says it finished.
-    if (!summary?.id) return;
-    if (state.openchamber.context_obligatory_last_compaction_message_id === summary.id) return;
 
     const fetched = await Promise.allSettled(state.messages.map(async (pinned) => {
       const message = await openCodeFetch(

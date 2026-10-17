@@ -35,6 +35,20 @@ afterEach(async () => {
 });
 
 describe('source-control mutation storage', () => {
+  it.each([
+    { ok: true, registered: true, nativeNumber: 12 },
+    { ok: true, registered: false, nativeNumber: null },
+    { ok: true, merged: true, status: 'merged', retargeted: 8 },
+    { ok: true, merged: false, status: 'pending', retargeted: null },
+    { ok: true, merged: false, status: 'enqueued', retargeted: null },
+  ])('preserves compact stack results across restart: %j', async (result) => {
+    const { filePath, store } = await makeStore();
+    const claim = claimFor('stack');
+    await store.claim(claim);
+    await store.complete(claim.key, claim.inputDigest, { state: 'succeeded', result });
+    expect((await createMutationStore({ filePath }).read('stack')).result).toEqual(result);
+  });
+
   it('claims once across processes and preserves sibling claim and completion writes', async () => {
     const { filePath, store } = await makeStore();
     const pair = await Promise.all([storageProcess('mutation', filePath), storageProcess('mutation', filePath)]);

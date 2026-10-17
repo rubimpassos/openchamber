@@ -1,0 +1,94 @@
+---
+title: PR-fixlus
+description: Laat een sessie een pull request blijven fixen tot CI groen is en de review klaar is.
+---
+
+# PR-fixlus
+
+De fixlus houdt een sessie aan het werk op één pull request tot die klaar is om te mergen. OpenChamber volgt de checks en de review van de PR. Faalt CI, dan krijgt de sessie de mislukte checks met hun stappen, annotaties en logregels. Als iemand reviewt of reageert, krijgt de sessie die feedback, doet de wijziging en antwoordt op de PR. De lus draait op uw OpenChamber-server en gaat dus door als de app dicht is.
+
+Hij eindigt als de PR klaar is: CI is groen, geen reviewthread staat open en niemand wacht op gevraagde wijzigingen. U krijgt dan een melding, en ook als de lus om een andere reden stopt.
+
+## De lus starten
+
+1. Open de sessie die het werk moet doen.
+2. Zoek de pull request op het bord [Issues en PR's](/nl/issues-and-prs/), in de pull-requestweergave of in de **Linked**-lijst van de sessie, en kies **Start fix loop**.
+3. Controleer de instellingen in het dialoogvenster en klik op **Start fix loop**.
+
+De lus staat bovenaan het berichtenveld van de sessie: de PR, wat de lus doet, het aantal iteraties en de CI-status. Daar kunt u de instellingen wijzigen, de PR op het bord openen of de lus met **Stop** beëindigen.
+
+## Wat de sessie krijgt
+
+- **Na een push** wacht de lus op CI voor de nieuwe commit. Faalt die, dan krijgt de sessie de mislukte checks één keer per commit, nooit dezelfde fout twee keer.
+- **Bij elke review, reviewopmerking of nieuwe opmerking** die volgens uw instellingen meetelt, krijgt de sessie de tekst en een link. De sessie wordt gevraagd op de PR te antwoorden en de threads die ze heeft opgelost af te sluiten. Om te antwoorden en threads af te sluiten heeft de sessie eigen, geauthenticeerde GitHub-tools nodig. Het account van de lus dient alleen om de PR te lezen.
+
+Is de sessie bezig, dan wacht het bericht in haar wachtrij en gaat het weg als de beurt eindigt. Is GitHub onbereikbaar, dan houdt de lus vast aan wat hij wist en meldt dat hij niet kon controleren. Een mislukte check leest hij nooit als groen.
+
+## Instellingen
+
+Standaardwaarden staan onder **Instellingen → Integraties → GitHub → Fix loop**, en elke lus kan ze wijzigen.
+
+- **Maximum iterations**: hoe vaak de lus werk naar de sessie mag sturen (standaard 10).
+- **Token budget**: stopt zodra de sessie sinds de start van de lus zoveel tokens heeft gebruikt. Leeg betekent geen budget. Het budget wordt na elke beurt gecontroleerd, dus een beurt kan er overheen gaan.
+- **Respond to**: **CI and reviews**, **CI only** of **Reviews only**.
+- **Ignore my feedback**: slaat opmerkingen over van het GitHub-account waarmee de lus de PR leest. In de automatische modus antwoordt de sessie met haar eigen GitHub-account, en wijkt dat af van het leesaccount, dan voeg je het toe aan **Blocked authors**. In de goedkeuringsmodus antwoordt de server met het GitHub-account dat aan de loop is gebonden, en de worker heeft geen GitHub-account.
+- **Ignore bots**: slaat opmerkingen van bots over.
+- **Allowed authors** en **Blocked authors**: GitHub-logins, gescheiden door komma's. Met een lijst met toegestane auteurs tellen alleen die mensen mee.
+- **Only comments that mention this text**: telt een opmerking alleen mee als die de vermeldingstekst bevat (standaard `@openchamber`).
+- **Push changes**: **Push automatically** of **Wait for my approval**. De automatische modus behoudt de eigen GitHub-werkwijze van de sessie. De goedkeuringsmodus voert de fixes uit in een beperkte worker en heeft een eigen installatie nodig.
+
+## Goedkeuringsmodus
+
+Met **Wait for my approval** pusht de sessie niet. Een beperkte worker repareert de PR in een geïsoleerde ruimte en er wordt niets op GitHub gewijzigd voordat jij de exacte commit goedkeurt. De server blijft de PR ondertussen van GitHub lezen.
+
+### De worker instellen
+
+1. Zet geïsoleerde ruimtes aan en stel er een plek voor in. De fixloop zet dit nooit voor je aan.
+2. Zoek in het startvenster **Restricted worker**. Kies waar de worker draait en welk model hij gebruikt, en klik op **Prepare new worker**. Dat maakt een verse ruimte die alleen deze worker gebruikt. Een bestaande ruimte kun je niet hergebruiken of omzetten.
+3. Geef het model van de worker toegang in het toegangsvenster. Alleen het gekozen model krijgt toegang. De gatekeeper bewaart de modeltokens en de worker ziet ze nooit. Het modelgebruik gaat van je quotum af.
+4. De head-repository van de PR, ook een fork, heeft een beheerde Git-pushbestemming nodig voor precies die repository. Ontbreekt die, dan verwijst het venster je naar de Git-instellingen.
+5. Zodra het venster meldt dat de worker klaar is, klik je op **Start fix loop**.
+
+De worker bereikt GitHub noch een ander netwerk, alleen het model. Er is geen terugval op een push van het systeem of de omgeving. De loop start niet als de worker niet klaar is of de toegang ontbreekt. Een model of eigen endpoint dat niet is beoordeeld voor beperkte workers wordt geweigerd en nooit door een ander vervangen.
+
+**Forget worker selection** haalt alleen de selectie weg. De ruimte en de bestanden blijven en beheer je in de geïsoleerde ruimtes.
+
+### Bekijken en publiceren
+
+Als een beurt eindigt, exporteert de server de commit van de worker en bewaart die als bewijs met de exacte repository, branch en verwachte remote head. De loop toont dan **Review publication**. Open **Inspect exact changes**, controleer ze en klik op **Approve and publish commit**. De gewone Git-pushknop keurt geen bewijs goed. Publicatie wordt geweigerd als de PR is gesloten of de remote head, branch of repository is veranderd. Bewijs en werk blijven dan staan zodat je ze kunt bekijken.
+
+### Antwoorden na publicatie
+
+Het controlevenster toont **Automatic GitHub replies**: de gegenereerde antwoorden en welke threads worden opgelost. Het is tekst van de worker, dus lees de geciteerde tekst voor je goedkeurt. Na publicatie van de commit plaatst de server de antwoorden en lost hij de threads op met zijn eigen GitHub-schrijftoegang, die niet van de worker komt. Dit gebeurt ook als alle clients gesloten zijn. Mislukt een schrijfactie, dan toont de loop dat en meldt hij de PR niet als klaar.
+
+### Stoppen, hervatten en budget
+
+**Stop** stopt de worker en bewaart de code en het bewijs. **Resume fix loop** controleert de worker opnieuw en start hem weer, en pas daarna kan het bewijs van een gestopte loop gepubliceerd worden. Een afgeronde loop vergeten verwijdert zijn ruimte niet.
+
+De uitvoeringsmodus ligt per loop vast. Rond openstaande publicaties en GitHub-antwoorden af voordat je de loop stopt en een andere modus start. Instellingen zijn ook vergrendeld zolang een bewijs of GitHub-antwoorden in behandeling zijn.
+
+Het tokenbudget wordt na elke beurt gecontroleerd, dus een beurt kan er overheen gaan. Is het bereikt, dan start er geen nieuwe modelbeurt meer, maar een export, publicatie en antwoorden in behandeling kunnen nog afronden. Daarna toont de loop de status voor het tokenbudget.
+
+### Waar de goedkeuringsmodus werkt
+
+De server draait de loop ook met alle clients gesloten. De webapp, de desktopapp en de mobiele apps delen die server. De VS Code-extensie biedt de goedkeuringsmodus niet aan.
+
+## Wanneer de lus stopt
+
+| Status | Reden |
+| --- | --- |
+| PR is klaar | CI groen, geen openstaande threads, geen gevraagde wijzigingen |
+| PR gesloten | De PR is gemerged of gesloten |
+| Iteratielimiet | De lus heeft zo vaak werk gestuurd als is toegestaan |
+| Tokenbudget | De sessie heeft het budget opgebruikt |
+| Gestopt | U hebt hem gestopt of de sessie is verwijderd |
+
+Een gestopte lus blijft bovenaan het berichtenveld staan tot u hem sluit. In de goedkeuringsmodus blijven bij een bewijs of GitHub-antwoorden in behandeling het werk en de lus bewaard; gebruik **Resume fix loop** om de bestaande lus voort te zetten. Opnieuw starten op dezelfde PR begint pas een nieuwe lus als er geen publicatie of antwoorden meer in behandeling zijn.
+
+## Stacks
+
+Elke pull request heeft zijn eigen lus. Start in een [stack](/nl/stacked-prs/) een lus op elke PR die gefixt moet worden; een fout in één PR houdt de andere niet op.
+
+## Waar het werkt
+
+De lus draait op de OpenChamber-server achter de webapp, de desktopapp en de mobiele apps. De VS Code-extensie biedt hem niet aan.

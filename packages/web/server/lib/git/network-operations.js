@@ -2543,6 +2543,30 @@ export function createNetworkOperations({
 
   return Object.freeze({
     plan,
+    // Server-only approval flow. Planning and execution both pin the object; no HTTP route exposes this method.
+    async publishApprovedCommit(input, expectedCommit) {
+      const provenance = await contributorProvenance?.read(input.directory);
+      let destinationSelectionId;
+      if (provenance?.provenance?.kind === 'contributor-fork') {
+        const selection = await planner.issueContributorDestination({
+          directory: input.directory, repositoryId: input.repositoryId, bindingRevision: input.bindingRevision,
+          configRevision: input.configRevision, provenanceRevision: provenance.revision,
+          remote: input.remote, sourceRef: input.sourceRef, destinationRef: input.destinationRef, transportMode: input.transportMode,
+        });
+        destinationSelectionId = selection.selectionId;
+      }
+      const request = { ...input };
+      if (destinationSelectionId) request.destinationSelectionId = destinationSelectionId;
+      const plans = await planner.planNetworkOperation(request);
+      if (plans.internalPlan.transportMode !== 'managed' || plans.internalPlan.sourceSha !== expectedCommit
+        || plans.publicPlan.target.operation !== 'push' || !plans.publicPlan.target.forceWithLease) {
+        throw operationError('APPROVED_COMMIT_CHANGED', 'The approved commit or publication authority changed', 409);
+      }
+      await registerWithAudit(plans);
+      const result = await executeOperation(plans.publicPlan.operationId, Date.now() + timeoutMs);
+      if (result.state !== 'succeeded') throw operationError(result.error?.code ?? 'PUBLICATION_FAILED', 'Approved publication failed; the receipt and local work are retained', 409);
+      return result;
+    },
     issueContributorDestination: planner.issueContributorDestination,
     async transferContributorHead({ directory, sourceRequest, source, credentialId, destinationRef }) {
       const operationId = `git_${crypto.randomUUID()}`;

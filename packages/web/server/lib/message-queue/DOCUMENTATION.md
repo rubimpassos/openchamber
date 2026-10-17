@@ -95,6 +95,14 @@ send. Bulk take returns only ordinary items and leaves scheduled items queued.
 Disable, delete and retarget use `cancelScheduledTask`. Existing composer
 persistence, retries, directory query and delivery gates remain unchanged.
 
+## Server-origin items
+
+The PR fix loop (`../pr-fix-loop/`) and the stacked-PR restack (`../pr-stacks/`) queue messages themselves, with `origin: { kind: 'pr-fix-loop' | 'pr-stack', id }`. Like scheduled items they may omit the model and then keep the session's own selection. Only the server sets `origin`; a client item that names one is refused (400). They are delivered, edited and removed like any other item; the fix loop reads the queue to know its message is still waiting.
+
+Every `pr-fix-loop` item requires `assertFixLoopHostDispatch` before any model switch, synthetic message or prompt. The owning runtime loads the persisted loop on demand and accepts only the same active auto loop, host session and directory. Legacy approval items therefore cannot slip through when this queue starts before the fix-loop runtime. A missing service or refused authority retains the item with the normal visible retry error. Work already dispatched before the guard existed cannot be retroactively isolated. PR-stack and ordinary items retain their existing dispatch rules.
+
+Automatic loops also need the owning runtime's persisted `feedbackTrustVersion: 1` admission marker. Old queued automatic prompts without that evidence stay queued with an error, including when this queue starts before the fix-loop runtime. Removing such an item lets the loop perform a fresh permission-checked feedback read.
+
 ## Queue file
 
 `<data-dir>/message-queue.json` (`OPENCHAMBER_DATA_DIR` or

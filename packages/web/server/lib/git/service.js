@@ -1215,6 +1215,11 @@ const runGitCommandWithoutEditor = async (cwd, args) => {
   }
 };
 
+/** A Git command that may continue a rebase; answers `{ success, stdout, stderr, message }`. */
+export const runGitCommandNoEditor = async (cwd, args) => runGitCommand(cwd, args, {
+  env: { ...(await buildGitEnv(cwd)), GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' },
+});
+
 const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
   const result = await runGitCommand(cwd, args);
   if (!result.success) {

@@ -270,6 +270,80 @@ hydration, scoped controls and durable guards. These tests do not prove behavior
 after browser storage is explicitly cleared or a webview is replaced with a new
 storage context.
 
+## Pull request stack contracts
+
+`lib/api/pull-stacks.ts` owns the parsed GitHub stack and local restack run
+contracts. `SourceControlAPI` exposes the stack read, register, retarget, merge,
+and local run lifecycle operations. Web, Electron, hosted mobile and Capacitor
+share `packages/web/src/api/pull-stacks.ts`; the VS Code adapter explicitly
+rejects each operation. Provider operations carry the complete bound read
+context in the query and exact PR mutation fields in JSON. Local runs use the
+directory in the start body or GET query, and the run ID for control requests.
+
+`restackState.ts` orders run snapshots and determines which changed branches can
+be published. `publishRestack.ts` owns sequential branch publication and partial
+failure reporting. The branch push builder accepts an explicit
+`forceWithLease.expectedRemoteSha`; ordinary pushes remain unchanged. The
+runner rechecks the repository, binding revision, config revision, and remote
+before executing its normal durable network-operation plan.
+
+Captured leases are in-memory state of the mounted stack control. A restored
+run never grants permission to overwrite a newer remote head. If its original
+GitHub head cannot be proven, publication requires inspection and reports the
+blocked branch. The local run and successful transfers remain valid after a
+sibling branch fails. Unknown transfers retain the existing recovery guard.
+
+The focused stack tests cover page-local inference, metadata round-trips,
+unknown and malformed results, request shapes, run ordering, captured leases,
+restored-run safety, and partial context attachment. They do not exercise a
+real GitHub repository, local rebase conflicts, or browser paint.
+
+## PR fix-loop publication review
+
+`prFixLoop.ts` and `prFixLoopApi.ts` parse the host loop, preparation and receipt
+contracts. `components/session/pr-fix-loop` composes existing Spaces setup,
+model selection, access grants and Git configuration with the loop dialog.
+Only preparations returned by the host for the original host session and
+directory are offered. General spaces cannot be selected as approval workers.
+
+The review keeps the selected receipt immutable while the projection updates.
+It shows the full commit, retained host ref, local repository identity, GitHub
+head repository identity, destination ref and expected remote head. A changed
+receipt disables the open review. Existing range-file and range-diff reads compare
+the expected head with the exact receipt commit and set `includeWorkingTree` to
+false. They never compare a mutable local branch or the current checkout.
+
+The host's nullable `review` is parsed at the same boundary. Only omission from
+older records defaults to null. Malformed action variants, duplicate targets,
+out-of-bounds bodies or inconsistent operation counts reject that entity while
+complete sibling loops remain usable. A thread reply with resolution counts as
+2 host operations. The UI never replaces malformed authority with empty work.
+
+Approval inspection retains proposed replies with the selected receipt. It shows
+each original target kind and ID, exact quoted plain-text body, and the thread's
+resolve-or-leave-open choice. Generated text is never executed or rendered as
+Markdown. A changed proposal also disables the open inspection. Submission checks
+the current projection again before sending the receipt ID.
+
+The loop row announces authoritative review state and completed/total operations,
+and displays the retained host blocker as plain text. Existing configuration
+controls and form submission stay locked while a receipt or pending/blocked
+review job exists. Host publication triggers the automatic review writes; there
+is no separate posting button or client-supplied action payload.
+
+The publication action calls the host approval route with the receipt ID only.
+Host admission, managed destination selection, head checks and leased publication
+are owned by `packages/web/server/lib/pr-fix-loop`. A fork's head repository is
+the publication destination even when the primary remote reads the upstream PR.
+The UI directs missing transport authority to existing repository configuration
+and Git identity settings; it saves no credential or binding automatically.
+
+Web, Electron, hosted mobile and Capacitor share this flow and runtime transport.
+VS Code keeps the entry point absent. Unit and DOM tests cover parsing, scoped
+partial failure, exact request bodies, immutable review, refusal retention and
+opt-in setup. Real Docker, GitHub publication, browser, mobile and RTL checks
+remain integration validation; these tests do not establish those guarantees.
+
 ## Tests
 
 `repository-binding.test.ts` covers deferred failure, successful empty, a read

@@ -1,0 +1,56 @@
+---
+title: Pull requests apilados
+description: Mira, crea y fusiona una cadena de pull requests que se apoyan unas en otras.
+---
+
+# Pull requests apilados
+
+Un stack es una cadena de pull requests en la que cada uno se apoya en el de abajo: la rama base del segundo PR es la rama del primero, y así sucesivamente. Dividir un cambio grande de esta forma mantiene cada PR lo bastante pequeño para revisarlo. OpenChamber muestra el stack completo allí donde aparece un PR de él y te ayuda a mantener la cadena en orden.
+
+Los stacks funcionan con GitHub. Cuando GitHub conoce el stack (sus pull requests apilados nativos), OpenChamber lee el stack de GitHub. Si no, encuentra la cadena a partir de las ramas base de los PRs, lo que también cubre forks y GitHub Enterprise Server.
+
+## Ver un stack
+
+Abre un pull request de un stack en el tablero de [Issues y PRs](/es/issues-and-prs/), en la vista de pull request o en la vista **Git**. Su vista previa tiene una sección **Pull request stack** que lista todos los PRs de abajo arriba. Cada fila muestra el estado del PR, sus checks y si tiene conflictos, y marca el que estás viendo. Una fila que no se puede leer lo indica en lugar de mostrar un color.
+
+En la lista del tablero, un PR apilado lleva una pequeña insignia con su lugar en el stack, como **2/3**. Haz clic en una fila del stack para abrir ese PR.
+
+Una fila también puede avisarte:
+
+- **Behind base by N commits**: el PR de abajo cambió, así que este necesita un restack.
+- **Base was merged. Retarget to main.**: el PR de abajo se fusionó y este todavía apunta a su rama anterior.
+- **Still carries the commits of merged #N**: el PR de abajo se fusionó con squash en el trunk y este aún contiene sus commits antiguos.
+
+## Abrir un PR encima de otro
+
+1. Haz checkout de la rama del nuevo PR, con la rama del PR superior como punto de partida.
+2. En la sección del stack, haz clic en **Open stacked PR on top**, o elige la rama del PR superior como base en el formulario de creación de la vista **Git**.
+3. El formulario dice **Stacked on #N**. Escribe el título y la descripción y crea el PR.
+
+En GitHub.com, OpenChamber también registra el nuevo PR en el stack propio de GitHub. Si GitHub lo rechaza (un fork, un servidor antiguo), el PR se crea igualmente y el stack se sigue mostrando.
+
+## Restack tras un cambio más abajo
+
+Cuando un PR bajo del stack recibe commits nuevos, los PRs de encima quedan desactualizados. Haz clic en **Fetch and restack**. OpenChamber hace fetch del remoto, rebasa cada rama sobre la de abajo en orden y luego hace push de las ramas que se movieron. El push se rechaza si alguien más hizo push a una rama mientras tanto, así no se sobrescribe trabajo.
+
+Solo se mueven los commits propios de cada rama. Tras un squash merge más abajo, los commits antiguos del PR fusionado se dejan fuera.
+
+### Cuando un restack encuentra un conflicto
+
+El restack se detiene en el PR que tiene el conflicto. Las ramas de abajo quedan con restack hecho; las de arriba esperan. Lo que pasa después depende de **Settings → Integrations → GitHub → Restack conflicts**:
+
+- **Pause and let me choose** (el valor por defecto): resuelve el conflicto en la carpeta que indica la sección del stack, haz stage de los archivos y haz clic en **Continue**. **Abort** devuelve esa rama a donde estaba y omite el resto. **Ask the session to resolve** pasa el conflicto a la sesión en la que estás.
+- **Let the session resolve it**: el conflicto va directo a la sesión. Cuando su turno termina sin nada sin resolver, el restack continúa solo.
+
+## Fusionar un stack
+
+Fusiona de abajo arriba. La sección del stack ofrece **Merge bottom PR #N** solo para el PR abierto más bajo, con tu método de merge habitual. Tras fusionarlo, el siguiente PR pasa al trunk, y un **Fetch and restack** limpia de él los commits ya fusionados. Después fusiona el siguiente.
+
+## Trabajar en un stack completo en una sesión
+
+- **Attach whole stack** en la sección del stack adjunta al cuadro de mensaje el diff, los checks y los comentarios de cada PR, con un resumen del orden y las ramas. Si un PR no se puede leer, los demás se adjuntan igualmente y se te dice cuál falló.
+- En la lista **Linked** de una sesión, activa **Follow whole stack** en un PR vinculado. La sesión sigue entonces el stack mientras cambia: los PRs nuevos encima, las fusiones y los cambios de destino aparecen sin vincular de nuevo.
+
+## Dónde funciona
+
+Los stacks funcionan en la app web, la app de escritorio y las apps móviles. La extensión de VS Code no muestra stacks.

@@ -5,6 +5,7 @@ import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
+import { normalizeConfig as normalizeFixLoopConfig } from '../pr-fix-loop/runtime.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -529,6 +530,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (Number.isInteger(candidate.sessionGoalMaxAutoTurns) && candidate.sessionGoalMaxAutoTurns >= 1 && candidate.sessionGoalMaxAutoTurns <= 200) {
       result.sessionGoalMaxAutoTurns = candidate.sessionGoalMaxAutoTurns;
+    }
+    if (candidate.prStackConflictMode === 'pause' || candidate.prStackConflictMode === 'agent') {
+      result.prStackConflictMode = candidate.prStackConflictMode;
+    }
+    if (candidate.prFixLoopDefaults) {
+      result.prFixLoopDefaults = normalizeFixLoopConfig(candidate.prFixLoopDefaults);
     }
     if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
       result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;

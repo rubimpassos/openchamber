@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ja.settings';
+import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -9,6 +10,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -79,6 +81,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} サブエージェントを使用',
   'sessions.sidebar.projectAction.active': 'プロジェクトアクション実行中',
   ...settingsDict,
+  ...prStacksI18n.ja,
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber はここで Git 転送の状態を保存できません。サイトのストレージを許可して再読み込みしてください。それまで push と pull は一時停止します。',
   'gitView.operation.recovery.capacity': '未完了の Git 転送が多すぎます。新しく始める前に下のものを確認してください。',
@@ -149,6 +152,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.ja,
   ...surfacePanelI18n.ja,
   ...browserServerPanelI18n.ja,
+  ...prFixLoopI18n.ja,
   ...fileArtifactsI18n.ja,
   ...htmlRenderI18n.ja,
   ...usageStatsI18n.ja,

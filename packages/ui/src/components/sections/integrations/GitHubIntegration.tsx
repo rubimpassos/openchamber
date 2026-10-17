@@ -2,10 +2,12 @@ import React from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Icon } from '@/components/icon/Icon';
 import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings';
+import { GitHubAutomationSettings } from '@/components/sections/openchamber/GitHubAutomationSettings';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
 import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { useUIStore } from '@/stores/useUIStore';
 
 /**
  * The GitHub row of Settings → Integrations → Built-in integrations: a
@@ -20,6 +22,12 @@ export const GitHubIntegration: React.FC = () => {
   const isLoading = entry?.isLoading ?? false;
   const hasChecked = entry?.hasChecked ?? false;
   const [open, setOpen] = React.useState(false);
+  const openRequested = useUIStore((state) => state.settingsGitHubOpenRequested);
+  React.useEffect(() => {
+    if (!openRequested) return;
+    setOpen(true);
+    useUIStore.setState({ settingsGitHubOpenRequested: false });
+  }, [openRequested]);
 
   const connected = status?.connected === true;
   const accounts = status?.accounts ?? [];
@@ -74,7 +82,10 @@ export const GitHubIntegration: React.FC = () => {
           />
         </CollapsibleTrigger>
         <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
-          <GitHubSettings embedded />
+          <div className="space-y-3">
+            <GitHubSettings embedded />
+            {!(isLoading && !hasChecked) && <GitHubAutomationSettings />}
+          </div>
         </CollapsibleContent>
       </div>
     </Collapsible>

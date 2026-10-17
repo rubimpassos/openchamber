@@ -111,6 +111,17 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
+import { createFixLoopRuntime } from './lib/pr-fix-loop/runtime.js';
+import { createSpaceWorker } from './lib/pr-fix-loop/space-worker.js';
+import { createApprovalPublication } from './lib/pr-fix-loop/publication.js';
+import { createHostGit } from './lib/spaces/host-git.js';
+import { runCommand as runSpaceCommand } from './lib/spaces/run-command.js';
+import { unwrapOpenCodeResponse } from './lib/opencode/response-envelope.js';
+import { createTokenSnapshotReader } from './lib/pr-fix-loop/token-usage.js';
+import { createRestackRuntime } from './lib/pr-stacks/restack.js';
+import { isGitHubRateLimited, noteIfGitHubRateLimit, noteGitHubRateLimit } from './lib/github/rate-limit.js';
+import { isGraphqlRateLimitError } from './lib/github/pr-summaries.js';
+import { createSessionActivityProbe } from './lib/opencode/session-activity.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
@@ -149,6 +160,7 @@ import {
   readScanCheckout,
   removeDetachedWorktree,
   resolvePrimaryWorktreeRoot,
+  runGitCommandNoEditor,
 } from './lib/git/service.js';
 import { getLinearAuth } from './lib/linear/auth.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
@@ -1083,6 +1095,7 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   // Pins and the delivered-signature cursor are read from and written to
   // OpenChamber's own store; nothing here talks to OpenCode any more.
   persistSessionMetadata: (sessionID, directory, patch) => persistSessionMetadataPatch(sessionID, patch, { directory }),
+  collectFollowedPullStacks: (directory, session) => featureRoutesRuntime.collectFollowedPullStacks(directory, session),
 });
 
 const contextObligatoryRuntime = createContextObligatoryRuntime({
@@ -1177,10 +1190,106 @@ const messageQueueRuntime = createMessageQueueRuntime({
   onPromptSent: (sessionId) => sessionRuntime.markUserMessageSent(sessionId),
   beforeScheduledTaskSend: (...args) => scheduledTasksRuntime.beforeScheduledTaskSend(...args),
   validateScheduledTaskTarget: (...args) => scheduledTasksRuntime.validateTarget(...args),
+  assertFixLoopHostDispatch: (...args) => prFixLoopRuntime.assertHostDispatch(...args),
   onScheduledTaskResult: (...args) => scheduledTasksRuntime.onScheduledTaskResult(...args),
   dataDir: OPENCHAMBER_DATA_DIR,
 });
 messageQueueRuntime.start();
+
+// Stacked PR restacks and PR fix loops hand work to a session through the
+// queue above, so a busy session gets it when its turn ends.
+const queueServerMessage = (kind, id) => async (sessionId, directory, item) => {
+  await messageQueueRuntime.enqueue(sessionId, directory, { ...item, origin: { kind, id } });
+};
+const prStackRestackRuntime = createRestackRuntime({
+  runGit: runGitCommandNoEditor,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  readConflictMode: async () => ((await readSettingsFromDisk().catch(() => ({})))?.prStackConflictMode === 'agent' ? 'agent' : 'pause'),
+  sendToSession: ({ sessionId, directory, text }) => queueServerMessage('pr-stack', sessionId)(sessionId, directory, {
+    content: 'Stacked PRs: resolve the restack conflict',
+    text,
+  }),
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+});
+const prFixLoopActivity = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+const approvalGit = createHostGit({ runCommand: (_binary, args, options) => runSpaceCommand(resolveGitBinaryForSpawn(), args, options) });
+const approvalGitServices = () => featureRoutesRuntime.fixLoopGitServices();
+const approvalWorker = createSpaceWorker({
+  dataDir: OPENCHAMBER_DATA_DIR, getHost: () => spacesHost, git: approvalGit, gitServices: approvalGitServices,
+  readHostSession: async (sessionId) => {
+    const response = await fetch(buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, ''), {
+      headers: getOpenCodeAuthHeaders(), signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error('The original host session is unavailable');
+    return unwrapOpenCodeResponse(await response.json());
+  },
+});
+const prFixLoopRuntime = createFixLoopRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  getOctokit: async (accountId) => {
+    const github = await import('./lib/github/index.js');
+    if (!accountId) return github.getOctokitOrNull();
+    return (await github.getOctokitForAccountId(accountId))?.octokit ?? null;
+  },
+  readFeedback: async (input) => (await import('./lib/github/pr-feedback.js')).readPullFeedback(input),
+  readAuthorPermission: async (input) => (await import('./lib/github/pr-feedback.js')).readFeedbackAuthorPermission(input),
+  readFailedChecks: async (input) => (await import('./lib/github/pr-feedback.js')).readFailedChecks(input),
+  isRateLimited: () => isGitHubRateLimited(),
+  noteRateLimit: (error) => {
+    if (isGraphqlRateLimitError(error)) {
+      noteGitHubRateLimit(error);
+      return true;
+    }
+    return noteIfGitHubRateLimit(error);
+  },
+  isSessionWorking: async (sessionId) => {
+    const statuses = await prFixLoopActivity.fetchActiveSessionStatuses();
+    if (!statuses) return null;
+    if (statuses[sessionId]) return true;
+    return prFixLoopActivity.hasWorkingChildren(sessionId, statuses);
+  },
+  hasQueuedItem: async (sessionId, loopId) => {
+    await messageQueueRuntime.load();
+    return (messageQueueRuntime.sessionSnapshot(sessionId)?.items ?? [])
+      .some((item) => item.origin?.kind === 'pr-fix-loop' && item.origin.id === loopId);
+  },
+  enqueue: async (sessionId, directory, item) => { await messageQueueRuntime.enqueue(sessionId, directory, item); },
+  readTokenSnapshot: createTokenSnapshotReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
+  workerRuntime: approvalWorker,
+  publication: createApprovalPublication({ dataDir: OPENCHAMBER_DATA_DIR, git: approvalGit, gitServices: approvalGitServices }),
+  applyReviewOperation: (input) => approvalGitServices().applyReviewOperation(input),
+  notify: async (loop) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) return;
+    const titles = {
+      ready: 'Pull request is ready',
+      closed: 'Pull request closed',
+      limitReached: 'Fix loop reached its iteration limit',
+      budgetReached: 'Fix loop reached its token budget',
+      error: 'Fix loop stopped',
+    };
+    const title = titles[loop.status] ?? 'Fix loop finished';
+    const notificationPayload = {
+      title,
+      body: [`#${loop.number} ${loop.title}`.trim(), loop.statusReason].filter(Boolean).join(' · ').slice(0, 240),
+      tag: `pr-fix-loop-${loop.id}`,
+      kind: 'goal',
+      sessionId: loop.sessionId,
+      directory: loop.directory,
+    };
+    const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+    broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+    void notificationTriggerRuntime.sendGoalSettlePush({
+      sessionId: loop.sessionId,
+      directory: loop.directory,
+      status: loop.status === 'ready' ? 'complete' : 'blocked',
+      title,
+      body: notificationPayload.body,
+    }).catch((error) => console.warn('[pr-fix-loop] push fanout failed:', error?.message || error));
+  },
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+  readDefaults: async () => (await readSettingsFromDisk().catch(() => ({})))?.prFixLoopDefaults ?? {},
+});
 
 // Sessions an agent dispatched with `returnResult` report back to it: their
 // final answer lands in the dispatching session and wakes it.
@@ -1241,6 +1350,10 @@ globalMessageStreamHub.subscribeEvent((event) => {
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWorkRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
+    prFixLoopRuntime.processPayload(payload);
+    if (payload.type === 'session.idle' || (payload.type === 'session.status' && payload.properties?.status?.type === 'idle')) {
+      prStackRestackRuntime.noteSessionIdle(payload.properties?.sessionID);
+    }
     sessionInterruptionRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     linearSessionStatusRuntime.processPayload(payload);
@@ -2054,6 +2167,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   messageQueueRuntime,
+  prFixLoopRuntime,
   dispatchResultsRuntime,
   suggestedTasksRuntime,
   messageSearchRuntime,
@@ -2736,8 +2850,11 @@ async function main(options = {}) {
     permissionAutoAcceptRuntime,
     worktreeBootstrapStore,
     messageQueueRuntime,
+    prStackRestackRuntime,
+    prFixLoopRuntime,
     routingRuntime,
   });
+  void prFixLoopRuntime.start().catch(() => console.warn('[pr-fix-loop] persisted state could not be loaded; loops remain disabled'));
 
   // After bootstrap: the upgrade gate needs the real UI auth controller.
   guestSurfaceRuntime = createGuestSurfaceRuntime({

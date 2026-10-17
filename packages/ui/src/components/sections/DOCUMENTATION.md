@@ -65,6 +65,22 @@ on disk. Once the entity exists, the page switches to the autosave rules above.
 `skills/` follows the same split for supporting files: editing an existing file
 writes when the dialog closes, while a new file is only created on confirm.
 
+## GitHub automation defaults
+
+Settings > Integrations > GitHub includes all PR fix-loop defaults and the
+stack-restack conflict choice. `GitHubAutomationSettings` uses the same
+`PrFixLoopConfigFields` as loop creation and editing. New loops merge
+`prFixLoopDefaults` over the built-in configuration. Existing loops retain
+their own configuration until edited through PATCH. `prStackConflictMode`
+defaults to `pause`; `agent` lets the session resolve restack conflicts.
+
+`GitHubIntegration` composes the account settings and automation sections in the same card. `GitHubSettings` owns only account authentication and CLI fallback. Automation waits for the initial account check to finish.
+
+Both settings use the profile registry and its ordinary autosave feedback.
+Every field has a search anchor; choosing an automation search result opens
+the GitHub card before revealing the field. Web, Electron, hosted mobile, and
+Capacitor expose these controls. VS Code hides them and their search entries.
+
 ## Providers
 
 `providers/` is not an autosave page. Connecting a provider is an action, not a

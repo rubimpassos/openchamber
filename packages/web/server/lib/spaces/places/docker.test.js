@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { createRequire } from 'node:module';
+import vm from 'node:vm';
 
 import { SpaceError } from '../errors.js';
 import { GATEKEEPER_PROGRAM } from '../gatekeeper-channel.js';
@@ -125,6 +127,50 @@ const SPACE_STEPS = [
 ];
 
 const removals = (fake) => changes(fake).filter((line) => /(^| )rm /.test(line));
+
+describe('docker approval purpose', () => {
+  const purpose = 'pr-fix-loop-approval';
+  const protectedProgram = (fake) => {
+    const written = fake.calls.filter((call) => isExec('gatekeeper.cjs.new')(call.args)).at(-1).options.stdin;
+    const module = { exports: {} };
+    vm.runInNewContext(written, { require: createRequire(import.meta.url), module, process, console, Buffer, URL });
+    return module.exports;
+  };
+
+  it('preserves the enforced profile after a host restart, container restart and move to new tools', async () => {
+    // Given a newly created protected space.
+    const fake = createFakeDocker();
+    const place = makePlace(fake);
+    await place.create({ ...SPEC, purpose });
+    expect((await place.list())[0].purpose).toBe(purpose);
+    expect(protectedProgram(fake).setNetwork({ mode: 'open', domains: [] })).not.toBeNull();
+    await place.stop(ID);
+    // When a fresh place instance moves it to a different tools version at start.
+    const source = createRegistryToolsSource({ webVersion: '1.24.2', openCodeVersion: '1.18.31', revision: 'approval-next' });
+    const restarted = makePlace(fake, OWNER, source);
+    await restarted.start(ID);
+    // Then labels and the program rebuilt from them retain the restriction.
+    expect((await restarted.list())[0].purpose).toBe(purpose);
+    expect(await restarted.verify(ID)).toEqual([]);
+    const program = protectedProgram(fake);
+    expect(program.setNetwork({ mode: 'allowlist', domains: [] })).toBeNull();
+    expect(program.setNetwork({ mode: 'open', domains: [] })).not.toBeNull();
+    expect(program.addGrant({ id: 'domain', upstream: 'https://api.github.com' })).not.toBeNull();
+    expect(program.addGrant({ id: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', secret: 'disposable', model: { providerID: 'openai', modelID: 'gpt-4.1' } })).toBeNull();
+  });
+
+  it.each(['space', 'gatekeeper'])('refuses a lost purpose on %s before starting that container', async (role) => {
+    // Given a runtime that drops a requested security label.
+    const fake = createFakeDocker({ alterContainer: (entry) => {
+      if (entry.Config.Labels['openchamber.space.role'] === role) delete entry.Config.Labels['openchamber.space.purpose'];
+      return entry;
+    } });
+    // When creating a protected worker.
+    await expect(makePlace(fake).create({ ...SPEC, purpose })).rejects.toMatchObject({ code: 'space_purpose_immutable' });
+    // Then the defective container never ran.
+    expect(fake.calls.some(({ args }) => args[0] === 'start' && args[1] === `openchamber-space-${ID}-${role}`)).toBe(false);
+  });
+});
 
 describe('docker place: check', () => {
   const placeWith = (runCommand) => placeOn(runCommand, { dockerPath: '/opt/bin/docker' });

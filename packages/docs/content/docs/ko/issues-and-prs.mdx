@@ -63,12 +63,14 @@ Linear 이슈에서는 **Start in**에 세션이 시작될 프로젝트가 표�
 
 크기 옆에는 버튼이 두 개 있습니다. **Changes**는 풀 리퀘스트의 diff를 사이드 패널에 열고, **Walkthrough**는 [변경 워크스루](/ko/walkthrough/)를 엽니다. 앱이 다른 프로젝트에 있으면 먼저 PR의 프로젝트로 전환합니다. 휴대폰에서는 **Changes**가 작업 공간 패널의 **Git** 탭에서 PR을 엽니다. **Walkthrough**는 데스크톱과 웹에서만 쓸 수 있습니다.
 
-하단의 **Merge**는 병합 전에 확인을 묻고 평소 쓰는 병합 방식을 사용합니다. 초안에는 **Ready for review**도 있습니다.
+하단의 **Merge**는 병합 전에 확인을 묻고 평소 쓰는 병합 방식을 사용합니다. 초안에는 **Ready for review**도 있습니다. **Start fix loop**는 병합 준비가 될 때까지 PR을 열려 있는 세션에 맡깁니다. [PR 수정 루프](/ko/pr-fix-loop/)를 참고하세요. 스택에 속한 PR은 전체 체인을 보여 줍니다. [스택된 풀 리퀘스트](/ko/stacked-prs/)를 참고하세요.
 
 열린 이슈나 풀 리퀘스트의 하단에는 **Close issue** 또는 **Close pull request**(GitLab에서는 **Close merge request**)도 있고, 닫힌 항목에는 **Reopen issue** 또는 **Reopen pull request**(**Reopen merge request**)가 있습니다. 되돌릴 수 있는 작업이라 확인을 묻지 않습니다. 병합된 풀 리퀘스트는 닫거나 다시 열 수 없습니다. GitHub에서는 이슈가 완료 상태로 닫힙니다.
 
 ## 관련 항목
 
 - [GitHub 이슈 및 PR](/ko/github/) — GitHub를 연결하고 이슈를 메시지에 첨부하세요
+- [스택된 풀 리퀘스트](/ko/stacked-prs/) — PR 체인을 확인하고, restack하고, 병합하세요
+- [PR 수정 루프](/ko/pr-fix-loop/) — CI가 통과하고 리뷰가 끝날 때까지 세션이 PR을 수정하게 하세요
 - [Worktree 세션](/ko/worktrees/) — worktree 세션이 시작되는 곳
 - [통합 기능](/ko/integrations/) — Linear를 연결하고 팀을 프로젝트에 매핑하세요

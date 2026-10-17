@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 import { SpaceError } from './errors.js';
+import { requireSpacePurpose } from './approval-profile.js';
 
 export const LABEL_MARKER = 'openchamber.space';
 const LABEL_ID = 'openchamber.space.id';
@@ -9,6 +10,7 @@ export const LABEL_OWNER = 'openchamber.space.owner';
 const LABEL_PROJECT = 'openchamber.space.project';
 const LABEL_NAME = 'openchamber.space.name';
 const LABEL_CREATED = 'openchamber.space.created';
+const LABEL_PURPOSE = 'openchamber.space.purpose';
 
 const MARKER_VALUE = 'true';
 
@@ -94,7 +96,7 @@ export function spaceResourceName(spaceId, role, suffix = '') {
   return `${spaceResourcePrefix(spaceId)}${role}-${suffix}`;
 }
 
-export function buildSpaceLabels({ id, role, owner, project, name, created }) {
+export function buildSpaceLabels({ id, role, owner, project, name, created, purpose = 'general' }) {
   if (!ROLES.has(role)) {
     throw new SpaceError('invalid_role', `Unknown space resource role '${role}'`);
   }
@@ -104,7 +106,7 @@ export function buildSpaceLabels({ id, role, owner, project, name, created }) {
   if (Number.isNaN(Date.parse(created))) {
     throw new SpaceError('invalid_created', 'A creation time is an ISO date string');
   }
-  return {
+  const labels = {
     [LABEL_MARKER]: MARKER_VALUE,
     [LABEL_ID]: requireSpaceId(id),
     [LABEL_ROLE]: role,
@@ -113,6 +115,8 @@ export function buildSpaceLabels({ id, role, owner, project, name, created }) {
     [LABEL_NAME]: normalizeSpaceName(name),
     [LABEL_CREATED]: created,
   };
+  if (requireSpacePurpose(purpose) !== 'general') labels[LABEL_PURPOSE] = purpose;
+  return labels;
 }
 
 export const labelArgs = (labels) => Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
@@ -140,7 +144,7 @@ export function parseSpaceLabels(labels) {
   if (!isSpaceId(id) || !ROLES.has(role) || !isOwner(owner)) {
     return null;
   }
-  return {
+  const parsed = {
     id,
     role,
     owner,
@@ -148,6 +152,8 @@ export function parseSpaceLabels(labels) {
     name: labels[LABEL_NAME] ?? '',
     created: labels[LABEL_CREATED] ?? '',
   };
+  if (labels[LABEL_PURPOSE] !== undefined) parsed.purpose = requireSpacePurpose(labels[LABEL_PURPOSE]);
+  return parsed;
 }
 
 const isToolsKey = (value) => TOOLS_KEY_PATTERN.test(value ?? '');

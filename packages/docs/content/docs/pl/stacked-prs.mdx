@@ -1,0 +1,56 @@
+---
+title: Stosy pull requestów
+description: Przeglądaj, buduj i scalaj łańcuch pull requestów leżących jeden na drugim.
+---
+
+# Stosy pull requestów
+
+Stos (stack) to łańcuch pull requestów, w którym każdy opiera się na tym poniżej: gałąź bazowa drugiego PR-a to gałąź pierwszego i tak dalej. Dzięki takiemu podziałowi duża zmiana składa się z PR-ów na tyle małych, że da się je przejrzeć. OpenChamber pokazuje cały stos wszędzie tam, gdzie pojawia się jego PR, i pomaga utrzymać łańcuch w porządku.
+
+Stosy działają z GitHubem. Gdy GitHub zna stos sam (jego natywne stosy pull requestów), OpenChamber czyta stos z GitHuba. W przeciwnym razie odtwarza łańcuch z gałęzi bazowych PR-ów, co obejmuje też forki i GitHub Enterprise Server.
+
+## Zobacz stos
+
+Otwórz pull request ze stosu na tablicy [Zgłoszenia i PR-y](/pl/issues-and-prs/), w widoku pull requesta albo w widoku **Git**. Jego podgląd ma sekcję **Pull request stack**, która wymienia wszystkie PR-y od dołu do góry. Każdy wiersz pokazuje stan PR-a, jego checki i to, czy ma konflikty, oraz zaznacza ten, na który patrzysz. Wiersz, którego nie da się odczytać, mówi o tym zamiast pokazywać kolor.
+
+Na liście tablicy PR ze stosu ma małą plakietkę z miejscem w stosie, np. **2/3**. Kliknij wiersz w stosie, żeby otworzyć ten PR.
+
+Wiersz może też ostrzegać:
+
+- **Behind base by N commits**: PR poniżej się zmienił, więc ten wymaga restacku.
+- **Base was merged. Retarget to main.**: PR poniżej został scalony, a ten nadal wskazuje jego starą gałąź.
+- **Still carries the commits of merged #N**: PR poniżej został scalony przez squash do trunka, a ten nadal zawiera jego stare commity.
+
+## Otwórz PR na wierzchu innego
+
+1. Przełącz się na gałąź nowego PR-a, wychodząc od gałęzi najwyższego PR-a.
+2. W sekcji stosu kliknij **Open stacked PR on top** albo wybierz gałąź najwyższego PR-a jako bazę w formularzu tworzenia w widoku **Git**.
+3. Formularz pokazuje **Stacked on #N**. Wpisz tytuł i opis i utwórz PR.
+
+Na GitHub.com OpenChamber rejestruje nowy PR także we własnym stosie GitHuba. Jeśli GitHub odmówi (fork, starszy serwer), PR i tak powstaje, a stos nadal się wyświetla.
+
+## Restack po zmianie niżej
+
+Gdy PR nisko w stosie dostanie nowe commity, PR-y nad nim są nieaktualne. Kliknij **Fetch and restack**. OpenChamber pobiera zdalne repozytorium, po kolei rebase'uje każdą gałąź na tę poniżej, a potem pushuje gałęzie, które się przesunęły. Push jest odrzucany, jeśli w międzyczasie ktoś inny wypchnął coś do gałęzi, więc żadna praca nie zostanie nadpisana.
+
+Przesuwają się tylko własne commity każdej gałęzi. Po scaleniu przez squash niżej stare commity scalonego PR-a są pomijane.
+
+### Gdy restack trafi na konflikt
+
+Restack zatrzymuje się na PR-ze z konfliktem. Gałęzie poniżej pozostają po restacku, te powyżej czekają. Co dalej, zależy od **Settings → Integrations → GitHub → Restack conflicts**:
+
+- **Pause and let me choose** (domyślnie): rozwiąż konflikt w katalogu wskazanym przez sekcję stosu, dodaj pliki do stage'a i kliknij **Continue**. **Abort** przywraca tę gałąź do poprzedniego stanu i pomija resztę. **Ask the session to resolve** przekazuje konflikt sesji, w której jesteś.
+- **Let the session resolve it**: konflikt trafia od razu do sesji. Gdy jej tura kończy się bez nierozwiązanych spraw, restack idzie dalej sam.
+
+## Scal stos
+
+Scalaj od dołu. Sekcja stosu oferuje **Merge bottom PR #N** tylko dla najniższego otwartego PR-a, z twoją zwykłą metodą scalania. Po scaleniu następny PR przechodzi na trunk, a **Fetch and restack** usuwa z niego scalone commity. Potem scal kolejny.
+
+## Pracuj nad całym stosem w sesji
+
+- **Attach whole stack** w sekcji stosu dołącza do pola wiadomości diff, checki i komentarze każdego PR-a wraz z podsumowaniem kolejności i gałęzi. Jeśli jednego PR-a nie da się odczytać, pozostałe i tak się dołączą, a ty dowiesz się, który zawiódł.
+- Na liście **Linked** sesji włącz **Follow whole stack** przy powiązanym PR-ze. Sesja śledzi wtedy stos, gdy się zmienia: nowe PR-y na górze, scalenia i zmiany celu pojawiają się bez ponownego łączenia.
+
+## Gdzie to działa
+
+Stosy działają w aplikacji webowej, aplikacji desktopowej i aplikacjach mobilnych. Rozszerzenie VS Code nie pokazuje stosów.

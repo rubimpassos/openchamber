@@ -196,6 +196,45 @@ const setup = ({ mode = 'managed', transport = 'https', credentialId = 'opaque-c
   return { service, authority, validateGitTransportContext, resolveRef, resolveSymbolicRef, credentialResolver, credentialBroker, ...spawned };
 };
 
+describe('approved publication', () => {
+  it('refuses a changed local receipt object before any Git execution', async () => {
+    // Given
+    const fixture = setup();
+    const input = request('push', { forceWithLease: { expectedRemoteSha: 'b'.repeat(40) } });
+    // When / Then
+    await expect(fixture.service.publishApprovedCommit(input, 'c'.repeat(40))).rejects.toMatchObject({ code: 'APPROVED_COMMIT_CHANGED' });
+    expect(fixture.calls).toEqual([]);
+  });
+  it('publishes the exact object and lease with repository hooks disabled', async () => {
+    // Given
+    const fixture = setup();
+    // When
+    const result = await fixture.service.publishApprovedCommit(request('push', { forceWithLease: { expectedRemoteSha: 'b'.repeat(40) } }), SHA);
+    // Then
+    expect(result.state).toBe('succeeded');
+    const push = fixture.calls.find((call) => call.args.includes('push'));
+    expect(push.args).toContain('core.hooksPath=/dev/null');
+    expect(push.args.slice(-3)).toEqual(['--', ENDPOINT, `${SHA}:refs/heads/published`]);
+    expect(push.args).toContain(`--force-with-lease=refs/heads/published:${'b'.repeat(40)}`);
+  });
+  it('refuses an approval push without a lease', async () => {
+    // Given
+    const fixture = setup();
+    // When / Then
+    await expect(fixture.service.publishApprovedCommit(request(), SHA)).rejects.toMatchObject({ code: 'APPROVED_COMMIT_CHANGED' });
+    expect(fixture.calls).toEqual([]);
+  });
+  it('refuses a receipt branch changed after planning', async () => {
+    // Given
+    const fixture = setup();
+    fixture.resolveRef.mockResolvedValueOnce(SHA).mockResolvedValue('c'.repeat(40));
+    // When / Then
+    await expect(fixture.service.publishApprovedCommit(request('push', { forceWithLease: { expectedRemoteSha: 'b'.repeat(40) } }), SHA))
+      .rejects.toMatchObject({ code: 'STALE_CONFIG' });
+    expect(fixture.calls.some((call) => call.args.includes('push'))).toBe(false);
+  });
+});
+
 const createLfsPublicationFixture = async ({ transport = 'https', timeoutMs, ordinary = false } = {}) => {
     const fixture = await createLocalRepository();
     const oid = 'd'.repeat(64);

@@ -1,0 +1,56 @@
+---
+title: Yığınlanmış pull request'ler
+description: Üst üste binen bir pull request zincirini görün, oluşturun ve birleştirin.
+---
+
+# Yığınlanmış pull request'ler
+
+Stack, her PR'ın altındakinin üzerine kurulduğu bir pull request zinciridir: ikinci PR'ın base dalı birinci PR'ın dalıdır ve böyle devam eder. Büyük bir değişikliği bu şekilde bölmek her PR'ı gözden geçirilebilecek kadar küçük tutar. OpenChamber, stack'ten bir PR'ın göründüğü her yerde tüm stack'i gösterir ve zinciri düzenli tutmanıza yardım eder.
+
+Stack'ler GitHub için çalışır. GitHub stack'i kendisi biliyorsa (yerel yığınlanmış pull request'leri), OpenChamber GitHub'ın stack'ini okur. Bilmiyorsa zinciri PR'ların base dallarından bulur; bu fork'ları ve GitHub Enterprise Server'ı da kapsar.
+
+## Bir stack'i görün
+
+Bir stack'e ait pull request'i [Issue'lar ve PR'lar](/tr/issues-and-prs/) panosunda, pull request görünümünde veya **Git** görünümünde açın. Önizlemesinde tüm PR'ları alttan üste listeleyen bir **Pull request stack** bölümü vardır. Her satır PR'ın durumunu, check'lerini ve çakışma olup olmadığını gösterir; baktığınız PR'ı işaretler. Okunamayan bir satır, renk göstermek yerine bunu söyler.
+
+Panonun listesinde yığınlanmış bir PR'ın üzerinde, stack içindeki yerini gösteren küçük bir rozet bulunur, örneğin **2/3**. O PR'ı açmak için stack'teki bir satıra tıklayın.
+
+Bir satır sizi uyarabilir de:
+
+- **Behind base by N commits**: Altındaki PR değişti, bu yüzden bunun restack'e ihtiyacı var.
+- **Base was merged. Retarget to main.**: Altındaki PR birleştirildi ve bu hâlâ eski dalına işaret ediyor.
+- **Still carries the commits of merged #N**: Altındaki PR squash ile ana dala alındı ve bu hâlâ onun eski commit'lerini taşıyor.
+
+## Başka bir PR'ın üstüne PR açın
+
+1. Yeni PR'ın dalını, en üstteki PR'ın dalını başlangıç noktası alarak checkout edin.
+2. Stack bölümünde **Open stacked PR on top**'a tıklayın veya **Git** görünümünün oluşturma formunda en üstteki PR'ın dalını base olarak seçin.
+3. Form **Stacked on #N** der. Başlığı ve açıklamayı yazıp PR'ı oluşturun.
+
+GitHub.com'da OpenChamber yeni PR'ı GitHub'ın kendi stack'ine de kaydeder. GitHub reddederse (bir fork, daha eski bir sunucu), PR yine de oluşturulur ve stack görünmeye devam eder.
+
+## Altta bir değişiklikten sonra restack
+
+Stack'in altındaki bir PR yeni commit aldığında, üstündekiler eskir. **Fetch and restack**'e tıklayın. OpenChamber uzak depoyu fetch eder, her dalı sırayla altındakinin üzerine rebase eder, sonra yer değiştiren dalları push eder. Bu arada başka biri bir dala push ettiyse push reddedilir, böylece hiçbir iş ezilmez.
+
+Yalnızca her dalın kendi commit'leri taşınır. Altta bir squash merge'den sonra, birleştirilen PR'ın eski commit'leri dışarıda bırakılır.
+
+### Restack bir çakışmaya takılınca
+
+Restack, çakışan PR'da durur. Altındaki dallar restack edilmiş kalır; üstündekiler bekler. Sonrası **Settings → Integrations → GitHub → Restack conflicts** ayarına bağlıdır:
+
+- **Pause and let me choose** (varsayılan): Çakışmayı stack bölümünün belirttiği klasörde çözün, dosyaları stage edin ve **Continue**'ya tıklayın. **Abort** o dalı eski yerine geri koyar ve gerisini atlar. **Ask the session to resolve** çakışmayı içinde bulunduğunuz oturuma verir.
+- **Let the session resolve it**: Çakışma doğrudan oturuma gider. Turu çözülmemiş bir şey kalmadan bittiğinde restack kendiliğinden devam eder.
+
+## Bir stack'i birleştirin
+
+Alttan yukarı doğru birleştirin. Stack bölümü **Merge bottom PR #N** seçeneğini yalnızca en alttaki açık PR için sunar ve her zamanki merge yönteminizi kullanır. Birleştikten sonra sıradaki PR ana dala geçer ve bir **Fetch and restack** birleşmiş commit'leri ondan temizler. Sonra bir sonrakini birleştirin.
+
+## Bir oturumda tüm stack üzerinde çalışın
+
+- Stack bölümündeki **Attach whole stack**, her PR'ın diff'ini, check'lerini ve yorumlarını sıra ve dalların özetiyle birlikte mesaj kutusuna ekler. Bir PR okunamazsa diğerleri yine eklenir ve hangisinin başarısız olduğu size söylenir.
+- Bir oturumun **Linked** listesinde, bağlı bir PR için **Follow whole stack**'i açın. Oturum bundan sonra stack'i değiştikçe izler: üstteki yeni PR'lar, birleştirmeler ve hedef değişiklikleri yeniden bağlamadan görünür.
+
+## Nerede çalışır
+
+Stack'ler web uygulamasında, masaüstü uygulamasında ve mobil uygulamalarda çalışır. VS Code uzantısı stack'leri göstermez.

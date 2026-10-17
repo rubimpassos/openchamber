@@ -63,12 +63,14 @@ Linear の Issue では、**Start in** にセッションを開始するプロ�
 
 サイズの横には 2 つのボタンがあります。**Changes** はプルリクエストの差分をサイドパネルに開き、**Walkthrough** はその [変更のウォークスルー](/ja/walkthrough/) を開きます。アプリが別のプロジェクトを開いている場合は、先に PR のプロジェクトに切り替えます。スマートフォンでは **Changes** がワークスペースパネルの **Git** タブで PR を開きます。**Walkthrough** はデスクトップと Web だけで使えます。
 
-下部の **Merge** は、マージ前に確認し、いつものマージ方法を使います。ドラフトには **Ready for review** もあります。
+下部の **Merge** は、マージ前に確認し、いつものマージ方法を使います。ドラフトには **Ready for review** もあります。**Start fix loop** は、マージ可能になるまで PR を開いているセッションに任せます。詳しくは [PR 修正ループ](/ja/pr-fix-loop/) を参照してください。スタックに属する PR にはチェーン全体が表示されます。詳しくは [スタックされたプルリクエスト](/ja/stacked-prs/) を参照してください。
 
 開いている Issue やプルリクエストの下部には **Close issue** または **Close pull request**（GitLab では **Close merge request**）があり、閉じたものには **Reopen issue** または **Reopen pull request**（**Reopen merge request**）があります。元に戻せる操作なので、確認は出ません。マージ済みのプルリクエストは閉じることも開き直すこともできません。GitHub では、Issue は完了として閉じられます。
 
 ## 関連
 
 - [GitHub Issues と PR](/ja/github/) — GitHub を接続し、Issue をメッセージに添付する
+- [スタックされたプルリクエスト](/ja/stacked-prs/) — PR のチェーンを確認し、restack し、マージする
+- [PR 修正ループ](/ja/pr-fix-loop/) — CI が通ってレビューが終わるまで、セッションに PR を修正させる
 - [Worktree セッション](/ja/worktrees/) — worktree セッションの開始場所
 - [統合機能](/ja/integrations/) — Linear を接続し、チームをプロジェクトに対応付ける

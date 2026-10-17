@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS, isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
+import { fixLoopConfigSchema, type FixLoopConfig } from '@/lib/prFixLoop';
 import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
@@ -950,6 +951,7 @@ interface UIStore {
    */
   settingsJumpRequest: { page: string; itemId: string | null } | null;
   settingsRemoteInstancesSelectedId: string | null;
+  settingsGitHubOpenRequested: boolean;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
@@ -965,6 +967,8 @@ interface UIStore {
   sessionGoalChecker: SessionGoalChecker;
   /** Automatic continuations a goal may take before it stops for the user (1–200). */
   sessionGoalMaxAutoTurns: number;
+  prFixLoopDefaults: Partial<FixLoopConfig>;
+  prStackConflictMode: 'pause' | 'agent';
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
@@ -1248,6 +1252,8 @@ interface UIStore {
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
   setSessionGoalMaxAutoTurns: (value: number) => void;
+  setPrFixLoopDefaults: (value: Partial<FixLoopConfig>) => void;
+  setPrStackConflictMode: (value: 'pause' | 'agent') => void;
   setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudget: (value: number) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
@@ -1463,6 +1469,7 @@ export const useUIStore = create<UIStore>()(
         settingsProvidersOpenRequested: null,
         settingsJumpRequest: null,
         settingsRemoteInstancesSelectedId: null,
+        settingsGitHubOpenRequested: false,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
@@ -1474,6 +1481,8 @@ export const useUIStore = create<UIStore>()(
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
         sessionGoalMaxAutoTurns: DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS,
+        prFixLoopDefaults: {},
+        prStackConflictMode: 'pause',
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
@@ -2526,6 +2535,15 @@ export const useUIStore = create<UIStore>()(
           set({ sessionGoalMaxAutoTurns: value });
         },
 
+        setPrFixLoopDefaults: (value) => {
+          const parsed = fixLoopConfigSchema.partial().safeParse(value);
+          if (parsed.success) set({ prFixLoopDefaults: parsed.data });
+        },
+
+        setPrStackConflictMode: (value) => {
+          set({ prStackConflictMode: value });
+        },
+
         setSessionGoalDefaultBudgetEnabled: (value) => {
           set({ sessionGoalDefaultBudgetEnabled: value });
         },
@@ -3575,6 +3593,8 @@ export const useUIStore = create<UIStore>()(
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,
           sessionGoalMaxAutoTurns: state.sessionGoalMaxAutoTurns,
+          prFixLoopDefaults: state.prFixLoopDefaults,
+          prStackConflictMode: state.prStackConflictMode,
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,

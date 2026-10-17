@@ -1,4 +1,5 @@
 import { settingsDict } from './ar.settings';
+import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
@@ -8,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -3825,6 +3827,7 @@ export const dict = {
   'settings.extensions.capability.loopback.routes': 'الأساليب والمسارات المسموح بها',
   'settings.extensions.capability.loopback.invalid': 'قيمة منفذ الخادم المحددة غير صالحة. اضبط عددًا صحيحًا من 1024 إلى 65535، أو امسح المتغير لاستخدام الافتراضي. الموافقة غير متاحة حتى يتم إصلاح ذلك.',
   ...settingsDict,
+  ...prStacksI18n.ar,
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...sessionMenuHintsI18n.ar,
@@ -3834,6 +3837,7 @@ export const dict = {
   ...pluginPanelI18n.ar,
   ...surfacePanelI18n.ar,
   ...browserServerPanelI18n.ar,
+  ...prFixLoopI18n.ar,
   ...fileArtifactsI18n.ar,
   ...htmlRenderI18n.ar,
   ...usageStatsI18n.ar,

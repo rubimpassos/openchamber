@@ -80,6 +80,7 @@ import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { fetchGitHubPullStatuses, fetchGitHubReferenceDetail, fetchGitHubReferences } from './github-references';
+import { createWebPullStackAPI } from './pull-stacks';
 
 interface ErrorResponse {
   error?: string;
@@ -1863,5 +1864,6 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     githubReferences: (context, referenceOptions) => fetchGitHubReferences(fetch, context, referenceOptions),
     githubReferenceDetail: (context, item) => fetchGitHubReferenceDetail(fetch, context, item),
     githubPullStatuses: (context, pulls) => fetchGitHubPullStatuses(fetch, context, pulls),
+    ...createWebPullStackAPI(fetch),
   };
 };

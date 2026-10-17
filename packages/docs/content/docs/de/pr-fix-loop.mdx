@@ -1,0 +1,94 @@
+---
+title: PR-Fix-Schleife
+description: Lass eine Sitzung einen Pull Request weiter fixen, bis CI grün ist und das Review erledigt ist.
+---
+
+# PR-Fix-Schleife
+
+Die Fix-Schleife hält eine Sitzung an einem Pull Request, bis er mergebereit ist. OpenChamber beobachtet die Checks und das Review des PRs. Schlägt CI fehl, bekommt die Sitzung die fehlgeschlagenen Checks mit Schritten, Annotationen und Logzeilen. Wenn jemand reviewt oder kommentiert, bekommt die Sitzung dieses Feedback, nimmt die Änderung vor und antwortet im PR. Die Schleife läuft auf deinem OpenChamber-Server und läuft deshalb auch bei geschlossener App weiter.
+
+Sie endet, wenn der PR bereit ist: CI ist grün, kein Review-Thread ist offen und niemand wartet auf angeforderte Änderungen. Dann bekommst du eine Benachrichtigung, und auch dann, wenn die Schleife aus einem anderen Grund stoppt.
+
+## Die Schleife starten
+
+1. Öffne die Sitzung, die die Arbeit erledigen soll.
+2. Finde den Pull Request im Board [Issues und PRs](/de/issues-and-prs/), in der Pull-Request-Ansicht oder in der **Linked**-Liste der Sitzung und wähle **Start fix loop**.
+3. Prüfe die Einstellungen im Dialog und klicke auf **Start fix loop**.
+
+Die Schleife erscheint oben im Nachrichtenfeld der Sitzung: der PR, was die Schleife gerade tut, die Anzahl der Durchläufe und der CI-Status. Von dort kannst du ihre Einstellungen ändern, den PR im Board öffnen oder sie mit **Stop** beenden.
+
+## Was die Sitzung bekommt
+
+- **Nach einem Push** wartet die Schleife auf CI für den neuen Commit. Schlägt er fehl, bekommt die Sitzung die fehlgeschlagenen Checks einmal pro Commit, nie zweimal denselben Fehler.
+- **Zu jedem Review, Review-Kommentar oder neuen Kommentar**, der nach deinen Einstellungen zählt, bekommt die Sitzung den Text und einen Link dazu. Sie soll im PR antworten und die Threads auflösen, die sie behoben hat. Um zu antworten und Threads aufzulösen, braucht die Sitzung eigene, authentifizierte GitHub-Tools. Das Konto der Schleife dient nur zum Lesen des PR.
+
+Ist die Sitzung beschäftigt, wartet die Nachricht in ihrer Warteschlange und geht raus, wenn der Zug endet. Ist GitHub nicht erreichbar, behält die Schleife ihren letzten Stand und meldet, dass sie nicht prüfen konnte. Einen fehlgeschlagenen Check liest sie nie als grün.
+
+## Einstellungen
+
+Standardwerte stehen unter **Einstellungen → Integrationen → GitHub → Fix loop**, und jede Schleife kann sie ändern.
+
+- **Maximum iterations**: wie oft die Schleife Arbeit an die Sitzung schicken darf (Standard 10).
+- **Token budget**: stoppt, sobald die Sitzung seit dem Start der Schleife so viele Tokens verbraucht hat. Leer heißt kein Budget. Das Budget wird nach jedem Zug geprüft, ein Zug kann es also überschreiten.
+- **Respond to**: **CI and reviews**, **CI only** oder **Reviews only**.
+- **Ignore my feedback**: überspringt Kommentare des GitHub-Kontos, mit dem die Schleife den PR liest. Im automatischen Modus antwortet die Sitzung mit ihrem eigenen GitHub-Konto, und weicht es vom Lesekonto ab, trägst du es unter **Blocked authors** ein. Im Freigabemodus antwortet der Server mit dem an die Schleife gebundenen GitHub-Konto, der Worker hat kein GitHub-Konto.
+- **Ignore bots**: überspringt Kommentare von Bots.
+- **Allowed authors** und **Blocked authors**: GitHub-Logins, durch Kommas getrennt. Mit einer Allow-Liste zählen nur diese Personen.
+- **Only comments that mention this text**: zählt einen Kommentar nur, wenn er den Erwähnungstext enthält (standardmäßig `@openchamber`).
+- **Push changes**: **Push automatically** oder **Wait for my approval**. Der automatische Modus behält den GitHub-Ablauf der Sitzung. Der Freigabemodus führt die Korrekturen in einem eingeschränkten Worker aus und braucht eine eigene Einrichtung.
+
+## Freigabemodus
+
+Mit **Wait for my approval** pusht die Sitzung nicht. Ein eingeschränkter Worker korrigiert den PR in einem isolierten Bereich, und keine Änderung wird auf GitHub veröffentlicht, bevor du genau diesen Commit freigibst. Der Server liest den PR währenddessen weiter von GitHub.
+
+### Worker einrichten
+
+1. Aktiviere isolierte Bereiche und richte einen Ausführungsort ein. Die Korrekturschleife schaltet das nie für dich ein.
+2. Such im Startdialog den Abschnitt **Restricted worker**. Wähle, wo der Worker läuft, und sein Modell, und klicke auf **Prepare new worker**. Das legt einen neuen Bereich nur für diesen Worker an. Ein vorhandener Bereich lässt sich weder wiederverwenden noch umwandeln.
+3. Gewähre dem Modell des Workers im Zugriffsdialog Zugriff. Gewährt wird nur das gewählte Modell. Die Modell-Tokens hält der Gatekeeper, der Worker sieht sie nie. Die Modellnutzung geht von deinem Kontingent ab.
+4. Das Head-Repository des PR, auch ein Fork, braucht ein verwaltetes Git-Push-Ziel für genau dieses Repository. Fehlt es, verweist der Dialog auf die Git-Einstellungen.
+5. Sobald der Dialog meldet, dass der Worker bereit ist, klicke auf **Start fix loop**.
+
+Der Worker erreicht weder GitHub noch ein anderes Netzwerk, nur das Modell. Einen Rückfall auf einen System- oder Umgebungs-Push gibt es nicht. Die Schleife startet nicht, wenn der Worker nicht bereit ist oder der Zugriff fehlt. Ein Modell oder eigener Endpunkt, der nicht für eingeschränkte Worker geprüft wurde, wird abgelehnt und nie durch ein anderes ersetzt.
+
+**Forget worker selection** entfernt nur die Auswahl. Bereich und Dateien bleiben und werden in den isolierten Bereichen verwaltet.
+
+### Prüfen und veröffentlichen
+
+Wenn ein Zug endet, exportiert der Server den Commit des Workers und hält ihn als Beleg fest, mit genauem Repository, Branch und erwartetem Remote-Head. Die Schleife zeigt dann **Review publication**. Öffne **Inspect exact changes**, prüfe sie und klicke auf **Approve and publish commit**. Der normale Git-Push-Button gibt keinen Beleg frei. Die Veröffentlichung wird abgelehnt, wenn der PR geschlossen wurde oder sich Remote-Head, Branch oder Repository geändert haben. Beleg und Arbeit bleiben dann zur Ansicht erhalten.
+
+### Antworten nach der Veröffentlichung
+
+Der Prüfdialog listet **Automatic GitHub replies**: die erzeugten Antworten und welche Threads aufgelöst werden. Es ist der Text des Workers, lies also den zitierten Text vor der Freigabe. Nach der Veröffentlichung postet der Server die Antworten und löst die Threads mit eigenem GitHub-Schreibzugriff auf, der nicht vom Worker stammt. Das geschieht auch bei geschlossenen Clients. Schlägt ein Schreibvorgang fehl, zeigt die Schleife das an und meldet den PR nicht als bereit.
+
+### Stoppen, fortsetzen und Budget
+
+**Stop** hält den Worker an und behält Code und Beleg. **Resume fix loop** prüft den Worker erneut und startet ihn neu. Erst danach lässt sich ein Beleg einer gestoppten Schleife veröffentlichen. Wer eine beendete Schleife vergisst, löscht ihren Bereich nicht.
+
+Der Ausführungsmodus ist pro Schleife festgelegt. Schließe ausstehende Veröffentlichungen und GitHub-Antworten ab, bevor du die Schleife stoppst und einen anderen Modus startest. Die Einstellungen sind außerdem gesperrt, solange ein Beleg oder GitHub-Antworten ausstehen.
+
+Das Token-Budget wird nach jedem Zug geprüft, ein Zug kann es also überschreiten. Ist es erreicht, startet kein neuer Modellzug mehr, aber ein ausstehender Export, die Veröffentlichung und die Antworten können noch abgeschlossen werden. Danach zeigt die Schleife den Status für das Token-Budget.
+
+### Wo der Freigabemodus funktioniert
+
+Der Server führt die Schleife auch bei geschlossenen Clients aus. Web-App, Desktop-App und mobile Apps teilen sich diesen Server. Die VS-Code-Erweiterung bietet den Freigabemodus nicht an.
+
+## Wann die Schleife stoppt
+
+| Status | Grund |
+| --- | --- |
+| PR ist bereit | CI grün, keine offenen Threads, keine angeforderten Änderungen |
+| PR geschlossen | Der PR wurde gemergt oder geschlossen |
+| Iterationslimit | Die Schleife hat so oft Arbeit geschickt wie erlaubt |
+| Token-Budget | Die Sitzung hat das Budget aufgebraucht |
+| Gestoppt | Du hast sie gestoppt oder die Sitzung wurde gelöscht |
+
+Eine gestoppte Schleife bleibt oben im Nachrichtenfeld, bis du sie schließt. Im Freigabemodus mit ausstehendem Beleg oder ausstehenden GitHub-Antworten bleibt die Arbeit erhalten und die Schleife bestehen. Setze die bestehende Schleife mit **Resume fix loop** fort. Auf demselben PR beginnt eine neue Schleife erst, wenn keine Veröffentlichung und keine Antworten mehr ausstehen.
+
+## Stacks
+
+Jeder Pull Request hat seine eigene Schleife. Starte in einem [Stack](/de/stacked-prs/) auf jedem PR, der gefixt werden soll, eine Schleife. Ein Fehler in einem PR hält die anderen nicht auf.
+
+## Wo es funktioniert
+
+Die Schleife läuft auf dem OpenChamber-Server hinter der Web-App, der Desktop-App und den mobilen Apps. Die VS-Code-Erweiterung bietet sie nicht an.

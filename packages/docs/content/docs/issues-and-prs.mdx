@@ -63,12 +63,14 @@ A pull request's preview also shows its branch, its size (lines added and remove
 
 Two buttons sit beside the size. **Changes** opens the pull request's diff in the side panel, and **Walkthrough** opens its [walkthrough](/walkthrough/). If the app is on another project, it switches to the PR's project first. On a phone, **Changes** opens the PR in the **Git** tab of the workspace drawer; **Walkthrough** is desktop and web only.
 
-At the bottom, **Merge** asks before merging and uses your usual merge method. A draft also gets **Ready for review**.
+At the bottom, **Merge** asks before merging and uses your usual merge method. A draft also gets **Ready for review**. **Start fix loop** hands the PR to the open session until it's ready to merge; see [PR fix loop](/pr-fix-loop/). A PR that is part of a stack shows the whole chain; see [Stacked pull requests](/stacked-prs/).
 
 An open issue or pull request also has **Close issue** or **Close pull request** (**Close merge request** on GitLab); a closed one has **Reopen issue** or **Reopen pull request** (**Reopen merge request**). Neither asks first, since it can be undone. A merged pull request can't be closed or reopened. On GitHub, an issue closes as completed.
 
 ## Related
 
 - [GitHub Issues & PRs](/github/): connect GitHub and attach issues to messages
+- [Stacked pull requests](/stacked-prs/): see, restack and merge a chain of PRs
+- [PR fix loop](/pr-fix-loop/): let a session fix a PR until CI is green and the review is done
 - [Worktree Sessions](/worktrees/): where worktree sessions start
 - [Integrations](/integrations/): connect Linear and map teams to projects

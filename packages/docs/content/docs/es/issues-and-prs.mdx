@@ -63,12 +63,14 @@ La vista previa de un pull request también muestra su rama, su tamaño (líneas
 
 Junto al tamaño hay dos botones. **Changes** abre el diff del pull request en el panel lateral, y **Walkthrough** abre su [recorrido por los cambios](/es/walkthrough/). Si la app está en otro proyecto, primero cambia al proyecto del PR. En el teléfono, **Changes** abre el PR en la pestaña **Git** del panel de trabajo; **Walkthrough** está solo en escritorio y web.
 
-Al pie, **Merge** pregunta antes de fusionar y usa tu método de merge habitual. Un borrador también tiene **Ready for review**.
+Al pie, **Merge** pregunta antes de fusionar y usa tu método de merge habitual. Un borrador también tiene **Ready for review**. **Start fix loop** entrega el PR a la sesión abierta hasta que esté listo para fusionar; consulta [Bucle de corrección de PR](/es/pr-fix-loop/). Un PR que forma parte de un stack muestra toda la cadena; consulta [Pull requests apilados](/es/stacked-prs/).
 
 Una issue o un pull request abiertos también tienen al pie **Close issue** o **Close pull request** (**Close merge request** en GitLab), y uno cerrado tiene **Reopen issue** o **Reopen pull request** (**Reopen merge request**). No piden confirmación, porque se puede deshacer. Un pull request fusionado no se puede cerrar ni reabrir. En GitHub, una issue se cierra como completada.
 
 ## Relacionado
 
 - [Issues y PRs de GitHub](/es/github/): conecta GitHub y adjunta issues a los mensajes
+- [Pull requests apilados](/es/stacked-prs/): ver, hacer restack y fusionar una cadena de PRs
+- [Bucle de corrección de PR](/es/pr-fix-loop/): deja que una sesión corrija un PR hasta que CI esté en verde y la revisión termine
 - [Sesiones de worktree](/es/worktrees/): dónde empiezan las sesiones de worktree
 - [Integraciones](/es/integrations/): conecta Linear y asigna equipos a proyectos

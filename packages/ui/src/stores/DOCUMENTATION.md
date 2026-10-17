@@ -277,6 +277,49 @@ per session, permissions the safety net is holding). Nothing is persisted; a
 failed read keeps what was known and records `loadError` instead of reading as
 "routing is off". See `packages/web/server/lib/routing/DOCUMENTATION.md`.
 
+`usePrFixLoopStore.ts` projects server-owned PR fix loops for the active runtime.
+The server owns execution, queue delivery, and persistence, including while the
+app is closed. Mounted PR controls and the composer share one snapshot request
+and the existing OpenChamber control event stream. Each stream-ready event
+requests a new snapshot, with one trailing read when reconnect happens during a
+read. There is no client poller or persisted loop copy.
+
+`prFixLoopProjection.ts` preserves known loops on read failure. Events and
+mutation results received during a snapshot survive that snapshot, including
+removal tombstones for IDs not yet loaded. Older per-loop timestamps cannot
+replace newer records. Runtime changes invalidate pending reads and writes,
+including a switch away and back to the same runtime key. Mutation failures
+leave the authoritative configuration unchanged. Terminal loops remain visible
+until a successful server DELETE dismisses them. Web, Electron, hosted mobile,
+and Capacitor use this projection; VS Code exposes no fix-loop controls.
+
+The HTTP boundary parses each loop separately. An identifiable malformed record
+is retained and listed in `failedLoopIds`; valid siblings still reconcile and
+remain actionable. `loadError` reports that partial failure while `loadState`
+is ready for the complete records. Unidentifiable or duplicate records fail the
+whole snapshot. A valid event or mutation clears its own failed-record marker.
+Unknown execution modes, malformed workers and malformed receipts never become
+automatic publication authority. Legacy auto records may omit the worker and
+receipt fields; the old local-ahead count grants no publication permission.
+
+Approval-mode preparation is an explicit request for a fresh protected Spaces
+worker. The open setup dialog reads saved preparations; creation, model grants,
+progress and live space state remain with the existing Spaces journey. There is
+no new client poller or persisted worker cache. The existing opt-in and place
+configuration controls are available through the contextual setup dialog without
+changing the global Spaces release flag. No setup action enables Spaces or
+grants model access on behalf of the user.
+
+The loop keeps the original host session identity and projects the separate
+worker session. Activation requires a matching prepared worker, protected purpose,
+running undamaged space, empty corridor and authoritative access to the selected
+model. The server rechecks the worker and the exact managed Git destination.
+Execution mode is locked for an existing loop; a pending receipt locks all loop
+configuration. Stop and resume use the server transitions and retain work.
+Publication review uses immutable receipt SHAs for existing Git comparison reads,
+with working-tree inclusion explicitly off. Approval sends only the receipt ID
+through the host route, never through the ordinary Git push helper.
+
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
 The VS Code foreground delivery gate holds an idle parent while a live busy or
 retry descendant runs, following up to 8 parent links through the cached sync
