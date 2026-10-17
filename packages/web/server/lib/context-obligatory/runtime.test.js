@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createContextObligatoryRuntime } from './runtime.js';
+import { createSessionKnowledgeRuntime } from '../session-knowledge/runtime.js';
 
 /**
  * Pinned messages and the compaction cursor live in OpenChamber's own session
@@ -67,6 +68,26 @@ const pinnedMetadata = (extra = {}) => ({
     ...extra,
   },
 });
+
+const stackKnowledge = () => {
+  let metadata = { openchamber: { knowledge_context_delivered: 'previously-delivered' } };
+  const readSessionMetadata = async () => metadata;
+  const persistContextCursor = async (_id, _directory, patch) => {
+    metadata = { openchamber: { ...metadata.openchamber, ...patch.openchamber } };
+  };
+  const runtime = createSessionKnowledgeRuntime({
+    resolveProjectId: async () => '',
+    isAgentMemoryEnabled: async () => false,
+    readSessionMetadata,
+    persistSessionMetadata: persistContextCursor,
+    collectFollowedPullStacks: async () => [{
+      anchor: { owner: 'acme', repo: 'app', number: 1 },
+      status: 'available',
+      stack: { members: [{ number: 1, head: 'first', base: 'main' }, { number: 2, head: 'second', base: 'first' }] },
+    }],
+  });
+  return { runtime, readSessionMetadata, persistContextCursor };
+};
 
 afterEach(() => {
   while (runtimes.length > 0) runtimes.pop().stop();
@@ -150,5 +171,51 @@ describe('context obligatory runtime', () => {
     await runtime.processPayload(compactionEvent(), '/repo');
     expect(fetchMock.mock.calls.some(([url]) => new URL(url).pathname.endsWith('/synthetic'))).toBe(true);
     expect(persistContextCursor).not.toHaveBeenCalled();
+  });
+
+  it('restores followed stack context alone when a compaction removes an already delivered snapshot', async () => {
+    // Given a session carrying a delivered stack and no pinned messages.
+    const { synthetic } = fakeOpenCode();
+    const knowledge = stackKnowledge();
+    const before = await knowledge.runtime.resolvePendingForSession('ses_1', '/repo');
+    await knowledge.runtime.recordDelivered('ses_1', '/repo', before.signature);
+    const { runtime } = makeRuntime({
+      sessionKnowledgeRuntime: knowledge.runtime,
+      readSessionMetadata: knowledge.readSessionMetadata,
+      persistContextCursor: knowledge.persistContextCursor,
+    });
+
+    // When OpenCode completes compaction.
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    // Then one background message restores the whole snapshot and records delivery again.
+    expect(synthetic).toEqual([{ text: before.text, resume: false }]);
+    expect((await knowledge.runtime.resolvePendingForSession('ses_1', '/repo')).text).toBe('');
+    expect((await knowledge.readSessionMetadata()).openchamber.context_obligatory_last_compaction_message_id).toBe('msg_compact');
+  });
+
+  it('keeps stack restoration pending when the compaction synthetic message fails', async () => {
+    // Given a delivered snapshot and an upstream refusing synthetic context.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fetchMock } = fakeOpenCode();
+    const upstream = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => new URL(input).pathname.endsWith('/synthetic')
+      ? new Response('unavailable', { status: 503 })
+      : upstream(input, init));
+    const knowledge = stackKnowledge();
+    const before = await knowledge.runtime.resolvePendingForSession('ses_1', '/repo');
+    await knowledge.runtime.recordDelivered('ses_1', '/repo', before.signature);
+    const { runtime } = makeRuntime({
+      sessionKnowledgeRuntime: knowledge.runtime,
+      readSessionMetadata: knowledge.readSessionMetadata,
+      persistContextCursor: knowledge.persistContextCursor,
+    });
+
+    // When the compaction restoration fails.
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    // Then the next ordinary send still owes the same complete snapshot.
+    expect(await knowledge.runtime.resolvePendingForSession('ses_1', '/repo')).toEqual(before);
+    expect((await knowledge.readSessionMetadata()).openchamber.context_obligatory_last_compaction_message_id).toBeUndefined();
   });
 });
