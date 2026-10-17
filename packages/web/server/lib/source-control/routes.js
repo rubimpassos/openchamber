@@ -284,6 +284,9 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     readGitLabChangeRequestPatch: (input) => gitlab.readChangeRequestPatch(input),
     readGitLabLiveSummaries: (input) => gitlab.readLiveSummaries(input),
     readGitLabChangeRequestFile: (input) => gitlab.readChangeRequestFile(input),
+    readGitHubPullStack: (input) => github.readPullStack(input),
+    readCurrentGitHubAccountId: () => github.readCurrentAccountId(),
+    applyFixLoopReviewOperation: (input) => github.applyFixLoopReviewOperation(input),
     resolveChangeRequestSource: async (input) => {
       const provider = input?.context?.provider;
       if (provider === 'github') return github.resolveChangeRequestSource(input);

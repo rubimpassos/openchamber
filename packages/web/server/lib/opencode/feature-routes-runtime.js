@@ -7,6 +7,7 @@ import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
+import { createFixLoopGitServices } from '../source-control/fix-loop-git.js';
 import { registerLinearRoutes } from '../linear/routes.js';
 import { registerGuestRoutes } from '../guests/routes.js';
 import { registerBuiltInGuests } from '../guests/catalog.js';
@@ -19,9 +20,11 @@ import { registerProjectContextRoutes } from '../project-context/routes.js';
 import { registerProjectDirectoryRoutes, registerProjectSetupRoutes } from '../projects/routes.js';
 import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
+import { createFollowedPullStackContext } from '../session-knowledge/pull-stacks.js';
 import { registerMessageSearchRoutes } from '../message-search/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
+import { registerRestackRoutes } from '../pr-stacks/restack.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
@@ -118,7 +121,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   let projectOpenIssuesReader = null;
   let gitRepositoryCredentialRuntime = null;
   let networkOperations = null;
+  let approvalGitServices = null;
   let gitWorktreeCreation = null;
+  const collectFollowedPullStacks = createFollowedPullStackContext({
+    readBinding: (directory) => walkthroughBindingService.get(directory),
+    readPullStack: (input) => walkthroughBindingService.readGitHubPullStack(input),
+    readCurrentAccountId: () => walkthroughBindingService.readCurrentGitHubAccountId(),
+  });
   const getWalkthroughService = async () => {
     if (!walkthroughService) {
       const [service, pullRequest] = await Promise.all([
@@ -266,6 +275,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       permissionAutoAcceptRuntime,
       worktreeBootstrapStore,
       messageQueueRuntime,
+      prStackRestackRuntime,
+      prFixLoopRuntime,
       routingRuntime,
       globalEventHub,
       openchamberVersion,
@@ -282,6 +293,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
     registerMessageQueueRoutes(app, messageQueueRuntime);
+    if (prStackRestackRuntime) registerRestackRoutes(app, prStackRestackRuntime);
     registerRoutingRoutes(app, routingRuntime);
     // Before the generic OpenCode proxy: swallows the `openchamber/auto` model
     // switch and routes the sends that follow it.
@@ -499,6 +511,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         // A worktree made from a fork PR has no upstream; its provenance says
         // which remote the branch came from, so PR status can find the PR.
         readContributorProvenance: contributorProvenance.read,
+        prFixLoopRuntime,
       },
       gitlab: {
         configRoot: openchamberDataDir,
@@ -670,6 +683,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitIdentity,
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
+    approvalGitServices = createFixLoopGitServices({ bindings: walkthroughBindingService, network: networkOperations, resolveAccount: resolveSourceControlAccount });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
     loopbackRuntime = registerGuestRoutes(app, {
       openchamberDataDir,
@@ -767,6 +781,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
   return {
     registerRoutes,
+    /** Exact Git authority for the server-owned PR approval worker, unavailable before routes initialize. */
+    fixLoopGitServices: () => {
+      if (!approvalGitServices) throw new Error('PR approval Git operations are unavailable');
+      return approvalGitServices;
+    },
     readProjectOpenIssues: (directory) => projectOpenIssuesReader
       ? projectOpenIssuesReader(directory)
       : Promise.resolve({ titles: [], warnings: [{
@@ -774,6 +793,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       }] }),
     hydrateBoundCheckout,
     createChangeRequestWorktree,
+    collectFollowedPullStacks,
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
     dispose: () => loopbackRuntime?.dispose(),
