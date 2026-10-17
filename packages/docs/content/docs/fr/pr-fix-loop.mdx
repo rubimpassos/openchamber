@@ -1,0 +1,94 @@
+---
+title: Boucle de correction de PR
+description: Laisse une session corriger une pull request jusqu'à ce que la CI soit verte et la relecture terminée.
+---
+
+# Boucle de correction de PR
+
+La boucle de correction garde une session au travail sur une pull request jusqu'à ce qu'elle soit prête à fusionner. OpenChamber surveille les checks et la relecture de la PR. Quand la CI échoue, la session reçoit les checks en échec avec leurs étapes, annotations et lignes de log. Quand quelqu'un relit ou commente, la session reçoit ce retour, fait le changement et répond sur la PR. La boucle tourne sur ton serveur OpenChamber, elle continue donc app fermée.
+
+Elle s'arrête quand la PR est prête : CI verte, aucun fil de relecture non résolu et personne n'attend de changements demandés. Tu reçois alors une notification, et aussi quand la boucle s'arrête pour une autre raison.
+
+## Démarrer la boucle
+
+1. Ouvre la session qui doit faire le travail.
+2. Trouve la pull request dans le tableau [Issues et PR](/fr/issues-and-prs/), dans la vue pull request ou dans la liste **Linked** de la session, puis choisis **Start fix loop**.
+3. Vérifie les réglages dans la boîte de dialogue et clique sur **Start fix loop**.
+
+La boucle s'affiche en haut du champ de message de la session : la PR, ce que fait la boucle, le nombre d'itérations et l'état de la CI. De là, tu peux modifier ses réglages, ouvrir la PR dans le tableau ou l'arrêter avec **Stop**.
+
+## Ce que reçoit la session
+
+- **Après un push**, la boucle attend la CI sur le nouveau commit. Si elle échoue, la session reçoit les checks en échec une fois par commit, jamais deux fois le même échec.
+- **Pour chaque relecture, commentaire de relecture ou nouveau commentaire** qui compte selon tes réglages, la session reçoit son texte et un lien. On lui demande de répondre sur la PR et de résoudre les fils qu'elle a corrigés. Pour répondre et résoudre les fils, la session a besoin de ses propres outils GitHub authentifiés. Le compte de la boucle ne sert qu'à lire la PR.
+
+Si la session est occupée, le message attend dans sa file et part à la fin du tour. Si GitHub est injoignable, la boucle garde ce qu'elle savait et indique qu'elle n'a pas pu vérifier. Elle ne lit jamais un check en échec comme vert.
+
+## Réglages
+
+Les valeurs par défaut se trouvent dans **Paramètres → Intégrations → GitHub → Fix loop**, et chaque boucle peut les modifier.
+
+- **Maximum iterations** : combien de fois la boucle peut envoyer du travail à la session (10 par défaut).
+- **Token budget** : s'arrête quand la session a utilisé ce nombre de tokens depuis le début de la boucle. Vide signifie pas de budget. Le budget est vérifié après chaque tour, donc un tour peut le dépasser.
+- **Respond to** : **CI and reviews**, **CI only** ou **Reviews only**.
+- **Ignore my feedback** : ignore les commentaires du compte GitHub avec lequel la boucle lit la PR. En mode automatique, la session répond avec son propre compte GitHub, et s'il diffère du compte de lecture, tu l'ajoutes à **Blocked authors**. En mode avec approbation, le serveur répond avec le compte GitHub lié à la boucle, et le worker n'a pas de compte GitHub.
+- **Ignore bots** : ignore les commentaires des bots.
+- **Allowed authors** et **Blocked authors** : identifiants GitHub séparés par des virgules. Avec une liste d'autorisés, seules ces personnes comptent.
+- **Only comments that mention this text** : ne compte un commentaire que s'il contient le texte de mention (`@openchamber` par défaut).
+- **Push changes**: **Push automatically** ou **Wait for my approval**. Le mode automatique garde le flux GitHub de la session. Le mode avec approbation exécute les corrections dans un worker restreint et demande sa propre configuration.
+
+## Mode avec approbation
+
+Avec **Wait for my approval**, la session ne pousse pas. Un worker restreint corrige la PR dans un espace isolé, et aucun changement n'est publié sur GitHub tant que vous n'avez pas approuvé le commit exact. Le serveur continue de lire la PR sur GitHub pendant que la boucle tourne.
+
+### Configurer le worker
+
+1. Activez les espaces isolés et configurez un emplacement pour eux. La boucle de correction ne l'active jamais à votre place.
+2. Dans la boîte de dialogue de démarrage, repérez **Restricted worker**. Choisissez où le worker s'exécute et son modèle, puis cliquez sur **Prepare new worker**. Cela crée un espace neuf, utilisé uniquement par ce worker. Un espace existant ne peut être ni réutilisé ni converti.
+3. Accordez l'accès au modèle du worker dans la boîte de dialogue d'accès. Seul le modèle choisi est autorisé. Le gatekeeper garde les jetons du modèle et le worker ne les voit jamais. L'usage du modèle consomme votre quota.
+4. Le dépôt head de la PR, fork compris, a besoin d'une destination de push Git gérée pour ce dépôt exact. Si elle manque, la boîte de dialogue vous renvoie aux réglages Git.
+5. Quand la boîte de dialogue indique que le worker est prêt, cliquez sur **Start fix loop**.
+
+Le worker ne peut atteindre ni GitHub ni aucun autre réseau, seulement le modèle. Il n'y a pas de repli sur un push système ou ambiant. La boucle ne démarre pas si le worker n'est pas prêt ou si l'accès manque. Un modèle ou un point de terminaison personnalisé qui n'a pas été examiné pour les workers restreints est refusé, jamais remplacé par un autre.
+
+**Forget worker selection** retire seulement la sélection. L'espace et ses fichiers restent, et vous les gérez dans les espaces isolés.
+
+### Examiner et publier
+
+À la fin d'un tour, le serveur exporte le commit du worker et le garde comme reçu, avec le dépôt, la branche et le head distant attendu exacts. La boucle affiche alors **Review publication**. Ouvrez **Inspect exact changes**, vérifiez-les, puis cliquez sur **Approve and publish commit**. Le bouton de push Git habituel n'approuve pas un reçu. La publication est refusée si la PR a été fermée ou si le head distant, la branche ou le dépôt ont changé, et le reçu et le travail restent pour que vous les examiniez.
+
+### Réponses après la publication
+
+La boîte de dialogue d'examen liste **Automatic GitHub replies** : les réponses générées et les fils qui seront résolus. C'est le texte du worker, lisez donc le texte cité avant d'approuver. Une fois le commit publié, le serveur poste les réponses et résout les fils avec son propre accès en écriture à GitHub, qui ne vient pas du worker. Cela se passe même clients fermés. Si une écriture échoue, la boucle l'affiche et ne signale pas la PR comme prête.
+
+### Arrêter, reprendre et budget
+
+**Stop** arrête le worker et conserve le code et le reçu. **Resume fix loop** revérifie le worker puis le relance, et un reçu d'une boucle arrêtée ne peut être publié qu'ensuite. Oublier une boucle terminée ne supprime pas son espace.
+
+Le mode d'exécution est fixe pour chaque boucle. Terminez les publications et réponses GitHub en attente avant d'arrêter la boucle et de démarrer un autre mode. Les réglages sont aussi verrouillés tant qu'un reçu ou des réponses GitHub sont en attente.
+
+Le budget de jetons est vérifié après chaque tour, un tour peut donc le dépasser. Une fois atteint, aucun nouveau tour de modèle ne démarre, mais un export, une publication et des réponses en attente peuvent encore se terminer. La boucle affiche ensuite l'état du budget de jetons.
+
+### Où le mode avec approbation fonctionne
+
+Le serveur exécute la boucle clients fermés. L'application web, l'application de bureau et les applications mobiles partagent ce serveur. L'extension VS Code ne propose pas le mode avec approbation.
+
+## Quand la boucle s'arrête
+
+| Statut | Raison |
+| --- | --- |
+| PR prête | CI verte, aucun fil non résolu, aucun changement demandé |
+| PR fermée | La PR a été fusionnée ou fermée |
+| Limite d'itérations | La boucle a envoyé du travail autant de fois que permis |
+| Budget de tokens | La session a épuisé le budget |
+| Arrêtée | Tu l'as arrêtée, ou la session a été supprimée |
+
+Une boucle arrêtée reste en haut du champ de message jusqu'à ce que tu la fermes. En mode avec approbation, avec un reçu ou des réponses GitHub en attente, le travail est conservé et la boucle reste ; utilise **Resume fix loop** pour continuer la boucle existante. Relancer sur la même PR ne démarre une nouvelle boucle que s'il n'y a plus de publication ni de réponses en attente.
+
+## Piles
+
+Chaque pull request a sa propre boucle. Dans une [pile](/fr/stacked-prs/), lance une boucle sur chaque PR à corriger ; un échec sur une PR ne retient pas les autres.
+
+## Où ça fonctionne
+
+La boucle tourne sur le serveur OpenChamber derrière l'app web, l'app de bureau et les apps mobiles. L'extension VS Code ne la propose pas.

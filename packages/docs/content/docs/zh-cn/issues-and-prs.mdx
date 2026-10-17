@@ -63,12 +63,14 @@ issue 或拉取请求的动态下方有一个评论框。**Comment** 会把你�
 
 大小旁边有两个按钮。**Changes** 在侧边面板中打开拉取请求的 diff，**Walkthrough** 打开它的 [改动导读](/zh-cn/walkthrough/)。如果应用当前在另一个项目上，会先切换到该 PR 的项目。在手机上，**Changes** 会在工作区面板的 **Git** 标签页中打开该 PR；**Walkthrough** 只在桌面端和网页端提供。
 
-底部的 **Merge** 会先确认再合并，并使用你平常的合并方式。草稿还会有 **Ready for review**。
+底部的 **Merge** 会先确认再合并，并使用你平常的合并方式。草稿还会有 **Ready for review**。**Start fix loop** 会把 PR 交给当前打开的会话，直到它可以合并；参见 [PR 修复循环](/zh-cn/pr-fix-loop/)。属于某个堆叠的 PR 会显示整条链；参见 [堆叠式拉取请求](/zh-cn/stacked-prs/)。
 
 打开状态的 issue 或拉取请求底部还有 **Close issue** 或 **Close pull request**（GitLab 上为 **Close merge request**），已关闭的则有 **Reopen issue** 或 **Reopen pull request**（**Reopen merge request**）。这些操作可以撤回，所以不会先确认。已合并的拉取请求不能关闭，也不能重新打开。在 GitHub 上，issue 会以已完成的状态关闭。
 
 ## 相关内容
 
 - [GitHub 工单与 PR](/zh-cn/github/) — 连接 GitHub，并把 issue 附加到消息
+- [堆叠式拉取请求](/zh-cn/stacked-prs/) — 查看、restack 并合并一条 PR 链
+- [PR 修复循环](/zh-cn/pr-fix-loop/) — 让会话修复 PR，直到 CI 变绿、评审完成
 - [Worktree 会话](/zh-cn/worktrees/) — worktree 会话从哪里开始
 - [集成](/zh-cn/integrations/) — 连接 Linear，并把团队映射到项目

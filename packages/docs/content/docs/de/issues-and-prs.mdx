@@ -63,12 +63,14 @@ Die Vorschau eines Pull Requests zeigt außerdem seinen Branch, seine Größe (h
 
 Neben der Größe stehen zwei Schaltflächen. **Changes** öffnet den Diff des Pull Requests im Seitenpanel, **Walkthrough** öffnet seinen [Änderungsrundgang](/de/walkthrough/). Ist die App gerade auf einem anderen Projekt, wechselt sie zuerst zum Projekt des PRs. Auf dem Handy öffnet **Changes** den PR im Tab **Git** der Arbeitsbereich-Leiste; **Walkthrough** gibt es nur auf Desktop und im Web.
 
-Unten fragt **Merge** vor dem Mergen nach und nutzt deine übliche Merge-Methode. Ein Entwurf bekommt zusätzlich **Ready for review**.
+Unten fragt **Merge** vor dem Mergen nach und nutzt deine übliche Merge-Methode. Ein Entwurf bekommt zusätzlich **Ready for review**. **Start fix loop** übergibt den PR an die offene Sitzung, bis er mergebereit ist; siehe [PR-Fix-Schleife](/de/pr-fix-loop/). Ein PR, der zu einem Stack gehört, zeigt die ganze Kette; siehe [Gestapelte Pull Requests](/de/stacked-prs/).
 
 Ein offenes Issue oder ein offener Pull Request hat unten außerdem **Close issue** oder **Close pull request** (auf GitLab **Close merge request**), ein geschlossener **Reopen issue** oder **Reopen pull request** (**Reopen merge request**). Beides fragt nicht nach, weil es sich rückgängig machen lässt. Ein gemergter Pull Request lässt sich weder schließen noch wieder öffnen. Auf GitHub wird ein Issue als erledigt geschlossen.
 
 ## Verwandt
 
 - [GitHub-Issues und PRs](/de/github/): GitHub verbinden und Issues an Nachrichten hängen
+- [Gestapelte Pull Requests](/de/stacked-prs/): eine Kette von PRs ansehen, restacken und mergen
+- [PR-Fix-Schleife](/de/pr-fix-loop/): eine Sitzung einen PR fixen lassen, bis CI grün ist und das Review erledigt ist
 - [Worktree-Sitzungen](/de/worktrees/): wo Worktree-Sitzungen starten
 - [Integrationen](/de/integrations/): Linear verbinden und Teams Projekten zuordnen

@@ -1,0 +1,56 @@
+---
+title: Gestapelte Pull Requests
+description: Sieh, baue und merge eine Kette von Pull Requests, die aufeinander aufbauen.
+---
+
+# Gestapelte Pull Requests
+
+Ein Stack ist eine Kette von Pull Requests, in der jeder auf dem darunterliegenden aufbaut: Der Base-Branch des zweiten PRs ist der Branch des ersten PRs, und so weiter. Wenn du eine große Änderung so aufteilst, bleibt jeder PR klein genug zum Reviewen. OpenChamber zeigt den ganzen Stack überall, wo ein PR daraus auftaucht, und hilft dir, die Kette in Ordnung zu halten.
+
+Stacks funktionieren mit GitHub. Kennt GitHub den Stack selbst (seine nativen gestapelten Pull Requests), liest OpenChamber den GitHub-Stack. Sonst findet es die Kette über die Base-Branches der PRs, das deckt auch Forks und GitHub Enterprise Server ab.
+
+## Einen Stack ansehen
+
+Öffne einen Pull Request aus einem Stack im Board [Issues und PRs](/de/issues-and-prs/), in der Pull-Request-Ansicht oder in der **Git**-Ansicht. Seine Vorschau hat einen Abschnitt **Pull request stack**, der alle PRs von unten nach oben auflistet. Jede Zeile zeigt den Status des PRs, seine Checks und ob er Konflikte hat, und markiert den PR, den du gerade ansiehst. Eine Zeile, die sich nicht lesen lässt, sagt das, statt eine Farbe zu zeigen.
+
+In der Liste des Boards trägt ein gestapelter PR ein kleines Badge mit seiner Position im Stack, etwa **2/3**. Klicke im Stack auf eine Zeile, um diesen PR zu öffnen.
+
+Eine Zeile kann dich auch warnen:
+
+- **Behind base by N commits**: Der PR darunter hat sich geändert, dieser braucht also ein Restack.
+- **Base was merged. Retarget to main.**: Der PR darunter wurde gemergt, und dieser zeigt noch auf dessen alten Branch.
+- **Still carries the commits of merged #N**: Der PR darunter wurde per Squash in den Trunk übernommen, und dieser enthält noch dessen alte Commits.
+
+## Einen PR auf einen anderen setzen
+
+1. Checke den Branch für den neuen PR aus, mit dem Branch des obersten PRs als Ausgangspunkt.
+2. Klicke im Stack-Abschnitt auf **Open stacked PR on top** oder wähle im Erstellungsformular der **Git**-Ansicht den Branch des obersten PRs als Base.
+3. Das Formular zeigt **Stacked on #N**. Schreibe Titel und Beschreibung und erstelle den PR.
+
+Auf GitHub.com trägt OpenChamber den neuen PR auch im GitHub-eigenen Stack ein. Lehnt GitHub das ab (Fork, ältere Serverversion), wird der PR trotzdem erstellt und der Stack wird weiter angezeigt.
+
+## Restack nach einer Änderung weiter unten
+
+Bekommt ein PR weit unten im Stack neue Commits, sind die PRs darüber veraltet. Klicke auf **Fetch and restack**. OpenChamber holt den Remote, rebased jeden Branch der Reihe nach auf den darunterliegenden und pusht dann die Branches, die sich bewegt haben. Der Push wird abgelehnt, wenn inzwischen jemand anderes auf einen Branch gepusht hat, so wird keine Arbeit überschrieben.
+
+Nur die eigenen Commits jedes Branches wandern mit. Nach einem Squash-Merge weiter unten bleiben die alten Commits des gemergten PRs draußen.
+
+### Wenn ein Restack auf einen Konflikt trifft
+
+Der Restack hält bei dem PR an, der den Konflikt hat. Die Branches darunter bleiben gerestackt, die darüber warten. Wie es weitergeht, hängt von **Einstellungen → Integrationen → GitHub → Restack conflicts** ab:
+
+- **Pause and let me choose** (Standard): Löse den Konflikt in dem Ordner, den der Stack-Abschnitt nennt, stage die Dateien und klicke auf **Continue**. **Abort** setzt diesen Branch zurück und überspringt den Rest. **Ask the session to resolve** gibt den Konflikt an die Sitzung weiter, in der du bist.
+- **Let the session resolve it**: Der Konflikt geht direkt an die Sitzung. Sobald ihr Zug endet und nichts Ungelöstes bleibt, läuft der Restack von selbst weiter.
+
+## Einen Stack mergen
+
+Merge von unten nach oben. Der Stack-Abschnitt bietet **Merge bottom PR #N** nur für den untersten offenen PR an, mit deiner üblichen Merge-Methode. Nach dem Merge wandert der nächste PR auf den Trunk, und ein **Fetch and restack** entfernt die gemergten Commits daraus. Danach mergst du den nächsten.
+
+## An einem ganzen Stack in einer Sitzung arbeiten
+
+- **Attach whole stack** im Stack-Abschnitt hängt Diff, Checks und Kommentare aller PRs an das Nachrichtenfeld, dazu eine Zusammenfassung von Reihenfolge und Branches. Lässt sich ein PR nicht lesen, werden die anderen trotzdem angehängt, und du erfährst, welcher fehlgeschlagen ist.
+- Aktiviere in der **Linked**-Liste einer Sitzung bei einem verknüpften PR **Follow whole stack**. Die Sitzung folgt dann dem Stack, wenn er sich ändert: Neue PRs obendrauf, Merges und Retargets erscheinen, ohne dass du erneut verknüpfen musst.
+
+## Wo es funktioniert
+
+Stacks funktionieren in der Web-App, der Desktop-App und den mobilen Apps. Die VS-Code-Erweiterung zeigt keine Stacks.
