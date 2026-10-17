@@ -41,16 +41,19 @@ function useHtmlRenderTheme(): HtmlRenderTheme {
     const { currentTheme } = useThemeSystem();
     // The interface size setting scales the root font, and the app's
     // controls with it; read again whenever it changes.
-    const interfaceSize = useUIStore((state) => state.fontSize);
+    useUIStore((state) => state.fontSize);
+    // The user's font settings land on the root as these variables.
+    const style = getComputedStyle(document.documentElement);
+    const rem = Number.parseFloat(style.fontSize) || 16;
+    const sans = style.getPropertyValue('--font-sans').trim() || DEFAULT_SANS;
+    const mono = style.getPropertyValue('--font-mono').trim() || DEFAULT_MONO;
     return React.useMemo(() => {
-        // The user's font settings land on the root as these variables.
-        const style = getComputedStyle(document.documentElement);
         return htmlRenderTheme(currentTheme, {
-            rem: Number.parseFloat(style.fontSize) || 16,
-            sans: style.getPropertyValue('--font-sans').trim() || DEFAULT_SANS,
-            mono: style.getPropertyValue('--font-mono').trim() || DEFAULT_MONO,
+            rem,
+            sans,
+            mono,
         });
-    }, [currentTheme, interfaceSize]);
+    }, [currentTheme, rem, sans, mono]);
 }
 
 // A timeline row unmounts when it scrolls away and mounts again when it comes
