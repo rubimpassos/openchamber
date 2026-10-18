@@ -1,0 +1,17 @@
+name: qa-stack-test
+on:
+  pull_request:
+    branches: ['main', 'qa/stack-*']
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail when .qa-stack-test/FAIL exists
+        run: |
+          if [ -f .qa-stack-test/FAIL ]; then
+            echo "::error file=.qa-stack-test/FAIL::QA stack test forced failure"
+            cat .qa-stack-test/FAIL
+            exit 1
+          fi
+          echo "QA stack test passed"
