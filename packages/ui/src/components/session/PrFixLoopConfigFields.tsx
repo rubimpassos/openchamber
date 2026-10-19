@@ -34,6 +34,8 @@ export function PrFixLoopConfigFields({ config, onChange, disabled = false, sett
   const anchor = (field: keyof FixLoopConfig) => settings ? `integrations.pr-fix-loop.${field}` : undefined;
   return (
     <div className={SETTINGS_FIELDS_STACK_CLASS}>
+      <SettingsCheckboxRow checked={config.watch === true} disabled={disabled} onChange={(watch) => onChange({ watch })}
+        label={t('prFixLoop.config.watch')} info={t('prFixLoop.config.watch.info')} settingsItem={anchor('watch')} />
       <SettingsFieldRow label={t('prFixLoop.config.maxIterations')} info={t('prFixLoop.config.maxIterations.info')} settingsItem={anchor('maxIterations')}>
         <NumberInput value={config.maxIterations} min={1} max={50} step={1} disabled={disabled}
           aria-label={t('prFixLoop.config.maxIterations')} containerClassName={SETTINGS_NUMBER_INPUT_CLASS}

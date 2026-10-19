@@ -1,13 +1,13 @@
 ---
 title: PR-fixlus
-description: Laat een sessie een pull request blijven fixen tot CI groen is en de review klaar is.
+description: Laat een sessie een pull request blijven fixen tot CI groen is en de review klaar is, en het daarna blijven volgen.
 ---
 
 # PR-fixlus
 
 De fixlus houdt een sessie aan het werk op één pull request tot die klaar is om te mergen. OpenChamber volgt de checks en de review van de PR. Faalt CI, dan krijgt de sessie de mislukte checks met hun stappen, annotaties en logregels. Als iemand reviewt of reageert, krijgt de sessie die feedback, doet de wijziging en antwoordt op de PR. De lus draait op uw OpenChamber-server en gaat dus door als de app dicht is.
 
-Hij eindigt als de PR klaar is: CI is groen, geen reviewthread staat open en niemand wacht op gevraagde wijzigingen. U krijgt dan een melding, en ook als de lus om een andere reden stopt.
+Als de PR klaar is (CI groen, geen openstaande reviewthreads en niemand die op gevraagde wijzigingen wacht), blijft de lus hem volgen. Een CI-fout of review die later binnenkomt gaat op dezelfde manier naar de sessie, tot de PR is gemergd of gesloten of u de lus stopt. U krijgt een melding elke keer dat de PR klaar wordt, en als de lus om een andere reden stopt. Met **Keep watching after the PR is ready** uitgeschakeld eindigt de lus zodra de PR klaar is.
 
 ## De lus starten
 
@@ -15,27 +15,36 @@ Hij eindigt als de PR klaar is: CI is groen, geen reviewthread staat open en nie
 2. Zoek de pull request op het bord [Issues en PR's](/nl/issues-and-prs/), in de pull-requestweergave of in de **Context sources** van de sessie (menu **⋮** op de rij van de PR), en kies **Start fix loop**.
 3. Controleer de instellingen in het dialoogvenster en klik op **Start fix loop**.
 
-De lus staat bovenaan het berichtenveld van de sessie: de PR, wat de lus doet, het aantal iteraties en de CI-status. Daar kunt u de instellingen wijzigen, de PR op het bord openen of de lus met **Stop** beëindigen.
+De lus staat bovenaan het berichtenveld van de sessie: de PR, wat de lus doet, het aantal iteraties en de CI-status. Zolang de PR klaar is, staat er **PR ready · watching for new CI and reviews**. Daar kunt u de instellingen wijzigen, de PR op het bord openen of de lus met **Stop** beëindigen.
 
 ## Wat de sessie krijgt
 
 - **Na een push** wacht de lus op CI voor de nieuwe commit. Faalt die, dan krijgt de sessie de mislukte checks één keer per commit, nooit dezelfde fout twee keer.
 - **Bij elke review, reviewopmerking of nieuwe opmerking** die volgens uw instellingen meetelt, krijgt de sessie de tekst en een link. De sessie wordt gevraagd op de PR te antwoorden en de threads die ze heeft opgelost af te sluiten. Om te antwoorden en threads af te sluiten heeft de sessie eigen, geauthenticeerde GitHub-tools nodig. Het account van de lus dient alleen om de PR te lezen.
 
-Is de sessie bezig, dan wacht het bericht in haar wachtrij en gaat het weg als de beurt eindigt. Is GitHub onbereikbaar, dan houdt de lus vast aan wat hij wist en meldt dat hij niet kon controleren. Een mislukte check leest hij nooit als groen.
+In de chat verschijnt elk van deze berichten als één ingeklapte regel, zoals **Fix loop: CI failed on #5** of **Fix loop: new review on #6**, met de commit, de auteurs en de iteratie. Klap hem open om alles te lezen wat de sessie kreeg: mislukte checks, stappen, annotaties en logregels, of de reviewtekst met auteur en link. Hij verschijnt nooit als een bericht dat u zelf hebt getypt.
+
+Is de sessie bezig, dan wacht het bericht in haar wachtrij en gaat het weg als de beurt eindigt. Een wachtend fixlus-bericht kunt u verwijderen, maar niet bewerken of vanuit de app versturen, en het houdt zijn regel als het wordt verstuurd. Is GitHub onbereikbaar, dan houdt de lus vast aan wat hij wist en meldt dat hij niet kon controleren. Een mislukte check leest hij nooit als groen.
 
 ## Instellingen
 
 Standaardwaarden staan onder **Instellingen → Integraties → GitHub → Fix loop**, en elke lus kan ze wijzigen.
 
-- **Maximum iterations**: hoe vaak de lus werk naar de sessie mag sturen (standaard 10).
-- **Token budget**: stopt zodra de sessie sinds de start van de lus zoveel tokens heeft gebruikt. Leeg betekent geen budget. Het budget wordt na elke beurt gecontroleerd, dus een beurt kan er overheen gaan.
+- **Keep watching after the PR is ready**: standaard aan. Zet het uit om de lus te laten eindigen zodra de PR klaar is.
+- **Maximum iterations**: hoe vaak de lus werk naar de sessie mag sturen voordat de PR weer klaar is (standaard 10). De telling begint opnieuw elke keer dat de PR klaar wordt.
+- **Token budget**: stopt zodra de sessie sinds de start van de lus zoveel tokens heeft gebruikt, over alle rondes samen. Leeg betekent geen budget. Het budget wordt na elke beurt gecontroleerd, dus een beurt kan er overheen gaan.
 - **Respond to**: **CI and reviews**, **CI only** of **Reviews only**.
-- **Ignore my feedback**: slaat opmerkingen over van het GitHub-account waarmee de lus de PR leest. In de automatische modus antwoordt de sessie met haar eigen GitHub-account, en wijkt dat af van het leesaccount, dan voeg je het toe aan **Blocked authors**. In de goedkeuringsmodus antwoordt de server met het GitHub-account dat aan de loop is gebonden, en de worker heeft geen GitHub-account.
+- **Ignore my feedback**: slaat opmerkingen over van het GitHub-account waarmee de lus de PR leest. Standaard uit, zodat u de PR van de agent met uw eigen account kunt reviewen en de sessie elke thread krijgt. De eigen antwoorden van de agent worden overgeslagen op hun markering (zie hieronder).
 - **Ignore bots**: slaat opmerkingen van bots over.
 - **Allowed authors** en **Blocked authors**: GitHub-logins, gescheiden door komma's. Met een lijst met toegestane auteurs tellen alleen die mensen mee.
 - **Only comments that mention this text**: telt een opmerking alleen mee als die de vermeldingstekst bevat (standaard `@openchamber`).
 - **Push changes**: **Push automatically** of **Wait for my approval**. De automatische modus behoudt de eigen GitHub-werkwijze van de sessie. De goedkeuringsmodus voert de fixes uit in een beperkte worker en heeft een eigen installatie nodig.
+
+## Tekst die de agent op GitHub schrijft
+
+Elke opmerking, elk antwoord en elke review die de agent schrijft eindigt met een korte regel, **Written by the OpenChamber agent**, en een verborgen markering (`<!-- openchamber-agent:v1 -->`). De lus slaat tekst met de markering altijd over, wat de auteursinstellingen ook zeggen. Gebruikt u hetzelfde GitHub-account als de agent, dan komen zijn antwoorden dus nooit als nieuwe feedback bij hem terug. In de goedkeuringsmodus voegt de server de markering toe aan de antwoorden die hij plaatst. In de automatische modus krijgt de sessie de opdracht haar toe te voegen. Vergeet de sessie dat, dan slaat de lus ook een antwoord van het leesaccount over dat is geplaatst terwijl haar eigen beurt liep of binnen twee minuten daarna.
+
+De markering labelt tekst en is geen handtekening. Iedereen kan haar in een opmerking plakken zodat de lus niet op die opmerking reageert. Dat onderdrukt alleen een reactie: het geeft geen toegang en start geen werk.
 
 ## Goedkeuringsmodus
 
@@ -77,13 +86,13 @@ De server draait de loop ook met alle clients gesloten. De webapp, de desktopapp
 
 | Status | Reden |
 | --- | --- |
-| PR is klaar | CI groen, geen openstaande threads, geen gevraagde wijzigingen |
+| PR is klaar | CI groen, geen openstaande threads, geen gevraagde wijzigingen, en **Keep watching after the PR is ready** staat uit |
 | PR gesloten | De PR is gemerged of gesloten |
 | Iteratielimiet | De lus heeft zo vaak werk gestuurd als is toegestaan |
 | Tokenbudget | De sessie heeft het budget opgebruikt |
 | Gestopt | U hebt hem gestopt of de sessie is verwijderd |
 
-Een gestopte lus blijft bovenaan het berichtenveld staan tot u hem sluit. In de goedkeuringsmodus blijven bij een bewijs of GitHub-antwoorden in behandeling het werk en de lus bewaard; gebruik **Resume fix loop** om de bestaande lus voort te zetten. Opnieuw starten op dezelfde PR begint pas een nieuwe lus als er geen publicatie of antwoorden meer in behandeling zijn.
+Een gestopte lus blijft bovenaan het berichtenveld staan tot u hem sluit. Een lus die als klaar eindigde voordat volgen bestond, blijft afgerond; sluit hem en start hem opnieuw om de PR te volgen. In de goedkeuringsmodus blijven bij een bewijs of GitHub-antwoorden in behandeling het werk en de lus bewaard; gebruik **Resume fix loop** om de bestaande lus voort te zetten. Opnieuw starten op dezelfde PR begint pas een nieuwe lus als er geen publicatie of antwoorden meer in behandeling zijn.
 
 ## Stacks
 

@@ -1,13 +1,13 @@
 ---
 title: Loop de correção de PR
-description: Deixe uma sessão continuar corrigindo um pull request até o CI ficar verde e a revisão terminar.
+description: Deixe uma sessão continuar corrigindo um pull request até o CI ficar verde e a revisão terminar, e continuar acompanhando depois disso.
 ---
 
 # Loop de correção de PR
 
 O loop de correção mantém uma sessão trabalhando em um pull request até ele estar pronto para merge. O OpenChamber acompanha os checks e a revisão do PR. Quando o CI falha, a sessão recebe os checks que falharam, com seus passos, anotações e linhas de log. Quando alguém revisa ou comenta, a sessão recebe esse feedback, faz a mudança e responde no PR. O loop roda no seu servidor OpenChamber, então continua com o app fechado.
 
-Ele termina quando o PR está pronto: CI verde, nenhuma thread de revisão sem resolver e ninguém esperando mudanças solicitadas. Você recebe uma notificação nesse momento, e também quando o loop para por outro motivo.
+Quando o PR está pronto (CI verde, nenhuma thread de revisão sem resolver e ninguém esperando mudanças solicitadas), o loop continua acompanhando. Uma falha de CI ou uma revisão que chegue depois vai para a sessão do mesmo jeito, até o PR ser mesclado ou fechado, ou você parar o loop. Você recebe uma notificação toda vez que o PR fica pronto e quando o loop para por outro motivo. Com **Keep watching after the PR is ready** desativado, o loop termina assim que o PR está pronto.
 
 ## Iniciar o loop
 
@@ -15,14 +15,16 @@ Ele termina quando o PR está pronto: CI verde, nenhuma thread de revisão sem r
 2. Encontre o pull request no quadro de [Issues e PRs](/pt-br/issues-and-prs/), na visão de pull request ou nas **Context sources** da sessão (menu **⋮** da linha do PR), e escolha **Start fix loop**.
 3. Confira as configurações no diálogo e clique em **Start fix loop**.
 
-O loop aparece no topo do campo de mensagem da sessão: o PR, o que o loop está fazendo, a contagem de iterações e o estado do CI. Dali você pode mudar as configurações, abrir o PR no quadro ou parar o loop com **Stop**.
+O loop aparece no topo do campo de mensagem da sessão: o PR, o que o loop está fazendo, a contagem de iterações e o estado do CI. Enquanto o PR está pronto, ele mostra **PR ready · watching for new CI and reviews**. Dali você pode mudar as configurações, abrir o PR no quadro ou parar o loop com **Stop**.
 
 ## O que a sessão recebe
 
 - **Depois de um push**, o loop espera o CI do novo commit. Se falhar, a sessão recebe os checks que falharam uma vez por commit, nunca a mesma falha duas vezes.
 - **Para cada revisão, comentário de revisão ou comentário novo** que conte pelas suas configurações, a sessão recebe o texto e um link. Ela é instruída a responder no PR e resolver as threads que corrigiu. Para responder e resolver threads, a sessão precisa das próprias ferramentas do GitHub autenticadas. A conta do loop só serve para ler o PR.
 
-Se a sessão estiver ocupada, a mensagem espera na fila dela e sai quando o turno termina. Se o GitHub não puder ser alcançado, o loop mantém o que sabia e avisa que não conseguiu verificar. Ele nunca lê um check que falhou como verde.
+No chat, cada uma dessas mensagens aparece como uma linha recolhida, como **Fix loop: CI failed on #5** ou **Fix loop: new review on #6**, com o commit, os autores e a iteração. Abra a linha para ler tudo o que a sessão recebeu: checks que falharam, passos, anotações e linhas de log, ou o texto da revisão com autor e link. Ela nunca aparece como uma mensagem que você digitou.
+
+Se a sessão estiver ocupada, a mensagem espera na fila dela e sai quando o turno termina. Uma mensagem do loop de correção na espera pode ser removida, mas não editada nem enviada pelo app, e mantém a linha quando sai. Se o GitHub não puder ser alcançado, o loop mantém o que sabia e avisa que não conseguiu verificar. Ele nunca lê um check que falhou como verde.
 
 O modo automático só aceita feedback de autores cujo acesso de escrita ao repositório seja confirmado pelo GitHub. Isso também vale para comentários antigos incluídos como contexto de uma thread. Listas de autores permitidos e menções não dispensam essa verificação. Se a permissão não puder ser confirmada, o loop mostra um erro e espera. O modo com aprovação pode enviar feedback externo ao worker restrito; publicar continua exigindo sua aprovação. Mensagens automáticas antigas na fila sem admissão verificada ficam bloqueadas; remova-as para o loop ler o feedback novamente.
 
@@ -30,14 +32,21 @@ O modo automático só aceita feedback de autores cujo acesso de escrita ao repo
 
 Os padrões ficam em **Settings → Integrations → GitHub → Fix loop**, e cada loop pode alterá-los.
 
-- **Maximum iterations**: quantas vezes o loop pode enviar trabalho para a sessão (padrão 10).
-- **Token budget**: para quando a sessão usar essa quantidade de tokens desde o início do loop. Vazio significa sem orçamento. O orçamento é verificado após cada turno, então um turno pode ultrapassá-lo.
+- **Keep watching after the PR is ready**: ativado por padrão. Desative para o loop terminar quando o PR estiver pronto.
+- **Maximum iterations**: quantas vezes o loop pode enviar trabalho para a sessão até o PR ficar pronto de novo (padrão 10). A contagem recomeça toda vez que o PR fica pronto.
+- **Token budget**: para quando a sessão usar essa quantidade de tokens desde o início do loop, somando todas as rodadas. Vazio significa sem orçamento. O orçamento é verificado após cada turno, então um turno pode ultrapassá-lo.
 - **Respond to**: **CI and reviews**, **CI only** ou **Reviews only**.
-- **Ignore my feedback**: ignora comentários da conta do GitHub com a qual o loop lê. No modo automático, a sessão responde com a própria conta do GitHub e, se ela for diferente da conta de leitura, você a adiciona a **Blocked authors**. No modo com aprovação, o servidor responde com a conta do GitHub vinculada ao loop, e o worker não tem conta do GitHub.
+- **Ignore my feedback**: ignora comentários da conta do GitHub com a qual o loop lê. Desativado por padrão, então você pode revisar o PR do agente com a sua própria conta e a sessão recebe todas as threads. As respostas do próprio agente são ignoradas pela marca delas (veja abaixo).
 - **Ignore bots**: ignora comentários de bots.
 - **Allowed authors** e **Blocked authors**: logins do GitHub separados por vírgulas. Com uma lista de permitidos, só essas pessoas contam.
 - **Only comments that mention this text**: só conta um comentário que contenha o texto de menção (`@openchamber` por padrão).
 - **Push changes**: **Push automatically** ou **Wait for my approval**. O modo automático mantém o fluxo de GitHub da própria sessão. O modo com aprovação executa as correções em um worker restrito e precisa de uma configuração própria.
+
+## Texto que o agente escreve no GitHub
+
+Todo comentário, resposta e revisão que o agente escreve termina com uma linha curta, **Written by the OpenChamber agent**, e uma marca oculta (`<!-- openchamber-agent:v1 -->`). O loop sempre ignora texto com a marca, independentemente das configurações de autores, então quando você e o agente usam a mesma conta do GitHub, as respostas dele nunca voltam para ele como feedback novo. No modo com aprovação, o servidor adiciona a marca às respostas que publica. No modo automático, a sessão é instruída a adicioná-la. Se a sessão esquecer, o loop também ignora uma resposta da conta de leitura publicada enquanto o turno dela rodava ou nos dois minutos seguintes.
+
+A marca rotula o texto e não é uma assinatura. Qualquer pessoa pode colá-la em um comentário para o loop não reagir a ele. Isso só suprime uma reação: não dá acesso e não inicia trabalho.
 
 ## Modo com aprovação
 
@@ -79,13 +88,13 @@ O servidor executa o loop com todos os clientes fechados. O app web, o desktop e
 
 | Status | Motivo |
 | --- | --- |
-| PR pronto | CI verde, sem threads sem resolver, sem mudanças solicitadas |
+| PR pronto | CI verde, sem threads sem resolver, sem mudanças solicitadas e **Keep watching after the PR is ready** está desativado |
 | PR fechado | O PR foi mesclado ou fechado |
 | Limite de iterações | O loop enviou trabalho o máximo de vezes permitido |
 | Orçamento de tokens | A sessão esgotou o orçamento |
 | Parado | Você parou o loop ou a sessão foi excluída |
 
-Um loop parado fica no topo do campo de mensagem até você dispensá-lo. No modo com aprovação, com um recibo ou respostas do GitHub pendentes, o trabalho é mantido e o loop permanece; use **Resume fix loop** para continuar o loop existente. Iniciar de novo no mesmo PR só começa um loop novo quando não há publicação nem respostas pendentes.
+Um loop parado fica no topo do campo de mensagem até você dispensá-lo. Um loop que terminou como pronto antes de o acompanhamento existir continua encerrado; dispense-o e inicie de novo para acompanhar o PR. No modo com aprovação, com um recibo ou respostas do GitHub pendentes, o trabalho é mantido e o loop permanece; use **Resume fix loop** para continuar o loop existente. Iniciar de novo no mesmo PR só começa um loop novo quando não há publicação nem respostas pendentes.
 
 ## Stacks
 

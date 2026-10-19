@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { AGENT_SIGNATURE } from './agent-marker.js';
 import { authorCounts, collectFeedback, createFixLoopRuntime, DEFAULT_CONFIG, normalizeConfig } from './runtime.js';
 
 const who = (login, bot = false) => ({ login, bot });
@@ -83,7 +84,8 @@ describe('config and authors', () => {
   });
 
   test('self, bots, block and allow lists', () => {
-    expect(authorCounts(DEFAULT_CONFIG, 'me', who('Me'))).toBe(false);
+    expect(authorCounts(DEFAULT_CONFIG, 'me', who('Me'))).toBe(true);
+    expect(authorCounts({ ...DEFAULT_CONFIG, ignoreSelf: true }, 'me', who('Me'))).toBe(false);
     expect(authorCounts(DEFAULT_CONFIG, 'me', who('ci[bot]', true))).toBe(false);
     expect(authorCounts({ ...DEFAULT_CONFIG, blockAuthors: ['bob'] }, 'me', who('Bob'))).toBe(false);
     expect(authorCounts({ ...DEFAULT_CONFIG, allowAuthors: ['carol'] }, 'me', who('dave'))).toBe(false);
@@ -132,7 +134,7 @@ describe('fix loop runtime', () => {
       reads.push(snapshot({ reviewDecision: 'CHANGES_REQUESTED', [source]: source === 'threads'
         ? [{ id: 'T1', resolved: false, comments: [entry] }]
         : source === 'reviews' ? [{ ...entry, state: 'CHANGES_REQUESTED' }] : [entry] }));
-      await create(runtime);
+      await create(runtime, { ignoreSelf: true });
       if (source === 'comments') await runNext();
       await runNext();
       expect(queue).toEqual([]);
@@ -271,7 +273,7 @@ describe('fix loop runtime', () => {
   test('red CI goes to the session once, then the loop waits for its turn and settles ready on green', async () => {
     const runtime = makeRuntime();
     reads.push(snapshot({ ci: { state: 'failure', total: 1, success: 0, failure: 1, pending: 0, contexts: [] } }));
-    const loop = await create(runtime);
+    const loop = await create(runtime, { watch: false });
     expect(loop.status).toBe('watching');
     await runNext();
     expect(queue).toHaveLength(1);
@@ -310,7 +312,7 @@ describe('fix loop runtime', () => {
     const runtime = makeRuntime();
     const own = { id: 'T1', resolved: false, path: 'a.js', line: 1, comments: [{ id: 1, body: 'note to self', url: 'u', author: who('me') }] };
     reads.push(snapshot({ threads: [own] }));
-    await create(runtime);
+    await create(runtime, { ignoreSelf: true });
     await runNext();
     expect((await runtime.list())[0]).toMatchObject({ status: 'watching', unresolvedThreads: 1 });
     expect(queue).toEqual([]);
@@ -371,10 +373,10 @@ describe('fix loop runtime', () => {
   test('turning a finished loop on again replaces it and tells clients', async () => {
     const runtime = makeRuntime();
     reads.push(snapshot());
-    const first = await create(runtime);
+    const first = await create(runtime, { watch: false });
     await runNext();
     reads.push(snapshot());
-    const second = await create(runtime);
+    const second = await create(runtime, { watch: false });
     expect(second.id).not.toBe(first.id);
     expect(events).toContainEqual({ type: 'openchamber:pr-fix-loop.updated', properties: { id: first.id, removed: true } });
     expect((await runtime.list()).map((loop) => loop.id)).toEqual([second.id]);
@@ -469,5 +471,185 @@ describe('fix loop runtime', () => {
     expect(queue[0].item.text).not.toContain('Historical conversation');
     await runNext();
     expect(queue).toHaveLength(1);
+  });
+});
+
+const iso = (at) => new Date(at).toISOString();
+const note = (id, body, login = 'me', at = clock) => ({ id, body, url: `https://github.com/acme/app/pull/7#c${id}`, createdAt: iso(at), author: who(login) });
+const openThread = (id, comments, resolved = false) => ({ id, resolved, path: 'a.js', line: 1, comments });
+const red = (headSha) => snapshot({ headSha, ci: { state: 'failure', total: 1, success: 0, failure: 1, pending: 0, contexts: [] } });
+
+describe('watching a ready PR', () => {
+  test('a green PR waits as ready, a later failure starts a new round, and ready returns', async () => {
+    // Given
+    const resolved = [];
+    const runtime = makeRuntime({ resolveNotifications: async (loop) => { resolved.push(loop.id); } });
+    reads.push(snapshot());
+    const loop = await create(runtime, { maxIterations: 1 });
+    // When
+    await runNext();
+    // Then
+    expect((await runtime.list())[0]).toMatchObject({ status: 'watching', statusReason: 'pr-ready', iterations: 0, totalIterations: 0 });
+    expect(notified).toEqual(['watching']);
+    expect(timers.at(-1).ms).toBe(180_000);
+    reads.push(snapshot());
+    await runNext();
+    expect(notified).toHaveLength(1);
+
+    reads.push(red('bbb222'));
+    await runNext();
+    expect(queue).toHaveLength(1);
+    expect((await runtime.list())[0]).toMatchObject({ status: 'working', iterations: 1, totalIterations: 1 });
+    expect(resolved).toEqual([loop.id]);
+    expect(queue[0].item.notice).toMatchObject({
+      source: 'openchamber-notice', kind: 'fix-loop', loopId: loop.id, trigger: 'ci', iteration: 1, maxIterations: 1,
+      headSha: 'bbb222', checks: [{ name: 'test', url: 'https://ci' }], pr: { owner: 'acme', repo: 'app', number: 7 },
+    });
+
+    reads.push(snapshot({ headSha: 'ccc333' }));
+    await runNext();
+    expect((await runtime.list())[0]).toMatchObject({ status: 'watching', statusReason: 'pr-ready', iterations: 0, totalIterations: 1 });
+    expect(notified).toHaveLength(2);
+
+    // The iteration limit counts one round: a new failure still goes out.
+    reads.push(red('ddd444'));
+    await runNext();
+    expect(queue).toHaveLength(2);
+    expect((await runtime.list())[0]).toMatchObject({ status: 'working', iterations: 1, totalIterations: 2 });
+  });
+
+  test('loops saved before watch keep their behavior, and a ready one stays finished', async () => {
+    // Given
+    const runtime = makeRuntime();
+    reads.push(snapshot());
+    await create(runtime, { watch: false });
+    await runNext();
+    await runtime.flush();
+    runtime.stop();
+    const file = path.join(dataDir, 'pr-fix-loops.json');
+    const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const ready = stored.loops.find((loop) => loop.status === 'ready');
+    const watching = { ...structuredClone(ready), id: 'fixloop_legacy', number: 8, status: 'watching', iterations: 2 };
+    for (const loop of [ready, watching]) {
+      delete loop.config.watch;
+      delete loop.config.ignoreSelf;
+      delete loop.totalIterations;
+    }
+    stored.loops = [ready, watching];
+    fs.writeFileSync(file, JSON.stringify(stored));
+    timers.length = 0;
+    // When
+    const restarted = makeRuntime();
+    await restarted.start();
+    // Then
+    const loops = await restarted.list();
+    expect(loops.map((loop) => loop.config.watch)).toEqual([false, false]);
+    expect(loops.map((loop) => loop.config.ignoreSelf)).toEqual([true, true]);
+    expect(loops.find((loop) => loop.id === 'fixloop_legacy').totalIterations).toBe(2);
+    expect(timers).toHaveLength(1);
+    restarted.stop();
+  });
+});
+
+describe('the agent marker and the reviewer\'s own account', () => {
+  test('the user\'s multi-thread review reaches the session; the agent\'s replies do not', async () => {
+    // Given
+    const runtime = makeRuntime();
+    const asked = [openThread('T1', [note(1, 'rename x')]), openThread('T2', [note(2, 'add a test')]), openThread('T3', [note(3, 'drop the log')])];
+    reads.push(snapshot({ threads: asked }));
+    await create(runtime);
+    // When
+    await runNext();
+    // Then
+    expect(queue).toHaveLength(1);
+    for (const text of ['rename x', 'add a test', 'drop the log', '<!-- openchamber-agent:v1 -->', 'Written by the OpenChamber agent']) {
+      expect(queue[0].item.text).toContain(text);
+    }
+    expect(queue[0].item.notice.feedback.map((entry) => entry.type)).toEqual(['thread', 'thread', 'thread']);
+
+    // The agent answers during its turn: T1 fixed and resolved, T2 answered and left open, T3 answered without the marker.
+    clock += 60_000;
+    reads.push(snapshot({ threads: [
+      openThread('T1', [asked[0].comments[0], note(11, `Renamed.\n\n${AGENT_SIGNATURE}`)], true),
+      openThread('T2', [asked[1].comments[0], note(12, `Left as is because of X.\n\n${AGENT_SIGNATURE}`)]),
+      openThread('T3', [asked[2].comments[0], note(13, 'Dropped it.')]),
+    ] }));
+    await runNext();
+    expect(queue).toHaveLength(1);
+    expect((await runtime.list())[0]).toMatchObject({ status: 'watching', statusReason: 'waiting-review', unresolvedThreads: 2 });
+
+    // After a restart and well past the turn, the user's new reply in T2 is new work.
+    await runtime.flush();
+    runtime.stop();
+    timers.length = 0;
+    clock += 10 * 60_000;
+    const restarted = makeRuntime();
+    await restarted.start();
+    reads.push(snapshot({ threads: [
+      openThread('T2', [asked[1].comments[0], note(12, `Left as is because of X.\n\n${AGENT_SIGNATURE}`), note(14, 'please change it anyway')]),
+      openThread('T3', [asked[2].comments[0], note(13, 'Dropped it.', 'me', clock - 10 * 60_000)]),
+    ] }));
+    await runNext();
+    expect(queue).toHaveLength(2);
+    expect(queue[1].item.text).toContain('please change it anyway');
+    expect(queue[1].item.text).not.toContain('### Review thread on a.js:1 (thread id T3)');
+    restarted.stop();
+  });
+
+  test('marked text never counts, whatever the lists and mentions say; a quote of the visible line does', () => {
+    const config = { ...DEFAULT_CONFIG, allowAuthors: ['me'], mentionOnly: true };
+    const pr = snapshot({ comments: [
+      note(1, `@openchamber done\n\n${AGENT_SIGNATURE}`),
+      note(2, '> <sub>Written by the OpenChamber agent</sub>\n\n@openchamber this is not done'),
+    ] });
+    expect(collectFeedback(pr, config, new Set(), { first: false }).comments.map((comment) => comment.id)).toEqual([2]);
+  });
+
+  test('only feedback that passes every local rule is checked for write access', async () => {
+    const checks = [];
+    const runtime = makeRuntime({ readAuthorPermission: async (input) => { checks.push(input.username); return true; } });
+    reads.push(snapshot({ threads: [
+      openThread('T1', [note(1, 'from a blocked author', 'spam')]),
+      openThread('T2', [note(2, `marked\n\n${AGENT_SIGNATURE}`, 'agentish')]),
+      openThread('T3', [note(3, 'real request', 'rev')]),
+    ] }));
+    await create(runtime, { blockAuthors: ['spam'] });
+    await runNext();
+    expect(checks).toEqual(['rev']);
+    expect(queue[0].item.text).toContain('real request');
+    expect(queue[0].item.text).not.toContain('from a blocked author');
+  });
+
+  test('turning off "ignore my feedback" on a running loop reads the skipped review once', async () => {
+    const runtime = makeRuntime();
+    const own = () => snapshot({ threads: [openThread('T1', [note(1, 'fix the name')])] });
+    reads.push(own());
+    const loop = await create(runtime, { ignoreSelf: true });
+    await runNext();
+    expect(queue).toEqual([]);
+    reads.push(own());
+    await runtime.update(loop.id, { ignoreSelf: false });
+    await runNext();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].item.text).toContain('fix the name');
+    reads.push(own());
+    await runNext();
+    expect(queue).toHaveLength(1);
+  });
+
+  test('a first mention-only read takes an open thread and a mention made after the agent last wrote', () => {
+    const config = { ...DEFAULT_CONFIG, mentionOnly: true };
+    const pr = snapshot({
+      threads: [openThread('PRRT_6', [note(1, '@openchamber Please rewrite this first line', 'me', 3_000)])],
+      reviews: [
+        { id: 7, state: 'COMMENTED', body: '@openchamber QA review', url: 'r7', createdAt: iso(3_000), author: who('me') },
+        { id: 6, state: 'COMMENTED', body: '@openchamber an older request', url: 'r6', createdAt: iso(500), author: who('me') },
+      ],
+      comments: [note(9, `Done.\n\n${AGENT_SIGNATURE}`, 'me', 1_000), note(10, 'plain chat', 'rev', 4_000)],
+    });
+    const first = collectFeedback(pr, config, new Set(), { first: true });
+    expect(first.threads.map((thread) => thread.id)).toEqual(['PRRT_6']);
+    expect(first.reviews.map((review) => review.id)).toEqual([7]);
+    expect(first.comments).toEqual([]);
   });
 });

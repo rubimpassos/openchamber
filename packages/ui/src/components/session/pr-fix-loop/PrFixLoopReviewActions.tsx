@@ -13,6 +13,7 @@ export function PrFixLoopReviewActions({ review }: { readonly review: Review }) 
   return <section aria-label={t('prFixLoop.review.title')} className="min-w-0 space-y-3">
     <h3 className="typography-ui-label text-foreground">{t('prFixLoop.review.title')}</h3>
     <p className="typography-meta text-muted-foreground">{t('prFixLoop.review.description')}</p>
+    <p className="typography-meta text-muted-foreground">{t('prFixLoop.review.marker')}</p>
     <ol className="min-w-0 space-y-4">
       {review.actions.map((action) => {
         let resolution: string | null;

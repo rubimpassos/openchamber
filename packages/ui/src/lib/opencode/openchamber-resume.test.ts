@@ -46,4 +46,19 @@ describe("readOpenChamberResume", () => {
     expect(isSkippedTimelineMessage(message)).toBe(false)
     expect(isSkippedTimelineMessage(synthetic(undefined))).toBe(true)
   })
+
+  test("reads what the PR fix loop found, and the bare notice of an item queued before it was described", () => {
+    const notice = {
+      source: "openchamber-notice", kind: "fix-loop", loopId: "fixloop_1", trigger: "ci", iteration: 1, maxIterations: 10, headSha: "abcdef1234567",
+      pr: { owner: "o", repo: "r", number: 5, url: "u", title: "T" }, checks: [{ name: "test", url: null }],
+      feedback: [{ type: "thread", author: "rev", url: "c", path: "a.ts", line: 3 }],
+    }
+    expect(readOpenChamberResume(synthetic(notice, "full CI log"))).toMatchObject({ kind: "fix-loop", trigger: "ci", text: "full CI log", checks: [{ name: "test" }] })
+    const bare = readOpenChamberResume(synthetic({ source: "openchamber-notice", kind: "fix-loop", loopId: "fixloop_1" }))
+    expect(bare).toMatchObject({ kind: "fix-loop", trigger: "unknown", checks: [], feedback: [] })
+    expect(bare?.kind === "fix-loop" ? bare.pr : "wrong kind").toBeUndefined()
+    expect(isBackgroundReportEntry(synthetic(notice))).toBe(true)
+    expect(readOpenChamberResume(synthetic({ source: "openchamber-notice", kind: "fix-loop" }))).toBeUndefined()
+  })
 })
+

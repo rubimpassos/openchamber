@@ -151,6 +151,51 @@ describe('fix-loop dispatch admission', () => {
     second.runtime.stop(); await fixLoop.stop();
   });
 
+  it('delivers a fix-loop item as a marked synthetic message, also after waiting in the queue, once across a lost answer', async () => {
+    // Given
+    const notice = { source: 'openchamber-notice', kind: 'fix-loop', loopId: 'fixloop_1', trigger: 'ci', checks: [{ name: 'test', url: null }] };
+    const { runtime, openCode, emit } = createRuntime({ assertFixLoopHostDispatch: async () => undefined });
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, { content: 'Fix loop: PR #5 · CI failed', text: 'full CI details', notice, origin: { kind: 'pr-fix-loop', id: 'fixloop_1' } });
+    await settle();
+    expect(openCode.state.sent).toEqual([]);
+    // When: the turn ends, and the first answer is lost after OpenCode admitted the message.
+    openCode.state.active = {};
+    openCode.state.failNext = /\/synthetic$/;
+    openCode.state.failStatus = 409;
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle(100);
+    // Then
+    expect(openCode.state.sent).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    expect(openCode.state.switched).toEqual([]);
+    runtime.stop();
+  });
+
+  it('sends the notice as the message metadata and never as a prompt', async () => {
+    const notice = { source: 'openchamber-notice', kind: 'fix-loop', loopId: 'fixloop_1' };
+    const { runtime, openCode } = createRuntime({ assertFixLoopHostDispatch: async () => undefined });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, { content: 'Fix loop: PR #6 · new review feedback', text: 'review details', notice, origin: { kind: 'pr-fix-loop', id: 'fixloop_1' } });
+    await settle(100);
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].path).toMatch(/\/synthetic$/);
+    expect(openCode.state.sent[0].body).toMatchObject({
+      text: 'review details', description: 'Fix loop: PR #6 · new review feedback', metadata: notice, delivery: 'steer', resume: true,
+    });
+    expect(openCode.state.sent[0].body.id).toMatch(/^msg_/);
+    runtime.stop();
+  });
+
+  it('gives a fix-loop item queued before the notice existed the minimal notice', () => {
+    const parsed = parseQueuedItemInput({ content: 'Fix loop', text: 'fix CI', origin: { kind: 'pr-fix-loop', id: 'fixloop_old' } });
+    expect(parsed.notice).toEqual({ source: 'openchamber-notice', kind: 'fix-loop', loopId: 'fixloop_old' });
+    expect(() => parseQueuedItemInput(item({ notice: { source: 'openchamber-notice', kind: 'fix-loop', loopId: 'x' } }))).toThrow(TypeError);
+    expect(() => parseQueuedItemInput({ content: 'x', text: 'x', origin: { kind: 'pr-fix-loop', id: 'a' },
+      notice: { source: 'openchamber-notice', kind: 'fix-loop', loopId: 'b' } })).toThrow(TypeError);
+  });
+
   it('cannot deliver a fix-loop item while its dispatch authority is unavailable', async () => {
     const { runtime, openCode } = createRuntime();
     runtime.start();

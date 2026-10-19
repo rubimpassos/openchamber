@@ -11,6 +11,10 @@
  * - `question-answer`: the user answered a question that a restart or
  *   OpenCode's inactivity eviction cut off (`answerOrphanedQuestion` in
  *   `@/sync/session-actions`).
+ * - `fix-loop`: the PR fix loop handed the session a CI failure or review
+ *   feedback (`web/server/lib/pr-fix-loop/runtime.js`, delivered by the
+ *   server message queue). The metadata indexes what it found; the message
+ *   text holds the full details the agent read.
  */
 
 import { z } from "zod"
@@ -38,7 +42,29 @@ const questionAnswerSchema = z.object({
   answers: z.array(z.object({ question: z.string(), answer: z.string() })).catch([]),
 })
 
-const resumeSchema = z.discriminatedUnion("kind", [restartResumeSchema, questionAnswerSchema])
+const fixLoopFeedbackSchema = z.object({
+  type: z.enum(["review", "thread", "comment"]),
+  author: z.string(),
+  url: z.string(),
+  path: z.string().optional(),
+  line: z.number().optional(),
+})
+
+const fixLoopSchema = z.object({
+  source: z.literal(OPENCHAMBER_RESUME_SOURCE),
+  kind: z.literal("fix-loop"),
+  loopId: z.string().min(1),
+  // A message queued before the loop described it carries only the loop id.
+  pr: z.object({ owner: z.string(), repo: z.string(), number: z.number(), url: z.string(), title: z.string() }).nullish().catch(null),
+  trigger: z.enum(["ci", "review", "ci+review", "unknown"]).catch("unknown"),
+  iteration: z.number().nullish().catch(null),
+  maxIterations: z.number().nullish().catch(null),
+  headSha: z.string().nullish().catch(null),
+  checks: z.array(z.object({ name: z.string(), url: z.string().nullable() })).catch([]),
+  feedback: z.array(fixLoopFeedbackSchema).catch([]),
+})
+
+const resumeSchema = z.discriminatedUnion("kind", [restartResumeSchema, questionAnswerSchema, fixLoopSchema])
 
 export type OpenChamberResume = z.infer<typeof resumeSchema> & { text: string; sentAt: number }
 

@@ -8,7 +8,7 @@ import { PrFixLoopWorkerStatus } from '@/components/session/pr-fix-loop/PrFixLoo
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isFixLoopActive, isFixLoopConfigLocked, type FixLoop, type FixLoopApproval } from '@/lib/prFixLoop';
-import { fixLoopCiState, fixLoopStatusKeys } from '@/lib/prFixLoopPresentation';
+import { fixLoopCiState, fixLoopStatusKey, isFixLoopPrReady } from '@/lib/prFixLoopPresentation';
 import { prFixLoopStore, usePrFixLoopStore } from '@/stores/usePrFixLoopStore';
 
 const loadApproval = () => import('@/components/session/pr-fix-loop/PrFixLoopApprovalDialog').then((module) => module.PrFixLoopApprovalDialog);
@@ -30,6 +30,7 @@ export const PrFixLoopRow = React.memo(function PrFixLoopRow({ loop, projectionF
   const recordFailed = usePrFixLoopStore((state) => state.failedLoopIds.includes(loop.id) || (projectionFailed && state.loadState === 'error'));
   const readFailed = recordFailed || Boolean(loop.lastError);
   const ci = fixLoopCiState(loop, recordFailed);
+  const prReady = !readFailed && isFixLoopPrReady(loop);
   const size = isMobile ? 'lg' : 'sm';
 
   const act = async (operation: () => Promise<void>) => {
@@ -49,10 +50,11 @@ export const PrFixLoopRow = React.memo(function PrFixLoopRow({ loop, projectionF
         <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate text-sm text-foreground" title={loop.title}>{loop.title}</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-meta text-muted-foreground" role="status">
-        <span className={readFailed ? 'text-status-warning' : undefined}>
-          {t(readFailed ? 'prFixLoop.status.error' : fixLoopStatusKeys[loop.status])}
+        <span className={readFailed ? 'text-status-warning' : prReady ? 'text-status-success' : undefined}>
+          {t(readFailed ? 'prFixLoop.status.error' : fixLoopStatusKey(loop))}
         </span>
-        <span dir="auto" className="tabular-nums">{t('prFixLoop.iterations', { current: loop.iterations, max: loop.config.maxIterations })}</span>
+        {prReady && loop.iterations === 0 ? null
+          : <span dir="auto" className="tabular-nums">{t('prFixLoop.iterations', { current: loop.iterations, max: loop.config.maxIterations })}</span>}
         <span className={ci === 'success' ? 'text-status-success' : ci === 'failure' ? 'text-status-error' : undefined}>
           {t(`prFixLoop.ci.${ci}`)}
         </span>

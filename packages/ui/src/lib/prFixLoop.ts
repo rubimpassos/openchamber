@@ -3,6 +3,8 @@ import { providerGrantOf, type SpaceEntry } from './spaces/spaces-api';
 
 /** The OpenChamber server owns execution and persistence. The UI only projects it. */
 export const fixLoopConfigSchema = z.object({
+  // Absent on loops from servers before watching existed; those end when the PR is ready.
+  watch: z.boolean().optional(),
   maxIterations: z.number().int().min(1).max(50),
   tokenBudget: z.number().int().positive().nullable(),
   triggers: z.enum(['both', 'ci', 'review']),
@@ -18,10 +20,11 @@ export const fixLoopConfigSchema = z.object({
 export type FixLoopConfig = z.infer<typeof fixLoopConfigSchema>;
 
 export const DEFAULT_PR_FIX_LOOP_CONFIG: FixLoopConfig = {
+  watch: true,
   maxIterations: 10,
   tokenBudget: null,
   triggers: 'both',
-  ignoreSelf: true,
+  ignoreSelf: false,
   ignoreBots: true,
   allowAuthors: [],
   blockAuthors: [],

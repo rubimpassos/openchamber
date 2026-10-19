@@ -75,7 +75,33 @@ Automatic dispatch intent persists `internal.feedbackTrustVersion: 1` only after
 
 Before any automatic iteration, the server awaits loading the persisted message queue and checks for an existing item for that loop, including while its saved status is `watching`. A queued legacy prompt therefore cannot inherit admission from a later permission-checked iteration. Queue read failure does not establish an empty queue.
 
-Feedback cadence, first-read baseline, CI completeness and notifications retain their existing behavior. Completed assistant-step usage sums input, output, reasoning and cache tokens. Settled results notify on the original host session and are kept in the notification center. A receipt that waits for the user's push approval (`waitingForPush`) calls `notifyAwaitingApproval(loop)` once per receipt id, and `server/index.js` records it in the center only, with the loop id as `requestId`. Approval waits do not become ready from a local-ahead heuristic.
+## Watching a ready PR
+
+`config.watch` (default `true`; records saved before it load as `false`) turns "ready" into a wait. When CI is green, no thread is unresolved and no change request is pending, a watching loop stays `status: 'watching'` with `statusReason: 'pr-ready'`, reads every 3 minutes and reacts to any new CI failure, review, review comment or comment under the same admission rules. It ends only when the PR is merged or closed, the user stops it, the session is deleted, or a limit or error settles it. No new status value exists: clients validate the enum, so an older client reads the loop as watching. Without `watch`, `ready` stays terminal as before. A loop saved as `ready` stays finished; dismissing and starting it again is the way to watch it.
+
+A round runs from the PR leaving ready until it is ready again. `iterations` counts the round and resets to 0 on entering `pr-ready`; `totalIterations` keeps the lifetime count (records without it start from their `iterations`). `maxIterations` limits one round. The token budget keeps counting from `createdAt` across rounds. `limitReached` and `budgetReached` remain terminal. Restart needs nothing new: `pr-ready` is `watching`, so `start()` schedules it again in 5 seconds and `seen` keeps handled feedback from going out twice.
+
+Approval mode follows the same path once publication and host replies finish; the worker keeps running while the loop watches, and the next feedback starts a turn in it.
+
+`notify(loop)` runs once per round when the loop enters `pr-ready` (`internal.readyAnnounced`). `server/index.js` titles it "Pull request is ready" and records it in the notification center as a `normal` `fix-loop` entry with the loop id as `requestId`; settled limits, budget, errors and the push-approval wait are `high`. `resolveNotifications(loop)` moves the loop's center entries to history (`notificationCenter.resolve({ sessionId, kinds: ['fix-loop'], requestId })`) when a new round starts, a receipt is published, or the loop is stopped, resumed or forgotten.
+
+## Iteration messages in the transcript
+
+Each host iteration item carries `notice` beside its `text`: `{ source: 'openchamber-notice', kind: 'fix-loop', loopId, pr, trigger, iteration, maxIterations, headSha, checks: [{ name, url }], feedback: [{ type, author, url, path?, line? }] }`, at most 200 feedback entries. The message queue sends it as the metadata of a synthetic message (`../message-queue/DOCUMENTATION.md`), and the UI renders it through `readOpenChamberResume` as a collapsible row headed "Fix loop: CI failed on #5" or "Fix loop: new review on #6" that opens to the full text the agent read. Bodies and logs travel only in `text`. The approval worker's turn drops the notice and stays an ordinary message, because its turn reader uses the latest user message as the boundary.
+
+## The agent marker and the reviewer's own account
+
+Everything the agent writes on GitHub ends with `<sub>Written by the OpenChamber agent</sub>` and `<!-- openchamber-agent:v1 -->` (`agent-marker.js`). Approval mode adds it in `reviewOperations` for jobs created with `agentMarker: 1`; a review job saved before the marker existed replays its exact old body, since a replay must send what its operation key was made for. Automatic mode asks for the exact block in the iteration prompt, because the session posts with its own GitHub tools.
+
+Admission of a review, thread comment or conversation comment, in order: text carrying the HTML marker never counts (quoting the visible line does not suppress anything); in automatic mode, an unmarked reply by the reading account created while one of the loop's own turns ran (`internal.turnWindows`, persisted, last 20) or up to 2 minutes after it never counts, which covers a reply the agent posted without the marker (never a review or a thread's first comment); then blocked authors, allowed authors, `ignoreSelf` and `ignoreBots`, the mention; and last, in automatic mode, current repository write access, the only check that calls GitHub. Marked comments stay in a thread's text as context but cannot trigger it. `ignoreSelf` now defaults to `false`, so a user reviewing the agent's PR with the same account reaches the session; records saved before keep `true`.
+
+The marker identifies text and is not a signature. Anyone can paste it to make the loop skip their comment. That only suppresses a reaction: it grants no access, starts no work and changes nothing that is published.
+
+`internal.handled` keeps the ids sent to the agent; `seen` keeps every id read. Changing an admission setting (`triggers`, `ignoreSelf`, `ignoreBots`, the author lists, the mention) resets `seen` to `handled` and reads again under first-read rules, so what the loop skipped is weighed again and history stays history. Records saved before `handled` keep what they saw.
+
+On a first read with `mentionOnly`, a review or conversation comment that mentions the loop and is newer than the agent's last marked text on the PR is admitted, besides unresolved threads and a pending change request. Without `mentionOnly`, earlier reviews and conversation comments stay history.
+
+Feedback cadence, CI completeness and other notifications retain their existing behavior. Completed assistant-step usage sums input, output, reasoning and cache tokens. Settled results notify on the original host session and are kept in the notification center. A receipt that waits for the user's push approval (`waitingForPush`) calls `notifyAwaitingApproval(loop)` once per receipt id, and `server/index.js` records it in the center only, with the loop id as `requestId`. Approval waits do not become ready from a local-ahead heuristic.
 
 ## HTTP API
 
@@ -118,7 +144,7 @@ Preparation has null session fields until the host initializes the first turn. W
   completed: number, total: number, lastError: string | null }
 ```
 
-Progress counts host operations, so a thread reply with resolution counts as 2. Older auto records may omit `worker`, `pendingApproval` and `review`. The loop status enum remains `watching`, `working`, `waitingForPush`, `ready`, `stopped`, `closed`, `limitReached`, `budgetReached`, `error`. Approval accepts only `{ receiptId }`; it accepts no replacement commit, destination, action array or credential. Review work has no new HTTP action or button.
+Progress counts host operations, so a thread reply with resolution counts as 2. Older auto records may omit `worker`, `pendingApproval`, `review`, `totalIterations` and `config.watch`. The loop status enum remains `watching`, `working`, `waitingForPush`, `ready`, `stopped`, `closed`, `limitReached`, `budgetReached`, `error`. Approval accepts only `{ receiptId }`; it accepts no replacement commit, destination, action array or credential. Review work has no new HTTP action or button.
 
 ## Runtimes and evidence
 

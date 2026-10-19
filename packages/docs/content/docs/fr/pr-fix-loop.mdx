@@ -1,13 +1,13 @@
 ---
 title: Boucle de correction de PR
-description: Laisse une session corriger une pull request jusqu'à ce que la CI soit verte et la relecture terminée.
+description: Laisse une session corriger une pull request jusqu'à ce que la CI soit verte et la relecture terminée, puis continuer à la surveiller.
 ---
 
 # Boucle de correction de PR
 
 La boucle de correction garde une session au travail sur une pull request jusqu'à ce qu'elle soit prête à fusionner. OpenChamber surveille les checks et la relecture de la PR. Quand la CI échoue, la session reçoit les checks en échec avec leurs étapes, annotations et lignes de log. Quand quelqu'un relit ou commente, la session reçoit ce retour, fait le changement et répond sur la PR. La boucle tourne sur ton serveur OpenChamber, elle continue donc app fermée.
 
-Elle s'arrête quand la PR est prête : CI verte, aucun fil de relecture non résolu et personne n'attend de changements demandés. Tu reçois alors une notification, et aussi quand la boucle s'arrête pour une autre raison.
+Quand la PR est prête (CI verte, aucun fil de relecture non résolu et personne n'attend de changements demandés), la boucle continue de la surveiller. Un échec de CI ou une relecture qui arrive plus tard va à la session de la même façon, jusqu'à ce que la PR soit fusionnée ou fermée, ou que tu arrêtes la boucle. Tu reçois une notification chaque fois que la PR devient prête, et quand la boucle s'arrête pour une autre raison. Avec **Keep watching after the PR is ready** désactivé, la boucle s'arrête dès que la PR est prête.
 
 ## Démarrer la boucle
 
@@ -15,27 +15,36 @@ Elle s'arrête quand la PR est prête : CI verte, aucun fil de relecture non ré
 2. Trouve la pull request dans le tableau [Issues et PR](/fr/issues-and-prs/), dans la vue pull request ou dans les **Context sources** de la session (menu **⋮** de la ligne de la PR), puis choisis **Start fix loop**.
 3. Vérifie les réglages dans la boîte de dialogue et clique sur **Start fix loop**.
 
-La boucle s'affiche en haut du champ de message de la session : la PR, ce que fait la boucle, le nombre d'itérations et l'état de la CI. De là, tu peux modifier ses réglages, ouvrir la PR dans le tableau ou l'arrêter avec **Stop**.
+La boucle s'affiche en haut du champ de message de la session : la PR, ce que fait la boucle, le nombre d'itérations et l'état de la CI. Tant que la PR est prête, il affiche **PR ready · watching for new CI and reviews**. De là, tu peux modifier ses réglages, ouvrir la PR dans le tableau ou l'arrêter avec **Stop**.
 
 ## Ce que reçoit la session
 
 - **Après un push**, la boucle attend la CI sur le nouveau commit. Si elle échoue, la session reçoit les checks en échec une fois par commit, jamais deux fois le même échec.
 - **Pour chaque relecture, commentaire de relecture ou nouveau commentaire** qui compte selon tes réglages, la session reçoit son texte et un lien. On lui demande de répondre sur la PR et de résoudre les fils qu'elle a corrigés. Pour répondre et résoudre les fils, la session a besoin de ses propres outils GitHub authentifiés. Le compte de la boucle ne sert qu'à lire la PR.
 
-Si la session est occupée, le message attend dans sa file et part à la fin du tour. Si GitHub est injoignable, la boucle garde ce qu'elle savait et indique qu'elle n'a pas pu vérifier. Elle ne lit jamais un check en échec comme vert.
+Dans le chat, chacun de ces messages s'affiche comme une ligne repliée, par exemple **Fix loop: CI failed on #5** ou **Fix loop: new review on #6**, avec le commit, les auteurs et l'itération. Ouvre-la pour lire tout ce que la session a reçu : checks en échec, étapes, annotations et lignes de log, ou le texte de la relecture avec son auteur et son lien. Il n'apparaît jamais comme un message que tu as tapé.
+
+Si la session est occupée, le message attend dans sa file et part à la fin du tour. Un message de la boucle en attente peut être retiré, mais pas modifié ni envoyé depuis l'app, et il garde sa ligne quand il part. Si GitHub est injoignable, la boucle garde ce qu'elle savait et indique qu'elle n'a pas pu vérifier. Elle ne lit jamais un check en échec comme vert.
 
 ## Réglages
 
 Les valeurs par défaut se trouvent dans **Paramètres → Intégrations → GitHub → Fix loop**, et chaque boucle peut les modifier.
 
-- **Maximum iterations** : combien de fois la boucle peut envoyer du travail à la session (10 par défaut).
-- **Token budget** : s'arrête quand la session a utilisé ce nombre de tokens depuis le début de la boucle. Vide signifie pas de budget. Le budget est vérifié après chaque tour, donc un tour peut le dépasser.
+- **Keep watching after the PR is ready** : activé par défaut. Désactive-le pour que la boucle s'arrête dès que la PR est prête.
+- **Maximum iterations** : combien de fois la boucle peut envoyer du travail à la session avant que la PR soit de nouveau prête (10 par défaut). Le compte repart de zéro chaque fois que la PR devient prête.
+- **Token budget** : s'arrête quand la session a utilisé ce nombre de tokens depuis le début de la boucle, tous les tours confondus. Vide signifie pas de budget. Le budget est vérifié après chaque tour, donc un tour peut le dépasser.
 - **Respond to** : **CI and reviews**, **CI only** ou **Reviews only**.
-- **Ignore my feedback** : ignore les commentaires du compte GitHub avec lequel la boucle lit la PR. En mode automatique, la session répond avec son propre compte GitHub, et s'il diffère du compte de lecture, tu l'ajoutes à **Blocked authors**. En mode avec approbation, le serveur répond avec le compte GitHub lié à la boucle, et le worker n'a pas de compte GitHub.
+- **Ignore my feedback** : ignore les commentaires du compte GitHub avec lequel la boucle lit la PR. Désactivé par défaut, pour que tu puisses relire la PR de l'agent avec ton propre compte et que la session reçoive tous les fils. Les réponses de l'agent sont ignorées grâce à leur marqueur (voir plus bas).
 - **Ignore bots** : ignore les commentaires des bots.
 - **Allowed authors** et **Blocked authors** : identifiants GitHub séparés par des virgules. Avec une liste d'autorisés, seules ces personnes comptent.
 - **Only comments that mention this text** : ne compte un commentaire que s'il contient le texte de mention (`@openchamber` par défaut).
 - **Push changes**: **Push automatically** ou **Wait for my approval**. Le mode automatique garde le flux GitHub de la session. Le mode avec approbation exécute les corrections dans un worker restreint et demande sa propre configuration.
+
+## Texte que l'agent écrit sur GitHub
+
+Chaque commentaire, réponse et relecture que l'agent écrit se termine par une courte ligne, **Written by the OpenChamber agent**, et un marqueur caché (`<!-- openchamber-agent:v1 -->`). La boucle ignore toujours le texte portant le marqueur, quels que soient les réglages d'auteurs : si toi et l'agent utilisez le même compte GitHub, ses réponses ne lui reviennent donc jamais comme nouveau retour. En mode avec approbation, le serveur ajoute le marqueur aux réponses qu'il publie. En mode automatique, on demande à la session de l'ajouter. Si elle l'oublie, la boucle ignore aussi une réponse du compte de lecture publiée pendant son propre tour ou dans les deux minutes qui suivent.
+
+Le marqueur étiquette le texte, ce n'est pas une signature. N'importe qui peut le coller dans un commentaire pour que la boucle ne réagisse pas à ce commentaire. Cela supprime seulement une réaction : aucun accès n'est donné et aucun travail ne démarre.
 
 ## Mode avec approbation
 
@@ -77,13 +86,13 @@ Le serveur exécute la boucle clients fermés. L'application web, l'application 
 
 | Statut | Raison |
 | --- | --- |
-| PR prête | CI verte, aucun fil non résolu, aucun changement demandé |
+| PR prête | CI verte, aucun fil non résolu, aucun changement demandé, et **Keep watching after the PR is ready** est désactivé |
 | PR fermée | La PR a été fusionnée ou fermée |
 | Limite d'itérations | La boucle a envoyé du travail autant de fois que permis |
 | Budget de tokens | La session a épuisé le budget |
 | Arrêtée | Tu l'as arrêtée, ou la session a été supprimée |
 
-Une boucle arrêtée reste en haut du champ de message jusqu'à ce que tu la fermes. En mode avec approbation, avec un reçu ou des réponses GitHub en attente, le travail est conservé et la boucle reste ; utilise **Resume fix loop** pour continuer la boucle existante. Relancer sur la même PR ne démarre une nouvelle boucle que s'il n'y a plus de publication ni de réponses en attente.
+Une boucle arrêtée reste en haut du champ de message jusqu'à ce que tu la fermes. Une boucle qui s'était terminée comme prête avant l'existence de la surveillance reste terminée ; ferme-la et relance-la pour surveiller la PR. En mode avec approbation, avec un reçu ou des réponses GitHub en attente, le travail est conservé et la boucle reste ; utilise **Resume fix loop** pour continuer la boucle existante. Relancer sur la même PR ne démarre une nouvelle boucle que s'il n'y a plus de publication ni de réponses en attente.
 
 ## Piles
 

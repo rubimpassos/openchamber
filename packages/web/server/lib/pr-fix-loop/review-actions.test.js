@@ -16,6 +16,16 @@ test('builds bounded reply and resolution operations only for assigned feedback'
   expect(operations.every((entry) => !('repo' in entry) && !('url' in entry) && !('method' in entry))).toBe(true);
 });
 
+test('marks posted bodies for jobs that carry the agent marker, never the resolution', () => {
+  const turn = createReviewTurn(feedback);
+  const parsed = parseReviewActions(turn, block(turn));
+  const marked = reviewOperations(turn, parsed, { marked: true });
+  expect(marked.filter((entry) => entry.kind !== 'thread-resolve').every((entry) => entry.body.endsWith('<!-- openchamber-agent:v1 -->'))).toBe(true);
+  expect(marked.find((entry) => entry.kind === 'thread-resolve')).not.toHaveProperty('body');
+  expect(marked.map((entry) => entry.idempotencyKey)).toEqual(reviewOperations(turn, parsed).map((entry) => entry.idempotencyKey));
+  expect(reviewOperations(turn, parsed)[0].body).toBe(actions()[0].body);
+});
+
 test.each([
   ['unassigned thread', (value) => { value[0].id = 'PRRT_other'; }],
   ['unassigned comment', (value) => { value[2].id = 99; }],

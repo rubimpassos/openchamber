@@ -164,7 +164,8 @@ resolving the global selection, so a chat pinned in the side panel addresses
 its own queue. It stays visible under the form and permission docks.
 
 `selectComposerQueue` in the submission builder excludes server-scheduled items
-before the composer counts manual content or reads captured send configuration.
+and PR fix-loop items (whose row offers Remove only; the server delivers them as
+OpenChamber's own message) before the composer counts manual content or reads captured send configuration.
 Mixed queues use only ordinary items for manual send; a scheduled-only queue
 cannot trigger an empty composer send. Enter and Ctrl/Cmd+Enter in an empty
 composer send the whole queue now, as one visible message (#4746). While a turn

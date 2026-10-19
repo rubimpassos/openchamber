@@ -16,6 +16,7 @@ import path from 'path';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { createMessageId } from '../dispatch-results/runtime.js';
 import { attachmentHint } from '../routing/runtime.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
@@ -52,6 +53,7 @@ const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 // session's own model, like scheduled tasks.
 const SERVER_ORIGIN_KINDS = new Set(['pr-fix-loop', 'pr-stack']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
+const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
 
 const getQueuedSendRetryDelayMs = (failures) =>
   Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
@@ -101,6 +103,20 @@ const parseAttachment = (value) => {
   if (serverPath) attachment.serverPath = serverPath;
   attachment.dataUrl = dataUrl;
   return attachment;
+};
+
+const FIX_LOOP_NOTICE_LIMIT = 64 * 1024;
+
+// The transcript row of a fix-loop message: kept and sent as the message's
+// metadata. The fix loop builds it; its shape is the UI's to validate.
+const parseFixLoopNotice = (value, loopId) => {
+  const raw = asRecord(value);
+  if (!raw) return { source: 'openchamber-notice', kind: 'fix-loop', loopId };
+  if (raw.source !== 'openchamber-notice' || raw.kind !== 'fix-loop' || raw.loopId !== loopId) {
+    throw new TypeError('invalid fix-loop notice');
+  }
+  if (JSON.stringify(raw).length > FIX_LOOP_NOTICE_LIMIT) throw new TypeError('fix-loop notice is too large');
+  return raw;
 };
 
 const parseContextPart = (value) => {
@@ -161,6 +177,13 @@ export const parseQueuedItemInput = (value) => {
     if (agent) item.sendConfig.agent = agent;
   }
   if (origin) item.origin = origin;
+  if (raw.notice !== undefined && origin?.kind !== 'pr-fix-loop') throw new TypeError('notice needs a fix-loop origin');
+  if (origin?.kind === 'pr-fix-loop') {
+    item.notice = parseFixLoopNotice(raw.notice, origin.id);
+    // Kept with the item, so a retry after a lost response cannot admit the message twice.
+    const messageId = asNonEmptyString(raw.messageId);
+    item.messageId = MESSAGE_ID_PATTERN.test(messageId) ? messageId : createMessageId(Date.now());
+  }
   return item;
 };
 
@@ -580,7 +603,28 @@ export function createMessageQueueRuntime({
       });
     }
 
-    if (command) {
+    if (item.origin?.kind === 'pr-fix-loop') {
+      // OpenChamber writes this message, so it arrives as a synthetic one whose
+      // metadata the transcript renders as a fix-loop row; the agent reads the
+      // full text and `resume` starts its turn.
+      try {
+        await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
+          directory,
+          method: 'POST',
+          body: {
+            id: item.messageId,
+            text: item.text,
+            description: item.content,
+            metadata: item.notice,
+            delivery: 'steer',
+            resume: true,
+          },
+        });
+      } catch (error) {
+        // Our id was admitted by an earlier attempt whose answer was lost.
+        if (error?.status !== 409) throw error;
+      }
+    } else if (command) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/command`, {
         directory,
         method: 'POST',

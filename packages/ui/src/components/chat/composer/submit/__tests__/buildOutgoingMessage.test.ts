@@ -109,6 +109,15 @@ describe('manual queue projection', () => {
         expect(buildOutgoingMessage(input({ queued: projection }), deps()).isEmpty).toBe(true);
     });
 
+    test('a fix-loop item stays with the server and never joins a composer send', () => {
+        const fixLoop: QueuedMessage = {
+            id: 'loop', content: 'Fix loop: PR #5 · CI failed', text: 'CI details', createdAt: 1,
+            origin: { kind: 'pr-fix-loop', id: 'fixloop_1' },
+        };
+        expect(selectComposerQueue([fixLoop, ordinary])).toEqual([ordinary]);
+        expect(buildOutgoingMessage(input({ queued: selectComposerQueue([fixLoop]) }), deps()).isEmpty).toBe(true);
+    });
+
     test('ordinary queues keep their original items, order and identity', () => {
         const queue = [ordinary, { ...ordinary, id: 'second' }];
         expect(selectComposerQueue(queue)).toBe(queue);

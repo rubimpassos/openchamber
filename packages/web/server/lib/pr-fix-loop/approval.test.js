@@ -237,6 +237,30 @@ test('posts assigned replies and resolves fixed threads automatically only after
   runtime.stop();
 });
 
+test('posts marked replies, then watches the ready PR without reacting to them', async () => {
+  // Given
+  addThread(); const runtime = make(); const loop = await pending(runtime);
+  await runtime.approve(loop.id, loop.pendingApproval.id);
+  remote.headSha = result; remote.ci.state = 'success';
+  // When
+  await tick();
+  const reply = reviewWrites.find(({ operation }) => operation.kind === 'thread-reply').operation.body;
+  remote.threads = [{ ...remote.threads[0], comments: [...remote.threads[0].comments,
+    { id: 12, body: reply, url: '', createdAt: new Date().toISOString(), author: { login: 'user', bot: false } }] }];
+  await tick();
+  // Then
+  expect(reply).toContain('Fixed in the approved commit.');
+  expect(reply).toContain('Written by the OpenChamber agent');
+  expect(reply).toContain('<!-- openchamber-agent:v1 -->');
+  expect(sent).toHaveLength(1);
+  expect((await runtime.list())[0]).toMatchObject({ status: 'watching', statusReason: 'waiting-review' });
+  remote.threads = [{ ...remote.threads[0], resolved: true }];
+  await tick();
+  expect((await runtime.list())[0]).toMatchObject({ status: 'watching', statusReason: 'pr-ready', iterations: 0, totalIterations: 1 });
+  expect(sent).toHaveLength(1);
+  runtime.stop();
+});
+
 test('pending review writes recover on restart without another turn or publication', async () => {
   addThread(); const first = make(); const loop = await pending(first);
   await first.approve(loop.id, loop.pendingApproval.id); await first.stop(); timers = []; remote.headSha = result; remote.ci.state = 'success';

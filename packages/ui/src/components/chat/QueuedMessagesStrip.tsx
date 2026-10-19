@@ -57,7 +57,8 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, on
                     <span className="ms-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
                 )}
             </span>
-            {!message.scheduledTask ? (
+            {/* Server-owned items go out from the server: a client send would turn them into the user's message. */}
+            {!message.scheduledTask && message.origin?.kind !== 'pr-fix-loop' ? (
                 <>
                     <Button
                         type="button"

@@ -112,7 +112,7 @@ const httpError = (message, status) => Object.assign(new Error(message), { statu
  * refuses a second admission of the same id, so a retry after a crash or a
  * lost response can never deliver the answer twice.
  */
-const createMessageId = (now) => {
+export const createMessageId = (now) => {
   const time = (BigInt(now) * 0x1000n + BigInt(Math.floor(Math.random() * 0x1000))).toString(16).padStart(12, '0').slice(-12);
   let random = '';
   for (let index = 0; index < 14; index += 1) random += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];

@@ -50,7 +50,7 @@ describe('PR automation settings contracts', () => {
       const results = buildSettingsSearchResults({ query: 'fix loop', runtimeCtx: runtime, t: (key) => key, getPageTitle: (page) => page });
       const controls = results.filter((result) => result.id.startsWith('integrations.pr-fix-loop'));
       // Then
-      expect(controls).toHaveLength(runtime.isVSCode ? 0 : 11);
+      expect(controls).toHaveLength(runtime.isVSCode ? 0 : 12);
       expect(controls.every((result) => result.page === 'integrations')).toBe(true);
     }
   });

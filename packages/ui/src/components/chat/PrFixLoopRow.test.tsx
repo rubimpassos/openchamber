@@ -88,3 +88,19 @@ describe('host review progress on the loop row', () => {
     } finally { await view.close(); }
   });
 });
+
+describe('a loop watching a ready PR', () => {
+  test('says the PR is ready and still watched, with no stale iteration count', async () => {
+    const { dict } = await import('@/lib/i18n/messages/en');
+    const view = await mount({ ...loop, status: 'watching', statusReason: 'pr-ready', iterations: 0, ci: { state: 'success', headSha: 'a' }, unresolvedThreads: 0 });
+    try {
+      const status = view.container.querySelector('[role="status"]')?.textContent ?? '';
+      expect(status).toContain(dict['prFixLoop.status.prReady']);
+      expect(status).not.toContain('Iteration');
+      const buttons = [...view.container.querySelectorAll('button')].map((entry) => entry.textContent);
+      expect(buttons).toContain(dict['prFixLoop.action.stop']);
+      expect(buttons).not.toContain(dict['prFixLoop.action.dismiss']);
+    } finally { await view.close(); }
+  });
+});
+

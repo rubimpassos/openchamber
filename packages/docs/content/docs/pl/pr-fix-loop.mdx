@@ -1,13 +1,13 @@
 ---
 title: Pętla poprawek PR
-description: Pozwól sesji poprawiać pull request, aż CI będzie zielone, a przegląd zakończony.
+description: Pozwól sesji poprawiać pull request, aż CI będzie zielone, a przegląd zakończony, i obserwować go dalej.
 ---
 
 # Pętla poprawek PR
 
 Pętla poprawek utrzymuje sesję przy jednym pull requeście, aż będzie gotowy do scalenia. OpenChamber obserwuje checki i przegląd PR-a. Gdy CI zawodzi, sesja dostaje nieudane checki z ich krokami, adnotacjami i liniami logów. Gdy ktoś robi przegląd lub komentuje, sesja dostaje tę opinię, wprowadza zmianę i odpowiada w PR-ze. Pętla działa na twoim serwerze OpenChamber, więc trwa także przy zamkniętej aplikacji.
 
-Kończy się, gdy PR jest gotowy: CI jest zielone, żaden wątek przeglądu nie został nierozwiązany i nikt nie czeka na zażądane zmiany. Dostajesz wtedy powiadomienie, a także gdy pętla zatrzyma się z innego powodu.
+Gdy PR jest gotowy (CI zielone, brak nierozwiązanych wątków przeglądu i nikt nie czeka na zażądane zmiany), pętla obserwuje go dalej. Awaria CI lub przegląd, który pojawi się później, trafia do sesji w ten sam sposób, aż PR zostanie scalony lub zamknięty albo zatrzymasz pętlę. Dostajesz powiadomienie za każdym razem, gdy PR staje się gotowy, oraz gdy pętla zatrzymuje się z innego powodu. Gdy **Keep watching after the PR is ready** jest wyłączone, pętla kończy się, gdy tylko PR jest gotowy.
 
 ## Uruchom pętlę
 
@@ -15,27 +15,36 @@ Kończy się, gdy PR jest gotowy: CI jest zielone, żaden wątek przeglądu nie 
 2. Znajdź pull request na tablicy [Zgłoszenia i PR-y](/pl/issues-and-prs/), w widoku pull requesta lub w **Context sources** sesji (menu **⋮** w wierszu PR-a) i wybierz **Start fix loop**.
 3. Sprawdź ustawienia w oknie i kliknij **Start fix loop**.
 
-Pętla widnieje na górze pola wiadomości sesji: PR, to, co pętla robi, liczba iteracji i stan CI. Stamtąd możesz zmienić jej ustawienia, otworzyć PR na tablicy albo ją zatrzymać przyciskiem **Stop**.
+Pętla widnieje na górze pola wiadomości sesji: PR, to, co pętla robi, liczba iteracji i stan CI. Gdy PR jest gotowy, widać tam **PR ready · watching for new CI and reviews**. Stamtąd możesz zmienić jej ustawienia, otworzyć PR na tablicy albo ją zatrzymać przyciskiem **Stop**.
 
 ## Co dostaje sesja
 
 - **Po pushu** pętla czeka na CI dla nowego commita. Jeśli zawiedzie, sesja dostaje nieudane checki raz na commit, nigdy dwa razy tej samej awarii.
 - **Przy każdym przeglądzie, komentarzu do przeglądu lub nowym komentarzu**, który liczy się według twoich ustawień, sesja dostaje jego treść i link. Ma odpowiedzieć w PR-ze i rozwiązać wątki, które naprawiła. Żeby odpowiadać i rozwiązywać wątki, sesja potrzebuje własnych, uwierzytelnionych narzędzi GitHub. Konto pętli służy tylko do czytania PR-a.
 
-Jeśli sesja jest zajęta, wiadomość czeka w jej kolejce i wychodzi po zakończeniu tury. Jeśli GitHub jest nieosiągalny, pętla zachowuje to, co wiedziała, i mówi, że nie mogła sprawdzić. Nigdy nie czyta nieudanego checka jako zielonego.
+W czacie każda z tych wiadomości pojawia się jako jeden zwinięty wiersz, na przykład **Fix loop: CI failed on #5** albo **Fix loop: new review on #6**, z commitem, autorami i iteracją. Otwórz go, żeby przeczytać wszystko, co dostała sesja: nieudane checki, kroki, adnotacje i linie logów albo tekst przeglądu z autorem i linkiem. Nigdy nie wygląda jak wiadomość, którą wpisałeś.
+
+Jeśli sesja jest zajęta, wiadomość czeka w jej kolejce i wychodzi po zakończeniu tury. Oczekującą wiadomość pętli można usunąć, ale nie można jej edytować ani wysłać z aplikacji, a po wysłaniu zachowuje swój wiersz. Jeśli GitHub jest nieosiągalny, pętla zachowuje to, co wiedziała, i mówi, że nie mogła sprawdzić. Nigdy nie czyta nieudanego checka jako zielonego.
 
 ## Ustawienia
 
 Wartości domyślne są w **Settings → Integrations → GitHub → Fix loop**, a każda pętla może je zmienić.
 
-- **Maximum iterations**: ile razy pętla może wysłać pracę do sesji (domyślnie 10).
-- **Token budget**: zatrzymuje, gdy sesja zużyje tyle tokenów od startu pętli. Puste oznacza brak budżetu. Budżet jest sprawdzany po każdej turze, więc jedna tura może go przekroczyć.
+- **Keep watching after the PR is ready**: domyślnie włączone. Wyłącz, żeby pętla kończyła się, gdy PR jest gotowy.
+- **Maximum iterations**: ile razy pętla może wysłać pracę do sesji, zanim PR znów będzie gotowy (domyślnie 10). Licznik zaczyna się od nowa za każdym razem, gdy PR staje się gotowy.
+- **Token budget**: zatrzymuje, gdy sesja zużyje tyle tokenów od startu pętli, we wszystkich rundach łącznie. Puste oznacza brak budżetu. Budżet jest sprawdzany po każdej turze, więc jedna tura może go przekroczyć.
 - **Respond to**: **CI and reviews**, **CI only** lub **Reviews only**.
-- **Ignore my feedback**: pomija komentarze z konta GitHub, którym pętla czyta PR. W trybie automatycznym sesja odpowiada własnym kontem GitHub, a jeśli różni się ono od konta do odczytu, dodajesz je do **Blocked authors**. W trybie z zatwierdzaniem odpowiada serwer kontem GitHub powiązanym z pętlą, a worker nie ma konta GitHub.
+- **Ignore my feedback**: pomija komentarze z konta GitHub, którym pętla czyta PR. Domyślnie wyłączone, więc możesz robić przegląd PR-a agenta własnym kontem, a sesja dostaje każdy wątek. Własne odpowiedzi agenta są pomijane na podstawie znacznika (zobacz niżej).
 - **Ignore bots**: pomija komentarze botów.
 - **Allowed authors** i **Blocked authors**: loginy GitHub oddzielone przecinkami. Przy liście dozwolonych liczą się tylko te osoby.
 - **Only comments that mention this text**: liczy komentarz tylko wtedy, gdy zawiera tekst wzmianki (domyślnie `@openchamber`).
 - **Push changes**: **Push automatically** albo **Wait for my approval**. Tryb automatyczny zachowuje własny przepływ pracy sesji z GitHubem. Tryb z zatwierdzaniem wykonuje poprawki w ograniczonym workerze i wymaga osobnej konfiguracji.
+
+## Tekst, który agent pisze na GitHubie
+
+Każdy komentarz, odpowiedź i przegląd napisany przez agenta kończy się krótką linią, **Written by the OpenChamber agent**, oraz ukrytym znacznikiem (`<!-- openchamber-agent:v1 -->`). Pętla zawsze pomija tekst ze znacznikiem, niezależnie od ustawień autorów, więc gdy ty i agent używacie tego samego konta GitHub, jego odpowiedzi nigdy nie wracają do niego jako nowa opinia. W trybie z zatwierdzaniem serwer dodaje znacznik do odpowiedzi, które publikuje. W trybie automatycznym sesja dostaje polecenie, żeby go dodać. Jeśli sesja o tym zapomni, pętla pomija też odpowiedź z konta do odczytu opublikowaną w trakcie jej tury lub w ciągu dwóch minut po niej.
+
+Znacznik etykietuje tekst i nie jest podpisem. Każdy może wkleić go do komentarza, żeby pętla nie reagowała na ten komentarz. To tylko tłumi reakcję: nie daje dostępu i nie uruchamia pracy.
 
 ## Tryb z zatwierdzaniem
 
@@ -77,13 +86,13 @@ Serwer prowadzi pętlę przy zamkniętych wszystkich klientach. Aplikacja webowa
 
 | Stan | Powód |
 | --- | --- |
-| PR gotowy | CI zielone, brak nierozwiązanych wątków, brak zażądanych zmian |
+| PR gotowy | CI zielone, brak nierozwiązanych wątków, brak zażądanych zmian, a **Keep watching after the PR is ready** jest wyłączone |
 | PR zamknięty | PR został scalony lub zamknięty |
 | Limit iteracji | Pętla wysłała pracę tyle razy, ile wolno |
 | Budżet tokenów | Sesja wyczerpała budżet |
 | Zatrzymana | Zatrzymałeś ją lub sesję usunięto |
 
-Zatrzymana pętla zostaje na górze pola wiadomości, dopóki jej nie zamkniesz. W trybie z zatwierdzaniem, gdy czeka potwierdzenie lub odpowiedzi na GitHubie, praca zostaje zachowana, a pętla pozostaje; użyj **Resume fix loop**, żeby kontynuować istniejącą pętlę. Ponowne uruchomienie na tym samym PR-ze zaczyna nową pętlę dopiero, gdy nie czeka żadna publikacja ani odpowiedzi.
+Zatrzymana pętla zostaje na górze pola wiadomości, dopóki jej nie zamkniesz. Pętla, która zakończyła się jako gotowa, zanim pojawiło się obserwowanie, pozostaje zakończona; zamknij ją i uruchom ponownie, żeby obserwować PR. W trybie z zatwierdzaniem, gdy czeka potwierdzenie lub odpowiedzi na GitHubie, praca zostaje zachowana, a pętla pozostaje; użyj **Resume fix loop**, żeby kontynuować istniejącą pętlę. Ponowne uruchomienie na tym samym PR-ze zaczyna nową pętlę dopiero, gdy nie czeka żadna publikacja ani odpowiedzi.
 
 ## Stosy
 
