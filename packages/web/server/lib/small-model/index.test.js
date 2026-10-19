@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { registerSmallModelRoutes } from './routes.js';
+import { createDiskCache } from '../disk-cache.js';
 import http from 'node:http';
 import os from 'os';
 import path from 'path';
@@ -715,5 +716,37 @@ describe('small model failure response', () => {
       code: 'small-model-unavailable',
     });
     setUnavailableRetryDelaysForTest();
+  });
+});
+
+describe('the text cache', () => {
+  const freshCache = () => createDiskCache({
+    dir: fs.mkdtempSync(path.join(TEMP_DATA_DIR, 'text-cache-')),
+    maxBytes: 1024 * 1024,
+    label: 'test',
+  });
+  const generateCalls = () => state.requests.filter((entry) => entry.path === '/api/experimental/generate').length;
+
+  it('answers the same model and prompt from the cache', async () => {
+    const cache = freshCache();
+    state.generate = () => ({ text: 'first answer' });
+    const first = await generateSmallModelText({ prompt: 'describe the table', system: 'be brief', directory: '/proj', cache });
+    state.generate = () => ({ text: 'second answer' });
+    const second = await generateSmallModelText({ prompt: 'describe the table', system: 'be brief', directory: '/proj', cache });
+
+    expect(first.text).toBe('first answer');
+    expect(second).toMatchObject({ text: 'first answer', cached: true });
+    expect(generateCalls()).toBe(1);
+  });
+
+  it('asks again for another prompt or another model, and never caches without the option', async () => {
+    const cache = freshCache();
+    await generateSmallModelText({ prompt: 'one', directory: '/proj', cache });
+    await generateSmallModelText({ prompt: 'two', directory: '/proj', cache });
+    await generateSmallModelText({ prompt: 'one', model: 'openai/gpt-5.6-luna', directory: '/proj', cache });
+    await generateSmallModelText({ prompt: 'plain', directory: '/proj' });
+    await generateSmallModelText({ prompt: 'plain', directory: '/proj' });
+
+    expect(generateCalls()).toBe(5);
   });
 });

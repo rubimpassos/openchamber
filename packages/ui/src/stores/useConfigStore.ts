@@ -58,6 +58,7 @@ interface OpenChamberDefaults {
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
     dictationEnabled?: boolean;
+    showMessageTTSButtons?: boolean;
     sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
     sttModel?: string;
@@ -144,6 +145,7 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         zenModel: zenModel.length > 0 ? zenModel : undefined,
         messageStreamTransport: data.messageStreamTransport,
         dictationEnabled: data.dictationEnabled,
+        showMessageTTSButtons: data.showMessageTTSButtons,
         sttProvider: data.sttProvider,
         sttServerUrl: data.sttServerUrl,
         sttModel: data.sttModel,
@@ -2715,6 +2717,10 @@ export const useConfigStore = create<ConfigStore>()(
                     const revision = openChamberDefaultsUserRevision;
                     const defaults = await fetchOpenChamberDefaults(runtimeContext);
                     if (!isConfigRuntimeContextCurrent(runtimeContext) || !defaults) return false;
+                    if (defaults.showMessageTTSButtons === undefined && get().showMessageTTSButtons) {
+                        // Earlier builds kept this only in the browser; hand it to the server once.
+                        updateDesktopSettings({ showMessageTTSButtons: true }).catch(() => {});
+                    }
 
                     set((state) => {
                         const edited = revision !== openChamberDefaultsUserRevision;
@@ -2730,6 +2736,7 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsZenModel: defaults.zenModel,
                             settingsMessageStreamTransport: defaults.messageStreamTransport ?? state.settingsMessageStreamTransport,
                             dictationEnabled: typeof defaults.dictationEnabled === 'boolean' ? defaults.dictationEnabled : state.dictationEnabled,
+                            showMessageTTSButtons: defaults.showMessageTTSButtons ?? state.showMessageTTSButtons,
                             sttProvider: defaults.sttProvider ?? state.sttProvider,
                             sttServerUrl: defaults.sttServerUrl ?? state.sttServerUrl,
                             sttModel: defaults.sttModel ?? state.sttModel,
@@ -3977,6 +3984,8 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('showMessageTTSButtons', String(show));
                     }
+                    // The server tells agents to describe tables only while read aloud is on.
+                    updateDesktopSettings({ showMessageTTSButtons: show }).catch(() => {});
                 },
 
                 setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => {

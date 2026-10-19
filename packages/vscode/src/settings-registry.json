@@ -221,6 +221,9 @@
     "dictationEnabled": {
       "scope": "profile"
     },
+    "showMessageTTSButtons": {
+      "scope": "profile"
+    },
     "sttProvider": {
       "scope": "instance"
     },

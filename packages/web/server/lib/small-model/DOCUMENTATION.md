@@ -26,7 +26,12 @@ credentials, the provider dispatch and the token refresh. Routes live under
   `listAuthenticatedProviders(directory?)`.
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
-  model?, directory? }` → `{ text, providerID, modelID, source }`).
+  model?, directory?, cache? }` → `{ text, providerID, modelID, source,
+  cached? }`). With `cache: true` the same resolved model and full prompt are
+  answered from `<data-dir>/cache/small-model` (20 MB, least recently used out,
+  `../disk-cache.js`); spoken summaries and table descriptions ask this way so
+  a replay costs nothing. Structured-output calls are never cached, and callers
+  that expect a fresh text (titles, commit messages) leave it off.
 - `runtime-providers.js` — compatibility re-export so `server/index.js` keeps
   resolving its import. Delete it once that import points at `client.js`.
 

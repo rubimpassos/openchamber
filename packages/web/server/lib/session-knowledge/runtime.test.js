@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SESSION_LINK_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SESSION_LINK_GUIDANCE, TABLE_SPEECH_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
@@ -33,7 +33,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'readCheckoutBranch', 'instructionEntries',
+    'isPageRenderingAvailable', 'isReadAloudEnabled', 'readCheckoutBranch', 'instructionEntries',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -180,6 +180,32 @@ describe('when to draw a page', () => {
     for (const isPageRenderingAvailable of [async () => false, async () => { throw new Error('settings unreadable'); }]) {
       const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable }), NO_PINS);
       expect(entries[GUIDANCE]).toBe('');
+    }
+  });
+});
+
+describe('describing tables for speech', () => {
+  const bare = {
+    isAgentMemoryEnabled: async () => false,
+    projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
+  };
+
+  test('is told while the user has read aloud on, after the other guidance', async () => {
+    const entries = await entriesFor(createRuntime({
+      ...bare,
+      isPageRenderingAvailable: async () => true,
+      isReadAloudEnabled: async () => true,
+    }), NO_PINS);
+
+    expect(entries[GUIDANCE]).toContain(RENDER_PAGE_GUIDANCE);
+    expect(entries[GUIDANCE].endsWith(`\n\n${TABLE_SPEECH_GUIDANCE}`)).toBe(true);
+    expect(TABLE_SPEECH_GUIDANCE).toContain('[oc-tts]: #');
+  });
+
+  test('is left out while read aloud is off, or when the check fails', async () => {
+    for (const isReadAloudEnabled of [async () => false, async () => { throw new Error('settings unreadable'); }]) {
+      const entries = await entriesFor(createRuntime({ ...bare, isReadAloudEnabled }), NO_PINS);
+      expect(entries[GUIDANCE]).not.toContain('[oc-tts]');
     }
   });
 });

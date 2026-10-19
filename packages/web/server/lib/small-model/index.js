@@ -269,7 +269,7 @@ const requestOptions = ({ timeoutMs, signal }) => {
  * Generates text with the user's small model through the running OpenCode.
  * Credentials stay inside OpenCode; this server only sends a prompt.
  */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate', cache = null }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
@@ -345,6 +345,22 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     }
   };
 
+  // Same model, same prompt: the text from last time (spoken summaries and
+  // table descriptions are asked for again on every replay).
+  const cacheKey = cache && !responseSchema
+    ? { providerID: resolved.providerID, modelID: resolved.modelID, prompt: fullPrompt }
+    : null;
+  const cached = cacheKey ? await cache.get(cacheKey) : null;
+  if (cached) {
+    return {
+      text: cached.buffer.toString('utf8'),
+      providerID: resolved.providerID,
+      modelID: resolved.modelID,
+      source: resolved.source,
+      cached: true,
+    };
+  }
+
   let text = await sendWithCatalogRetry();
 
   if (responseSchema) {
@@ -364,6 +380,8 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     }
     text = json;
   }
+
+  if (cacheKey && text.trim()) await cache.set(cacheKey, Buffer.from(text.trim(), 'utf8'));
 
   return {
     text: text.trim(),

@@ -102,6 +102,20 @@ export const RENDER_PAGE_GUIDANCE = "You can show the user a chart, table, diagr
   + " When the user has to choose between options a page shows better than text, such as layouts or designs, ask on a page with awaitAnswer and continue from the answer the call returns.";
 
 /**
+ * Stated while the user has read aloud on. The speech player reads the line
+ * in place of the table (`packages/ui/src/lib/voice/speechTables.ts`) and
+ * falls back to the small model without it. A markdown link definition is
+ * the one hidden form the chat renders as nothing, because assistant
+ * markdown shows raw HTML, comments included, as text. It must follow a
+ * blank line: after a paragraph line it is drawn as text.
+ */
+export const TABLE_SPEECH_GUIDANCE = "The user may listen to your replies read aloud, and a table cannot be read aloud."
+  + " Directly above every markdown table you write, after a blank line, put one line in exactly this form:"
+  + ' [oc-tts]: # "<one short spoken sentence, in the language of your reply, saying what the table shows and its main takeaway>"'
+  + " The chat hides that line and the voice speaks it in place of the table. Use straight double quotes around the sentence"
+  + " and none inside it, and never mention the line in your reply.";
+
+/**
  * Titles only for memory, never bodies: an index carrying full text grows
  * without bound until it crowds out the conversation it was meant to inform.
  */
@@ -159,9 +173,10 @@ const buildPinnedBlock = ({ notes, plans }) => {
   ].join('\n\n');
 };
 
-const buildGuidance = ({ linking, rendering }) => [
+const buildGuidance = ({ linking, rendering, readAloud }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
+  readAloud ? TABLE_SPEECH_GUIDANCE : '',
 ].filter(Boolean).join('\n\n');
 
 /**
@@ -169,11 +184,11 @@ const buildGuidance = ({ linking, rendering }) => [
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, checkout = null, pullStacks = [] }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, readAloud = false, checkout = null, pullStacks = [] }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, readAloud }),
     // Keep the JSON whole, independently of the pinned and memory budgets.
     [KNOWLEDGE_ENTRY_KEYS.pullStacks]: buildPullStackText(pullStacks),
   };
@@ -197,6 +212,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     readCheckoutBranch = null,
     // Whether this session's agent has the `openchamber_render` tool.
     isPageRenderingAvailable = async () => false,
+    // Whether the user has read aloud on, so tables need a spoken description.
+    isReadAloudEnabled = async () => false,
     // Pins live in OpenChamber's own session metadata store.
     readSessionMetadata = null,
     persistSessionMetadata = null,
@@ -292,8 +309,9 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const checkout = branch !== null ? { directory, branch } : null;
 
     const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
+    const readAloud = await Promise.resolve(isReadAloudEnabled()).catch(() => false);
 
-    return { notes, plans, memory, linking, rendering, checkout };
+    return { notes, plans, memory, linking, rendering, readAloud, checkout };
   };
 
   /**

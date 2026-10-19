@@ -69,7 +69,7 @@ other sources still sync.
 |---|---|
 | `openchamber.pinned` | pinned notes and plan bodies |
 | `openchamber.memory` | the memory index and when to save |
-| `openchamber.guidance` | when to link, when to draw a page |
+| `openchamber.guidance` | when to link, when to draw a page, how to describe a table for speech |
 | `openchamber.checkout` | the directory and branch the session works on |
 | `openchamber.pull-stacks` | complete snapshots for followed pull request stacks |
 
@@ -160,6 +160,19 @@ most one per answer) are `RENDER_PAGE_WHEN` in
 guidance also names asking with a page (`awaitAnswer`) when the user has to
 choose between visual options. It goes into `openchamber.guidance`, so a
 change to the text reaches running sessions on their next message.
+
+## Tables described for speech
+
+While the user has read aloud on (`showMessageTTSButtons`, a profile setting
+the server reads through `isReadAloudEnabled`), the guidance asks the agent to
+put one line above every table: `[oc-tts]: # "<spoken sentence>"`
+(`TABLE_SPEECH_GUIDANCE`). The speech player
+(`packages/ui/src/lib/voice/speechTables.ts`) speaks that sentence in place of
+the table and asks the small model only when the line is missing. A markdown
+link definition is the hidden form because assistant markdown shows raw HTML,
+comments included, as visible text. It must follow a blank line, since after a
+paragraph line marked draws it as text. Copying a reply as markdown keeps the
+line.
 
 ## Entries that read as instructions
 

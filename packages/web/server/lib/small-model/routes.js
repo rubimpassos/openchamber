@@ -1,4 +1,19 @@
-export function registerSmallModelRoutes(app, { getSmallModelService }) {
+import os from 'node:os';
+import path from 'node:path';
+import { createDiskCache } from '../disk-cache.js';
+
+const TEXT_CACHE_MAX_BYTES = 20 * 1024 * 1024;
+
+const defaultTextCacheDir = () => path.join(
+  process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'),
+  'cache',
+  'small-model',
+);
+
+export function registerSmallModelRoutes(app, { getSmallModelService, textCacheDir = defaultTextCacheDir() }) {
+  // Only callers that ask with `cache: true` share it: a session title or a
+  // commit message is expected to come out fresh each time.
+  const textCache = createDiskCache({ dir: textCacheDir, maxBytes: TEXT_CACHE_MAX_BYTES, label: 'small-model' });
   app.get('/api/small-model', async (req, res) => {
     try {
       const { describeSmallModel, listAuthenticatedProviders } = await getSmallModelService();
@@ -22,7 +37,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
   app.post('/api/small-model/generate', async (req, res) => {
     try {
       const { generateSmallModelText } = await getSmallModelService();
-      const { prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID } = req.body || {};
+      const { prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, cache } = req.body || {};
       const result = await generateSmallModelText({
         prompt,
         system,
@@ -31,6 +46,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         directory,
         preferredProviderID,
         preferredModelID,
+        cache: cache === true ? textCache : null,
       });
       res.json(result);
     } catch (error) {

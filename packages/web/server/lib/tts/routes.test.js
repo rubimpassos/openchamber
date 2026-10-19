@@ -1,6 +1,10 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
 import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
@@ -198,5 +202,49 @@ describe('normalizeCustomOpenAIBaseURL', () => {
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);
     expect(result.value).toBeUndefined();
+  });
+});
+
+describe('speech cache', () => {
+  const tempDirs = [];
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('serves a replay of the same text from disk without calling the speech server again', async () => {
+    const calls = [];
+    const upstream = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        calls.push(JSON.parse(body));
+        res.writeHead(200, { 'content-type': 'audio/wav' });
+        res.end(Buffer.from('RIFF-audio'));
+      });
+    });
+    await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-cache-'));
+    tempDirs.push(cacheDir);
+    try {
+      const app = express();
+      app.use(express.json());
+      registerTtsRoutes(app, { sayTTSCapability: null, speechCacheDir: cacheDir });
+      const baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
+      const speak = (text, voice = 'alloy') => request(app).post('/api/tts/speak').send({ text, voice, model: 'kokoro', speed: 1, baseURL });
+
+      const first = await speak('Read this twice.');
+      const replay = await speak('Read this twice.');
+      const otherVoice = await speak('Read this twice.', 'echo');
+
+      expect(first.status).toBe(200);
+      expect(first.headers['x-tts-cache']).toBe('miss');
+      expect(replay.headers['x-tts-cache']).toBe('hit');
+      expect(replay.headers['content-type']).toBe('audio/wav');
+      expect(Buffer.from(replay.body).toString()).toBe('RIFF-audio');
+      expect(otherVoice.headers['x-tts-cache']).toBe('miss');
+      expect(calls.map((call) => call.voice)).toEqual(['alloy', 'echo']);
+    } finally {
+      upstream.close();
+    }
   });
 });
