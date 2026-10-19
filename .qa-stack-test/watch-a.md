@@ -1,3 +1,3 @@
-QA watch A
+# QA watch A (fix loop)
 
-Placeholder for the fix-loop watch QA.
+Temporary placeholder for the fix-loop watch QA.
