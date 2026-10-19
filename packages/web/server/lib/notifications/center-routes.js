@@ -9,17 +9,21 @@ const readBodySchema = z.union([
   z.object({ all: z.literal(true) }).strict(),
 ]);
 
+const removeBodySchema = z.object({ ids: z.array(z.string().min(1)).min(1).max(NOTIFICATION_CENTER_LIMIT) }).strict();
+
 /**
  * `GET /api/notification-center` lists every kept notification, newest
  * first. `POST /api/notification-center/read` marks some read,
+ * `POST /api/notification-center/remove` deletes some,
  * `DELETE /api/notification-center` empties the center. Changes reach every
  * client as `openchamber:notification-center.changed`.
  */
 export function registerNotificationCenterRoutes(app, { notificationCenter }) {
   const json = express.json({ limit: '64kb' });
 
-  app.get('/api/notification-center', async (_req, res) => {
-    res.json({ entries: await notificationCenter.list() });
+  // `?version=2` asks for every kind; older clients reject a list with a kind they do not know.
+  app.get('/api/notification-center', async (req, res) => {
+    res.json({ entries: await notificationCenter.list({ allKinds: req.query.version === '2' }) });
   });
 
   app.post('/api/notification-center/read', json, async (req, res) => {
@@ -28,6 +32,14 @@ export function registerNotificationCenterRoutes(app, { notificationCenter }) {
       return res.status(400).json({ error: 'Send ids, a sessionId, or all: true' });
     }
     return res.json(await notificationCenter.markRead(body.data));
+  });
+
+  app.post('/api/notification-center/remove', json, async (req, res) => {
+    const body = removeBodySchema.safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ error: 'Send the ids to remove' });
+    }
+    return res.json({ ids: await notificationCenter.remove(body.data.ids) });
   });
 
   app.delete('/api/notification-center', async (_req, res) => {

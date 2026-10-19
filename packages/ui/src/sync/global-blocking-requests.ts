@@ -29,7 +29,7 @@ export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'
  */
 type BlockingPageRequest = { id: string; sessionID: string; title: string };
 
-type PendingBlockingRequests = {
+export type PendingBlockingRequests = {
   directory: string;
   permissions: readonly BlockingPermissionRequest[];
   forms: readonly BlockingFormRequest[];
@@ -38,16 +38,22 @@ type PendingBlockingRequests = {
 
 type GlobalBlockingRequestsState = {
   bySession: ReadonlyMap<string, PendingBlockingRequests>;
+  /**
+   * The host's pending list was read once on this runtime. Until then a
+   * session missing here may still wait on a request this client never saw.
+   */
+  hostSeeded: boolean;
 };
 
 const EMPTY: readonly never[] = [];
 
 export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState>(() => ({
   bySession: new Map(),
+  hostSeeded: false,
 }));
 
 export const resetGlobalBlockingRequests = (): void => {
-  useGlobalBlockingRequestsStore.setState({ bySession: new Map() });
+  useGlobalBlockingRequestsStore.setState({ bySession: new Map(), hostSeeded: false });
 };
 
 const normalizeDirectory = (directory: string): string => normalizeProjectPath(directory) ?? directory;
@@ -204,6 +210,8 @@ export const applyWaitingPageEvent = (
  * Seeds requests the host still holds for sessions this client has no entry
  * for. Additive by session; absence from the host never clears anything,
  * because a live reply may already have settled a request the host map lags on.
+ * Called only with the host's successful answer, so it also marks the index
+ * as covering what the host knows.
  */
 export const seedGlobalBlockingRequests = (
   entries: ReadonlyArray<{
@@ -228,4 +236,5 @@ export const seedGlobalBlockingRequests = (
     });
   }
   reducer.publish();
+  if (!useGlobalBlockingRequestsStore.getState().hostSeeded) useGlobalBlockingRequestsStore.setState({ hostSeeded: true });
 };

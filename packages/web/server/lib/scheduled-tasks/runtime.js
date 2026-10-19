@@ -1140,6 +1140,9 @@ export const createScheduledTasksRuntime = (deps) => {
           ranAt: finishedAt,
           status,
           ...(sessionID ? { sessionID } : {}),
+          directory: sessionDirectory,
+          taskName: task?.name,
+          error: status === 'error' ? errorMessage : undefined,
         });
       } catch {
       }

@@ -71,6 +71,7 @@ export const createBootstrapRuntime = (dependencies) => {
       agentToolRuntime,
       pluginNotificationEmitter,
       desktopUpdater,
+      onUpdateAvailable,
       skipBodyParsing,
       openChamberControlService,
       sanitizeProjects,
@@ -189,6 +190,7 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       desktopUpdater,
+      onUpdateAvailable,
     });
 
     return {

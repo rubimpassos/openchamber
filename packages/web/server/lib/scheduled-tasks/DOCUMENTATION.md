@@ -289,6 +289,11 @@ project write lock on every `syncProject` when the project path is known:
   - `syncAllProjects()`
   - `syncProject(projectId)`
   - `runNow(projectId, taskId)`
+- `emitTaskRunEvent({ projectID, taskID, ranAt, status, sessionID?, directory?, taskName?, error? })`
+  reports each run's start and end. `server/index.js` forwards it as
+  `openchamber:scheduled-task-ran` and keeps a finished run with `status:
+  'error'` in the notification center (`scheduled-task`), opening its session
+  or, without one, the project's scheduled tasks.
 
 ## Public exports (routes.js)
 

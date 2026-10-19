@@ -352,8 +352,32 @@ describe('session work runtime: ranking the notification of a finished turn', ()
     await expect(noProvider.runtime.awaitTurnVerdict('ses_1')).resolves.toBeNull();
   });
 
-  it('stops waiting after the timeout', async () => {
+  it('stops waiting after the timeout and says so in the log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { runtime } = makeRuntime({ settings: rankOnly });
     await expect(runtime.awaitTurnVerdict('ses_1', { timeoutMs: 10 })).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledWith('[session-work] no Jev verdict for ses_1 within 10 ms; the turn was announced unranked');
+  });
+
+  it('neither waits nor asks Jev while its provider is rate limiting', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubOpenCode();
+    const { runtime, jev } = makeRuntime({ settings: rankOnly });
+    jev.pausedUntil = () => Date.now() + 60_000;
+
+    const started = Date.now();
+    await expect(runtime.awaitTurnVerdict('ses_1')).resolves.toBeNull();
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await expect(runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: NO_ASSIST })).resolves.toBeNull();
+    expect(jev.ask).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('logs no failure per turn for a call refused by an ongoing rate limit', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubOpenCode();
+    const { runtime } = makeRuntime({ settings: rankOnly, askError: Object.assign(new Error('Jev is rate limited'), { code: 'rate-limited' }) });
+    await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: NO_ASSIST });
+    expect(warn).not.toHaveBeenCalled();
   });
 });

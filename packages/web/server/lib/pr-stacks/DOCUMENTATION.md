@@ -27,7 +27,7 @@ A branch checked out in a worktree is rebased there. Any other branch is rebased
 
 A conflict stops the run on that branch (`paused`): branches below stay restacked, branches above wait. The setting `prStackConflictMode` decides what happens next, read when the run starts:
 
-- `pause` (default): the user resolves in the named worktree and stages, then Continue (`git rebase --continue`), or Abort (`git rebase --abort`, the branch returns to where it was, the rest is skipped). A failed continuation keeps the rebase and staged changes, pauses with its error and never automatically skips a commit. "Ask the session" hands the conflict over on request.
+- `pause` (default): the run's pause is kept in the notification center as a `restack` entry, once per conflicting branch, and stays in its "Needs you" filter while the run is `paused`. The user resolves in the named worktree and stages, then Continue (`git rebase --continue`), or Abort (`git rebase --abort`, the branch returns to where it was, the rest is skipped). A failed continuation keeps the rebase and staged changes, pauses with its error and never automatically skips a commit. "Ask the session" hands the conflict over on request.
 - `agent`: the run's session gets the conflict through the server message queue (`origin: { kind: 'pr-stack' }`), told to resolve and stage but not to continue, commit or push. When that session's turn ends (`session.idle`, 3 s settle) with nothing unmerged, the run continues by itself.
 
 ## State

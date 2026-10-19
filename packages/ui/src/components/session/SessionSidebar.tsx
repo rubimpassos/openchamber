@@ -24,6 +24,7 @@ import { SidebarFooter } from './sidebar/shell/SidebarFooter';
 import { SidebarSearchEmptyState } from './sidebar/shell/SidebarSearchEmptyState';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
+import { clearUpdateDialogOpener, setUpdateDialogOpener } from '@/components/update/updateDialogOpener';
 import { useShallow } from 'zustand/react/shallow';
 import {
   listProjectWorktrees,
@@ -401,6 +402,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       setUpdateDialogOpen(true);
     });
   }, [t, updateStore]);
+
+  React.useEffect(() => {
+    setUpdateDialogOpener(handleOpenUpdateDialog);
+    return () => clearUpdateDialogOpener(handleOpenUpdateDialog);
+  }, [handleOpenUpdateDialog]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) {

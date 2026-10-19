@@ -15,18 +15,32 @@ import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useMobileAppActions, type MobileAppActions } from '@/apps/mobileAppContext';
+import { openUpdateDialog } from '@/components/update/updateDialogOpener';
+import { isCapacitorApp } from '@/lib/platform';
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import type { NotificationCenterEntry, NotificationCenterKind, NotificationCenterVerdict } from '@/lib/notificationCenter';
+import {
+  groupNotificationEntries,
+  initialNotificationFilter,
+  matchesNotificationFilter,
+  type NotificationCenterFilter,
+  type NotificationRowGroup,
+} from '@/lib/notificationCenterList';
+import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
 import { cn } from '@/lib/utils';
 import { selectNotificationCenterUnread, useNotificationCenterStore } from '@/stores/useNotificationCenterStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { openSessionFromToast } from '@/sync/session-navigation';
 
-type Filter = 'all' | 'unread' | 'attention';
+import { useAttentionSources } from './useAttentionSources';
 
-const FILTERS: Array<{ id: Filter; labelKey: I18nKey }> = [
+const FILTERS: Array<{ id: NotificationCenterFilter; labelKey: I18nKey }> = [
   { id: 'all', labelKey: 'notificationCenter.filter.all' },
   { id: 'unread', labelKey: 'notificationCenter.filter.unread' },
   { id: 'attention', labelKey: 'notificationCenter.filter.attention' },
+  { id: 'history', labelKey: 'notificationCenter.filter.history' },
 ];
 
 const KIND_ICON = {
@@ -37,6 +51,12 @@ const KIND_ICON = {
   goal: 'flag',
   'browser-help': 'global',
   plugin: 'notification-3',
+  restart: 'restart',
+  'fix-loop': 'git-pull-request',
+  restack: 'git-merge',
+  update: 'download-cloud',
+  'opencode-update': 'download',
+  'scheduled-task': 'calendar-schedule',
 } as const satisfies Record<NotificationCenterKind, IconName>;
 
 const KIND_LABEL = {
@@ -47,6 +67,12 @@ const KIND_LABEL = {
   goal: 'notificationCenter.kind.goal',
   'browser-help': 'notificationCenter.kind.browserHelp',
   plugin: 'notificationCenter.kind.plugin',
+  restart: 'notificationCenter.kind.restart',
+  'fix-loop': 'notificationCenter.kind.fixLoop',
+  restack: 'notificationCenter.kind.restack',
+  update: 'notificationCenter.kind.update',
+  'opencode-update': 'notificationCenter.kind.opencodeUpdate',
+  'scheduled-task': 'notificationCenter.kind.scheduledTask',
 } as const satisfies Record<NotificationCenterKind, I18nKey>;
 
 const VERDICT_LABEL = {
@@ -55,14 +81,6 @@ const VERDICT_LABEL = {
   'looks-done': 'notificationCenter.verdict.looksDone',
   trivial: 'notificationCenter.verdict.trivial',
 } as const satisfies Record<NotificationCenterVerdict, I18nKey>;
-
-const ATTENTION_KINDS = new Set<NotificationCenterKind>(['error', 'question', 'permission', 'browser-help']);
-
-const matchesFilter = (entry: NotificationCenterEntry, filter: Filter): boolean => {
-  if (filter === 'unread') return entry.readAt === null;
-  if (filter === 'attention') return entry.readAt === null && ATTENTION_KINDS.has(entry.kind);
-  return true;
-};
 
 const formatEntryTime = (createdAt: number): string => {
   const date = new Date(createdAt);
@@ -73,48 +91,157 @@ const formatEntryTime = (createdAt: number): string => {
 };
 
 const iconColor = (entry: NotificationCenterEntry): string => {
-  if (entry.kind === 'error') return 'text-[var(--status-error)]';
-  if (ATTENTION_KINDS.has(entry.kind)) return 'text-[var(--status-warning)]';
+  if (entry.kind === 'error' || entry.kind === 'scheduled-task') return 'text-[var(--status-error)]';
+  if (entry.priority === 'high') return 'text-[var(--status-warning)]';
   if (entry.priority === 'low') return 'text-muted-foreground';
   return 'text-[var(--status-info)]';
 };
 
-const NotificationRow: React.FC<{ entry: NotificationCenterEntry; onOpen: (entry: NotificationCenterEntry) => void }> = ({ entry, onOpen }) => {
+type ListedSession = { sessionId: string; directory: string | null; title: string | null };
+
+/** The chats an entry names when there is more than one to choose from (an OpenCode restart). */
+const listedSessions = (entry: NotificationCenterEntry): ListedSession[] | null => (
+  entry.action?.type === 'sessions' && entry.action.sessions.length > 1 ? entry.action.sessions : null
+);
+
+const openSession = (sessionId: string, directory: string | null): void => {
+  // Entries written before the server recorded every directory carry none;
+  // the session list knows where the session lives.
+  if (directory) openSessionFromToast(sessionId, directory);
+  else void openSessionFromRoute(sessionId);
+};
+
+const openSettingsPage = (slug: string, mobile: MobileAppActions | null): void => {
+  if (mobile) {
+    mobile.openSettingsPage(slug);
+    return;
+  }
+  const ui = useUIStore.getState();
+  ui.setSettingsPage(slug);
+  ui.setSettingsDialogOpen(true);
+};
+
+/** Runs what a click on the entry opens. False when it opens nothing. */
+const runEntryAction = (entry: NotificationCenterEntry, mobile: MobileAppActions | null): boolean => {
+  const action = entry.action;
+  if (action?.type === 'openchamber-update') {
+    // The native app reaches its server's update through About; other
+    // layouts use the update dialog the sidebar owns.
+    if (mobile) {
+      if (isCapacitorApp()) mobile.openSettingsPage('about');
+      else mobile.openUpdate();
+      return true;
+    }
+    return openUpdateDialog();
+  }
+  if (action?.type === 'opencode-update') {
+    openSettingsPage('general', mobile);
+    return true;
+  }
+  if (action?.type === 'sessions' && action.sessions.length === 1) {
+    openSession(action.sessions[0].sessionId, action.sessions[0].directory);
+    return true;
+  }
+  if (entry.sessionId) {
+    openSession(entry.sessionId, entry.directory);
+    return true;
+  }
+  if (action?.type === 'scheduled-tasks') {
+    useProjectsStore.getState().setActiveProjectIdOnly(action.projectId);
+    if (mobile) mobile.openScheduledTasks();
+    else useUIStore.getState().setScheduledTasksDialogOpen(true);
+    return true;
+  }
+  return false;
+};
+
+const NotificationRow: React.FC<{
+  group: NotificationRowGroup;
+  onOpen: (group: NotificationRowGroup) => void;
+  onOpenSession: (group: NotificationRowGroup, session: ListedSession) => void;
+  onRemove: (group: NotificationRowGroup) => void;
+}> = ({ group, onOpen, onOpenSession, onRemove }) => {
   const { t } = useI18n();
+  const { entry } = group;
   const unread = entry.readAt === null;
+  const sessions = listedSessions(entry);
+  const [expanded, setExpanded] = React.useState(false);
   const meta = [
     entry.sessionName,
+    group.ids.length > 1 ? t('notificationCenter.group.turns', { count: group.ids.length }) : null,
     entry.verdict ? t(VERDICT_LABEL[entry.verdict]) : null,
     entry.delivery === 'quiet' ? t('notificationCenter.delivery.quiet') : null,
   ].filter(Boolean).join(' · ');
 
   return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onOpen(entry)}
-        className={cn(
-          'flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-start transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          entry.priority === 'low' && !unread && 'opacity-70',
-        )}
-      >
-        <Icon name={KIND_ICON[entry.kind]} className={cn('mt-0.5 size-4 shrink-0', iconColor(entry))} aria-label={t(KIND_LABEL[entry.kind])} />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span dir="auto" className={cn('min-w-0 flex-1 truncate typography-ui-label', unread ? 'text-foreground font-medium' : 'text-muted-foreground')}>
-              {entry.title}
+    <li className="group/notification">
+      <div className="flex items-start">
+        <button
+          type="button"
+          onClick={() => {
+            if (sessions) setExpanded((value) => !value);
+            onOpen(group);
+          }}
+          aria-expanded={sessions ? expanded : undefined}
+          className={cn(
+            'flex min-w-0 flex-1 items-start gap-2.5 rounded-lg px-2.5 py-2 text-start transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            entry.priority === 'low' && !unread && 'opacity-70',
+          )}
+        >
+          <Icon name={KIND_ICON[entry.kind]} className={cn('mt-0.5 size-4 shrink-0', iconColor(entry))} aria-label={t(KIND_LABEL[entry.kind])} />
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span dir="auto" className={cn('min-w-0 flex-1 truncate typography-ui-label', unread ? 'text-foreground font-medium' : 'text-muted-foreground')}>
+                {entry.title}
+              </span>
+              <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{formatEntryTime(entry.createdAt)}</span>
             </span>
-            <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{formatEntryTime(entry.createdAt)}</span>
+            {entry.body ? (
+              <span dir="auto" className="line-clamp-2 typography-meta text-muted-foreground">{entry.body}</span>
+            ) : null}
+            {meta ? <span dir="auto" className="truncate typography-micro text-muted-foreground/80">{meta}</span> : null}
+            {sessions ? (
+              <span className="flex items-center gap-1 typography-micro text-muted-foreground">
+                <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-3.5" />
+                {expanded ? t('notificationCenter.sessions.hide') : t('notificationCenter.sessions.show', { count: sessions.length })}
+              </span>
+            ) : null}
           </span>
-          {entry.body ? (
-            <span dir="auto" className="line-clamp-2 typography-meta text-muted-foreground">{entry.body}</span>
+          {unread ? (
+            <span className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--primary-base)]" aria-label={t('notificationCenter.filter.unread')} />
           ) : null}
-          {meta ? <span dir="auto" className="truncate typography-micro text-muted-foreground/80">{meta}</span> : null}
-        </span>
-        {unread ? (
-          <span className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--primary-base)]" aria-label={t('notificationCenter.filter.unread')} />
-        ) : null}
-      </button>
+        </button>
+        {/* Its own column, so showing it on hover moves nothing. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="mt-1.5 size-6 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/notification:opacity-100 pointer-coarse:opacity-100"
+              onClick={() => onRemove(group)}
+              aria-label={t('notificationCenter.action.remove')}
+            >
+              <Icon name="close" className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{t('notificationCenter.action.remove')}</TooltipContent>
+        </Tooltip>
+      </div>
+      {sessions && expanded ? (
+        <ul className="flex flex-col ps-9 pb-1">
+          {sessions.map((session) => (
+            <li key={session.sessionId}>
+              <button
+                type="button"
+                onClick={() => onOpenSession(group, session)}
+                className="w-full truncate rounded-md px-2 py-1 text-start typography-meta text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span dir="auto">{session.title || t('notificationCenter.sessions.untitled')}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </li>
   );
 };
@@ -122,22 +249,42 @@ const NotificationRow: React.FC<{ entry: NotificationCenterEntry; onOpen: (entry
 /** The list with its filters and actions; shared by the popover and the mobile sheet. */
 const NotificationCenterContent: React.FC<{ onNavigate: () => void }> = ({ onNavigate }) => {
   const { t } = useI18n();
+  const mobile = useMobileAppActions();
   const status = useNotificationCenterStore((state) => state.status);
   const entries = useNotificationCenterStore((state) => state.entries);
   const unread = useNotificationCenterStore(selectNotificationCenterUnread);
-  const [filter, setFilter] = React.useState<Filter>('all');
-  const visible = React.useMemo(() => entries.filter((entry) => matchesFilter(entry, filter)), [entries, filter]);
+  const sources = useAttentionSources(entries);
+  // Decided when the list opens; it does not jump while the user reads it.
+  const [filter, setFilter] = React.useState<NotificationCenterFilter>(() => initialNotificationFilter(entries, sources));
+  const visible = React.useMemo(
+    () => groupNotificationEntries(entries.filter((entry) => matchesNotificationFilter(entry, filter, sources))),
+    [entries, filter, sources],
+  );
 
-  const openEntry = React.useCallback((entry: NotificationCenterEntry) => {
-    const { markRead } = useNotificationCenterStore.getState();
-    if (entry.readAt === null) {
-      void markRead({ ids: [entry.id] }).catch(() => toast.error(t('notificationCenter.toast.markReadFailed')));
-    }
-    if (entry.sessionId && entry.directory) {
-      openSessionFromToast(entry.sessionId, entry.directory);
-      onNavigate();
-    }
-  }, [onNavigate, t]);
+  const markGroupRead = React.useCallback((group: NotificationRowGroup) => {
+    const unreadIds = group.ids.filter((id) => entries.find((entry) => entry.id === id)?.readAt === null);
+    if (unreadIds.length === 0) return;
+    void useNotificationCenterStore.getState().markRead({ ids: unreadIds })
+      .catch(() => toast.error(t('notificationCenter.toast.markReadFailed')));
+  }, [entries, t]);
+
+  const openGroup = React.useCallback((group: NotificationRowGroup) => {
+    markGroupRead(group);
+    // Several chats: the row lists them and each opens its own.
+    if (listedSessions(group.entry)) return;
+    if (runEntryAction(group.entry, mobile)) onNavigate();
+  }, [markGroupRead, mobile, onNavigate]);
+
+  const openListedSession = React.useCallback((group: NotificationRowGroup, session: ListedSession) => {
+    markGroupRead(group);
+    openSession(session.sessionId, session.directory);
+    onNavigate();
+  }, [markGroupRead, onNavigate]);
+
+  const removeGroup = React.useCallback((group: NotificationRowGroup) => {
+    void useNotificationCenterStore.getState().remove(group.ids)
+      .catch(() => toast.error(t('notificationCenter.toast.removeFailed')));
+  }, [t]);
 
   const markAllRead = () => {
     void useNotificationCenterStore.getState().markRead({ all: true })
@@ -169,7 +316,9 @@ const NotificationCenterContent: React.FC<{ onNavigate: () => void }> = ({ onNav
   } else {
     body = (
       <ul className="flex flex-col gap-0.5 p-1">
-        {visible.map((entry) => <NotificationRow key={entry.id} entry={entry} onOpen={openEntry} />)}
+        {visible.map((group) => (
+          <NotificationRow key={group.entry.id} group={group} onOpen={openGroup} onOpenSession={openListedSession} onRemove={removeGroup} />
+        ))}
       </ul>
     );
   }

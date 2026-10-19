@@ -695,3 +695,117 @@ describe('notifications for a chat of an isolated space', () => {
     expect(hostFetch).not.toHaveBeenCalled();
   });
 });
+
+describe('the directory a notification records', () => {
+  // OpenCode 2's execution events carry no location, so a turn's end names
+  // only the session; the entry takes the directory from the session record.
+  const stubSessionRecord = (sessionRecord) => {
+    const fetchMock = vi.fn(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session/active') return Response.json({ data: {} });
+      if (url.pathname === '/api/session') return Response.json({ data: [], cursor: {} });
+      if (url.pathname.startsWith('/api/session/')) {
+        return sessionRecord ? Response.json({ data: sessionRecord }) : new Response('down', { status: 503 });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('records the session record\'s directory for a turn end that names none', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionRecord({ id: 'ses_dir', location: { directory: '/repo/worktree' } });
+    const { runtime, recordNotification, emitDesktopNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_dir'));
+
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ready', sessionId: 'ses_dir', directory: '/repo/worktree' }));
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ directory: '/repo/worktree' });
+  });
+
+  it('keeps the event\'s directory when it has one', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionRecord({ id: 'ses_ev', location: { directory: '/elsewhere' } });
+    const { runtime, recordNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger({ type: 'session.idle', properties: { sessionID: 'ses_ev', directory: '/from/event' } });
+
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ directory: '/from/event' }));
+  });
+
+  it('records no directory and still alerts when the record cannot be read', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionRecord(null);
+    const { runtime, recordNotification, emitDesktopNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_down'));
+
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'ses_down', directory: null }));
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the directory for a failed turn too', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionRecord({ id: 'ses_err', location: { directory: '/repo' } });
+    const { runtime, recordNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger({ type: 'session.error', properties: { sessionID: 'ses_err', error: { message: 'boom' } } });
+
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', directory: '/repo' }));
+  });
+});
+
+describe('the request a question or permission entry waits on', () => {
+  const makeAskRecorder = () => {
+    const recordNotification = vi.fn();
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: false, notificationMode: 'always', notifyOnQuestion: true }),
+      buildTemplateVariables: async () => ({}),
+      resolveNotificationTemplate: () => '',
+      shouldApplyResolvedTemplateMessage: () => false,
+      emitDesktopNotification: vi.fn(),
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => true,
+      getIsSessionAutoAccepting: async () => false,
+      recordNotification,
+    });
+    return { runtime, recordNotification };
+  };
+
+  afterEach(() => vi.useRealTimers());
+
+  it('records the form, page and permission request ids', async () => {
+    vi.useFakeTimers();
+    const { runtime, recordNotification } = makeAskRecorder();
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'form.created',
+      properties: { sessionID: 'ses_q', directory: '/repo', form: { id: 'frm_1', sessionID: 'ses_q', title: 'Pick', fields: [] } },
+    });
+    await vi.advanceTimersByTimeAsync(600);
+    await runtime.maybeSendPushForTrigger({
+      type: 'openchamber:page-waiting',
+      properties: { sessionID: 'ses_p', directory: '/repo', page: { id: 'call_1', title: 'Choose a layout' } },
+    });
+    await vi.advanceTimersByTimeAsync(600);
+    await runtime.maybeSendPushForTrigger({
+      type: 'permission.asked',
+      properties: { sessionID: 'ses_r', directory: '/repo', id: 'per_1', action: 'bash', resources: ['ls'] },
+    });
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(recordNotification.mock.calls.map(([entry]) => [entry.kind, entry.requestId])).toEqual([
+      ['question', 'frm_1'],
+      ['question', 'call_1'],
+      ['permission', 'per_1'],
+    ]);
+  });
+});

@@ -308,8 +308,14 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       openFiles: () => openFilesSurface(),
       openSettings: () => openSettingsSurface('nav'),
       openSourceBoard: () => openSurface('board'),
+      openSettingsPage: (slug) => {
+        setSettingsPage(slug);
+        openSettingsSurface('page-content');
+      },
+      openUpdate: () => openSurface('update'),
+      openScheduledTasks: () => openSurface('scheduled'),
     }),
-    [openChangesSurface, openFilesSurface, openSettingsSurface, openSurface],
+    [openChangesSurface, openFilesSurface, openSettingsSurface, openSurface, setSettingsPage],
   );
 
   // Expose the shell's panel-opening actions to the deep-link layer so openchamber:// URLs

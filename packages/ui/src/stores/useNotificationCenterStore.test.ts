@@ -15,7 +15,10 @@ const entry = (id: string, overrides: Partial<NotificationCenterEntry> = {}): No
   sessionId: 'ses_1',
   directory: '/repo',
   sessionName: null,
+  requestId: null,
+  action: null,
   readAt: null,
+  resolvedAt: null,
   ...overrides,
 });
 
@@ -38,6 +41,17 @@ describe('notification center store', () => {
 
     applyChange({ change: 'cleared' });
     expect(useNotificationCenterStore.getState().entries).toEqual([]);
+  });
+
+  test('moves resolved entries to the history, read, and drops removed ones', () => {
+    const { applyChange } = useNotificationCenterStore.getState();
+    applyChange({ change: 'added', entry: entry('n1') });
+    applyChange({ change: 'added', entry: entry('n2') });
+    applyChange({ change: 'resolved', ids: ['n1'], resolvedAt: 7 });
+    expect(useNotificationCenterStore.getState().entries.find((item) => item.id === 'n1')).toMatchObject({ readAt: 7, resolvedAt: 7 });
+    expect(selectNotificationCenterUnread(useNotificationCenterStore.getState())).toBe(1);
+    applyChange({ change: 'removed', ids: ['n2'] });
+    expect(useNotificationCenterStore.getState().entries.map((item) => item.id)).toEqual(['n1']);
   });
 
   test('a runtime switch drops the previous server\'s entries', () => {

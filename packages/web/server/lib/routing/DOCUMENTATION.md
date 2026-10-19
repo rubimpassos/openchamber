@@ -35,7 +35,16 @@ Auto. There is no env gate — the feature shipped dark behind
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
 - `jev.js` — request builders, answer parsing, and the HTTP call with a
-  timeout to the endpoint `classifierEndpoint` chose.
+  timeout to the endpoint `classifierEndpoint` chose. `server/index.js`
+  creates one client and hands it to routing, goal audits and session work,
+  so a rate limit holds for all of them: after a 429 with `Retry-After`
+  (OpenCode Zen's free model answers `FreeUsageLimitError` once its quota is
+  spent) no call goes to that endpoint and model until the time passes, and
+  each call fails at once with `code: 'rate-limited'`. Every feature already
+  treats a failed call as "no answer". An HTTP error names the provider's
+  `error.type` and the wait; the pause is logged once when it starts and once
+  when it ends, naming only the endpoint's host. `pausedUntil(endpoint)` lets
+  a caller skip work that only feeds Jev.
 - `history.js` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head

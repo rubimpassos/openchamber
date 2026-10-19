@@ -47,6 +47,18 @@ describe('global blocking requests index', () => {
     expect(bySession().has('s2')).toBe(false);
   });
 
+  test('knows the host list was read only after a seed, and forgets it on a runtime reset', () => {
+    const seeded = () => useGlobalBlockingRequestsStore.getState().hostSeeded;
+    expect(seeded()).toBe(false);
+    applyGlobalBlockingRequestEvents('/far', [formCreated(form('q1', 's1'))]);
+    expect(seeded()).toBe(false);
+    // A host with nothing pending is a complete answer too.
+    seedGlobalBlockingRequests([]);
+    expect(seeded()).toBe(true);
+    resetGlobalBlockingRequests();
+    expect(seeded()).toBe(false);
+  });
+
   test('seeds waiting pages from the host', () => {
     seedGlobalBlockingRequests([{ sessionId: 's1', directory: '/other', permissions: [], forms: [], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick' }] }]);
     expect(bySession().get('s1')?.pages.map((page) => page.id)).toEqual(['call_1']);

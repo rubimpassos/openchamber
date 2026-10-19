@@ -75,7 +75,7 @@ Automatic dispatch intent persists `internal.feedbackTrustVersion: 1` only after
 
 Before any automatic iteration, the server awaits loading the persisted message queue and checks for an existing item for that loop, including while its saved status is `watching`. A queued legacy prompt therefore cannot inherit admission from a later permission-checked iteration. Queue read failure does not establish an empty queue.
 
-Feedback cadence, first-read baseline, CI completeness and notifications retain their existing behavior. Completed assistant-step usage sums input, output, reasoning and cache tokens. Settled results notify on the original host session. Approval waits do not become ready from a local-ahead heuristic.
+Feedback cadence, first-read baseline, CI completeness and notifications retain their existing behavior. Completed assistant-step usage sums input, output, reasoning and cache tokens. Settled results notify on the original host session and are kept in the notification center. A receipt that waits for the user's push approval (`waitingForPush`) calls `notifyAwaitingApproval(loop)` once per receipt id, and `server/index.js` records it in the center only, with the loop id as `requestId`. Approval waits do not become ready from a local-ahead heuristic.
 
 ## HTTP API
 

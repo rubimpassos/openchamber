@@ -60,6 +60,10 @@ session `session-runtime.js` settled:
   Nothing resumes the turn on its own. The UI parser is
   `packages/ui/src/lib/sessionRestartInterruption.ts`; the notice is
   `SessionRestartInterruptionRow.tsx` above the composer.
+- The toast that lists the interrupted chats is also kept in the
+  notification center as one `restart` entry whose action lists every chat.
+  The center's "Needs you" filter keeps it while any listed chat still has
+  this record and its resume is not `sent`.
 
 ## Priority sessions
 

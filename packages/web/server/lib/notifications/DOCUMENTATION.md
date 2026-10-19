@@ -15,7 +15,7 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
 - `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
 - `packages/web/server/lib/notifications/center.js`: the notification center store (`createNotificationCenterRuntime`, `createNotificationCenterPersistence`); see "Notification center" below.
-- `packages/web/server/lib/notifications/center-routes.js`: `GET /api/notification-center`, `POST /api/notification-center/read`, `DELETE /api/notification-center`, registered by `routes.js` when a center is passed in.
+- `packages/web/server/lib/notifications/center-routes.js`: `GET /api/notification-center`, `POST /api/notification-center/read`, `POST /api/notification-center/remove` (`{ ids }`), `DELETE /api/notification-center`, registered by `routes.js` when a center is passed in.
 - `packages/web/server/lib/notifications/message.js`: helper implementation module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
@@ -166,16 +166,39 @@ can list what it missed. Advertised as the `api.notification-center.v1`
 server capability.
 
 - Who records: the trigger runtime (ready, error, question, permission), the
-  goal settle and browser-help paths in `index.js`, and the plugin emitter
-  (`emit-route.js`). An entry is recorded once the per-event toggle, subtask,
+  goal settle and browser-help paths in `index.js`, the plugin emitter
+  (`emit-route.js`), and, in `index.js`, an OpenCode restart that cut off
+  running turns (`restart`), a fix loop that settled or waits for push
+  approval (`fix-loop`), a restack paused on a conflict in `pause` mode
+  (`restack`, once per conflicting branch), the update check of this
+  server's own OpenChamber finding a version and a start on a new version
+  (`update`), OpenCode's `installation.update-available` (`opencode-update`)
+  and a scheduled run that failed (`scheduled-task`). These last ones record
+  only; they raise no alert they did not raise before. Every one is recorded
+  where it starts on the server, so it reaches every client and is kept
+  with all of them closed. An entry is recorded once the per-event toggle, subtask,
   goal, auto-accept and cooldown checks have passed, whether or not an alert
   goes out. `nativeNotificationsEnabled` gates the alert only, so the center
   still fills with alerts turned off (the plugin and browser-help paths stop
   before recording when it is off, as before).
 - Entry: `{ id, createdAt, kind, priority, delivery, verdict, title, body,
-  sessionId, directory, sessionName, readAt }`. `kind` is the trigger
-  (`ready`, `error`, `question`, `permission`, `goal`, `browser-help`,
-  `plugin`). `priority`: questions, permissions, errors, browser help and a
+  sessionId, directory, sessionName, requestId, action, readAt }`. `kind` is
+  the trigger (`ready`, `error`, `question`, `permission`, `goal`,
+  `browser-help`, `plugin`, and the v2 kinds `restart`, `fix-loop`,
+  `restack`, `update`, `opencode-update`, `scheduled-task`). `directory` is
+  the event's, else the one the trigger runtime saw for the session in a
+  `session.created`/`session.updated`, else the session record's
+  `location.directory`: OpenCode 2's execution events carry no location, so
+  a finished or failed turn names only its session. A failed read records
+  null and the notification goes out as before; a session of an isolated
+  space keeps what its event said. `requestId` names what the entry waits
+  on (form, page or permission request id, fix loop id, restack run id,
+  update version); null otherwise and on older entries. `action` is what a
+  click opens besides the session: `sessions` (every chat a restart cut
+  off), `openchamber-update`, `opencode-update`, `scheduled-tasks`; null
+  otherwise, and a malformed one is dropped. `recordOnce` skips an entry
+  whose kind and `requestId` are already kept, so a repeated update check
+  adds nothing. `priority`: questions, permissions, errors, browser help and a
   blocked goal are `high`; a turn Jev ranked low is `low`; the rest `normal`.
   `delivery`: `delivered` (went out on the channels the user has on),
   `focused` (none, the app was in front and `notificationMode` is
@@ -184,14 +207,45 @@ server capability.
   never leave this machine.
 - Storage: `notification-center.json` in the data directory, mode `0600`,
   written through a temp file and rename, one second after a change. At most
-  500 entries and 30 days. A missing file is an empty center; an unreadable
+  200 entries and 7 days, resolved ones included; a start trims a larger
+  file. A missing file is an empty center; an unreadable
   or malformed one is logged and starts empty; single entries that do not
   parse are dropped.
+- Resolution: the center lists what is still open; an entry with
+  `resolvedAt` is in the history. A finished turn resolves when it is read
+  (viewing its session, a click, mark all read; turns read before this
+  existed resolve on load). `resolve({ sessionId, kinds, requestId })`,
+  called from `index.js`, resolves a session's finished turns and errors
+  when a user message arrives there (`message.updated`, role user), a
+  question when its form or waiting page settles (`form.settled`,
+  `openchamber:page-settled`) and a permission when it is replied
+  (`permission.replied`), narrowed to that request when the entry names one.
+  Resolving also marks read. Every other kind stays until it is read, removed
+  or ages out. `remove(ids)` deletes entries.
 - Read state lives on the server, so every client sees the same. Changes are
   broadcast on the control stream as `openchamber:notification-center.changed`
   (`{ change: 'added', entry }`, `{ change: 'read', ids, readAt }`,
+  `{ change: 'resolved', ids, resolvedAt }`, `{ change: 'removed', ids }`,
   `{ change: 'cleared' }`); a client lists again after each
-  `event-stream-ready`.
+  `event-stream-ready`. Clients before v2 ignore `resolved` and `removed`;
+  a resolution also sends `read` for the entries it read, and their list
+  leaves resolved entries out.
+- Compatibility: clients before v2.4.3 parse `kind` as the original seven
+  and reject the whole list on any other. `GET /api/notification-center`
+  lists only those kinds unless the client asks with `?version=2`
+  (capability `api.notification-center.v2`); such clients parse entries one
+  by one and drop one they cannot read. An `added` event with a new kind is
+  ignored by older clients, which parse events with `safeParse`.
+- A start on a new OpenChamber version records `OpenChamber updated to X`
+  once (`createAppVersionMarker`, `notification-center-version.json` in the
+  data directory, mode `0600`). The first start of a data directory has
+  nothing to compare with and records nothing.
+- An update is recorded only when the check is about this server's own app:
+  `appType` `web` on a web server, `desktop` or `web` on the desktop's
+  in-process server. A desktop app connected to a remote server asks about
+  its own build, which that server does not install, so it records nothing
+  there. The check runs only when a client asks; with every client closed,
+  nothing is recorded until the next one does.
 - Runtimes: web, desktop, hosted and native mobile read it over HTTP and the
   control stream (relayed on mobile). VS Code has no OpenChamber server and
   shows no center.
@@ -202,7 +256,11 @@ Before a `ready` notification goes out, the trigger runtime asks
 `awaitTurnVerdict` (session-work) for Jev's reading of the turn and waits up
 to 8 seconds. `looks-done` and `trivial` make the entry `low` and `quiet`:
 no desktop alert, no toast, no web push and no APNs. `review`,
-`stopped-midway`, no answer, a failure or a timeout announce as before.
+`stopped-midway`, no answer, a failure or a timeout announce as before. A
+wait that times out logs `[session-work] no Jev verdict for <session> within
+8000 ms`. While the classification provider is rate limiting (a 429 with
+`Retry-After`, see `../routing/DOCUMENTATION.md`), the turn is announced
+unranked at once.
 Errors, questions, permissions, goals, browser help and plugin notices never
 wait for Jev. The setting is `notificationClassifierEnabled` (default on),
 which only matters with a classification provider and completion
