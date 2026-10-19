@@ -17,6 +17,15 @@ describe('sanitizeForTTS', () => {
         expect(sanitizeForTTS('a \n\n b')).toBe('a\nb');
     });
 
+    test('removes HTML tags and comments but keeps the text between tags', () => {
+        expect(sanitizeForTTS('<details><summary>Logs</summary>All green<br/></details><!-- hidden -->'))
+            .toBe('Logs All green');
+    });
+
+    test('keeps a tag written as inline code and leaves comparisons alone', () => {
+        expect(sanitizeForTTS('Use `<details>` when a < b')).toBe('Use details when a b');
+    });
+
     test('normalizes CRLF line breaks', () => {
         expect(sanitizeForTTS('first line\r\nsecond line')).toBe('first line\nsecond line');
     });

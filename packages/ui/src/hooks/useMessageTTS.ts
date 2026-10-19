@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useId, useRef } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useServerTTS } from './useServerTTS';
+import { type SpeechPart, useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { GEMINI_FAILURE_MESSAGE_KEYS, useGeminiTTS } from './useGeminiTTS';
@@ -15,6 +15,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { ensureLineTerminalPunctuation, sanitizeForTTS } from '@/lib/voice/summarize';
+import { type SpeechSegment, splitTablesForSpeech } from '@/lib/voice/speechTables';
 import { requestSmallModel } from '@/lib/smallModelRequest';
 import {
     finishReading,
@@ -33,22 +34,30 @@ const LANGUAGE_SAMPLE_CHARS = 2000;
 
 const SUMMARIZE_SYSTEM_PROMPT = 'Summarize the assistant reply for text-to-speech listening. Reply with 2-4 sentences of plain spoken prose in the same language as the reply. No markdown, no lists, no code — mention code changes briefly in words instead.';
 
-async function summarizeForSpeech(
-    text: string,
-    preferred: { providerID?: string; modelID?: string },
+const DESCRIBE_TABLE_SYSTEM_PROMPT = 'You describe one table from an assistant reply for someone listening, not reading. Reply with ONE short spoken sentence, at most 30 words, in the same language as the context (or the table when there is no context), that tells the listener what the table shows and its single most important takeaway. Natural speech, like a colleague pointing at the screen: e.g. "Na tabela dá para ver o tempo de cada provedor, e a OpenAI é a mais lenta." Never list columns or read cells. No markdown.';
+
+interface PreferredModel {
+    providerID?: string;
+    modelID?: string;
+}
+
+async function generateSpokenText(
+    prompt: string,
+    system: string,
+    preferred: PreferredModel,
+    requestOptions: Parameters<typeof requestSmallModel>[1],
 ): Promise<string | null> {
     try {
         const response = await requestSmallModel({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                prompt: text,
-                system: SUMMARIZE_SYSTEM_PROMPT,
+                prompt,
+                system,
                 ...(preferred.providerID ? { preferredProviderID: preferred.providerID } : {}),
                 ...(preferred.modelID ? { preferredModelID: preferred.modelID } : {}),
             }),
-        // No small model is not an error here: the original reply is spoken.
-        }, { silentStatuses: [404] });
+        }, requestOptions);
         if (!response.ok) return null;
         const payload = await response.json().catch(() => null) as { text?: unknown } | null;
         return typeof payload?.text === 'string' && payload.text.trim() ? payload.text.trim() : null;
@@ -56,6 +65,26 @@ async function summarizeForSpeech(
         return null;
     }
 }
+
+// No small model is not an error here: the original reply is spoken.
+const summarizeForSpeech = (text: string, preferred: PreferredModel) =>
+    generateSpokenText(text, SUMMARIZE_SYSTEM_PROMPT, preferred, { silentStatuses: [404] });
+
+// A table without a description is skipped, so a failure needs no toast.
+const describeTableForSpeech = async (
+    table: { markdown: string; context: string },
+    preferred: PreferredModel,
+): Promise<string | null> => {
+    const prompt = `Context before the table:\n${table.context || '(none)'}\n\nTable:\n${table.markdown}`;
+    const description = await generateSpokenText(prompt, DESCRIBE_TABLE_SYSTEM_PROMPT, preferred, { notifyOnError: false });
+    return description ? sanitizeForTTS(description) : null;
+};
+
+/** The reply as server speech parts: tables become small-model descriptions written while the prose plays. */
+const toServerSpeechParts = (segments: readonly SpeechSegment[], preferred: PreferredModel): SpeechPart[] =>
+    segments.map((segment): SpeechPart => segment.kind === 'prose'
+        ? { kind: 'text', text: sanitizeForTTS(segment.text) }
+        : { kind: 'late', text: describeTableForSpeech(segment, preferred) });
 
 export interface PlayMessageTTSOptions {
     /** False reads the text as-is even when the voice settings ask for a summary. */
@@ -160,15 +189,31 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 }
             }
 
+            // Tables are never read cell by cell: the server voices get a
+            // spoken description in their place, the other voices skip them.
+            const segments = splitTablesForSpeech(sourceText);
+            const hasTables = segments.some((segment) => segment.kind === 'table');
+            const proseText = segments.flatMap((segment) => segment.kind === 'prose' ? [segment.text] : []).join('\n');
             const shouldUseRaw = ttsInputMode === 'raw' && isServerProvider;
-            const sanitizedText = sanitizeForTTS(sourceText);
-            const textToSpeak = shouldUseRaw ? sourceText : sanitizedText;
+            const sanitizedText = sanitizeForTTS(proseText);
+            const speaksServerParts = isServerProvider && isServerTTSAvailable && (shouldUseRaw || hasTables);
+            if (!sanitizedText && !speaksServerParts) {
+                finish();
+                return;
+            }
             
             if (isServerProvider && isServerTTSAvailable) {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
                 const baseURL = voiceProvider === 'openai-compatible' ? openaiCompatibleUrl : undefined;
                 const model = voiceProvider === 'openai-compatible' ? openaiCompatibleTtsModel : undefined;
-                await speakServerTTS(textToSpeak, {
+                const { currentProviderId, currentModelId } = useConfigStore.getState();
+                const speechParts: SpeechPart[] = shouldUseRaw
+                    ? [{ kind: 'text', text: sourceText }]
+                    : toServerSpeechParts(segments, {
+                        providerID: currentProviderId || undefined,
+                        modelID: currentModelId || undefined,
+                    });
+                await speakServerTTS(speechParts, {
                     voice,
                     model,
                     speed: speechRate,

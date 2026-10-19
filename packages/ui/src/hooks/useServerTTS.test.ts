@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { runChunkedTTSPlayback, splitSentencesForTTS } from './useServerTTS';
+import { runChunkedTTSPlayback, type SpeechPart, splitSentencesForTTS } from './useServerTTS';
 
 /** Minimum characters a standalone chunk must have; shorter fragments merge into neighbors. */
 const MIN_CHUNK_LENGTH = 40;
@@ -226,9 +226,12 @@ function withoutIntlSegmenter<T>(fn: () => T): T {
   }
 }
 
-function createPlaybackHarness(chunks: readonly string[]) {
+const textPart = (text: string): SpeechPart => ({ kind: 'text', text });
+
+function createPlaybackHarness(chunks: readonly SpeechPart[]) {
   const controller = new AbortController();
   const fetches = chunks.map(() => makeDeferred<FakeAudioBuffer>());
+  const fetchedTexts: string[] = [];
   const sources: FakeSource[] = [];
   let fetchCalls = 0;
   let firstScheduledCount = 0;
@@ -236,7 +239,8 @@ function createPlaybackHarness(chunks: readonly string[]) {
 
   const runPromise = runChunkedTTSPlayback(chunks, {
     signal: controller.signal,
-    fetchChunk: () => {
+    fetchChunk: (text) => {
+      fetchedTexts.push(text);
       const request = fetches[fetchCalls];
       fetchCalls += 1;
       return request.promise;
@@ -263,6 +267,7 @@ function createPlaybackHarness(chunks: readonly string[]) {
   return {
     controller,
     fetches,
+    fetchedTexts,
     sources,
     get firstScheduledCount() {
       return firstScheduledCount;
@@ -276,7 +281,7 @@ function createPlaybackHarness(chunks: readonly string[]) {
 
 describe('runChunkedTTSPlayback', () => {
   test('completes playback when every remaining fetch fails after the last scheduled chunk ends', async () => {
-    const harness = createPlaybackHarness(['chunk one', 'chunk two', 'chunk three']);
+    const harness = createPlaybackHarness([textPart('chunk one'), textPart('chunk two'), textPart('chunk three')]);
 
     await tick();
     harness.fetches[0].resolve({ duration: 5 });
@@ -296,7 +301,7 @@ describe('runChunkedTTSPlayback', () => {
   });
 
   test('reports completion once all scheduled chunks have ended', async () => {
-    const harness = createPlaybackHarness(['chunk one', 'chunk two']);
+    const harness = createPlaybackHarness([textPart('chunk one'), textPart('chunk two')]);
 
     await tick();
     harness.fetches[0].resolve({ duration: 5 });
@@ -314,7 +319,7 @@ describe('runChunkedTTSPlayback', () => {
   });
 
   test('reports an aborted outcome without completing playback', async () => {
-    const harness = createPlaybackHarness(['chunk one', 'chunk two']);
+    const harness = createPlaybackHarness([textPart('chunk one'), textPart('chunk two')]);
 
     await tick();
     harness.fetches[0].resolve({ duration: 5 });
@@ -330,7 +335,7 @@ describe('runChunkedTTSPlayback', () => {
   });
 
   test('reports all-failed when every chunk fetch rejects without scheduling audio', async () => {
-    const harness = createPlaybackHarness(['chunk one', 'chunk two']);
+    const harness = createPlaybackHarness([textPart('chunk one'), textPart('chunk two')]);
 
     await tick();
     harness.fetches[0].reject(networkError());
@@ -340,5 +345,47 @@ describe('runChunkedTTSPlayback', () => {
     expect(outcome).toEqual({ status: 'all-failed' });
     expect(harness.firstScheduledCount).toBe(0);
     expect(harness.allEndedCount).toBe(0);
+  });
+});
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('runChunkedTTSPlayback with late parts', () => {
+  async function playWithLate(late: Promise<string | null>, firstDuration = 0.05) {
+    const harness = createPlaybackHarness([textPart('before the table'), { kind: 'late', text: late }, textPart('after the table')]);
+    for (const fetch of harness.fetches) fetch.resolve({ duration: firstDuration });
+    await harness.runPromise;
+    return harness.fetchedTexts;
+  }
+
+  test('speaks a late part that is ready while the queued audio still plays', async () => {
+    expect(await playWithLate(delay(5).then(() => 'The table shows latency.'))).toEqual([
+      'before the table',
+      'The table shows latency.',
+      'after the table',
+    ]);
+  });
+
+  test('skips a late part that is not ready when the queued audio runs out', async () => {
+    expect(await playWithLate(delay(200).then(() => 'Too late.'))).toEqual(['before the table', 'after the table']);
+  });
+
+  test('skips a late part that fails or comes back empty', async () => {
+    expect(await playWithLate(Promise.resolve(null))).toEqual(['before the table', 'after the table']);
+    expect(await playWithLate(Promise.reject(networkError()))).toEqual(['before the table', 'after the table']);
+  });
+
+  test('waits for a late part at the start, where nothing is playing yet', async () => {
+    const harness = createPlaybackHarness([{ kind: 'late', text: delay(20).then(() => 'Opening table.') }, textPart('after')]);
+    for (const fetch of harness.fetches) fetch.resolve({ duration: 1 });
+    expect(await harness.runPromise).toEqual({ status: 'completed', scheduled: 2 });
+    expect(harness.fetchedTexts).toEqual(['Opening table.', 'after']);
+  });
+
+  test('stops waiting for a late part when the reading is stopped', async () => {
+    const harness = createPlaybackHarness([{ kind: 'late', text: new Promise<string | null>(() => {}) }, textPart('after')]);
+    harness.controller.abort();
+    expect(await harness.runPromise).toEqual({ status: 'aborted', scheduled: 0 });
+    expect(harness.fetchedTexts).toEqual([]);
   });
 });

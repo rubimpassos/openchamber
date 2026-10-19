@@ -9,7 +9,7 @@
  * const { speak, isPlaying, stop, isAvailable } = useServerTTS();
  * 
  * // Speak text
- * await speak('Hello, this is a test');
+ * await speak([{ kind: 'text', text: 'Hello, this is a test' }]);
  * 
  * // Stop playback
  * stop();
@@ -77,8 +77,8 @@ export interface UseServerTTSReturn {
   isAvailable: boolean;
   /** Current error if any */
   error: string | null;
-  /** Speak the given text */
-  speak: (text: string, options?: SpeakOptions) => Promise<void>;
+  /** Speak the given parts in order; late parts are skipped when not ready in time */
+  speak: (parts: readonly SpeechPart[], options?: SpeakOptions) => Promise<void>;
   /** Stop current playback */
   stop: () => void;
   /** Check if service is available */
@@ -286,6 +286,43 @@ function scheduleAudioChunk(
   };
 }
 
+/**
+ * A piece of a reading. `late` text is still being written (a table
+ * description from the small model): it is spoken only if it is ready before
+ * the audio queued ahead of it runs out, and skipped otherwise.
+ */
+export type SpeechPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'late'; text: Promise<string | null> };
+
+/**
+ * How long a late part at the very start of a reading may hold back the first
+ * sound. Nothing is playing yet, so there is no queued audio to measure
+ * against; the small model's median table description took 1.7 s.
+ */
+const LATE_PART_START_WAIT_MS = 3000;
+
+function settleWithin(
+  late: Promise<string | null>,
+  ms: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const done = (value: string | null) => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      resolve(value);
+    };
+    const onAbort = () => done(null);
+    const timer = setTimeout(() => done(null), ms);
+    signal.addEventListener('abort', onAbort);
+    late.then(
+      (value) => done(value?.trim() ? value.trim() : null),
+      () => done(null),
+    );
+  });
+}
+
 /** Outcome of the chunked synthesis loop. */
 export type ChunkedPlaybackResult =
   | { status: 'completed'; scheduled: number }
@@ -295,13 +332,14 @@ export type ChunkedPlaybackResult =
 /**
  * Synthesize and schedule sentence chunks in order: each chunk is fetched,
  * scheduled for playback as soon as it is decoded, and the next chunk is
- * fetched while the current one plays. Completion is reported through
- * onAllEnded once every scheduled chunk has ended (or earlier chunks ended
- * and every remaining fetch failed). Test hooks are injected as deps so the
- * scheduling and failure behavior is unit-testable without Web Audio.
+ * fetched while the current one plays. A late chunk waits only as long as the
+ * audio already queued keeps playing, then is skipped. Completion is reported
+ * through onAllEnded once every scheduled chunk has ended (or earlier chunks
+ * ended and every remaining fetch failed). Test hooks are injected as deps so
+ * the scheduling and failure behavior is unit-testable without Web Audio.
  */
 export async function runChunkedTTSPlayback<TBuffer, TSource>(
-  chunks: readonly string[],
+  chunks: readonly SpeechPart[],
   deps: {
     signal: AbortSignal;
     fetchChunk: (chunk: string) => Promise<TBuffer>;
@@ -343,9 +381,26 @@ export async function runChunkedTTSPlayback<TBuffer, TSource>(
       break;
     }
 
+    let text: string;
+    if (chunk.kind === 'text') {
+      text = chunk.text;
+    } else {
+      const queuedMs = scheduled === 0
+        ? LATE_PART_START_WAIT_MS
+        : Math.max(0, nextStartTime - deps.currentTime()) * 1000;
+      const ready = await settleWithin(chunk.text, queuedMs, deps.signal);
+      if (deps.signal.aborted) {
+        break;
+      }
+      if (!ready) {
+        continue;
+      }
+      text = ready;
+    }
+
     let audioBuffer: TBuffer;
     try {
-      audioBuffer = await deps.fetchChunk(chunk);
+      audioBuffer = await deps.fetchChunk(text);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         break;
@@ -353,7 +408,7 @@ export async function runChunkedTTSPlayback<TBuffer, TSource>(
       // One failed sentence must not break the queue: skip it and continue.
       console.warn(
         '[useServerTTS] Skipping failed sentence chunk:',
-        chunk,
+        text,
         err,
       );
       continue;
@@ -508,11 +563,11 @@ export function useServerTTS(
 
   // Speak text using server TTS
   const speak = useCallback(
-    async (text: string, options?: SpeakOptions): Promise<void> => {
+    async (parts: readonly SpeechPart[], options?: SpeakOptions): Promise<void> => {
     // Stop any existing playback
     stop();
 
-    if (!text.trim()) {
+    if (!parts.some((part) => part.kind === 'late' || part.text.trim())) {
       setError('No text to speak');
       options?.onError?.('No text to speak');
       return;
@@ -552,14 +607,19 @@ export function useServerTTS(
         );
 
         // Chunked (sentence-by-sentence) synthesis is a user setting; when disabled,
-      // always take the single-request fast path.
-      const chunks = ttsChunkedMode ? splitSentencesForTTS(text) : [text.trim()];
+        // each text part is one request.
+        const chunks = parts.flatMap((part): SpeechPart[] => {
+          if (part.kind === 'late') return [part];
+          const pieces = ttsChunkedMode ? splitSentencesForTTS(part.text) : [part.text.trim()];
+          return pieces.filter(Boolean).map((piece) => ({ kind: 'text', text: piece }));
+        });
+        const [onlyChunk] = chunks;
 
-        if (chunks.length <= 1) {
+        if (chunks.length === 1 && onlyChunk.kind === 'text') {
           // Fast path: single request, single source — identical to non-chunked playback.
           const audioBuffer = await fetchTTSAudioChunk(
             ctx,
-            chunks[0] ?? text.trim(),
+            onlyChunk.text,
             options,
             config,
             controller.signal,

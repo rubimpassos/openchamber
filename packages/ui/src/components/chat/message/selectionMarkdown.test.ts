@@ -177,3 +177,24 @@ describe('wrapMarkdownSelectionForChat', () => {
     ));
   });
 });
+
+describe('selected tables', () => {
+  test('render as a markdown table so speech can recognize them', () => {
+    const table = element('table', [
+      element('thead', [element('tr', [element('th', [text('Provider')]), element('th', [text('Latency')])])]),
+      element('tbody', [
+        element('tr', [element('td', [text('OpenAI')]), element('td', [element('strong', [text('1.7 s')])])]),
+        element('tr', [element('td', [text('a|b')])]),
+      ]),
+    ]);
+
+    expect(selectionNodesToMarkdown([element('p', [text('Before.')]), table], '')).toBe(multiline(
+      'Before.',
+      '',
+      '| Provider | Latency |',
+      '| --- | --- |',
+      '| OpenAI | **1.7 s** |',
+      '| a\\|b |  |',
+    ));
+  });
+});

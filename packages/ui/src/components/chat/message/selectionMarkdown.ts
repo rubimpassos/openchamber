@@ -123,6 +123,29 @@ const renderListMarkdown = (list: Extract<SelectionNode, { type: 'element' }>, o
     .join('\n');
 };
 
+const collectElements = (
+  node: SelectionNode,
+  tags: ReadonlySet<string>,
+): Extract<SelectionNode, { type: 'element' }>[] => {
+  if (node.type === 'text') return [];
+  if (tags.has(node.tag)) return [node];
+  return node.children.flatMap((child) => collectElements(child, tags));
+};
+
+const ROW_TAGS = new Set(['tr']);
+const CELL_TAGS = new Set(['th', 'td']);
+
+const renderTableMarkdown = (table: Extract<SelectionNode, { type: 'element' }>): string => {
+  const rows = collectElements(table, ROW_TAGS)
+    .map((row) => collectElements(row, CELL_TAGS).map((cell) => renderInlineMarkdownNode(cell).replace(/\|/g, '\\|')))
+    .filter((cells) => cells.length > 0);
+  if (rows.length === 0) return '';
+  const width = Math.max(...rows.map((cells) => cells.length));
+  const toLine = (cells: string[]) => `| ${Array.from({ length: width }, (_, index) => cells[index] ?? '').join(' | ')} |`;
+  const [header, ...body] = rows;
+  return [toLine(header), `|${' --- |'.repeat(width)}`, ...body.map(toLine)].join('\n');
+};
+
 const renderBlockMarkdownNode = (node: SelectionNode): string => {
   if (node.type === 'text') return trimSelectionValue(node.value);
 
@@ -152,6 +175,7 @@ const renderBlockMarkdownNode = (node: SelectionNode): string => {
     const code = normalizeLineBreaks(getSelectionText(node)).trim();
     return code ? `\`${code.replace(/`/g, '\\`')}\`` : '';
   }
+  if (node.tag === 'table') return renderTableMarkdown(node);
   if (node.tag === 'ul') return renderListMarkdown(node, false);
   if (node.tag === 'ol') return renderListMarkdown(node, true);
 

@@ -10,6 +10,10 @@ export function sanitizeForTTS(text: string): string {
         // but keep inline-code CONTENT and only strip the backticks: agents
         // routinely inline meaningful words ("You are on `main`").
         .replace(/```[\s\S]*?```/g, '')
+        // HTML comments and tags go, the text between tags stays. Inline code
+        // is matched first so a tag written as code ("use `<details>`") is
+        // still read.
+        .replace(/(`[^`\n]*`)|<!--[\s\S]*?-->|<\/?[A-Za-z][\w:-]*(?:\s[^<>]*)?\/?>/g, (_match, code?: string) => code ?? ' ')
         .replace(/`([^`\n]*)`/g, '$1')
         // Remove markdown formatting
         .replace(/[*_~#]/g, '')

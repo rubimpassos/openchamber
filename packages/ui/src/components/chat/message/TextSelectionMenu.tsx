@@ -520,17 +520,18 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
   // The selection is read word for word: the reader picked exactly what to
   // hear. While a reading of this message plays the same button stops it, so
-  // stopping never needs a scroll down to the message's own button.
+  // stopping never needs a scroll down to the message's own button. The
+  // markdown form keeps a selected table recognizable as a table.
   const handleReadAloud = React.useCallback(() => {
     if (isReading) {
       stopReading();
       return;
     }
     if (!selectedText) return;
-    void playReading(selectedText, { summarize: false });
+    void playReading(selectedTextMarkdown || selectedText, { summarize: false });
     hideMenu();
     window.getSelection()?.removeAllRanges();
-  }, [hideMenu, isReading, playReading, selectedText, stopReading]);
+  }, [hideMenu, isReading, playReading, selectedText, selectedTextMarkdown, stopReading]);
 
   const readAloudLabel = isReading ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud');
 
