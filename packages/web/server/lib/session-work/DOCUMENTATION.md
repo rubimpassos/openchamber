@@ -98,8 +98,11 @@ whether a message started work, and every session now counts instead.
   ready notification and the turn-end check start from different events in
   either order, so whichever comes first creates the per-session entry; it
   belongs to one turn generation, a new turn resolves it null, and the wait
-  ends after 8 seconds. No provider, ranking off, a subsession or a failure
-  answer null, which announces the turn as before.
+  ends after 8 seconds, logged as `no Jev verdict ... within 8000 ms`. No
+  provider, ranking off, a subsession or a failure answer null, which
+  announces the turn as before. While the provider is rate limiting
+  (`jev.pausedUntil`), neither the turn-end check nor the wait runs, and the
+  refused call is not logged per turn.
 - Jev reads the request's first 1500 characters, the answer's first and last
   500, and three earlier turns cut as routing cuts them.
 

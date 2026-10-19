@@ -74,7 +74,15 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     fetchFreeZenModels,
     getCachedZenModels,
     desktopUpdater,
+    /** `(updateInfo)` when a check of this server's own OpenChamber finds an update. */
+    onUpdateAvailable = () => {},
   } = dependencies;
+
+  // Only a check about this server's own app: a desktop app connected to this
+  // server asks about its own build, which this server does not install.
+  const checksThisServer = (appType) => (process.env.OPENCHAMBER_RUNTIME === 'desktop'
+    ? appType === 'desktop' || appType === 'web'
+    : appType === 'web');
 
   let desktopRestartError = null;
   let systemScopeInstallRunning = false;
@@ -179,6 +187,13 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
               updateInfo = { ...updateInfo, installBlocked: 'service-manager' };
             }
           }
+        }
+      }
+      if (updateInfo?.available && updateInfo.version && checksThisServer(updateRequest.appType)) {
+        try {
+          onUpdateAvailable(updateInfo);
+        } catch (error) {
+          console.warn('[update-check] could not record the update:', error?.message ?? error);
         }
       }
       res.json(updateInfo);

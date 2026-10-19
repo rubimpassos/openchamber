@@ -11,6 +11,7 @@ import {
   clearNotificationCenter,
   fetchNotificationCenter,
   markNotificationCenterRead,
+  removeNotificationCenterEntries,
   type NotificationCenterChange,
   type NotificationCenterEntry,
   type NotificationCenterReadTarget,
@@ -33,10 +34,26 @@ type NotificationCenterState = {
   markRead: (target: NotificationCenterReadTarget) => Promise<void>;
   /** Marks a session's entries read, asking the server only when this client has an unread one. */
   markSessionRead: (sessionId: string) => void;
+  /** Deletes some entries; applied from the server's answer. */
+  remove: (ids: string[]) => Promise<void>;
   clear: () => Promise<void>;
 };
 
 let loadGeneration = 0;
+
+const withoutIds = (entries: NotificationCenterEntry[], ids: string[]): NotificationCenterEntry[] => {
+  if (ids.length === 0) return entries;
+  const removed = new Set(ids);
+  return entries.filter((entry) => !removed.has(entry.id));
+};
+
+const applyResolved = (entries: NotificationCenterEntry[], ids: string[], resolvedAt: number): NotificationCenterEntry[] => {
+  if (ids.length === 0) return entries;
+  const changed = new Set(ids);
+  return entries.map((entry) => (changed.has(entry.id) && entry.resolvedAt === null
+    ? { ...entry, readAt: entry.readAt ?? resolvedAt, resolvedAt }
+    : entry));
+};
 
 const applyRead = (entries: NotificationCenterEntry[], ids: string[], readAt: number): NotificationCenterEntry[] => {
   if (ids.length === 0) return entries;
@@ -80,6 +97,14 @@ export const useNotificationCenterStore = create<NotificationCenterState>()((set
       set((state) => ({ entries: applyRead(state.entries, change.ids, change.readAt) }));
       return;
     }
+    if (change.change === 'resolved') {
+      set((state) => ({ entries: applyResolved(state.entries, change.ids, change.resolvedAt) }));
+      return;
+    }
+    if (change.change === 'removed') {
+      set((state) => ({ entries: withoutIds(state.entries, change.ids) }));
+      return;
+    }
     set((state) => (state.entries.some((entry) => entry.id === change.entry.id)
       ? state
       : { entries: [change.entry, ...state.entries] }));
@@ -96,6 +121,11 @@ export const useNotificationCenterStore = create<NotificationCenterState>()((set
     if (!entries.some((entry) => entry.sessionId === sessionId && entry.readAt === null)) return;
     // On failure the entries stay unread here and on the server; the next view tries again.
     void get().markRead({ sessionId }).catch(() => undefined);
+  },
+
+  remove: async (ids) => {
+    const removed = await removeNotificationCenterEntries(ids);
+    set((state) => ({ entries: withoutIds(state.entries, removed) }));
   },
 
   clear: async () => {

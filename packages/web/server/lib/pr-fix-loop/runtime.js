@@ -241,7 +241,8 @@ function buildIterationPrompt(loop, { failures, feedback }) {
  * - `readTokenSnapshot(sessionId, directory, { before })` → number | null;
  * - `workerRuntime` owns protected worker preparation, verification and transport;
  * - `publication` captures immutable approval objects and exact host publication;
- * - `notify(loop)` on settling; `broadcast(event)`; `readDefaults()` → partial config.
+ * - `notify(loop)` on settling; `notifyAwaitingApproval(loop)` once per receipt that waits for the
+ *   user's push approval; `broadcast(event)`; `readDefaults()` → partial config.
  */
 export function createFixLoopRuntime({
   dataDir,
@@ -259,6 +260,7 @@ export function createFixLoopRuntime({
   publication = null,
   applyReviewOperation = null,
   notify = async () => undefined,
+  notifyAwaitingApproval = async () => undefined,
   broadcast = () => undefined,
   readDefaults = async () => ({}),
   now = Date.now,
@@ -291,10 +293,22 @@ export function createFixLoopRuntime({
     broadcast({ type: 'openchamber:pr-fix-loop.updated', properties: { loop: publicLoop(loop) } });
   };
 
+  // Receipts already announced as waiting for approval, by loop id, so a
+  // resume or a failed publication of the same receipt does not repeat it.
+  const announcedReceipts = new Map();
+  const announceAwaitingApproval = (loop) => {
+    const receiptId = loop.pendingApproval?.id;
+    if (loop.status !== 'waitingForPush' || !receiptId || announcedReceipts.get(loop.id) === receiptId) return;
+    announcedReceipts.set(loop.id, receiptId);
+    Promise.resolve(notifyAwaitingApproval(publicLoop(loop)))
+      .catch((error) => log.warn?.('[pr-fix-loop] approval notification failed:', error?.message ?? error));
+  };
+
   const save = async (loop) => {
     loop.updatedAt = now();
     await persist();
     emit(loop);
+    announceAwaitingApproval(loop);
   };
 
   const clear = (id) => {

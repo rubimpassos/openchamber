@@ -1,7 +1,12 @@
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
+import { z } from 'zod';
 import { truncateNotificationText } from './message.js';
+
+const nonEmptyText = z.string().trim().min(1);
+/** The trimmed text, or null for anything else. */
+const textOrNull = (value) => nonEmptyText.safeParse(value).data ?? null;
 
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
@@ -292,10 +297,28 @@ export const createNotificationTriggerRuntime = (deps) => {
     return merged;
   };
 
+  // Where each host session lives. OpenCode 2's execution events carry no
+  // location, so a turn's end names only the session; the directory comes
+  // from session events seen earlier or from the session's own record.
+  const SESSION_DIRECTORY_CACHE_LIMIT = 500;
+  const sessionDirectoryCache = new Map();
+  const rememberSessionDirectory = (sessionId, directory) => {
+    const known = textOrNull(directory);
+    if (!sessionId || !known) return;
+    sessionDirectoryCache.delete(sessionId);
+    sessionDirectoryCache.set(sessionId, known);
+    while (sessionDirectoryCache.size > SESSION_DIRECTORY_CACHE_LIMIT) {
+      sessionDirectoryCache.delete(sessionDirectoryCache.keys().next().value);
+    }
+  };
+
   const maybeCacheSessionParentFromPayload = (payload, spaceId) => {
     const sessionId = extractSessionIdFromPayload(payload);
     if (typeof sessionId !== 'string' || sessionId.length === 0) return;
     const directory = extractDirectoryFromPayload(payload);
+    if (!spaceId && (payload.type === 'session.created' || payload.type === 'session.updated')) {
+      rememberSessionDirectory(sessionId, payload.properties?.info?.directory);
+    }
     const parentID = getParentIdFromPayload(payload);
     if (parentID === undefined) return;
     setCachedSessionParentId(sessionId, directory, spaceId, parentID);
@@ -318,10 +341,27 @@ export const createNotificationTriggerRuntime = (deps) => {
       });
       if (!response.ok) return null;
       const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
-      return session && typeof session === 'object' ? session : null;
+      if (!session || typeof session !== 'object') return null;
+      if (!spaceId) rememberSessionDirectory(sessionId, session.location?.directory ?? session.directory);
+      return session;
     } catch {
       return null;
     }
+  };
+
+  /**
+   * The directory a notification about this session records: the event's,
+   * else the one this runtime saw for the session, else its record's. Null
+   * when none of them is known. A session of an isolated space keeps what its
+   * event said: its directory is the space's, which no host client opens.
+   */
+  const resolveSessionDirectory = async (sessionId, eventDirectory, spaceId) => {
+    if (eventDirectory) return eventDirectory;
+    if (!sessionId || spaceId) return null;
+    const known = sessionDirectoryCache.get(sessionId);
+    if (known) return known;
+    await fetchSessionRecord(sessionId, undefined, null);
+    return sessionDirectoryCache.get(sessionId) ?? null;
   };
 
   const fetchSessionParentId = async (sessionId, directory, spaceId = null) => {
@@ -363,14 +403,14 @@ export const createNotificationTriggerRuntime = (deps) => {
     const firstField = Array.isArray(form?.fields) ? form.fields[0] : null;
     const fieldTitle = typeof firstField?.title === 'string' ? firstField.title.trim() : '';
     const fieldDescription = typeof firstField?.description === 'string' ? firstField.description.trim() : '';
-    return { header, questionText: fieldDescription || fieldTitle };
+    return { header, questionText: fieldDescription || fieldTitle, requestId: textOrNull(form?.id) };
   };
 
   // A waiting page's title says what it asks; the notification title stays
   // the generic "Input needed".
   const readPageAsk = (payload) => {
     const title = payload.properties?.page?.title;
-    return { header: '', questionText: typeof title === 'string' ? title.trim() : '' };
+    return { header: '', questionText: typeof title === 'string' ? title.trim() : '', requestId: textOrNull(payload.properties?.page?.id) };
   };
 
   const extractSessionIdFromPayload = (payload) => {
@@ -573,6 +613,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         const verdict = spaceId ? null : await Promise.resolve(awaitTurnVerdict(sessionId)).catch(() => null);
         const quiet = verdict === 'looks-done' || verdict === 'trivial';
         const delivery = focused ? 'focused' : (quiet ? 'quiet' : 'delivered');
+        const entryDirectory = await resolveSessionDirectory(sessionId, notificationDirectory, spaceId);
         recordNotification({
           kind: 'ready',
           priority: quiet ? 'low' : 'normal',
@@ -581,7 +622,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           title,
           body,
           sessionId,
-          directory: notificationDirectory,
+          directory: entryDirectory,
           sessionName,
         });
         if (delivery !== 'delivered') {
@@ -595,7 +636,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             tag: `ready-${sessionId}`,
             kind: 'ready',
             sessionId,
-            directory: notificationDirectory,
+            directory: entryDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
           const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
@@ -659,6 +700,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Error template resolution failed, using defaults:', error?.message || error);
         }
 
+        const entryDirectory = await resolveSessionDirectory(sessionId, notificationDirectory, spaceId);
         recordNotification({
           kind: 'error',
           priority: 'high',
@@ -666,7 +708,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           title,
           body,
           sessionId,
-          directory: notificationDirectory,
+          directory: entryDirectory,
           sessionName,
         });
         if (focused) {
@@ -680,7 +722,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             tag: `error-${sessionId}`,
             kind: 'error',
             sessionId,
-            directory: notificationDirectory,
+            directory: entryDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
           const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
@@ -759,14 +801,16 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Question template resolution failed, using defaults:', error?.message || error);
         }
 
+        const entryDirectory = await resolveSessionDirectory(formSessionId, notificationDirectory, spaceId);
         recordNotification({
           kind: 'question',
           priority: 'high',
           delivery: focused ? 'focused' : 'delivered',
           title,
           body,
+          requestId: ask.requestId,
           sessionId: formSessionId,
-          directory: notificationDirectory,
+          directory: entryDirectory,
           sessionName,
         });
         if (focused) {
@@ -780,7 +824,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             body,
             tag: `question-${sessionId}`,
             sessionId: formSessionId,
-            directory: notificationDirectory,
+            directory: entryDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
           const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
@@ -904,14 +948,16 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Permission template resolution failed, using defaults:', error?.message || error);
         }
 
+        const entryDirectory = await resolveSessionDirectory(sessionId, notificationDirectory, spaceId);
         recordNotification({
           kind: 'permission',
           priority: 'high',
           delivery: focused ? 'focused' : 'delivered',
           title,
           body,
+          requestId: textOrNull(requestId),
           sessionId,
-          directory: notificationDirectory,
+          directory: entryDirectory,
           sessionName,
         });
         if (focused) {
@@ -925,7 +971,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             body,
             tag: requestKey ? `permission-${requestKey}` : `permission-${sessionId}`,
             sessionId,
-            directory: notificationDirectory,
+            directory: entryDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
           const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);

@@ -10,13 +10,18 @@ import { z } from 'zod';
 
 const FILE_NAME = 'notification-center.json';
 const VERSION = 1;
-export const NOTIFICATION_CENTER_LIMIT = 500;
-export const NOTIFICATION_CENTER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const NOTIFICATION_CENTER_LIMIT = 200;
+export const NOTIFICATION_CENTER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAVE_DELAY_MS = 1_000;
 const TITLE_MAX = 200;
 const BODY_MAX = 500;
 
-const NOTIFICATION_KINDS = ['ready', 'error', 'question', 'permission', 'goal', 'browser-help', 'plugin'];
+/** The kinds clients before `api.notification-center.v2` parse; any other kind fails their whole list. */
+const V1_NOTIFICATION_KINDS = ['ready', 'error', 'question', 'permission', 'goal', 'browser-help', 'plugin'];
+const NOTIFICATION_KINDS = [
+  ...V1_NOTIFICATION_KINDS,
+  'restart', 'fix-loop', 'restack', 'update', 'opencode-update', 'scheduled-task',
+];
 const NOTIFICATION_PRIORITIES = ['high', 'normal', 'low'];
 /**
  * What happened to the alert: `delivered` went out on the channels the user
@@ -28,6 +33,25 @@ const NOTIFICATION_DELIVERIES = ['delivered', 'focused', 'quiet'];
 const TURN_VERDICTS = ['review', 'stopped-midway', 'looks-done', 'trivial'];
 
 const optionalText = z.string().trim().min(1).nullable().catch(null);
+
+/**
+ * What a click opens when it is more than the entry's session: every chat an
+ * OpenCode restart cut off, the OpenChamber or OpenCode update, a project's
+ * scheduled tasks. Null opens the session, when there is one.
+ */
+const actionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('sessions'),
+    sessions: z.array(z.object({
+      sessionId: z.string().min(1),
+      directory: optionalText,
+      title: optionalText,
+    })).min(1).max(50),
+  }),
+  z.object({ type: z.literal('openchamber-update'), version: optionalText }),
+  z.object({ type: z.literal('opencode-update'), version: optionalText }),
+  z.object({ type: z.literal('scheduled-tasks'), projectId: z.string().min(1) }),
+]);
 
 const entrySchema = z.object({
   id: z.string().min(1),
@@ -41,8 +65,23 @@ const entrySchema = z.object({
   sessionId: optionalText,
   directory: optionalText,
   sessionName: optionalText,
+  /**
+   * What the entry waits on, so a client can tell whether it still does: the
+   * form, page or permission request id, the fix loop or restack run id, the
+   * update's version. Null on entries written before it existed.
+   */
+  requestId: optionalText,
+  action: actionSchema.nullable().catch(null),
   readAt: z.number().finite().nullable().catch(null),
+  /** When nothing was left to do about it; resolved entries leave the list for the history. */
+  resolvedAt: z.number().finite().nullable().catch(null),
 });
+
+/**
+ * A finished turn is done once it was seen: reading it resolves it. Errors and
+ * every other kind stay until what they wait on is settled (`resolve`).
+ */
+const RESOLVED_ON_READ = new Set(['ready']);
 
 const fileSchema = z.object({ version: z.literal(VERSION), entries: z.array(z.unknown()) });
 
@@ -114,7 +153,12 @@ export function createNotificationCenterRuntime({
 
   const loaded = (async () => {
     try {
-      entries = prune((await persistence.load()).sort((a, b) => a.createdAt - b.createdAt));
+      // A finished turn read before resolution existed is resolved by that read.
+      entries = prune((await persistence.load())
+        .map((entry) => (entry.resolvedAt === null && entry.readAt !== null && RESOLVED_ON_READ.has(entry.kind)
+          ? { ...entry, resolvedAt: entry.readAt }
+          : entry))
+        .sort((a, b) => a.createdAt - b.createdAt));
     } catch (error) {
       console.warn('[notification-center] could not read saved notifications:', error?.message ?? error);
       entries = [];
@@ -138,13 +182,22 @@ export function createNotificationCenterRuntime({
 
   const emit = (properties) => broadcast({ type: 'openchamber:notification-center.changed', properties });
 
-  const list = async () => {
+  /**
+   * Newest first. Without `allKinds`, what clients before v2 can show: their
+   * kinds, and no resolved entry, since they have no history to put it in.
+   */
+  const list = async ({ allKinds = false } = {}) => {
     await loaded;
-    return entries.slice().reverse();
+    const visible = allKinds
+      ? entries
+      : entries.filter((entry) => V1_NOTIFICATION_KINDS.includes(entry.kind) && entry.resolvedAt === null);
+    return visible.slice().reverse();
   };
 
   /** Records one notification and answers with the stored entry. */
-  const record = async ({ kind, priority, delivery, verdict = null, title, body, sessionId, directory, sessionName }) => {
+  const record = async ({
+    kind, priority, delivery, verdict = null, title, body, sessionId, directory, sessionName, requestId = null, action = null,
+  }) => {
     await loaded;
     const entry = {
       id: createId(),
@@ -158,7 +211,10 @@ export function createNotificationCenterRuntime({
       sessionId: textOrNull(sessionId),
       directory: textOrNull(directory),
       sessionName: textOrNull(sessionName),
+      requestId: textOrNull(requestId),
+      action,
       readAt: null,
+      resolvedAt: null,
     };
     const parsed = entrySchema.parse(entry);
     entries = prune([...entries, parsed]);
@@ -177,18 +233,62 @@ export function createNotificationCenterRuntime({
     const wanted = ids ? new Set(ids) : null;
     const readAt = now();
     const changed = [];
+    const resolved = [];
     entries = entries.map((entry) => {
       if (entry.readAt !== null) return entry;
       const matches = all || (wanted ? wanted.has(entry.id) : entry.sessionId === sessionId);
       if (!matches) return entry;
       changed.push(entry.id);
-      return { ...entry, readAt };
+      if (!RESOLVED_ON_READ.has(entry.kind) || entry.resolvedAt !== null) return { ...entry, readAt };
+      resolved.push(entry.id);
+      return { ...entry, readAt, resolvedAt: readAt };
     });
     if (changed.length > 0) {
       scheduleSave();
       emit({ change: 'read', ids: changed, readAt });
+      if (resolved.length > 0) emit({ change: 'resolved', ids: resolved, resolvedAt: readAt });
     }
     return { ids: changed, readAt };
+  };
+
+  /**
+   * Moves to the history what no longer waits on the user: the entries of one
+   * session of the given kinds, narrowed to one request when `requestId` is
+   * set. A resolved entry is also read. Answers with the ids that changed.
+   */
+  const resolve = async ({ sessionId, kinds, requestId = null }) => {
+    await loaded;
+    if (!sessionId) return [];
+    const wantedKinds = new Set(kinds);
+    const at = now();
+    const read = [];
+    const resolved = [];
+    entries = entries.map((entry) => {
+      if (entry.resolvedAt !== null || entry.sessionId !== sessionId || !wantedKinds.has(entry.kind)) return entry;
+      if (requestId && entry.requestId && entry.requestId !== requestId) return entry;
+      resolved.push(entry.id);
+      if (entry.readAt === null) read.push(entry.id);
+      return { ...entry, readAt: entry.readAt ?? at, resolvedAt: at };
+    });
+    if (resolved.length > 0) {
+      scheduleSave();
+      // Clients before v2 know only `read`; it keeps their unread count right.
+      if (read.length > 0) emit({ change: 'read', ids: read, readAt: at });
+      emit({ change: 'resolved', ids: resolved, resolvedAt: at });
+    }
+    return resolved;
+  };
+
+  /** Deletes the listed entries. Answers with the ids that were there. */
+  const remove = async (ids) => {
+    await loaded;
+    const wanted = new Set(ids);
+    const removed = entries.filter((entry) => wanted.has(entry.id)).map((entry) => entry.id);
+    if (removed.length === 0) return [];
+    entries = entries.filter((entry) => !wanted.has(entry.id));
+    scheduleSave();
+    emit({ change: 'removed', ids: removed });
+    return removed;
   };
 
   const clear = async () => {
@@ -196,6 +296,19 @@ export function createNotificationCenterRuntime({
     entries = [];
     scheduleSave();
     emit({ change: 'cleared' });
+  };
+
+  /**
+   * Records an entry unless one of the same kind already names this
+   * `requestId` (an update version, a paused restack step), so a check that
+   * repeats does not add it again. Answers with the stored entry or null.
+   */
+  const recordOnce = async (entry) => {
+    await loaded;
+    if (entry.requestId && entries.some((existing) => existing.kind === entry.kind && existing.requestId === entry.requestId)) {
+      return null;
+    }
+    return record(entry);
   };
 
   /** Writes what is pending now; later changes are not saved. */
@@ -207,5 +320,40 @@ export function createNotificationCenterRuntime({
     }
   };
 
-  return { ready: () => loaded, list, record, markRead, clear, stop };
+  return { ready: () => loaded, list, record, recordOnce, markRead, resolve, remove, clear, stop };
+}
+
+/**
+ * The OpenChamber version this data directory last ran, kept beside the
+ * center so a start on a new version can say so. `noteVersion(current)`
+ * answers the previous version when it differs, and null on the first start
+ * (nothing to compare with), on the same version, or when the file cannot be
+ * read or written.
+ */
+export function createAppVersionMarker({ dataDir, fs = fsPromises }) {
+  const filePath = path.join(dataDir, 'notification-center-version.json');
+  const versionSchema = z.string().min(1);
+  const markerSchema = z.object({ version: versionSchema });
+  return {
+    async noteVersion(current) {
+      if (!versionSchema.safeParse(current).success) return null;
+      let previous = null;
+      try {
+        previous = markerSchema.safeParse(JSON.parse(await fs.readFile(filePath, 'utf8'))).data?.version ?? null;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          console.warn('[notification-center] could not read the last version:', error?.message ?? error);
+          return null;
+        }
+      }
+      if (previous === current) return null;
+      try {
+        await fs.writeFile(filePath, JSON.stringify({ version: current }), { encoding: 'utf8', mode: 0o600 });
+      } catch (error) {
+        console.warn('[notification-center] could not save the version:', error?.message ?? error);
+        return null;
+      }
+      return previous;
+    },
+  };
 }

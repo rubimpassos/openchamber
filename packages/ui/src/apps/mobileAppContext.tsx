@@ -10,6 +10,12 @@ export type MobileAppActions = {
   openSettings: () => void;
   /** Open the issues and PRs board page; what it shows is set in its store first. */
   openSourceBoard: () => void;
+  /** Open Settings on one page. */
+  openSettingsPage: (slug: string) => void;
+  /** Open the OpenChamber update surface. */
+  openUpdate: () => void;
+  /** Open the scheduled tasks surface of the active project. */
+  openScheduledTasks: () => void;
 };
 
 const DedicatedMobileAppContext = React.createContext<MobileAppActions | null>(null);

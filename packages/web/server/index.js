@@ -105,7 +105,8 @@ import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
 import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
-import { createNotificationCenterPersistence, createNotificationCenterRuntime } from './lib/notifications/center.js';
+import { createAppVersionMarker, createNotificationCenterPersistence, createNotificationCenterRuntime } from './lib/notifications/center.js';
+import { getCurrentVersion as getInstalledOpenChamberVersion } from './lib/package-manager.js';
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
@@ -982,6 +983,31 @@ const recordCenterNotification = (entry) => {
     console.warn('[notification-center] could not record a notification:', error?.message ?? error);
   });
 };
+/** Same, once per kind and `requestId`: a check that repeats (an update version) adds nothing new. */
+const recordCenterNotificationOnce = (entry) => {
+  void notificationCenter.recordOnce(entry).catch((error) => {
+    console.warn('[notification-center] could not record a notification:', error?.message ?? error);
+  });
+};
+
+// A start on a new OpenChamber version says so once. The first start of a
+// data directory has nothing to compare with and records nothing.
+{
+  const currentVersion = getInstalledOpenChamberVersion();
+  if (currentVersion !== 'unknown') {
+    void createAppVersionMarker({ dataDir: OPENCHAMBER_DATA_DIR }).noteVersion(currentVersion).then((previous) => {
+      if (!previous) return;
+      recordCenterNotification({
+        kind: 'update',
+        priority: 'low',
+        delivery: 'delivered',
+        title: `OpenChamber updated to ${currentVersion}`,
+        body: `Previous version: ${previous}`,
+        action: { type: 'openchamber-update', version: currentVersion },
+      });
+    });
+  }
+}
 
 const notificationTriggerRuntime = createNotificationTriggerRuntime({
   readSettingsFromDisk,
@@ -1026,12 +1052,15 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   lineage: sessionLineage,
 });
 
+// One Jev client for every feature, so a rate limit one of them hits pauses them all.
+const jevClient = createJevClient();
+
 const sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
-  jev: createJevClient(),
+  jev: jevClient,
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
@@ -1147,6 +1176,7 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
 // user's own model or the auto-accept reply it was asked about.
 const routingRuntime = createRoutingRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
+  jev: jevClient,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
@@ -1158,7 +1188,7 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
-  jev: createJevClient(),
+  jev: jevClient,
   readMetadata: (sessionID, directory) => sessionMetadataStore.get(sessionID, { directory }),
   updateMetadata: updateSessionMetadataWith,
   isSessionArchived: (sessionID) => openChamberSessionService.archiveStore.isArchived(sessionID),
@@ -1244,6 +1274,26 @@ messageQueueRuntime.start();
 const queueServerMessage = (kind, id) => async (sessionId, directory, item) => {
   await messageQueueRuntime.enqueue(sessionId, directory, { ...item, origin: { kind, id } });
 };
+// A restack paused on a conflict the user resolves (`pause` mode) goes to the
+// center once per conflicting branch; in `agent` mode the session resolves it.
+const announcedRestackConflicts = new Set();
+const recordRestackConflict = (run) => {
+  if (run?.status !== 'paused' || run.conflictMode !== 'pause') return;
+  const step = Array.isArray(run.steps) ? run.steps.find((candidate) => candidate?.status === 'conflict') : null;
+  const key = `${run.id}\0${step?.branch ?? ''}`;
+  if (announcedRestackConflicts.has(key)) return;
+  announcedRestackConflicts.add(key);
+  recordCenterNotification({
+    kind: 'restack',
+    priority: 'high',
+    delivery: 'delivered',
+    title: 'Restack stopped on a conflict',
+    body: step?.branch ? `${step.branch} onto ${step.onto ?? ''}`.trim() : '',
+    sessionId: run.sessionId,
+    directory: run.directory,
+    requestId: run.id,
+  });
+};
 const prStackRestackRuntime = createRestackRuntime({
   runGit: runGitCommandNoEditor,
   dataDir: OPENCHAMBER_DATA_DIR,
@@ -1252,7 +1302,10 @@ const prStackRestackRuntime = createRestackRuntime({
     content: 'Stacked PRs: resolve the restack conflict',
     text,
   }),
-  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+  broadcast: (event) => {
+    broadcastOpenChamberUiEvent(event);
+    recordRestackConflict(event?.properties?.run);
+  },
 });
 const prFixLoopActivity = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
 const approvalGit = createHostGit({ runCommand: (_binary, args, options) => runSpaceCommand(resolveGitBinaryForSpawn(), args, options) });
@@ -1322,6 +1375,15 @@ const prFixLoopRuntime = createFixLoopRuntime({
     };
     const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
     broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+    recordCenterNotification({
+      kind: 'fix-loop',
+      priority: loop.status === 'ready' || loop.status === 'closed' ? 'normal' : 'high',
+      delivery: 'delivered',
+      title,
+      body: notificationPayload.body,
+      sessionId: loop.sessionId,
+      directory: loop.directory,
+    });
     void notificationTriggerRuntime.sendGoalSettlePush({
       sessionId: loop.sessionId,
       directory: loop.directory,
@@ -1329,6 +1391,19 @@ const prFixLoopRuntime = createFixLoopRuntime({
       title,
       body: notificationPayload.body,
     }).catch((error) => console.warn('[pr-fix-loop] push fanout failed:', error?.message || error));
+  },
+  // Center only: the loop's row in the chat already shows the approval.
+  notifyAwaitingApproval: async (loop) => {
+    recordCenterNotification({
+      kind: 'fix-loop',
+      priority: 'high',
+      delivery: 'delivered',
+      title: 'Fix loop is waiting for your approval',
+      body: `#${loop.number} ${loop.title}`.trim().slice(0, 240),
+      sessionId: loop.sessionId,
+      directory: loop.directory,
+      requestId: loop.id,
+    });
   },
   broadcast: (event) => broadcastOpenChamberUiEvent(event),
   readDefaults: async () => (await readSettingsFromDisk().catch(() => ({})))?.prFixLoopDefaults ?? {},
@@ -1373,6 +1448,38 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   },
 });
 
+// What the center keeps moves to its history once nothing waits on the user:
+// a finished turn or an error when the user writes in that session again, a
+// question or permission when it is answered.
+const resolveCenterEntries = (target) => {
+  void notificationCenter.resolve(target).catch((error) => {
+    console.warn('[notification-center] could not resolve notifications:', error?.message ?? error);
+  });
+};
+const resolveCenterEntriesFor = (payload) => {
+  const sessionId = payload.properties?.sessionID;
+  if (!sessionId) return;
+  if (payload.type === 'message.updated' && payload.properties?.info?.role === 'user') {
+    resolveCenterEntries({ sessionId, kinds: ['ready', 'error'] });
+  } else if (payload.type === 'permission.replied') {
+    resolveCenterEntries({ sessionId, kinds: ['permission'], requestId: payload.properties.requestID || null });
+  } else if (payload.type === 'form.settled') {
+    resolveCenterEntries({ sessionId, kinds: ['question'], requestId: payload.properties.formID || null });
+  }
+};
+
+const recordOpenCodeUpdate = (version) => {
+  recordCenterNotificationOnce({
+    kind: 'opencode-update',
+    priority: 'normal',
+    delivery: 'delivered',
+    title: `OpenCode ${version} is available`,
+    body: '',
+    requestId: version,
+    action: { type: 'opencode-update', version },
+  });
+};
+
 // Session-assist subscribes to the hub directly: it needs the envelope's
 // directory to route its own OpenCode calls to the right instance.
 console.log('[session-assist] listening for session events');
@@ -1389,6 +1496,10 @@ globalMessageStreamHub.subscribeEvent((event) => {
     if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
       agentToolRuntime?.abortSession?.(payload.properties.sessionID);
     }
+    if (payload.type === 'installation.update-available' && payload.properties?.version) {
+      recordOpenCodeUpdate(payload.properties.version);
+    }
+    resolveCenterEntriesFor(payload);
     sessionLineage.observe(payload);
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWorkRuntime.processPayload(payload, directory || payload.properties?.directory || '');
@@ -1733,7 +1844,25 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     if (sessionIds.length === 0) return;
     void sessionInterruptionRuntime.recordRestartInterruptions({ sessionIds, cause })
       .then((sessions) => {
-        broadcastUiNotification(restartInterruptedNotification(sessions));
+        const notice = restartInterruptedNotification(sessions);
+        broadcastUiNotification(notice);
+        const single = sessions.length === 1 ? sessions[0] : null;
+        recordCenterNotification({
+          kind: 'restart',
+          priority: 'high',
+          delivery: 'delivered',
+          title: notice.title,
+          body: notice.body,
+          sessionId: single?.sessionId,
+          directory: single?.directory,
+          sessionName: single?.title,
+          action: {
+            type: 'sessions',
+            sessions: sessions.slice(0, 50).map(({ sessionId, directory, title }) => ({
+              sessionId, directory: directory || null, title: title || null,
+            })),
+          },
+        });
         return autoResumeRuntime.resume(sessions);
       })
       .catch((error) => console.warn('Failed to announce or resume sessions interrupted by the OpenCode restart:', error?.message ?? error));
@@ -1828,6 +1957,18 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
       } catch {
         uiOpenChamberEventClients.delete(client);
       }
+    }
+    if (event.status === 'error') {
+      recordCenterNotification({
+        kind: 'scheduled-task',
+        priority: 'high',
+        delivery: 'delivered',
+        title: event.taskName?.trim() ? `Scheduled task failed: ${event.taskName.trim()}` : 'Scheduled task failed',
+        body: event.error ?? '',
+        sessionId: event.sessionID,
+        directory: event.directory,
+        action: { type: 'scheduled-tasks', projectId: scheduledChatsScope.toPublicID(event.projectID) },
+      });
     }
   },
   logger: console,
@@ -2154,6 +2295,7 @@ const openChamberControlService = createOpenChamberControlService({
       type: 'openchamber:page-settled',
       properties: { sessionID: change.sessionId, pageID: change.callId },
     });
+    resolveCenterEntries({ sessionId: change.sessionId, kinds: ['question'], requestId: change.callId });
   },
   // The tool is off by default; a plugin generated before it was switched off
   // must not keep paging the user.
@@ -2715,6 +2857,15 @@ async function main(options = {}) {
     notificationCenter,
     agentToolRuntime,
     desktopUpdater,
+    onUpdateAvailable: (updateInfo) => recordCenterNotificationOnce({
+      kind: 'update',
+      priority: 'normal',
+      delivery: 'delivered',
+      title: `OpenChamber ${updateInfo.version} is available`,
+      body: updateInfo.currentVersion ? `Installed: ${updateInfo.currentVersion}` : '',
+      requestId: updateInfo.version,
+      action: { type: 'openchamber-update', version: updateInfo.version },
+    }),
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;

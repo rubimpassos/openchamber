@@ -121,6 +121,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       'api.raw-file.v1',
       'api.notifications.emit.v1',
       'api.notification-center.v1',
+      'api.notification-center.v2',
       'realtime.sse.v1',
       'realtime.websocket.global-events.v1',
       'terminal.websocket.v1',

@@ -328,6 +328,17 @@ test.each([
   runtime.stop();
 });
 
+test('announces a receipt waiting for approval once, however often the loop is saved', async () => {
+  const awaiting = [];
+  const runtime = make({ notifyAwaitingApproval: async (loop) => { awaiting.push([loop.id, loop.status, loop.pendingApproval?.id]); } });
+  await activate(runtime, { pushMode: 'approval', tokenBudget: 50 }); await tick(); usage = 50; await tick();
+  const loop = (await runtime.list())[0];
+  expect(loop.status).toBe('waitingForPush');
+  await runtime.refresh(loop.id); await tick();
+  expect(awaiting).toEqual([[loop.id, 'waitingForPush', loop.pendingApproval.id]]);
+  runtime.stop();
+});
+
 test('an approval budget retains its exact receipt across restart and settles after publication', async () => {
   const notifications = [];
   const options = { notify: async (loop) => { notifications.push(loop.status); } };

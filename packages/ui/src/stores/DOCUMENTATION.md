@@ -138,6 +138,28 @@ the store. Viewing a session (`markSessionViewed` in `sync/notification-store.ts
 also marks its entries read, asking the server only when this client holds an
 unread one. VS Code never loads it.
 
+The list asks for every kind (`?version=2`) and parses entries one by one, so
+one a newer server writes in an unknown shape is left out. All, Unread and
+Needs you show open entries; History shows resolved ones
+(`lib/notificationCenterList.ts`). The finished turns of one session fold into
+the row of the newest; opening it reads them all and the remove button
+deletes them all. The center opens on Needs you when something waits. "Needs you"
+(`lib/notificationCenterAttention.ts`, sources gathered by
+`components/notifications/useAttentionSources.ts`) shows what still waits for
+the user, read or not: a question or permission while the cross-directory
+blocking-request index holds its request, a restart while a listed chat keeps
+its restart record, a fix loop while it waits for push approval, a restack
+while its run is paused, an update while the server still offers that version.
+Until a source has answered on this runtime (`hostSeeded` for the blocking
+index, a loaded global session list, a loaded fix-loop projection, a read of
+the repository's restack run, a successful update check), the entry counts
+while unread. Errors, browser help, failed scheduled runs and the OpenCode
+update count while unread; finished turns, goals and plugin notices never.
+A click opens the entry's session, through the global session list when the
+entry carries no directory; a restart with several chats lists them in the row,
+and update entries open the update dialog (About in the native app) or
+Settings → General for OpenCode.
+
 Sidebar visibility and its persisted width are independent. Opening or closing
 the sidebar never writes a width; only resizing changes the saved choice.
 The initial width is separate from the component's minimum resize width.

@@ -267,7 +267,7 @@ export function createSessionWorkRuntime({
     let turnVerdict = null;
     try {
       const endpoint = await classifierEndpoint();
-      if (!endpoint) return null;
+      if (!endpoint || jev.pausedUntil?.(endpoint)) return null;
       const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
       const client = openCodeClient(directory);
       const session = await eligibleSession(client, sessionId, signal);
@@ -315,7 +315,8 @@ export function createSessionWorkRuntime({
       }
       return assist.recap || assist.suggestion ? decideAssist(answers) : null;
     } catch (error) {
-      console.warn('[session-work] turn-end check failed:', errorMessage(error));
+      // The Jev client logs a rate limit once when it starts.
+      if (error?.code !== 'rate-limited') console.warn('[session-work] turn-end check failed:', errorMessage(error));
       return null;
     } finally {
       // A newer turn already resolved this entry null; resolving again is a no-op.
@@ -331,15 +332,20 @@ export function createSessionWorkRuntime({
   const awaitTurnVerdict = async (sessionId, { timeoutMs = VERDICT_WAIT_MS } = {}) => {
     if (stopped || lineage?.isChild(sessionId) === true) return null;
     if (!getSettings().rankNotifications) return null;
-    if (!(await classifierEndpoint().catch(() => null))) return null;
+    const endpoint = await classifierEndpoint().catch(() => null);
+    if (!endpoint || jev.pausedUntil?.(endpoint)) return null;
     const { promise } = verdictEntry(sessionId);
+    const timedOut = Symbol('timed out');
     let timer;
     const timeout = new Promise((done) => {
-      timer = setTimeout(() => done(null), timeoutMs);
+      timer = setTimeout(() => done(timedOut), timeoutMs);
       timer.unref?.();
     });
     try {
-      return await Promise.race([promise, timeout]);
+      const verdict = await Promise.race([promise, timeout]);
+      if (verdict !== timedOut) return verdict;
+      console.warn(`[session-work] no Jev verdict for ${sessionId} within ${timeoutMs} ms; the turn was announced unranked`);
+      return null;
     } finally {
       clearTimeout(timer);
     }
