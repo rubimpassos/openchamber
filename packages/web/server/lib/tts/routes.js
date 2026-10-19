@@ -7,6 +7,9 @@ import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage, speechLangu
 import { GeminiSpeechError, synthesizeGeminiSpeech } from './gemini.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
+import { createDiskCache } from '../disk-cache.js';
+import os from 'node:os';
+import path from 'node:path';
 
 // HTTP header values must be printable latin1; macOS voice names can be localized
 // (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
@@ -21,7 +24,18 @@ export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
 }
 
-export function registerTtsRoutes(app, { sayTTSCapability }) {
+const SPEECH_CACHE_MAX_BYTES = 200 * 1024 * 1024;
+
+const defaultSpeechCacheDir = () => path.join(
+  process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'),
+  'cache',
+  'tts',
+);
+
+export function registerTtsRoutes(app, { sayTTSCapability, speechCacheDir = defaultSpeechCacheDir() }) {
+  // Playing a reply again must not pay for the same audio twice. Pitch and
+  // volume are applied in the browser, so they are not part of the key.
+  const speechCache = createDiskCache({ dir: speechCacheDir, maxBytes: SPEECH_CACHE_MAX_BYTES, label: 'TTS' });
   let ttsModulePromise = null;
   const getTtsModule = async () => {
     if (!ttsModulePromise) {
@@ -122,17 +136,35 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       // Historical summarize request fields are intentionally ignored. The
       // model-backed summarization provider is retired.
 
-      const result = await ttsService.generateSpeechStream({
-        text: textToSpeak,
-        voice,
+      const cacheKey = {
+        server: hasCustomBaseURL ? normalizedBaseURL : 'openai',
         model,
+        voice,
         speed,
-        instructions,
-        apiKey: clientKey,
-        baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
-      });
+        instructions: hasCustomBaseURL ? null : instructions ?? null,
+        text: textToSpeak,
+      };
+      const cached = await speechCache.get(cacheKey);
+      let result;
+      if (cached) {
+        result = { buffer: cached.buffer, contentType: cached.meta.contentType ?? 'audio/mpeg' };
+      } else {
+        const startedAt = Date.now();
+        result = await ttsService.generateSpeechStream({
+          text: textToSpeak,
+          voice,
+          model,
+          speed,
+          instructions,
+          apiKey: clientKey,
+          baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
+        });
+        console.log('[TTS] Generated', result.buffer.length, 'bytes in', Date.now() - startedAt, 'ms');
+        await speechCache.set(cacheKey, result.buffer, { contentType: result.contentType });
+      }
 
       res.setHeader('Content-Type', result.contentType);
+      res.setHeader('X-TTS-Cache', cached ? 'hit' : 'miss');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Content-Length', result.buffer.length);
       res.send(result.buffer);

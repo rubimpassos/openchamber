@@ -1082,6 +1082,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.dictationEnabled === 'boolean') {
       result.dictationEnabled = candidate.dictationEnabled;
     }
+    if (candidate.showMessageTTSButtons === true || candidate.showMessageTTSButtons === false) {
+      result.showMessageTTSButtons = candidate.showMessageTTSButtons;
+    }
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
       if (provider === 'local' || provider === 'openai-compatible') {

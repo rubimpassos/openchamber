@@ -54,6 +54,8 @@ async function generateSpokenText(
             body: JSON.stringify({
                 prompt,
                 system,
+                // A replay of the same reply asks again; the server answers from its cache.
+                cache: true,
                 ...(preferred.providerID ? { preferredProviderID: preferred.providerID } : {}),
                 ...(preferred.modelID ? { preferredModelID: preferred.modelID } : {}),
             }),
@@ -82,9 +84,12 @@ const describeTableForSpeech = async (
 
 /** The reply as server speech parts: tables become small-model descriptions written while the prose plays. */
 const toServerSpeechParts = (segments: readonly SpeechSegment[], preferred: PreferredModel): SpeechPart[] =>
-    segments.map((segment): SpeechPart => segment.kind === 'prose'
-        ? { kind: 'text', text: sanitizeForTTS(segment.text) }
-        : { kind: 'late', text: describeTableForSpeech(segment, preferred) });
+    segments.map((segment): SpeechPart => {
+        if (segment.kind === 'prose') return { kind: 'text', text: sanitizeForTTS(segment.text) };
+        // The agent wrote the description with the reply: no model call, no wait.
+        if (segment.description) return { kind: 'text', text: sanitizeForTTS(segment.description) };
+        return { kind: 'late', text: describeTableForSpeech(segment, preferred) };
+    });
 
 export interface PlayMessageTTSOptions {
     /** False reads the text as-is even when the voice settings ask for a summary. */
@@ -189,11 +194,14 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 }
             }
 
-            // Tables are never read cell by cell: the server voices get a
-            // spoken description in their place, the other voices skip them.
+            // Tables are never read cell by cell. Every voice speaks the
+            // description the agent wrote above a table; without one the
+            // server voices ask the small model and the others skip it.
             const segments = splitTablesForSpeech(sourceText);
             const hasTables = segments.some((segment) => segment.kind === 'table');
-            const proseText = segments.flatMap((segment) => segment.kind === 'prose' ? [segment.text] : []).join('\n');
+            const proseText = segments
+                .flatMap((segment) => segment.kind === 'prose' ? [segment.text] : segment.description ? [segment.description] : [])
+                .join('\n');
             const shouldUseRaw = ttsInputMode === 'raw' && isServerProvider;
             const sanitizedText = sanitizeForTTS(proseText);
             const speaksServerParts = isServerProvider && isServerTTSAvailable && (shouldUseRaw || hasTables);
