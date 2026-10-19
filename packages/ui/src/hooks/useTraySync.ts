@@ -10,6 +10,7 @@ import {
   type BlockingFormRequest,
   type BlockingPermissionRequest,
 } from '@/sync/global-blocking-requests';
+import { listPendingQuestions, usePendingQuestionsStore } from '@/sync/pending-questions';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
 import { respondToPermission } from '@/sync/session-actions';
@@ -412,6 +413,14 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
       approvals.push({ kind: 'form', id: request.id, sessionId, sessionTitle, label: formLabel(request), directory: pending.directory, canSave: false });
     }
   }
+  // A question a restart or the inactivity eviction cut off is listed like a
+  // form: the tray opens the session, where the card answers it.
+  for (const [sessionId, question] of listPendingQuestions()) {
+    const id = `orphaned:${question.callID}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    approvals.push({ kind: 'form', id, sessionId, sessionTitle: titleById.get(sessionId) || '', label: question.title.trim() || 'Question', directory: question.directory, canSave: false });
+  }
 
   return { sessions, approvals, instanceName, usage: buildUsage(), dockBadgeCount };
 };
@@ -524,6 +533,7 @@ export const useTraySync = (): void => {
     // each of them; the host seed covers the same startup gap for free.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
     const unsubscribeGlobalRequests = useGlobalBlockingRequestsStore.subscribe(() => scheduleFlush());
+    const unsubscribePendingQuestions = usePendingQuestionsStore.subscribe(() => scheduleFlush());
     const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
 
     // Usage: push to the tray whenever the quota store changes, and do one
@@ -551,6 +561,7 @@ export const useTraySync = (): void => {
       unsubscribeGit();
       unsubscribeGlobalStatus();
       unsubscribeGlobalRequests();
+      unsubscribePendingQuestions();
       unsubscribeSessionOrder();
       unsubscribeQuota();
       unsubscribeRegistry?.();

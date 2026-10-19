@@ -2,9 +2,19 @@ import { useMemo, useReducer } from 'react';
 import type { FormRequest, Part } from '@/lib/opencode/model';
 import { projectQuestionForm } from '@/lib/opencode/projection';
 import { useSessionMessages, useSessionPartsForMessages, useSessionStatus, useSessionSelector, useSessionStatusSnapshotReady } from '@/sync/sync-context';
-import { collectOrphanedQuestionRequests, findLastContentMessageIndex, wasInterruptedByInactivity } from './orphanedQuestions';
+import { getRestartCutTurn, type RestartCutTurn } from '@/lib/sessionRestartInterruption';
+import { getPendingQuestion, type PendingQuestion } from './pendingQuestion';
+import { collectOrphanedQuestionRequests, findLastContentMessageIndex, inactivityInterruptionAt } from './orphanedQuestions';
 
 const NO_PARTS: Part[] = [];
+
+const samePendingQuestion = (left: PendingQuestion | null, right: PendingQuestion | null) => (
+  left === right || (left !== null && right !== null && left.callID === right.callID && left.at === right.at)
+);
+
+const sameRestartCutTurn = (left: RestartCutTurn | null, right: RestartCutTurn | null) => (
+  left === right || (left !== null && right !== null && left.messageID === right.messageID && left.at === right.at && left.callID === right.callID)
+);
 
 export function useOrphanedQuestions(sessionId: string | null, directory: string | undefined, forms: FormRequest[]) {
   const messages = useSessionMessages(sessionId ?? '', directory);
@@ -14,13 +24,16 @@ export function useOrphanedQuestions(sessionId: string | null, directory: string
   const parts = useSessionPartsForMessages(lastMessageIds, directory)[lastMessageId ?? ''] ?? NO_PARTS;
   const status = useSessionStatus(sessionId ?? '', directory);
   const statusReady = useSessionStatusSnapshotReady(directory, sessionId ?? undefined);
-  const interruptedByInactivity = useSessionSelector(sessionId, directory, wasInterruptedByInactivity);
+  const inactivityAt = useSessionSelector(sessionId, directory, inactivityInterruptionAt);
+  const restartCut = useSessionSelector(sessionId, directory, getRestartCutTurn, sameRestartCutTurn);
+  const pending = useSessionSelector(sessionId, directory, getPendingQuestion, samePendingQuestion);
+  const interruptions = useMemo(() => ({ inactivityAt, restartCut, pending }), [inactivityAt, restartCut, pending]);
   const [, refresh] = useReducer((value: number) => value + 1, 0);
   // Dismissals live in localStorage; refresh must read them even when sync inputs are unchanged.
   const questions = (() => {
     if (!sessionId || !lastMessage || !statusReady || (status && status.type !== 'idle')) return [];
     const live = forms.map(projectQuestionForm).filter((form) => form !== null);
-    return collectOrphanedQuestionRequests(sessionId, [{ info: lastMessage, parts }], live, interruptedByInactivity);
+    return collectOrphanedQuestionRequests(sessionId, [{ info: lastMessage, parts }], live, interruptions);
   })();
   return { questions, refresh };
 }

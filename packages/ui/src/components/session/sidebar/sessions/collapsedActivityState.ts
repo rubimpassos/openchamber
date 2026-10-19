@@ -3,6 +3,9 @@ import React from 'react';
 import type { SessionNode } from '../types';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { usePendingQuestion } from '@/sync/pending-questions';
+
+const NO_IDS: readonly string[] = [];
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useNotificationStore } from '@/sync/notification-store';
 
@@ -130,5 +133,7 @@ export const useCollapsedSessionActivityState = ({
     }
     return result;
   }, [enabled, blockingIds]));
-  return blocked ?? active ?? waitingOnShell ?? unread;
+  // A question a restart or the inactivity eviction cut off waits like a form.
+  const pendingQuestion = usePendingQuestion(enabled ? blockingIds : NO_IDS) ? 'form' : null;
+  return blocked === 'permission' ? blocked : blocked ?? pendingQuestion ?? active ?? waitingOnShell ?? unread;
 };

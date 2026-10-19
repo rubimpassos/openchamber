@@ -18,8 +18,14 @@ stores `interrupted` and nothing more.
 
 - `runtime.js` — `createSessionInterruptionRuntime({ persistMetadata, updateMetadata, buildOpenCodeUrl, getOpenCodeAuthHeaders })`,
   fed by the global hub subscriber in `server/index.js`; `recordRestartInterruptions` is called by its `onOpenCodeRestarted`.
-- `restart.js` — the restart record patch, `findInterruptedTool` and the
-  `opencode-restart-interrupted` notification payload.
+- `restart.js` — the restart record patch, `findInterruptedTool`,
+  `findOpenAssistantMessageID` and the `opencode-restart-interrupted`
+  notification payload.
+- `auto-resume.js` — the resume message, the automatic resume of priority
+  sessions and the notice's Continue (`continueManually`).
+- `routes.js` — `POST /api/openchamber/sessions/:sessionId/restart-resume`
+  with `{ at, directory? }`: 200 sent, 409 the record changed or was already
+  resumed, 502 OpenCode did not take the message.
 
 ## State
 
@@ -29,7 +35,7 @@ for every interruption that reaches the hub as `session.idle` with
 null there, so the write replaces a restart record whole). `shutdown` never does, because OpenCode
 resumes that turn. `at` is the arrival time, so it is at least the session's
 `time.idle` for that turn; a later turn moves `time.idle` past it and the
-record stops counting. The UI parser is `wasInterruptedByInactivity` in
+record stops counting. The UI parser is `inactivityInterruptionAt` in
 `packages/ui/src/lib/questions/orphanedQuestions.ts`.
 
 ## A managed OpenCode restart
@@ -42,7 +48,8 @@ session `session-runtime.js` settled:
 ```jsonc
 { "reason": "opencode-restart", "at": 1760649461000,
   "cause": "memory-pressure",          // memory-pressure | health-timeout | process-exited | unknown
-  "tool": { "name": "shell", "input": "sleep 600" } }   // or null
+  "tool": { "name": "shell", "input": "sleep 600", "callID": "toolu_…" },   // or null
+  "resume": null }                     // a cut-off question: { "state": "manual", "reason": "question-pending" }
 ```
 
 - `cause` comes from the lifecycle (`../opencode/cgroup-memory.js`).
@@ -51,15 +58,64 @@ session `session-runtime.js` settled:
   newest message records after the restart. `input` is the first of
   `command`, `filePath`, `path`, `url`, `pattern`, `query`, `description`,
   flattened and cut to 200 characters.
+- A cut-off `question` waits for the user's answer, so its record starts as
+  `resume: { state: 'manual', reason: 'question-pending' }`. The automatic
+  resume only claims a record without `resume`, so a priority session is
+  skipped too, decided from the persisted tool.
 - Each session is read and written on its own (`updateMetadata`, decided at
   write time in the store's queue). A failed read records `tool: null`, a
   failed write is logged, and neither stops the other sessions or the toast.
-- The record is cleared when the user sends the next message in the session
-  or dismisses the notice: the UI deletes the key through the metadata route
-  (`dismissRestartInterruption` in `packages/ui/src/sync/session-actions.ts`).
-  Nothing resumes the turn on its own. The UI parser is
+- The record is cleared when the user sends the next message in the session,
+  answers a cut-off question, presses Continue, or dismisses the notice. The
+  UI deletes the key through the metadata route
+  (`dismissRestartInterruption` in `packages/ui/src/sync/session-actions.ts`),
+  Continue on the server once its message is in. While a cut-off question is
+  answerable in the form dock, the UI hides the notice and the question card
+  shows the time and cause instead. The UI parser is
   `packages/ui/src/lib/sessionRestartInterruption.ts`; the notice is
   `SessionRestartInterruptionRow.tsx` above the composer.
+
+### The turn the restart cut off
+
+OpenCode leaves the killed turn open, its tool `running`, until the session
+runs again. The same write records which message that was:
+
+```jsonc
+"restartCutTurn": { "messageID": "msg_…", "at": 1760649461000, "callID": "toolu_…", "toolName": "shell" }
+```
+
+`null` when the newest turn had no open assistant message. Dismiss, Continue
+and a sent message leave it; the next restart replaces it. The UI finalizes
+that message and its running tools as interrupted while it is still the
+session's last conversation message (`restartCutTurnToolParts` in
+`packages/ui/src/sync/sync-context.tsx`), and keeps its question answerable
+(`packages/ui/src/lib/questions/orphanedQuestions.ts`).
+
+### A question waiting for the user
+
+When the cut-off tool is a `question` whose input reads (restart), or an
+inactivity eviction errored one (its newest messages are read for that reason
+only), the same write records it:
+
+```jsonc
+"pendingQuestion": { "messageID": "msg_…", "callID": "toolu_…", "title": "Which color?",
+                     "cause": "opencode-restart" | "inactivity", "at": 1760649461000 }
+```
+
+`null` otherwise, which also clears an older one. The UI shows the session as
+waiting for the user from it (`packages/ui/src/sync/pending-questions.ts`), and
+the notification center gets a `question` entry. The UI clears it when the
+question is answered or dismissed and with any sent message; this server
+clears it when it sees the session run again (`session.status` busy), only for
+a record older than that turn and only for sessions it recorded one on.
+
+### Continue
+
+Continue sends the same message as the automatic resume, with
+`trigger: 'continue'`, then deletes the record. It is decided in the store's
+queue like the automatic resume: it claims the record written at that `at`
+unless its resume is already `sent`, which also stops an automatic resume
+still waiting for memory. A failed send puts the previous `resume` back.
 
 ## Priority sessions
 
@@ -73,12 +129,13 @@ other shape means an ordinary session.
 Only priority sessions; every other session keeps the notice and Continue.
 After `recordRestartInterruptions`, `index.js` hands its answer to
 `autoResumeRuntime.resume`, which sends the agent one message saying what was
-cut off, the cause, the time and the running command
+cut off, the cause, the time and the running command, and asking it to check
+the files it changed and the processes it started before repeating anything
 (`buildResumeMessage`). Its progress is written on the restart record:
 
 ```jsonc
 "resume": { "state": "waiting" | "sent" | "manual", "at": 1760649500000,
-            "reason": "memory-timeout" | "memory-unreadable" | "send-failed" }  // manual only
+            "reason": "memory-timeout" | "memory-unreadable" | "send-failed" | "question-pending" }  // manual only
 ```
 
 Every step is decided in the metadata store's write queue against the record
@@ -105,9 +162,14 @@ as it is then:
 - **A failed send** (OpenCode not answering within 15 s) becomes `manual`
   with `send-failed`; it is not retried.
 
-The message is a plain prompt, so the session's own agent and model answer
-it. The result of a job that finished during the restart is not in it yet:
-that needs the execution queue (stage 2).
+The message is a synthetic message with `resume: true`, so the session's own
+agent and model answer it, and its metadata
+(`{ source: 'openchamber-notice', kind: 'restart-resume', trigger, at, cause, tool }`)
+makes the transcript show an OpenChamber row instead of a user message
+(`packages/ui/src/lib/opencode/openchamber-resume.ts`). The answer to a
+cut-off question travels the same way with `kind: 'question-answer'`, sent by
+the UI. The result of a job that finished during the restart is not in the
+message yet: that needs the execution queue (stage 2).
 
 ## Runtimes
 
@@ -117,10 +179,16 @@ that needs the execution queue (stage 2).
   OpenCode lifecycle, so nothing is recorded or resumed, and the priority
   mark only lists the session first; a question errored by
   inactivity stays an error there. The notice still renders for a record
-  another server wrote, and Dismiss works through the metadata bridge.
+  another server wrote, without Continue (the extension has no route to send
+  it), and Dismiss works through the metadata bridge. The rows, the
+  interrupted turn and an answer to a cut-off question work there too: they
+  read session metadata and use only OpenCode's own API.
 - A turn interrupted while this server was not running has no record and is
   left as an error.
 
 ## Testing
 
-`bunx vitest run server/lib/session-interruption` from `packages/web`.
+`bunx vitest run server/lib/session-interruption` from `packages/web`. The UI
+side: `bun test src/lib/questions src/lib/opencode/openchamber-resume.test.ts
+src/sync/interrupted-turn-recovery.test.ts src/components/chat/SessionRestartInterruptionRow.test.tsx`
+from `packages/ui`.

@@ -69,7 +69,16 @@ describe('createAutoResumeRuntime', () => {
 
     expect(await runtime.resume([session('ses_p')])).toEqual({ ses_p: 'sent' });
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ sessionId: 'ses_p', directory: '/repo', stateAtSend: 'sent' });
+    expect(sent[0]).toMatchObject({
+      sessionId: 'ses_p',
+      directory: '/repo',
+      stateAtSend: 'sent',
+      description: 'OpenChamber resumed this session after OpenCode restarted',
+      metadata: {
+        source: 'openchamber-notice', kind: 'restart-resume', trigger: 'auto', at: AT, cause: 'health-timeout',
+        tool: { name: 'shell', input: 'bun run build' },
+      },
+    });
     expect(sent[0].text).toContain('`bun run build`');
 
     // The same restart again (a retry, a second announcement): nothing more goes out.
@@ -182,6 +191,83 @@ describe('createAutoResumeRuntime', () => {
     expect(sendPrompt).toHaveBeenCalledTimes(2);
     warn.mockRestore();
   });
+
+  it('skips a priority session whose cut-off question waits for the user', async () => {
+    const store = createStore({ ses_q: restartRecord({ tool: { name: 'question' }, resume: { state: 'manual', at: AT, reason: 'question-pending' } }) });
+    const sendPrompt = vi.fn();
+    const runtime = createAutoResumeRuntime({ updateMetadata: store.updateMetadata, readMemory: () => null, sendPrompt, ...fakeClock() });
+
+    expect(await runtime.resume([session('ses_q', { tool: { name: 'question' } })])).toEqual({ ses_q: 'skipped' });
+    expect(sendPrompt).not.toHaveBeenCalled();
+    expect(store.resumeOf('ses_q')).toMatchObject({ state: 'manual', reason: 'question-pending' });
+  });
+});
+
+describe('continueManually', () => {
+  const ordinary = () => ({ openchamber: { interruption: restartRecord().openchamber.interruption } });
+
+  it('sends the resume message for the record and deletes the record', async () => {
+    const store = createStore({ ses_n: ordinary() });
+    const sendPrompt = vi.fn(async () => {});
+    const runtime = createAutoResumeRuntime({ updateMetadata: store.updateMetadata, readMemory: () => null, sendPrompt, ...fakeClock() });
+
+    expect(await runtime.continueManually({ sessionId: 'ses_n', directory: '/repo', at: AT })).toBe('sent');
+    expect(sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'ses_n',
+      directory: '/repo',
+      text: expect.stringContaining('while `bun run build` was running'),
+      metadata: expect.objectContaining({ source: 'openchamber-notice', kind: 'restart-resume', trigger: 'continue', at: AT }),
+    }));
+    expect(store.records.get('ses_n').openchamber.interruption).toBeUndefined();
+
+    // A second click, or another client, finds nothing left to continue.
+    expect(await runtime.continueManually({ sessionId: 'ses_n', directory: '/repo', at: AT })).toBe('conflict');
+    expect(sendPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a record that is newer or already resumed', async () => {
+    const store = createStore({ ses_new: ordinary(), ses_sent: restartRecord({ resume: { state: 'sent', at: AT } }) });
+    const sendPrompt = vi.fn();
+    const runtime = createAutoResumeRuntime({ updateMetadata: store.updateMetadata, readMemory: () => null, sendPrompt, ...fakeClock() });
+
+    expect(await runtime.continueManually({ sessionId: 'ses_new', at: AT - 1 })).toBe('conflict');
+    expect(await runtime.continueManually({ sessionId: 'ses_sent', at: AT })).toBe('conflict');
+    expect(sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it('takes over an automatic resume still waiting for memory, which then sends nothing', async () => {
+    const store = createStore({ ses_a: restartRecord({ cause: 'memory-pressure' }) });
+    const readings = [memory(40), memory(1)];
+    const sendPrompt = vi.fn(async () => {});
+    let runtime;
+    let manual;
+    runtime = createAutoResumeRuntime({
+      updateMetadata: store.updateMetadata,
+      readMemory: () => {
+        if (readings.length === 1) manual = runtime.continueManually({ sessionId: 'ses_a', directory: '/repo', at: AT });
+        return readings.shift();
+      },
+      sendPrompt,
+      ...fakeClock(),
+    });
+
+    expect(await runtime.resume([session('ses_a', { cause: 'memory-pressure' })])).toEqual({ ses_a: 'skipped' });
+    expect(await manual).toBe('sent');
+    expect(sendPrompt).toHaveBeenCalledTimes(1);
+    expect(sendPrompt.mock.calls[0][0].metadata.trigger).toBe('continue');
+  });
+
+  it('puts the previous state back when OpenCode does not take the message', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = createStore({ ses_q: restartRecord({ resume: { state: 'manual', at: AT, reason: 'question-pending' } }) });
+    const runtime = createAutoResumeRuntime({
+      updateMetadata: store.updateMetadata, readMemory: () => null, sendPrompt: vi.fn(async () => { throw new Error('down'); }), ...fakeClock(),
+    });
+
+    expect(await runtime.continueManually({ sessionId: 'ses_q', at: AT })).toBe('send-failed');
+    expect(store.resumeOf('ses_q')).toEqual({ state: 'manual', at: AT, reason: 'question-pending' });
+    warn.mockRestore();
+  });
 });
 
 describe('buildResumeMessage', () => {
@@ -191,6 +277,8 @@ describe('buildResumeMessage', () => {
     expect(text).toContain('2026-10-16T21:17:41.000Z because OpenCode stopped responding');
     expect(text).toContain('while `sleep 600` was running');
     expect(text).toContain('Before repeating that or any other command');
+    expect(text).toContain('files you changed and processes you started that may still be running');
+    expect(text).not.toMatch(/heavy|\/tmp\/opencode|automatically/);
   });
 
   it('names no cause or command it does not know', () => {

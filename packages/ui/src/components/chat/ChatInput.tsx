@@ -3932,13 +3932,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? <ComposerStatusStrip chipId="space" icon="time" text={t('spaces.draft.queued')} chipLabel={t('chat.composerStatus.chip.space')} />
         : null;
     const autoReviewRow = !isBtwActive && !newSessionDraftOpen ? <AutoReviewStrip /> : null;
-    // An OpenCode restart cut off this session's last turn; Continue fills the
-    // composer the way a suggestion does.
+    // An OpenCode restart cut off this session's last turn; Continue sends the
+    // resume, and a cut-off question is answered in the form dock instead.
     const restartInterruptionRow = !isBtwActive && !newSessionDraftOpen ? (
         <SessionRestartInterruptionRow
             sessionId={currentSessionId}
             directory={currentSessionDirectoryForSync ?? currentDirectory}
-            onContinue={applyAssistSuggestion}
+            questionAnswerable={orphaned.questions.some((question) => question.cause.kind === 'opencode-restart')}
         />
     ) : null;
     // The session's goal, then what is still running, then what waits for it.

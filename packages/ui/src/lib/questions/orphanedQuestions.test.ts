@@ -6,8 +6,10 @@ import {
   collectOrphanedQuestionRequests,
   isOrphanedQuestionDismissed,
   isOrphanedQuestionId,
+  inactivityInterruptionAt,
   markOrphanedQuestionDismissed,
-  wasInterruptedByInactivity,
+  type OrphanedQuestion,
+  type OrphanedQuestionRecords,
 } from './orphanedQuestions';
 import { projectQuestionForm, questionToForm } from '@/lib/opencode/projection';
 
@@ -49,6 +51,13 @@ afterAll(() => {
 });
 
 const SESSION_ID = 'ses_test';
+
+const NONE: OrphanedQuestionRecords = { inactivityAt: null, restartCut: null };
+const INACTIVITY: OrphanedQuestionRecords = { inactivityAt: 200, restartCut: null };
+const restartCut = (overrides: Partial<NonNullable<OrphanedQuestionRecords['restartCut']>> = {}): OrphanedQuestionRecords => ({
+  inactivityAt: null,
+  restartCut: { messageID: 'msg_assistant', at: 300, callID: 'call_1', toolName: 'question', ...overrides },
+});
 
 const questionInput = {
   questions: [
@@ -122,7 +131,7 @@ describe('collectOrphanedQuestionRequests', () => {
       info: { id: 'idle', sessionID: SESSION_ID, role: 'idle', time: { created: 2 }, outcome: 'interrupted' },
       parts: [],
     });
-    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], false)).toHaveLength(1);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], NONE)).toHaveLength(1);
   });
 
   test('projects v2 form metadata to the original tool call identity', () => {
@@ -135,11 +144,11 @@ describe('collectOrphanedQuestionRequests', () => {
     expect(projected?.tool).toEqual(question.tool);
     expect(form.fields[0].key).toBe('q0');
     expect(form.fields[0].type).toBe('string');
-    expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), projected ? [projected] : [], false)).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), projected ? [projected] : [], NONE)).toHaveLength(0);
   });
 
   test('synthesizes a request from a stale running question tool part', () => {
-    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), [], false);
+    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), [], NONE);
     expect(orphaned).toHaveLength(1);
     expect(orphaned[0].id).toBe(`${ORPHANED_QUESTION_ID_PREFIX}call_1`);
     expect(orphaned[0].sessionID).toBe(SESSION_ID);
@@ -154,7 +163,7 @@ describe('collectOrphanedQuestionRequests', () => {
       SESSION_ID,
       makeRecords([makeQuestionToolPart({ status: 'pending' })]),
       [],
-      false,
+      NONE,
     );
     expect(orphaned).toHaveLength(1);
   });
@@ -165,7 +174,7 @@ describe('collectOrphanedQuestionRequests', () => {
         SESSION_ID,
         makeRecords([makeQuestionToolPart({ status })]),
         [],
-        false,
+        NONE,
       );
       expect(orphaned).toHaveLength(0);
     }
@@ -176,9 +185,37 @@ describe('collectOrphanedQuestionRequests', () => {
       SESSION_ID,
       makeRecords([makeQuestionToolPart({ status: 'error' })]),
       [],
-      true,
+      INACTIVITY,
     );
     expect(orphaned.map((question) => question.id)).toEqual([`${ORPHANED_QUESTION_ID_PREFIX}call_1`]);
+    expect(orphaned[0].cause).toEqual({ kind: 'inactivity', at: 200 });
+  });
+
+  test('a restart that cut the question off keeps it answerable once the UI marks it errored', () => {
+    for (const status of ['running', 'error'] as const) {
+      const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart({ status })]), [], restartCut());
+      expect(orphaned.map((question) => question.cause)).toEqual([{ kind: 'opencode-restart', at: 300 }]);
+    }
+  });
+
+  test('a restart mark for another message or tool call does not bring an errored question back', () => {
+    for (const records of [restartCut({ messageID: 'msg_other' }), restartCut({ callID: 'call_other' })]) {
+      expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart({ status: 'error' })]), [], records)).toHaveLength(0);
+    }
+  });
+
+  test('the pending-question record names the exact call and its cause', () => {
+    const pending = { messageID: 'msg_assistant', callID: 'call_1', title: 'Mode?', cause: 'inactivity' as const, at: 400 };
+    const records = { ...NONE, pending };
+    expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart({ status: 'error' })]), [], records)
+      .map((question) => question.cause)).toEqual([{ kind: 'inactivity', at: 400 }]);
+    const otherCall = { ...NONE, pending: { ...pending, callID: 'call_other' } };
+    expect(collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart({ status: 'error' })]), [], otherCall)).toHaveLength(0);
+  });
+
+  test('a stranded question with no record says nothing about its cause', () => {
+    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), [], NONE);
+    expect(orphaned[0].cause).toEqual({ kind: 'unknown' });
   });
 
   test('looks past the agent switch and idle marker OpenCode records after an interrupted turn', () => {
@@ -190,7 +227,7 @@ describe('collectOrphanedQuestionRequests', () => {
       },
       { info: { id: 'idle', sessionID: SESSION_ID, role: 'idle', time: { created: 3 }, outcome: 'interrupted' }, parts: [] },
     );
-    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], true)).toHaveLength(1);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], INACTIVITY)).toHaveLength(1);
   });
 
   test('excludes questions still pending server-side (matched by callID)', () => {
@@ -198,7 +235,7 @@ describe('collectOrphanedQuestionRequests', () => {
       SESSION_ID,
       makeRecords([makeQuestionToolPart({ callID: 'call_1' })]),
       [makeLiveQuestion('call_1')],
-      false,
+      NONE,
     );
     expect(orphaned).toHaveLength(0);
   });
@@ -208,7 +245,7 @@ describe('collectOrphanedQuestionRequests', () => {
       SESSION_ID,
       makeRecords([makeQuestionToolPart({ callID: 'call_2' })]),
       [makeLiveQuestion('call_1')],
-      false,
+      NONE,
     );
     expect(orphaned).toHaveLength(1);
   });
@@ -221,7 +258,7 @@ describe('collectOrphanedQuestionRequests', () => {
         parts: [],
       },
     ];
-    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], false)).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, records, [], NONE)).toHaveLength(0);
   });
 
   test('ignores non-assistant last message and mismatched session', () => {
@@ -229,10 +266,10 @@ describe('collectOrphanedQuestionRequests', () => {
       [makeQuestionToolPart()],
       { id: 'msg_user', sessionID: SESSION_ID, role: 'user', time: { created: 1 } } as Message,
     );
-    expect(collectOrphanedQuestionRequests(SESSION_ID, userRecord, [], false)).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, userRecord, [], NONE)).toHaveLength(0);
 
     const otherSession = makeRecords([makeQuestionToolPart()], makeAssistantInfo({ sessionID: 'ses_other' }));
-    expect(collectOrphanedQuestionRequests(SESSION_ID, otherSession, [], false)).toHaveLength(0);
+    expect(collectOrphanedQuestionRequests(SESSION_ID, otherSession, [], NONE)).toHaveLength(0);
   });
 
   test('skips malformed tool input', () => {
@@ -241,7 +278,7 @@ describe('collectOrphanedQuestionRequests', () => {
         SESSION_ID,
         makeRecords([makeQuestionToolPart({ input })]),
         [],
-        false,
+        NONE,
       );
       expect(orphaned).toHaveLength(0);
     }
@@ -250,12 +287,12 @@ describe('collectOrphanedQuestionRequests', () => {
   test('excludes dismissed questions', () => {
     markOrphanedQuestionDismissed('call_1');
     expect(isOrphanedQuestionDismissed('call_1')).toBe(true);
-    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), [], false);
+    const orphaned = collectOrphanedQuestionRequests(SESSION_ID, makeRecords([makeQuestionToolPart()]), [], NONE);
     expect(orphaned).toHaveLength(0);
   });
 });
 
-describe('wasInterruptedByInactivity', () => {
+describe('inactivityInterruptionAt', () => {
   const session = (interruption: { reason?: string; at?: number } | null, idle: number): Session => ({
     id: SESSION_ID,
     projectID: 'prj',
@@ -267,28 +304,28 @@ describe('wasInterruptedByInactivity', () => {
     metadata: interruption === null ? {} : { openchamber: { interruption } },
   });
 
-  test('is true for an inactivity record written after the last idle time', () => {
-    expect(wasInterruptedByInactivity(session({ reason: 'inactivity', at: 200 }, 100))).toBe(true);
+  test('is the time of an inactivity record written after the last idle time', () => {
+    expect(inactivityInterruptionAt(session({ reason: 'inactivity', at: 200 }, 100))).toBe(200);
   });
 
-  test('is false for a user stop or a superseded turn', () => {
-    expect(wasInterruptedByInactivity(session({ reason: 'user', at: 200 }, 100))).toBe(false);
-    expect(wasInterruptedByInactivity(session({ reason: 'superseded', at: 200 }, 100))).toBe(false);
+  test('is null for a user stop or a superseded turn', () => {
+    expect(inactivityInterruptionAt(session({ reason: 'user', at: 200 }, 100))).toBeNull();
+    expect(inactivityInterruptionAt(session({ reason: 'superseded', at: 200 }, 100))).toBeNull();
   });
 
-  test('is false once a later turn has ended', () => {
-    expect(wasInterruptedByInactivity(session({ reason: 'inactivity', at: 200 }, 300))).toBe(false);
+  test('is null once a later turn has ended', () => {
+    expect(inactivityInterruptionAt(session({ reason: 'inactivity', at: 200 }, 300))).toBeNull();
   });
 
-  test('is false without a record or with a malformed one', () => {
-    expect(wasInterruptedByInactivity(undefined)).toBe(false);
-    expect(wasInterruptedByInactivity(session(null, 100))).toBe(false);
-    expect(wasInterruptedByInactivity(session({ reason: 'inactivity' }, 100))).toBe(false);
+  test('is null without a record or with a malformed one', () => {
+    expect(inactivityInterruptionAt(undefined)).toBeNull();
+    expect(inactivityInterruptionAt(session(null, 100))).toBeNull();
+    expect(inactivityInterruptionAt(session({ reason: 'inactivity' }, 100))).toBeNull();
   });
 });
 
 describe('buildOrphanedAnswerMessage', () => {
-  const request: QuestionRequest = {
+  const request: OrphanedQuestion = {
     id: `${ORPHANED_QUESTION_ID_PREFIX}call_1`,
     sessionID: SESSION_ID,
     questions: [
@@ -296,17 +333,25 @@ describe('buildOrphanedAnswerMessage', () => {
       { question: 'Which color?', header: 'Color', options: [] },
     ],
     tool: { messageID: 'msg_assistant', callID: 'call_1' },
+    cause: { kind: 'opencode-restart', at: 300 },
   };
 
-  test('pairs each question with its answers', () => {
-    const text = buildOrphanedAnswerMessage(request, [['safe'], ['red', 'blue']]);
+  test('pairs each question with its answers and says what cut it off', () => {
+    const text = buildOrphanedAnswerMessage(request, [['safe'], ['red', 'blue']], request.cause);
     expect(text).toContain('"Which mode?"="safe"');
     expect(text).toContain('"Which color?"="red, blue"');
-    expect(text).toContain('interrupted');
+    expect(text).toContain('interrupted before I could answer, because OpenCode restarted.');
+  });
+
+  test('names the inactivity eviction, and no cause it does not know', () => {
+    expect(buildOrphanedAnswerMessage(request, [['safe']], { kind: 'inactivity', at: 1 }))
+      .toContain('because OpenCode stopped the session after an hour without activity.');
+    expect(buildOrphanedAnswerMessage(request, [['safe']], { kind: 'unknown' }))
+      .toContain('interrupted before I could answer. Here are my answers');
   });
 
   test('skips empty answers and handles none provided', () => {
-    const text = buildOrphanedAnswerMessage(request, [[], ['  ']]);
+    const text = buildOrphanedAnswerMessage(request, [[], ['  ']], request.cause);
     expect(text).toContain('(no answer provided)');
   });
 });

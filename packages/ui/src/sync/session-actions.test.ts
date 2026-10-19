@@ -102,6 +102,10 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "session.sendMessage", params })
       return Promise.resolve("msg_sent")
     }),
+    sendOpenChamberMessage: mock((params: { sessionID: string; directory?: string | null; text: string; description: string; metadata: Metadata }) => {
+      replyCalls.push({ method: "session.sendOpenChamberMessage", params })
+      return Promise.resolve()
+    }),
     createSession: mock(async (params: Record<string, unknown>, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.create", params: { ...params, directory } })
       return sessionRecords.get("created") ?? ({ id: "created" } as Session)
@@ -409,9 +413,9 @@ mock.module("./sync-refs", () => ({
 
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
-import { buildOrphanedAnswerMessage } from "@/lib/questions/orphanedQuestions"
+import { buildOrphanedAnswerMessage, type OrphanedQuestion } from "@/lib/questions/orphanedQuestions"
 import { questionToForm } from "@/lib/opencode/projection"
-import type { Message, Part, Session, SessionStatus, QuestionRequest } from "@/lib/opencode/model"
+import type { Message, Metadata, Part, Session, SessionStatus, QuestionRequest } from "@/lib/opencode/model"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveCall = { sessionID: string; directory?: string | null; messageID: string }
@@ -3380,8 +3384,9 @@ describe("dismissOpenPermissionsForSession", () => {
   })
 })
 
-function buildOrphanedQuestion(sessionId: string): QuestionRequest {
+function buildOrphanedQuestion(sessionId: string): OrphanedQuestion {
   return {
+    cause: { kind: "opencode-restart", at: 300 },
     id: "orphaned:call_1",
     sessionID: sessionId,
     questions: [
@@ -3413,7 +3418,7 @@ describe("answerOrphanedQuestion", () => {
   } as Message
 
   const questionReplies = () => replyCalls.filter((call) => call.method === "form.reply")
-  const sentMessages = () => replyCalls.filter((call) => call.method === "session.sendMessage")
+  const sentMessages = () => replyCalls.filter((call) => call.method === "session.sendMessage" || call.method === "session.sendOpenChamberMessage")
 
   beforeEach(() => {
     replyCalls.length = 0
@@ -3460,10 +3465,8 @@ describe("answerOrphanedQuestion", () => {
     expect(sentMessages()).toHaveLength(0)
   })
 
-  test("sends the answers as a chat message from the asking assistant message when no longer pending", async () => {
-    // SAFETY: answerOrphanedQuestion reads only id, role and sessionID off this record.
-    const userMessage = { id: "msg_user", role: "user", sessionID: "session-a", time: { created: 0 } } as Message
-    const store = createStore({}, { message: { "session-a": [userMessage, askingAssistantMessage] } })
+  test("sends the answers as an OpenChamber message that names the question and its cause when no longer pending", async () => {
+    const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
     const childStores = createChildStores([["/test/project", store]])
     const question = buildOrphanedQuestion("session-a")
     pendingQuestionsResult = []
@@ -3473,15 +3476,48 @@ describe("answerOrphanedQuestion", () => {
 
     await answerOrphanedQuestion(question, [["safe"]])
 
-    expect(sentMessages()).toHaveLength(1)
-    const sent = sentMessages()[0].params
-    expect(sent.id).toBe("session-a")
-    expect(sent.providerID).toBe("anthropic")
-    expect(sent.model).toEqual({ id: "claude-sonnet", providerID: "anthropic", variant: "high" })
-    expect(sent.agent).toBe("build")
-    expect(sent.text).toBe(buildOrphanedAnswerMessage(question, [["safe"]]))
-    expect(sent.text).toContain('"Which mode?"="safe"')
+    expect(sentMessages().map((call) => call.method)).toEqual(["session.sendOpenChamberMessage"])
+    expect(sentMessages()[0].params).toMatchObject({
+      sessionID: "session-a",
+      directory: "/test/project",
+      text: buildOrphanedAnswerMessage(question, [["safe"]], question.cause),
+      metadata: {
+        source: "openchamber-notice",
+        kind: "question-answer",
+        cause: "opencode-restart",
+        at: 300,
+        answers: [{ question: "Which mode?", answer: "safe" }],
+      },
+    })
     expect(questionReplies()).toHaveLength(0)
+  })
+
+  test("clears the restart notice and the pending question in one write after the answer goes out", async () => {
+    const restarted = {
+      ...sessionFixture("session-a"),
+      metadata: {
+        openchamber: {
+          interruption: { reason: "opencode-restart", at: 300, cause: "process-exited", tool: { name: "question" } },
+          pendingQuestion: { messageID: "msg_assistant", callID: "call_1", title: "Which mode?", cause: "opencode-restart", at: 300 },
+          priority: { at: 1 },
+        },
+      },
+    }
+    const store = createStore({}, { session: [restarted], message: { "session-a": [askingAssistantMessage] } })
+    pendingQuestionsResult = []
+    openchamberRouteRequests.length = 0
+    archiveBatchResponse = { status: 200, body: { metadata: { openchamber: { priority: { at: 1 } } } } }
+    globalActiveSessions = [restarted]
+    sessionRecords.set("session-a", restarted)
+
+    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    await answerOrphanedQuestion(buildOrphanedQuestion("session-a"), [["safe"]])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const metadataWrites = openchamberRouteRequests.filter((request) => request.path.endsWith("/metadata"))
+    expect(metadataWrites).toHaveLength(1)
+    expect(metadataWrites[0].body).toEqual({ patch: { openchamber: { interruption: null, pendingQuestion: null } } })
   })
 
   test("treats a pending question for a different tool call as orphaned", async () => {
@@ -3504,7 +3540,7 @@ describe("answerOrphanedQuestion", () => {
 
     expect(questionReplies()).toHaveLength(0)
     expect(sentMessages()).toHaveLength(1)
-    expect(sentMessages()[0].params.text).toContain('"Which mode?"="safe"')
+    expect(String(sentMessages()[0].params.text)).toContain('"Which mode?"="safe"')
   })
 
   test("rethrows when the pending re-check fails and never falls back to a chat message", async () => {
@@ -3528,26 +3564,34 @@ describe("answerOrphanedQuestion", () => {
     expect(questionReplies()).toHaveLength(0)
   })
 
-  test("throws when the originating assistant message cannot be found and does not send", async () => {
-    // SAFETY: answerOrphanedQuestion reads only id, role and sessionID off this record.
-    const userMessage = { id: "msg_user", role: "user", sessionID: "session-a", time: { created: 0 } } as Message
-    const store = createStore({}, { message: { "session-a": [userMessage] } })
-    const childStores = createChildStores([["/test/project", store]])
-    pendingQuestionsResult = []
+})
 
-    const { setActionRefs, answerOrphanedQuestion } = await import("./session-actions")
-    setActionRefs(childStores, () => "/test/project")
+describe("continueAfterRestart", () => {
+  const savedArchiveResponse = archiveBatchResponse
 
-    let thrown: unknown
-    try {
-      await answerOrphanedQuestion(buildOrphanedQuestion("session-a"), [["safe"]])
-    } catch (error) {
-      thrown = error
-    }
+  beforeEach(() => {
+    runtimeKey = "runtime-a"
+    openchamberRouteRequests.length = 0
+  })
 
-    expect(thrown).toBeInstanceOf(Error)
-    expect(String(thrown)).toContain("originating assistant message not found")
-    expect(sentMessages()).toHaveLength(0)
+  afterEach(() => {
+    archiveBatchResponse = savedArchiveResponse
+  })
+
+  test("asks the server to continue the record it shows, and reads a conflict as nothing sent", async () => {
+    const { continueAfterRestart } = await import("./session-actions")
+    archiveBatchResponse = { status: 200, body: { outcome: "sent" } }
+
+    expect(await continueAfterRestart("session-a", "/test/project", 300)).toBe("sent")
+    expect(openchamberRouteRequests).toEqual([{
+      path: "/api/openchamber/sessions/session-a/restart-resume",
+      body: { at: 300, directory: "/test/project" },
+    }])
+
+    archiveBatchResponse = { status: 409, body: { outcome: "conflict" } }
+    expect(await continueAfterRestart("session-a", "/test/project", 300)).toBe("conflict")
+    archiveBatchResponse = { status: 502, body: { outcome: "send-failed" } }
+    expect(await continueAfterRestart("session-a", "/test/project", 300)).toBe("send-failed")
   })
 })
 

@@ -7,14 +7,16 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import type { FormRequest, QuestionRequest } from '@/lib/opencode/model';
+import type { FormRequest } from '@/lib/opencode/model';
 import { questionToForm } from '@/lib/opencode/projection';
-import { markOrphanedQuestionDismissed } from '@/lib/questions/orphanedQuestions';
+import { markOrphanedQuestionDismissed, type OrphanedQuestion } from '@/lib/questions/orphanedQuestions';
+import { formatTimeForPreference } from '@/lib/timeFormat';
+import { getRestartInterruption, type RestartInterruptionCause } from '@/lib/sessionRestartInterruption';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
-import { useScopedBlockingForms, useSessions } from '@/sync/sync-context';
+import { useScopedBlockingForms, useSession, useSessions } from '@/sync/sync-context';
 import { useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
@@ -57,12 +59,19 @@ interface FormDockProps {
     sessionId: string | null;
     directory?: string;
     hidden: boolean;
-    /** Questions an OpenCode restart left unanswered; only the composer's dock offers them. */
-    orphanedQuestions?: QuestionRequest[];
+    /** Questions a restart or the inactivity eviction left unanswered; only the composer's dock offers them. */
+    orphanedQuestions?: OrphanedQuestion[];
     onOrphanedResolved?: () => void;
 }
 
-const NO_ORPHANED_QUESTIONS: QuestionRequest[] = [];
+const NO_ORPHANED_QUESTIONS: OrphanedQuestion[] = [];
+
+const RESTART_CAUSE_KEYS = {
+    'memory-pressure': 'chat.restartInterruption.cause.memoryPressure',
+    'health-timeout': 'chat.restartInterruption.cause.healthTimeout',
+    'process-exited': 'chat.restartInterruption.cause.processExited',
+    unknown: null,
+} as const satisfies Record<RestartInterruptionCause, I18nKey | null>;
 const ignoreOrphanedResolved = () => {};
 
 const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, orphanedQuestions: questions = NO_ORPHANED_QUESTIONS, onOrphanedResolved = ignoreOrphanedResolved }) => {
@@ -117,12 +126,15 @@ const isStepAnswered = (field: FormField, values: FormValues): boolean => {
     return !(Array.isArray(answer) && answer.length === 0);
 };
 
-const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting: number; orphanedQuestion?: QuestionRequest; onOrphanedResolved: () => void }> = ({ form, forms, waiting, orphanedQuestion, onOrphanedResolved }) => {
+const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting: number; orphanedQuestion?: OrphanedQuestion; onOrphanedResolved: () => void }> = ({ form, forms, waiting, orphanedQuestion, onOrphanedResolved }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     // The sessions of the chat this dock belongs to, which may be a chat of
     // another project pinned in the side panel.
-    const sessions = useSessions(useChatSessionSelection().directory ?? undefined);
+    const chatDirectory = useChatSessionSelection().directory ?? undefined;
+    const sessions = useSessions(chatDirectory);
+    const session = useSession(orphanedQuestion?.sessionID ?? '', chatDirectory);
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
 
     const fields = form.fields;
@@ -231,6 +243,8 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
             if (orphanedQuestion) {
                 if (orphanedQuestion.tool) markOrphanedQuestionDismissed(orphanedQuestion.tool.callID);
                 onOrphanedResolved();
+                // Other devices and the sidebar stop showing it as waiting too.
+                await sessionActions.dismissPendingQuestion(orphanedQuestion.sessionID, chatDirectory);
             } else {
                 await sessionActions.cancelForm(form.sessionID, form.id);
             }
@@ -240,7 +254,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
         } finally {
             setIsResponding(false);
         }
-    }, [form.id, form.sessionID, t, orphanedQuestion, onOrphanedResolved]);
+    }, [chatDirectory, form.id, form.sessionID, t, orphanedQuestion, onOrphanedResolved]);
 
     const goNext = React.useCallback(() => {
         setStep(Math.min(currentStep + 1, lastStep));
@@ -281,6 +295,21 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
     }, [form, t]);
 
     const title = form.title?.trim() || t('chat.formCard.inputNeeded');
+    const orphanedCause = orphanedQuestion?.cause;
+    const severalQuestions = (orphanedQuestion?.questions.length ?? 0) > 1;
+    // The restart notice above the composer stays hidden while this card is
+    // answerable, so the card names the cause it would have shown.
+    const restartRecord = orphanedCause?.kind === 'opencode-restart' ? getRestartInterruption(session) : null;
+    const causeKey = restartRecord && orphanedCause?.kind === 'opencode-restart' && restartRecord.at === orphanedCause.at
+        ? RESTART_CAUSE_KEYS[restartRecord.cause]
+        : null;
+    const orphanedNotice = orphanedCause?.kind === 'opencode-restart'
+        ? severalQuestions
+            ? t('chat.questionCard.orphanedNoticeRestartPlural', { time: formatTimeForPreference(orphanedCause.at, timeFormatPreference) })
+            : t('chat.questionCard.orphanedNoticeRestart', { time: formatTimeForPreference(orphanedCause.at, timeFormatPreference) })
+        : orphanedCause?.kind === 'inactivity'
+            ? severalQuestions ? t('chat.questionCard.orphanedNoticeInactivityPlural') : t('chat.questionCard.orphanedNoticeInactivity')
+            : t('chat.questionCard.orphanedNotice');
     const stepLabel = (field: FormField, index: number) => field.title?.trim() || t('chat.questionCard.questionFallback', { index: String(index + 1) });
     const iconButtonClass = 'rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground';
 
@@ -299,18 +328,26 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
                 >
                     <Icon name="question" className="size-3.5 shrink-0 text-primary" />
                     <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
-                    <span className="typography-ui-label min-w-0 truncate text-foreground">{title}</span>
+                    {/* On a phone the icon and the chip name a recovered question; the dialog keeps the title. */}
+                    {isMobile && orphanedQuestion ? null : (
+                        <span className="typography-ui-label min-w-0 truncate text-foreground">{title}</span>
+                    )}
                     {orphanedQuestion ? (
-                        <span className="typography-micro shrink-0 text-muted-foreground">{t('chat.questionCard.orphanedBadge')}</span>
+                        <span className="typography-micro shrink-0 whitespace-nowrap rounded bg-[var(--status-warning-background)] px-1 text-[var(--status-warning)]">
+                            {t('chat.questionCard.orphanedBadge')}
+                        </span>
                     ) : null}
                     {isFromSubagent ? (
                         <span className="typography-micro shrink-0 rounded bg-foreground/5 px-1.5 py-0.5 text-muted-foreground">
                             {t('chat.formCard.fromSubagent')}
                         </span>
                     ) : null}
-                    <span className="typography-micro shrink-0 tabular-nums text-muted-foreground">
-                        {t('chat.formDock.progress', { current: String(currentStep + 1), total: String(shown.length) })}
-                    </span>
+                    {/* On a phone the step dots say the same, and the title needs the room. */}
+                    {isMobile && shown.length > 1 ? null : (
+                        <span className="typography-micro shrink-0 tabular-nums text-muted-foreground">
+                            {t('chat.formDock.progress', { current: String(currentStep + 1), total: String(shown.length) })}
+                        </span>
+                    )}
                 </button>
                 {/* One dot per question: filled when answered, the current one solid. */}
                 {!collapsed ? (
@@ -356,7 +393,10 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
             {!collapsed ? (
                 <div onKeyDown={handlePanelKeyDown}>
                     {orphanedQuestion ? (
-                        <p className="typography-micro px-3 pb-2 text-muted-foreground">{t('chat.questionCard.orphanedNotice')}</p>
+                        <p className="typography-micro px-3 pb-2 text-muted-foreground">
+                            {causeKey ? <>{t(causeKey)} </> : null}
+                            {orphanedNotice}
+                        </p>
                     ) : null}
                     <div
                         ref={bodyRef}

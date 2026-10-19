@@ -39,6 +39,7 @@ import { createTrackedItemReaders } from '../tracked-items/readers.js';
 import { createTrackedItemsPersistence } from '../tracked-items/persistence.js';
 import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
+import { registerSessionInterruptionRoutes } from '../session-interruption/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
@@ -267,6 +268,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       scheduledTasksRuntime,
       scheduledTaskService,
       suggestedTasksRuntime,
+      autoResumeRuntime,
       openChamberSessionService,
       openChamberControlService,
       waitForOpenCodeReady,
@@ -344,6 +346,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerSuggestedTaskRoutes(app, { suggestedTasksRuntime });
+
+    registerSessionInterruptionRoutes(app, { autoResumeRuntime });
 
     registerOpenChamberSessionRoutes(app, {
       readSettingsFromDiskMigrated,

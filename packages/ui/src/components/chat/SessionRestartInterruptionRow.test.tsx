@@ -32,27 +32,31 @@ describe('RestartInterruptionNotice', () => {
     await windowInstance.happyDOM.close();
   });
 
-  const render = async (interruption: RestartInterruption, priority = false) => {
-    const continued: string[] = [];
+  const render = async (
+    interruption: RestartInterruption,
+    { priority = false, continueAvailable = true } = {},
+  ) => {
+    let continued = 0;
     let dismissed = 0;
-    const onContinue = (text: string) => { continued.push(text); };
-    const onDismiss = () => { dismissed += 1; };
     await act(async () => {
       root.render(
         <I18nProvider>
           <RestartInterruptionNotice
             interruption={interruption}
             priority={priority}
+            continueAvailable={continueAvailable}
             formatTime={(timestamp) => (timestamp === 1 ? '21:17' : '21:20')}
-            dismissing={false}
-            onContinue={onContinue}
-            onDismiss={onDismiss}
+            busy={false}
+            onContinue={() => { continued += 1; }}
+            onDismiss={() => { dismissed += 1; }}
           />
         </I18nProvider>,
       );
     });
-    return { continued, dismissedCount: () => dismissed };
+    return { continuedCount: () => continued, dismissedCount: () => dismissed };
   };
+
+  const buttonLabels = () => [...host.querySelectorAll('button')].map((element) => element.textContent);
 
   const button = (label: string) => {
     const found = [...host.querySelectorAll('button')].find((element) => element.textContent === label);
@@ -68,20 +72,8 @@ describe('RestartInterruptionNotice', () => {
     expect(host.querySelector('code')?.textContent).toBe('sleep 600');
   });
 
-  test('Continue hands over an editable message naming the command', async () => {
-    const { continued } = await render({ at: 1, cause: 'health-timeout', tool: { name: 'shell', input: 'bun run build' }, resume: null });
-
-    await act(async () => button('Continue').click());
-
-    expect(continued).toHaveLength(1);
-    const [text] = continued;
-    expect(text).toContain('`bun run build`');
-    expect(text).toContain('/tmp/opencode');
-    expect(text).toContain('`heavy list`');
-  });
-
-  test('without a tool or a known cause, says only when, and Continue asks for a state check', async () => {
-    const { continued, dismissedCount } = await render({ at: 1, cause: 'unknown', tool: null, resume: null });
+  test('Continue and Dismiss each ask for their action once', async () => {
+    const { continuedCount, dismissedCount } = await render({ at: 1, cause: 'unknown', tool: null, resume: null });
 
     expect(host.textContent).toContain('Interrupted when OpenCode restarted at 21:17.');
     expect(host.querySelector('code')).toBeNull();
@@ -89,12 +81,30 @@ describe('RestartInterruptionNotice', () => {
     await act(async () => button('Continue').click());
     await act(async () => button('Dismiss').click());
 
-    expect(continued[0].startsWith('OpenCode restarted and cut off your last turn. Before repeating any command')).toBe(true);
+    expect(continuedCount()).toBe(1);
     expect(dismissedCount()).toBe(1);
   });
 
+  test('a cut-off question that can no longer be answered falls back to Continue', async () => {
+    await render(
+      { at: 1, cause: 'process-exited', tool: { name: 'question' }, resume: { state: 'manual', at: 1, reason: 'question-pending' } },
+      { priority: true },
+    );
+
+    expect(host.textContent).toContain('A question was waiting for your answer.');
+    expect(host.textContent).toContain('Not resumed automatically, because the question needs your answer.');
+    expect(host.textContent).not.toContain('Running command');
+    expect(buttonLabels()).toEqual(['Continue', 'Dismiss']);
+  });
+
+  test('a runtime that cannot send the resume offers only Dismiss', async () => {
+    await render({ at: 1, cause: 'unknown', tool: null, resume: null }, { continueAvailable: false });
+
+    expect(buttonLabels()).toEqual(['Dismiss']);
+  });
+
   test('a priority session says it is one and that it will resume once memory frees up', async () => {
-    await render({ at: 1, cause: 'memory-pressure', tool: null, resume: { state: 'waiting', at: 2 } }, true);
+    await render({ at: 1, cause: 'memory-pressure', tool: null, resume: { state: 'waiting', at: 2 } }, { priority: true });
 
     expect(host.firstElementChild?.getAttribute('data-priority')).toBe('true');
     expect(host.textContent).toContain('Priority session');
@@ -103,14 +113,14 @@ describe('RestartInterruptionNotice', () => {
   });
 
   test('once the server resumed it, the notice says when and offers no Continue', async () => {
-    await render({ at: 1, cause: 'health-timeout', tool: null, resume: { state: 'sent', at: 3 } }, true);
+    await render({ at: 1, cause: 'health-timeout', tool: null, resume: { state: 'sent', at: 3 } }, { priority: true });
 
     expect(host.textContent).toContain('Resumed automatically at 21:20.');
-    expect([...host.querySelectorAll('button')].map((element) => element.textContent)).toEqual(['Dismiss']);
+    expect(buttonLabels()).toEqual(['Dismiss']);
   });
 
   test('a resume left to the user says why and offers Continue', async () => {
-    await render({ at: 1, cause: 'memory-pressure', tool: null, resume: { state: 'manual', at: 3, reason: 'memory-timeout' } }, true);
+    await render({ at: 1, cause: 'memory-pressure', tool: null, resume: { state: 'manual', at: 3, reason: 'memory-timeout' } }, { priority: true });
 
     expect(host.textContent).toContain('did not free up in time');
     expect(button('Continue')).toBeTruthy();

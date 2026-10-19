@@ -9,7 +9,7 @@
  * writes the reason to `metadata.openchamber.interruption` as `{ reason, at }`.
  * `at` is taken when the event arrives, so it is never older than the
  * session's `time.idle` for the same turn; a later turn moves `time.idle` past
- * it. The UI parser is `wasInterruptedByInactivity` in
+ * it. The UI parser is `inactivityInterruptionAt` in
  * `packages/ui/src/lib/questions/orphanedQuestions.ts`.
  *
  * A `shutdown` interruption never reaches here: `translate-v2.js` drops it,
@@ -20,11 +20,14 @@
  */
 
 import { OpenCode } from '@opencode/client';
+import { z } from 'zod';
 import { asNonEmptyString } from '../shared/guards.js';
-import { findInterruptedTool, RECENT_MESSAGE_LIMIT, restartInterruptionPatch } from './restart.js';
+import { findCutAssistantMessageID, findInterruptedTool, findPendingQuestion, pendingQuestionRecord, RECENT_MESSAGE_LIMIT, restartInterruptionPatch } from './restart.js';
 import { isPrioritySession } from './priority.js';
 
 const READ_TIMEOUT_MS = 5_000;
+
+const pendingQuestionAtSchema = z.object({ openchamber: z.object({ pendingQuestion: z.object({ at: z.number() }) }) });
 
 const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
 
@@ -33,6 +36,8 @@ const errorMessage = (error) => (error instanceof Error ? error.message : String
  * @param {(sessionID: string, patch: object, options: { directory: string }) => Promise<unknown>} options.persistMetadata
  * @param {(sessionID: string, decide: (metadata: object) => object | null, options: { directory: string }) => Promise<unknown>} [options.updateMetadata]
  * @param {() => { session: { get: Function }, message: { list: Function } }} [options.createClient] OpenCode client; session routes resolve their own location, so it names no directory.
+ * @param {(question: { sessionId: string, directory: string | null, sessionTitle: string | null, title: string }) => void} [options.onPendingQuestion]
+ *   A cut-off question now waits for the user (feeds the notification center).
  * @param {() => number} [options.now]
  */
 export const createSessionInterruptionRuntime = ({
@@ -44,17 +49,74 @@ export const createSessionInterruptionRuntime = ({
     baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
     headers: { ...getOpenCodeAuthHeaders() },
   }),
+  onPendingQuestion = () => {},
   now = Date.now,
 }) => {
+  // Sessions this server gave a pending question, so a busy status reads the
+  // store only for them. After a server restart the UI's own clear (answer,
+  // send, dismiss) still applies.
+  const pendingQuestionSessions = new Set();
+
+  const readRecentMessages = async (client, sessionID) => {
+    const page = await client.message.list(
+      { sessionID, limit: RECENT_MESSAGE_LIMIT, order: 'desc' },
+      { signal: AbortSignal.timeout(READ_TIMEOUT_MS) },
+    );
+    return Array.isArray(page?.data) ? page.data : [];
+  };
+
+  /**
+   * The question an inactivity eviction cut off, read from the session's
+   * newest messages; null for any other reason or when they cannot be read.
+   */
+  const readEvictedQuestion = async (sessionID, reason) => {
+    if (reason !== 'inactivity') return null;
+    try {
+      return findPendingQuestion(await readRecentMessages(createClient(), sessionID));
+    } catch (error) {
+      console.warn(`[session-interruption] could not read the question of ${sessionID}:`, errorMessage(error));
+      return null;
+    }
+  };
+
+  /**
+   * A turn running again means the question was answered or superseded:
+   * the user replied, or a message came in from anywhere (CLI, TUI, another
+   * client). Decided in the store's queue, so a record written after the
+   * turn started stays.
+   */
+  const settlePendingQuestion = (sessionID, directory, startedAt) => {
+    if (!updateMetadata) return;
+    void updateMetadata(sessionID, (metadata) => {
+      const at = pendingQuestionAtSchema.safeParse(metadata).data?.openchamber.pendingQuestion.at;
+      return at !== undefined && at <= startedAt ? { openchamber: { pendingQuestion: null } } : null;
+    }, { directory }).catch((error) => {
+      console.warn(`[session-interruption] could not clear the pending question of ${sessionID}:`, errorMessage(error));
+    });
+  };
+
   const processPayload = (payload, directory = '') => {
+    if (payload?.type === 'session.status' && payload.properties?.status?.type === 'busy') {
+      const sessionID = asNonEmptyString(payload.properties.sessionID);
+      if (sessionID && pendingQuestionSessions.has(sessionID)) {
+        pendingQuestionSessions.delete(sessionID);
+        settlePendingQuestion(sessionID, directory, now());
+      }
+      return;
+    }
     if (payload?.type !== 'session.idle' || payload.properties?.aborted !== true) return;
     const sessionID = asNonEmptyString(payload.properties.sessionID);
     const reason = asNonEmptyString(payload.properties.reason);
     if (!sessionID || !reason) return;
     // A newer interruption replaces a restart record whole.
     const interruption = { reason, at: now(), cause: null, tool: null, resume: null };
-    void Promise.resolve()
-      .then(() => persistMetadata(sessionID, { openchamber: { interruption } }, { directory }))
+    void readEvictedQuestion(sessionID, reason)
+      .then(async (question) => {
+        const pendingQuestion = pendingQuestionRecord(question, { cause: reason, at: interruption.at });
+        await persistMetadata(sessionID, { openchamber: { interruption, pendingQuestion } }, { directory });
+        if (question) pendingQuestionSessions.add(sessionID);
+        if (question) onPendingQuestion({ sessionId: sessionID, directory: directory || null, sessionTitle: null, title: question.title });
+      })
       .catch((error) => {
         console.warn('[session-interruption] could not record the interruption reason:', error?.message ?? error);
       });
@@ -73,16 +135,13 @@ export const createSessionInterruptionRuntime = ({
     }
   };
 
-  const readInterruptedTool = async (client, sessionID) => {
+  const readCutTurn = async (client, sessionID) => {
     try {
-      const page = await client.message.list(
-        { sessionID, limit: RECENT_MESSAGE_LIMIT, order: 'desc' },
-        { signal: AbortSignal.timeout(READ_TIMEOUT_MS) },
-      );
-      return Array.isArray(page?.data) ? findInterruptedTool(page.data) : null;
+      const records = await readRecentMessages(client, sessionID);
+      return { tool: findInterruptedTool(records), messageID: findCutAssistantMessageID(records), question: findPendingQuestion(records) };
     } catch (error) {
       console.warn(`[session-interruption] could not read the interrupted tool of ${sessionID}:`, errorMessage(error));
-      return null;
+      return { tool: null, messageID: null, question: null };
     }
   };
 
@@ -100,9 +159,11 @@ export const createSessionInterruptionRuntime = ({
     const at = now();
     const client = createClient();
     return Promise.all(sessionIds.map(async (sessionId) => {
-      const [session, tool] = await Promise.all([readSession(client, sessionId), readInterruptedTool(client, sessionId)]);
+      const [session, { tool, messageID, question }] = await Promise.all([readSession(client, sessionId), readCutTurn(client, sessionId)]);
       try {
-        const { metadata } = await updateMetadata(sessionId, () => restartInterruptionPatch({ at, cause, tool }), { directory: session.directory ?? '' });
+        const { metadata } = await updateMetadata(sessionId, () => restartInterruptionPatch({ at, cause, tool, messageID, question }), { directory: session.directory ?? '' });
+        if (question) pendingQuestionSessions.add(sessionId);
+        if (question) onPendingQuestion({ sessionId, directory: session.directory, sessionTitle: session.title, title: question.title });
         return { sessionId, ...session, recorded: true, priority: isPrioritySession(metadata), at, cause, tool };
       } catch (error) {
         console.warn(`[session-interruption] could not record the restart on ${sessionId}:`, errorMessage(error));

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { Message, Part, QuestionInfo, QuestionOption, QuestionRequest, Session } from '@/lib/opencode/model';
+import type { RestartCutTurn } from '@/lib/sessionRestartInterruption';
+import type { PendingQuestion } from './pendingQuestion';
 
 /**
  * Orphaned question detection.
@@ -14,17 +16,21 @@ import type { Message, Part, QuestionInfo, QuestionOption, QuestionRequest, Sess
  * This module synthesizes an answerable `QuestionRequest` from that stale
  * tool part so the user can still answer. Submission goes through
  * `answerOrphanedQuestion()` in `sync/session-actions.ts`, which re-checks
- * the server authoritatively and falls back to sending the answers as a new
- * user message.
+ * the server authoritatively and falls back to sending the answers as an
+ * OpenChamber message (`@/lib/opencode/openchamber-resume`).
  *
- * On OpenCode 2.x the part usually does not stay pending: the interrupted
- * step settles it as `error` ("Tool execution interrupted"). The most common
- * cause is OpenCode's location eviction, which interrupts every execution in
- * a directory after 60 minutes without session events, and a question waiting
- * for an answer produces none. An errored question counts as orphaned only
- * when the session's last interruption was that eviction
- * (`wasInterruptedByInactivity`); a Stop pressed by the user errors the part
- * the same way and must not bring the question back.
+ * On OpenCode 2.x the part does not always stay pending. OpenCode's location
+ * eviction interrupts every execution in a directory after 60 minutes without
+ * session events, and a question waiting for an answer produces none; the
+ * interrupted step settles the part as `error` ("Tool execution interrupted").
+ * A managed restart leaves it `running` until the session runs again, and the
+ * UI then finalizes it as `error` itself (`restartCutTurnToolParts`). An
+ * errored question counts as orphaned only when an authoritative record says
+ * which of those cut it off: the inactivity record (`inactivityInterruptionAt`)
+ * or the restart's cut-turn mark naming this message (`getRestartCutTurn`). A
+ * Stop pressed by the user errors the part the same way and must not bring the
+ * question back. Each orphan carries that cause, so the card can say the
+ * question was interrupted and the answer can tell the agent why.
  *
  * Scope: only the current session's last assistant message is considered (a
  * stale question from an older turn the user already moved past must not
@@ -71,16 +77,50 @@ const interruptionSchema = z.object({
 });
 
 /**
- * Whether the session's latest turn ended because OpenCode evicted its
- * location for inactivity. A record older than the session's last idle time
+ * When OpenCode evicted the location of the session's latest turn for
+ * inactivity, or null. A record older than the session's last idle time
  * belongs to an earlier turn and does not count.
  */
-export function wasInterruptedByInactivity(session: Session | null | undefined): boolean {
-  if (!session) return false;
+export function inactivityInterruptionAt(session: Session | null | undefined): number | null {
+  if (!session) return null;
   const interruption = interruptionSchema.safeParse(session.metadata).data?.openchamber.interruption;
-  if (!interruption || interruption.reason !== 'inactivity') return false;
-  return interruption.at >= (session.time?.idle ?? 0);
+  if (!interruption || interruption.reason !== 'inactivity') return null;
+  return interruption.at >= (session.time?.idle ?? 0) ? interruption.at : null;
 }
+
+/** What cut a question off: a managed restart, the inactivity eviction, or nothing on record. */
+export type OrphanedQuestionCause =
+  | { kind: 'opencode-restart'; at: number }
+  | { kind: 'inactivity'; at: number }
+  | { kind: 'unknown' };
+
+export type OrphanedQuestion = QuestionRequest & { cause: OrphanedQuestionCause };
+
+/**
+ * The authoritative records that can say a question was cut off. `pending`
+ * names the exact call (written since the server records the question
+ * itself); `inactivityAt` covers an inactivity record written before that.
+ */
+export type OrphanedQuestionRecords = {
+  inactivityAt: number | null;
+  restartCut: RestartCutTurn | null;
+  pending?: PendingQuestion | null;
+};
+
+const causeOf = (part: QuestionToolPart, records: OrphanedQuestionRecords): OrphanedQuestionCause | null => {
+  const { restartCut, inactivityAt, pending } = records;
+  const stranded = part.state.status === 'pending' || part.state.status === 'running';
+  const errored = part.state.status === 'error';
+  if (pending && pending.callID === part.callID && pending.messageID === part.messageID && (stranded || errored)) {
+    return { kind: pending.cause, at: pending.at };
+  }
+  const cutByRestart = restartCut !== null
+    && restartCut.messageID === part.messageID
+    && (restartCut.callID === null || restartCut.callID === part.callID);
+  if (cutByRestart && (stranded || errored)) return { kind: 'opencode-restart', at: restartCut.at };
+  if (errored && inactivityAt !== null) return { kind: 'inactivity', at: inactivityAt };
+  return stranded ? { kind: 'unknown' } : null;
+};
 
 const parseQuestionOption = (value: unknown): QuestionOption | null => {
   if (!value || typeof value !== 'object') return null;
@@ -116,10 +156,11 @@ const parseQuestionsFromToolInput = (input: unknown): QuestionInfo[] => {
 };
 
 /**
- * Collect answerable question requests for question tool calls that are stuck
- * pending/running in the last message of the session, or errored by an
- * inactivity interruption, and are no longer pending server-side
- * (`liveQuestions` is the authoritative pending set for the session subtree).
+ * Collect answerable question requests for question tool calls in the last
+ * message of the session that are stuck pending/running, or errored by a
+ * cut-off an authoritative record names (`causeOf`), and are no longer
+ * pending server-side (`liveQuestions` is the authoritative pending set for
+ * the session subtree).
  *
  * Callers must additionally gate on the session being idle: while a question
  * is genuinely waiting, the session run is active and the live form dock
@@ -129,8 +170,8 @@ export function collectOrphanedQuestionRequests(
   sessionId: string,
   records: MessageRecord[],
   liveQuestions: QuestionRequest[],
-  interruptedByInactivity: boolean,
-): QuestionRequest[] {
+  interruptions: OrphanedQuestionRecords,
+): OrphanedQuestion[] {
   if (!sessionId || records.length === 0) return [];
 
   const lastRecord = records[findLastContentMessageIndex(records.map((record) => record.info))];
@@ -141,12 +182,11 @@ export function collectOrphanedQuestionRequests(
     if (question.tool?.callID) liveCallIds.add(question.tool.callID);
   }
 
-  const orphaned: QuestionRequest[] = [];
+  const orphaned: OrphanedQuestion[] = [];
   for (const part of lastRecord.parts) {
     if (!isQuestionToolPart(part)) continue;
-    const stranded = part.state.status === 'pending' || part.state.status === 'running';
-    const interrupted = part.state.status === 'error' && interruptedByInactivity;
-    if (!stranded && !interrupted) continue;
+    const cause = causeOf(part, interruptions);
+    if (!cause) continue;
     if (liveCallIds.has(part.callID)) continue;
     if (isOrphanedQuestionDismissed(part.callID)) continue;
 
@@ -159,28 +199,40 @@ export function collectOrphanedQuestionRequests(
       sessionID: sessionId,
       questions,
       tool: { messageID: part.messageID, callID: part.callID },
+      cause,
     });
   }
 
   return orphaned;
 }
 
+/** Each answered question with what the user chose, in order; unanswered ones are left out. */
+export function orphanedAnswerPairs(question: QuestionRequest, answers: string[][]): Array<{ question: string; answer: string }> {
+  const pairs: Array<{ question: string; answer: string }> = [];
+  question.questions.forEach((info, index) => {
+    const answer = (answers[index] ?? []).map((value) => value.trim()).filter((value) => value.length > 0);
+    if (answer.length > 0) pairs.push({ question: info.question, answer: answer.join(', ') });
+  });
+  return pairs;
+}
+
+const CAUSE_TEXT = {
+  'opencode-restart': ', because OpenCode restarted',
+  inactivity: ', because OpenCode stopped the session after an hour without activity',
+  unknown: '',
+} satisfies Record<OrphanedQuestionCause['kind'], string>;
+
 /**
- * Build the user message that carries the answers back to the agent when the
+ * Build the message that carries the answers back to the agent when the
  * original question request no longer exists server-side. Mirrors the phrasing
  * of the question tool's own result ("User has answered your questions: ...")
  * so the model treats it as the missing answer to its interrupted tool call.
  * Agent-facing content — intentionally not localized.
  */
-export function buildOrphanedAnswerMessage(question: QuestionRequest, answers: string[][]): string {
-  const pairs: string[] = [];
-  question.questions.forEach((info, index) => {
-    const answer = (answers[index] ?? []).map((value) => value.trim()).filter((value) => value.length > 0);
-    if (answer.length === 0) return;
-    pairs.push(`"${info.question}"="${answer.join(', ')}"`);
-  });
+export function buildOrphanedAnswerMessage(question: QuestionRequest, answers: string[][], cause: OrphanedQuestionCause): string {
+  const pairs = orphanedAnswerPairs(question, answers).map(({ question: text, answer }) => `"${text}"="${answer}"`);
   const answered = pairs.length > 0 ? pairs.join(', ') : '(no answer provided)';
-  return `Your previous question was interrupted before I could answer (the session was restarted). Here are my answers: ${answered}. Please continue from where you left off.`;
+  return `Your previous question was interrupted before I could answer${CAUSE_TEXT[cause.kind]}. Here are my answers: ${answered}. Please continue from where you left off.`;
 }
 
 // ---------------------------------------------------------------------------

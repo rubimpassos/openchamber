@@ -1771,6 +1771,32 @@ class OpencodeService {
   }
 
   /**
+   * Wakes the session with a message OpenChamber writes on the user's behalf,
+   * such as the answer to a question a restart cut off. It is admitted as a
+   * synthetic message whose metadata names it, so the transcript renders an
+   * OpenChamber row (`./openchamber-resume`) and the session's own agent and
+   * model answer it.
+   */
+  async sendOpenChamberMessage(params: {
+    sessionID: string
+    directory?: string | null
+    text: string
+    description: string
+    metadata: Metadata
+  }): Promise<void> {
+    await call("session.synthetic", () =>
+      this.clientFor(params.directory).session.synthetic({
+        sessionID: params.sessionID,
+        text: params.text,
+        description: params.description,
+        metadata: params.metadata,
+        delivery: "steer",
+        resume: true,
+      }),
+    )
+  }
+
+  /**
    * Stops a subagent the agent started, in the foreground or the background.
    * The agent is told first, in a note that does not wake it, that the
    * cancellation OpenCode is about to report is the user's stop (see

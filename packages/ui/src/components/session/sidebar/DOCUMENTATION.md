@@ -8,7 +8,7 @@ kept at this root in `types.ts` and `utils.tsx`.
   layout-owned synchronization, authoritative cleanup, and nearby-session prefetch.
 - `projects/` owns project zones, grouping, ordering, scroller behavior, project
   view state, repository state, and worktree presentation.
-- `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. A collapsed group or folder shows one indicator for its hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; running and unread come from the global status index and the notification store.
+- `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. A collapsed group or folder shows one indicator for its hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; a question a restart or the inactivity eviction cut off counts as a pending question too (`sync/pending-questions.ts`, from the session record's `pendingQuestion`), though OpenCode reports the session idle; running and unread come from the global status index and the notification store.
 - `recent/` owns the In work and timeline row projections and session
   locations (the name predates the removal of Recent).
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.

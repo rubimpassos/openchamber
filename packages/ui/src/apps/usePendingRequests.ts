@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { usePendingQuestion } from '@/sync/pending-questions';
 
 export type PendingRequests = { hasPermission: boolean; hasForm: boolean };
 
@@ -23,5 +24,7 @@ export const usePendingRequests = (sessionIds: readonly string[]): PendingReques
     }),
     [sessionIds],
   ));
-  return { hasPermission, hasForm };
+  // A question a restart or the inactivity eviction cut off waits like a form.
+  const hasPendingQuestion = usePendingQuestion(sessionIds);
+  return { hasPermission, hasForm: hasForm || hasPendingQuestion };
 };

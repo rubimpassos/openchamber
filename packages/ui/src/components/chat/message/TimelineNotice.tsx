@@ -21,13 +21,15 @@ import ToolPart from './parts/ToolPart';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
+import { readOpenChamberResume, type OpenChamberResume } from '@/lib/opencode/openchamber-resume';
+import { formatTimeForPreference } from '@/lib/timeFormat';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { IconName } from '@/components/icon/icons';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 
@@ -303,11 +305,82 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
     );
 };
 
+const RESTART_CAUSE_KEYS = {
+    'memory-pressure': 'chat.restartInterruption.cause.memoryPressure',
+    'health-timeout': 'chat.restartInterruption.cause.healthTimeout',
+    'process-exited': 'chat.restartInterruption.cause.processExited',
+    unknown: null,
+} as const satisfies Record<Extract<OpenChamberResume, { kind: 'restart-resume' }>['cause'], I18nKey | null>;
+
+const openChamberResumeTitle = (
+    resume: OpenChamberResume,
+    t: ReturnType<typeof useI18n>['t'],
+    formatTime: (timestamp: number) => string,
+): string => {
+    const time = formatTime(resume.at);
+    if (resume.kind === 'question-answer') {
+        switch (resume.cause) {
+            case 'opencode-restart':
+                return t('chat.openchamberResume.answerRestart', { time });
+            case 'inactivity':
+                return t('chat.openchamberResume.answerInactivity');
+            case 'unknown':
+                return t('chat.openchamberResume.answer');
+        }
+    }
+    const title = resume.trigger === 'continue'
+        ? t('chat.openchamberResume.restartContinued', { time })
+        : t('chat.openchamberResume.restart', { time });
+    const causeKey = RESTART_CAUSE_KEYS[resume.cause];
+    return causeKey ? `${title} ${t(causeKey)}` : title;
+};
+
+const openChamberResumeBody = (resume: OpenChamberResume): string => {
+    if (resume.kind === 'question-answer' && resume.answers.length > 0) {
+        return resume.answers.map(({ question, answer }) => `**${question}**\n\n${answer}`).join('\n\n');
+    }
+    return resume.text;
+};
+
+/**
+ * OpenChamber woke a session it saw cut off: a resume after an OpenCode
+ * restart, or the answer to a question the restart or the inactivity eviction
+ * interrupted. One collapsed line in the tool style, so it never reads as
+ * something the user typed; it opens to what the agent received.
+ */
+const OpenChamberResumeNotice: React.FC<{ message: SyntheticMessage; resume: OpenChamberResume }> = ({ message, resume }) => {
+    const { t } = useI18n();
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+    const formatTime = React.useCallback(
+        (timestamp: number) => formatTimeForPreference(timestamp, timeFormatPreference),
+        [timeFormatPreference],
+    );
+
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={openChamberResumeBody(resume)}
+                blockId={message.id}
+                presentation={{
+                    icon: resume.kind === 'question-answer' ? 'question' : 'restart',
+                    title: openChamberResumeTitle(resume, t, formatTime),
+                    expandLabel: t('chat.openchamberResume.show'),
+                    collapseLabel: t('chat.openchamberResume.hide'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+            />
+        </NoticeRow>
+    );
+};
+
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
+    const resume = React.useMemo(() => (run || dispatched ? undefined : readOpenChamberResume(message)), [message, run, dispatched]);
     if (run) return <SubagentRunNotice message={message} run={run} />;
-    return dispatched ? <DispatchedSessionNotice message={message} result={dispatched} /> : null;
+    if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
+    return resume ? <OpenChamberResumeNotice message={message} resume={resume} /> : null;
 };
 
 /**

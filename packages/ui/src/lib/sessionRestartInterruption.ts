@@ -21,7 +21,8 @@ export type RestartInterruptionCause = z.infer<typeof causeSchema>;
 const resumeSchema = z.object({
   state: z.enum(['waiting', 'sent', 'manual']),
   at: z.number(),
-  reason: z.enum(['memory-timeout', 'memory-unreadable', 'send-failed']).optional().catch(undefined),
+  // `question-pending`: the cut-off tool was a question, which needs the user's answer.
+  reason: z.enum(['memory-timeout', 'memory-unreadable', 'send-failed', 'question-pending']).optional().catch(undefined),
 });
 
 export type RestartResume = z.infer<typeof resumeSchema>;
@@ -40,7 +41,11 @@ const restartSchema = z.object({
       at: z.number(),
       // A cause a newer server adds reads as unknown here.
       cause: causeSchema.catch('unknown'),
-      tool: z.object({ name: z.string().min(1), input: z.string().optional() }).nullish().catch(null),
+      tool: z.object({
+        name: z.string().min(1),
+        input: z.string().nullish().transform((value) => value ?? undefined),
+        callID: z.string().nullish().transform((value) => value ?? undefined),
+      }).nullish().catch(null),
       resume: resumeSchema.nullish().catch(null),
     }),
   }),
@@ -49,9 +54,36 @@ const restartSchema = z.object({
 export type RestartInterruption = {
   at: number;
   cause: RestartInterruptionCause;
-  tool: { name: string; input?: string } | null;
+  tool: { name: string; input?: string; callID?: string } | null;
   resume: RestartResume | null;
 };
+
+const cutTurnSchema = z.object({
+  openchamber: z.object({
+    restartCutTurn: z.object({
+      messageID: z.string().min(1),
+      at: z.number(),
+      callID: z.string().nullish().catch(null),
+      toolName: z.string().nullish().catch(null),
+    }),
+  }),
+});
+
+/**
+ * The assistant message a managed OpenCode restart left open
+ * (`metadata.openchamber.restartCutTurn`, written with the restart record by
+ * `packages/web/server/lib/session-interruption/restart.js`). Unlike the
+ * record, Dismiss and a sent message leave it in place: it is the
+ * authoritative statement that the process running that turn died, so the
+ * turn shows as interrupted and its question stays answerable. It counts only
+ * while that message is the session's last conversation message.
+ */
+export type RestartCutTurn = { messageID: string; at: number; callID: string | null; toolName: string | null };
+
+export function getRestartCutTurn(session: Session | null | undefined): RestartCutTurn | null {
+  const cut = cutTurnSchema.safeParse(session?.metadata).data?.openchamber.restartCutTurn;
+  return cut ? { messageID: cut.messageID, at: cut.at, callID: cut.callID ?? null, toolName: cut.toolName ?? null } : null;
+}
 
 export function getRestartInterruption(session: Session | null | undefined, now = Date.now()): RestartInterruption | null {
   const interruption = restartSchema.safeParse(session?.metadata).data?.openchamber.interruption;

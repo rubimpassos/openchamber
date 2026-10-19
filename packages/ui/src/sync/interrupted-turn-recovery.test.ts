@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { SyncEvent } from "@/lib/opencode/events"
-import type { Message, Part, SessionOutcome } from "@/lib/opencode/model"
+import type { Message, Part, Session, SessionOutcome } from "@/lib/opencode/model"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { ChildStoreManager } from "./child-store"
 import { createEventRoutingIndex, handleEvent, markRecordedInterruptedTurn } from "./sync-context"
 
@@ -23,12 +24,12 @@ const idle = (outcome: SessionOutcome, id = "msg_i", error?: typeof quota): Mess
   { id, sessionID: "ses_1", role: "idle", time: { created: 3 }, outcome, error }
 )
 
-function setup(messages: Message[]) {
+function setup(messages: Message[], session: Session[] = []) {
   const childStores = new ChildStoreManager()
   const store = childStores.ensureChild("/repo", { bootstrap: false })
   const routingIndex = createEventRoutingIndex()
   const receive = (event: SyncEvent) => handleEvent("/repo", event, childStores, routingIndex, getRuntimeKey())
-  store.setState({ session: [], message: { ses_1: messages }, part: { msg_a: [runningTool] } })
+  store.setState({ session, message: { ses_1: messages }, part: { msg_a: [runningTool] } })
   cleanups.push(() => childStores.disposeAll())
   return { store, receive }
 }
@@ -124,4 +125,60 @@ describe("settle events", () => {
       expect(store.getState().message.ses_1[1]).toBe(openAssistant)
     })
   }
+})
+
+const cutTurn = { openchamber: { restartCutTurn: { messageID: "msg_a", at: 5, callID: "c", toolName: "bash" } } }
+const sessionWith = (metadata: Session["metadata"]): Session => ({
+  id: "ses_1", projectID: "p", directory: "/repo", title: "t", cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 1, updated: 1 }, metadata,
+})
+
+describe("a turn a managed OpenCode restart cut off", () => {
+  test("is marked stopped on load when the server named its message", () => {
+    const { store } = setup([user, openAssistant], [sessionWith(cutTurn)])
+
+    markRecordedInterruptedTurn(store, "ses_1")
+
+    expect(isStopped(store.getState().message.ses_1[1])).toBe(true)
+    const tool = store.getState().part.msg_a[0]
+    expect(tool?.type === "tool" && tool.state.status).toBe("error")
+    // It ended when the restart was recorded, however much later it loads.
+    expect(tool?.type === "tool" && tool.state.status === "error" && tool.state.time.end).toBe(5)
+  })
+
+  test("is marked from the global list when the directory has not listed the session yet", () => {
+    const { store } = setup([user, openAssistant], [])
+    useGlobalSessionsStore.getState().upsertSession(sessionWith(cutTurn))
+    cleanups.push(() => useGlobalSessionsStore.getState().removeSessions(["ses_1"]))
+
+    markRecordedInterruptedTurn(store, "ses_1")
+
+    expect(isStopped(store.getState().message.ses_1[1])).toBe(true)
+  })
+
+  test("is marked when the record arrives after the messages loaded", () => {
+    const { store, receive } = setup([user, openAssistant], [sessionWith(undefined)])
+
+    receive({ type: "session.patched", properties: { sessionID: "ses_1", patch: { metadata: cutTurn } } })
+
+    expect(isStopped(store.getState().message.ses_1[1])).toBe(true)
+  })
+
+  test("leaves another message, a running session and a newer turn alone", () => {
+    const other = { openchamber: { restartCutTurn: { ...cutTurn.openchamber.restartCutTurn, messageID: "msg_other" } } }
+    const { store } = setup([user, openAssistant], [sessionWith(other)])
+    markRecordedInterruptedTurn(store, "ses_1")
+    expect(store.getState().message.ses_1[1]).toBe(openAssistant)
+
+    const busy = setup([user, openAssistant], [sessionWith(cutTurn)])
+    busy.store.setState({ session_status: { ses_1: { type: "busy" } } })
+    markRecordedInterruptedTurn(busy.store, "ses_1")
+    expect(busy.store.getState().message.ses_1[1]).toBe(openAssistant)
+
+    const later: Message = { ...user, id: "msg_u2", time: { created: 9 } }
+    const moved = setup([user, openAssistant, later], [sessionWith(cutTurn)])
+    markRecordedInterruptedTurn(moved.store, "ses_1")
+    expect(moved.store.getState().message.ses_1[1]).toBe(openAssistant)
+  })
 })

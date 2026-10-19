@@ -5,18 +5,20 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isSessionPriority } from '@/lib/sessionPriority';
+import { getPendingQuestion } from '@/lib/questions/pendingQuestion';
 import { cn } from '@/lib/utils';
 import { getRestartInterruption, type RestartInterruption, type RestartInterruptionCause } from '@/lib/sessionRestartInterruption';
 import { formatTimeForPreference } from '@/lib/timeFormat';
-import { dismissRestartInterruption } from '@/sync/session-actions';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { continueAfterRestart, dismissRestartInterruption } from '@/sync/session-actions';
 import { useSession, useSessionStatus } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 
 interface SessionRestartInterruptionRowProps {
   sessionId: string | null;
   directory?: string;
-  /** Puts a message in the composer for the user to edit and send. */
-  onContinue: (text: string) => void;
+  /** The question the restart cut off is in the form dock, waiting for an answer. */
+  questionAnswerable: boolean;
 }
 
 const CAUSE_KEYS = {
@@ -46,33 +48,33 @@ const MANUAL_REASON_KEYS = {
   'memory-timeout': 'chat.restartInterruption.resume.memoryTimeout',
   'memory-unreadable': 'chat.restartInterruption.resume.memoryUnreadable',
   'send-failed': 'chat.restartInterruption.resume.failed',
+  'question-pending': 'chat.restartInterruption.resume.questionPending',
 } as const satisfies Record<NonNullable<NonNullable<RestartInterruption['resume']>['reason']>, I18nKey>;
 
 interface RestartInterruptionNoticeProps {
   interruption: RestartInterruption;
   /** A priority session: the server resumes it on its own, and the notice is stronger. */
   priority: boolean;
+  /** This runtime's server can send the resume (not VS Code, which has no route for it). */
+  continueAvailable: boolean;
   /** A time as the user reads clocks. */
   formatTime: (timestamp: number) => string;
-  dismissing: boolean;
-  onContinue: (text: string) => void;
+  busy: boolean;
+  onContinue: () => void;
   onDismiss: () => void;
 }
 
 /** What the notice shows for one restart record. */
-export const RestartInterruptionNotice: React.FC<RestartInterruptionNoticeProps> = ({ interruption, priority, formatTime, dismissing, onContinue, onDismiss }) => {
+export const RestartInterruptionNotice: React.FC<RestartInterruptionNoticeProps> = ({
+  interruption, priority, continueAvailable, formatTime, busy, onContinue, onDismiss,
+}) => {
   const { t } = useI18n();
   const causeKey = CAUSE_KEYS[interruption.cause];
-  const toolText = interruption.tool ? (interruption.tool.input || interruption.tool.name) : null;
+  const question = interruption.tool?.name === 'question';
+  const toolText = interruption.tool && !question ? (interruption.tool.input || interruption.tool.name) : null;
   const resume = priority ? resumeLine(interruption, formatTime) : null;
   // Once the server sent the resume, a manual one would repeat it.
-  const canContinue = !priority || interruption.resume?.state !== 'sent';
-
-  const handleContinue = () => {
-    onContinue(toolText
-      ? t('chat.restartInterruption.promptWithTool', { tool: toolText })
-      : t('chat.restartInterruption.prompt'));
-  };
+  const canContinue = continueAvailable && (!priority || interruption.resume?.state !== 'sent');
 
   return (
     <div
@@ -89,6 +91,7 @@ export const RestartInterruptionNotice: React.FC<RestartInterruptionNoticeProps>
           {t('chat.restartInterruption.text', { time: formatTime(interruption.at) })}
           {causeKey ? <> {t(causeKey)}</> : null}
         </p>
+        {question ? <p className="mt-0.5">{t('chat.restartInterruption.questionLost')}</p> : null}
         {toolText ? (
           <p className="mt-0.5 flex min-w-0 items-baseline gap-1">
             <span className="shrink-0">{t('chat.restartInterruption.toolLabel')}</span>
@@ -102,7 +105,8 @@ export const RestartInterruptionNotice: React.FC<RestartInterruptionNoticeProps>
           type="button"
           variant="ghost"
           size="sm"
-          onClick={handleContinue}
+          disabled={busy}
+          onClick={onContinue}
           onMouseDown={(event) => event.preventDefault()}
           className="shrink-0 text-foreground/80 hover:bg-transparent hover:text-foreground"
         >
@@ -113,7 +117,7 @@ export const RestartInterruptionNotice: React.FC<RestartInterruptionNoticeProps>
         type="button"
         variant="ghost"
         size="sm"
-        disabled={dismissing}
+        disabled={busy}
         onClick={onDismiss}
         onMouseDown={(event) => event.preventDefault()}
         className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
@@ -126,45 +130,66 @@ export const RestartInterruptionNotice: React.FC<RestartInterruptionNoticeProps>
 
 /**
  * A managed OpenCode restart killed this session's running turn. The notice
- * says when and why, and which command was running; Continue fills the
- * composer with a message asking the agent to check what already happened
- * before repeating anything. For an ordinary session nothing is sent on its
- * own; a priority session also shows how the server's automatic resume went.
- * The record goes away with the next message or Dismiss.
+ * says when and why, and which command was running; Continue has the server
+ * send the agent a message asking it to check what already happened before
+ * repeating anything, and clears the notice. While a question the restart
+ * cut off is answerable in the form dock, its card says when and why and the
+ * notice stays hidden. A priority session also shows how the server's automatic resume
+ * went. The record goes away with the next message, Continue or Dismiss.
  */
-export const SessionRestartInterruptionRow: React.FC<SessionRestartInterruptionRowProps> = React.memo(({ sessionId, directory, onContinue }) => {
+export const SessionRestartInterruptionRow: React.FC<SessionRestartInterruptionRowProps> = React.memo(({ sessionId, directory, questionAnswerable }) => {
   const { t } = useI18n();
   const session = useSession(sessionId ?? '', directory);
   const status = useSessionStatus(sessionId ?? '', directory);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const [pending, setPending] = React.useState(false);
   const interruption = getRestartInterruption(session);
+  const pendingQuestion = getPendingQuestion(session);
   const priority = isSessionPriority(session);
-  const visible = Boolean(sessionId && interruption && (!status || status.type === 'idle'));
+  // A cut-off question still answerable says all of this in its own card in
+  // the form dock, so the notice and its chip stay out of the way.
+  // The record says a question is answerable before the messages that let
+  // the dock show it have loaded; the notice must not flash in between.
+  const answeredInDock = interruption?.tool?.name === 'question' && (questionAnswerable || pendingQuestion !== null);
+  const visible = Boolean(sessionId && interruption && !answeredInDock && (!status || status.type === 'idle'));
 
   useComposerStatusChip('interrupted', visible ? { icon: 'error-warning', label: t('chat.composerStatus.chip.interrupted') } : null);
 
   if (!visible || !sessionId || !interruption) return null;
 
-  const handleDismiss = async () => {
+  const run = async (action: () => Promise<void>) => {
     if (pending) return;
     setPending(true);
     try {
-      await dismissRestartInterruption(sessionId, directory);
-    } catch {
-      toast.error(t('chat.restartInterruption.dismissFailed'));
+      await action();
     } finally {
       setPending(false);
     }
   };
 
+  const handleDismiss = () => run(async () => {
+    try {
+      await dismissRestartInterruption(sessionId, directory);
+    } catch {
+      toast.error(t('chat.restartInterruption.dismissFailed'));
+    }
+  });
+
+  // A conflict means the record changed meanwhile (another client continued
+  // or dismissed it, or a newer restart replaced it); its update follows.
+  const handleContinue = () => run(async () => {
+    const outcome = await continueAfterRestart(sessionId, directory, interruption.at).catch(() => 'send-failed' as const);
+    if (outcome === 'send-failed') toast.error(t('chat.restartInterruption.continueFailed'));
+  });
+
   return (
     <RestartInterruptionNotice
       interruption={interruption}
       priority={priority}
+      continueAvailable={!isVSCodeRuntime()}
       formatTime={(timestamp) => formatTimeForPreference(timestamp, timeFormatPreference)}
-      dismissing={pending}
-      onContinue={onContinue}
+      busy={pending}
+      onContinue={() => { void handleContinue(); }}
       onDismiss={() => { void handleDismiss(); }}
     />
   );

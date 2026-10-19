@@ -67,10 +67,16 @@ through `FormFieldControl`.
 The fork also recovers interrupted question tools in this dock. Once the session
 status snapshot confirms idle, `useOrphanedQuestions` inspects the last assistant
 message, ignoring v2 idle markers, and excludes live or dismissed questions.
-`projection.ts` maps the question tool's input and form metadata. Submission
-rechecks `form.list`: a live match gets a normal form reply; otherwise
-`answerOrphanedQuestion` sends a continuation with the originating model and
-agent. A failed recheck or runtime switch never triggers that fallback. Recovery
+`projection.ts` maps the question tool's input and form metadata. An errored
+question comes back only when a record names its cause: the inactivity record
+or the restart's `restartCutTurn` for that message, so it stays answerable
+after the UI marks the cut-off turn interrupted. The card shows an
+"Interrupted" chip and says which of the two cut it off. Submission rechecks
+`form.list`: a live match gets a normal form reply; otherwise
+`answerOrphanedQuestion` sends the answer as an OpenChamber message that wakes
+the session (rendered as its own row, not a user bubble) and clears the
+restart notice. A failed recheck or runtime switch never triggers that
+fallback. Recovery
 owns the dock ahead of the queue and suggestion, just like a live form.
 
 `formCardState.ts` decides what both surfaces show and send, mirroring
@@ -115,7 +121,10 @@ The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: worktree setup and a message
 waiting for its space (`ComposerStatusStrip`), the notice that an OpenCode
 restart cut off the last turn (`SessionRestartInterruptionRow`; its Continue
-fills the composer the way a suggestion does and sends nothing), the goal
+has the server send the agent the resume message and clears the notice;
+while the cut-off tool is a question answerable in the form dock the notice
+and its chip stay hidden and the card names the cause, and VS Code never
+offers Continue), the goal
 (`SessionGoalRow`), review and PR fix loops (`AutoReviewStrip`), background
 commands, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),

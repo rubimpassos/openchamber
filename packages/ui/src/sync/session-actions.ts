@@ -7,6 +7,8 @@ import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelectio
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
+import { questionAnswerMetadata, readOpenChamberResume } from "@/lib/opencode/openchamber-resume"
+import { runtimeFetch } from "@/lib/runtime-fetch"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -24,8 +26,7 @@ import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
 import { materializeSessionSnapshots } from "./materialization"
-import { buildOrphanedAnswerMessage } from "@/lib/questions/orphanedQuestions"
-import type { QuestionRequest } from "@/lib/opencode/model"
+import { buildOrphanedAnswerMessage, orphanedAnswerPairs, type OrphanedQuestion } from "@/lib/questions/orphanedQuestions"
 import { projectQuestionForm } from "@/lib/opencode/projection"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
@@ -41,6 +42,7 @@ import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessi
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
 import { getRestartInterruption, withoutRestartInterruption } from "@/lib/sessionRestartInterruption"
+import { getPendingQuestion, withoutPendingQuestion } from "@/lib/questions/pendingQuestion"
 import { withSessionPriority } from "@/lib/sessionPriority"
 import { withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
@@ -1205,6 +1207,32 @@ export async function dismissRestartInterruption(
   }
 }
 
+export type ContinueAfterRestartOutcome = "sent" | "conflict" | "send-failed"
+
+/**
+ * The restart notice's Continue: the server sends the agent the same resume
+ * message the automatic resume sends and deletes the record written at `at`
+ * (`web/server/lib/session-interruption/routes.js`). `conflict` means the
+ * record is gone, newer, or already resumed; nothing was sent. Bound to the
+ * server it was asked on: a runtime switch mid-request resolves null.
+ */
+export async function continueAfterRestart(
+  sessionId: string,
+  directory: string | null | undefined,
+  at: number,
+): Promise<ContinueAfterRestartOutcome | null> {
+  const runtimeKeyAtClick = getRuntimeKey()
+  const response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionId)}/restart-resume`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ at, directory: directory ?? undefined }),
+  })
+  if (isStaleRuntime(runtimeKeyAtClick)) return null
+  if (response.ok) return "sent"
+  if (response.status === 409) return "conflict"
+  return "send-failed"
+}
+
 /** Marks the session as a priority (`on`) or clears the mark. Bound to the server it was asked on. */
 export async function setSessionPriority(
   sessionId: string,
@@ -1241,10 +1269,33 @@ export async function setSessionPinned(
   }
 }
 
-/** A sent message answers the restart notice; costs nothing for a session without one. */
+/**
+ * Drops the cut-off question every "waiting for you" surface shows
+ * (`@/lib/questions/pendingQuestion`): the user dismissed its card, on this
+ * device, for all of them. Bound to the server it was asked on.
+ */
+export async function dismissPendingQuestion(
+  sessionId: string,
+  directory: string | null | undefined,
+): Promise<Session | null> {
+  const runtimeKeyAtClick = getRuntimeKey()
+  try {
+    return await patchSessionMetadata(sessionId, directory, withoutPendingQuestion, runtimeKeyAtClick)
+  } catch (error) {
+    if (isStaleRuntime(runtimeKeyAtClick)) return null
+    throw error
+  }
+}
+
+/**
+ * A sent message answers the restart notice and any cut-off question, in one
+ * write; costs nothing for a session without either.
+ */
 export function retireRestartInterruptionAfterSend(sessionId: string, directory: string | null | undefined): void {
-  if (!getRestartInterruption(getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId))) return
-  void dismissRestartInterruption(sessionId, directory)
+  const session = getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId)
+  if (!getRestartInterruption(session) && !getPendingQuestion(session)) return
+  const runtimeKeyAtClick = getRuntimeKey()
+  void patchSessionMetadata(sessionId, directory, (metadata) => withoutPendingQuestion(withoutRestartInterruption(metadata)), runtimeKeyAtClick)
     .catch((error) => console.warn("[session-interruption] could not clear the restart notice:", error))
 }
 
@@ -2546,40 +2597,23 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
   }
 }
 
-function findAssistantMessageInfo(sessionId: string, messageId: string | undefined): Message | null {
-  const stores = _childStores
-  if (!stores) return null
-
-  for (const [, store] of stores.children) {
-    const messages = store.getState().message[sessionId]
-    if (!messages?.length) continue
-    if (messageId) {
-      const exact = messages.find((message) => message.id === messageId && message.role === "assistant")
-      if (exact) return exact
-    }
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].role === "assistant") return messages[index]
-    }
-  }
-
-  return null
-}
-
 /**
  * Answer a question whose pending request was destroyed by an OpenCode server
- * restart (see `@/lib/questions/orphanedQuestions`). The server is re-checked
- * authoritatively first: if the question is actually still pending (the client
- * merely lost it), it is answered through the normal `form.reply` path so
- * the waiting tool call resumes. Otherwise the answers are delivered as a new
- * user message using the model/agent of the assistant message that asked,
- * re-entering the session loop.
+ * restart or the inactivity eviction (see `@/lib/questions/orphanedQuestions`).
+ * The server is re-checked authoritatively first: if the question is actually
+ * still pending (the client merely lost it), it is answered through the
+ * normal `form.reply` path so the waiting tool call resumes. Otherwise the
+ * answers go to the agent as an OpenChamber message that wakes the session
+ * (`@/lib/opencode/openchamber-resume`), answered by the session's own agent
+ * and model, and the restart notice is cleared the way a sent message clears
+ * it.
  *
  * The pending re-check failing is a hard error (never assume "not pending"
  * from a failed fetch — sending a duplicate message while the question is
  * still live would be destructive).
  */
 export async function answerOrphanedQuestion(
-  question: QuestionRequest,
+  question: OrphanedQuestion,
   answers: string[][],
 ): Promise<void> {
   const runtimeKey = getRuntimeKey()
@@ -2602,20 +2636,19 @@ export async function answerOrphanedQuestion(
     return
   }
 
-  const askingMessage = findAssistantMessageInfo(sessionId, question.tool?.messageID)
-  if (!askingMessage || askingMessage.role !== "assistant") {
-    throw new Error("Cannot answer interrupted question: originating assistant message not found")
-  }
-
-  await opencodeClient.sendMessage({
-    runtimeKey,
-    id: sessionId,
-    providerID: askingMessage.providerID,
-    model: { id: askingMessage.modelID, providerID: askingMessage.providerID, variant: askingMessage.variant },
-    agent: askingMessage.agent || undefined,
-    text: buildOrphanedAnswerMessage(question, answers),
+  const { cause } = question
+  await opencodeClient.sendOpenChamberMessage({
+    sessionID: sessionId,
     directory,
+    text: buildOrphanedAnswerMessage(question, answers, cause),
+    description: "The user answered a question that was interrupted before they could answer it",
+    metadata: questionAnswerMetadata({
+      cause: cause.kind,
+      at: cause.kind === "unknown" ? Date.now() : cause.at,
+      answers: orphanedAnswerPairs(question, answers),
+    }),
   })
+  retireRestartInterruptionAfterSend(sessionId, directory)
 }
 
 /**
@@ -2886,6 +2919,7 @@ const isTurnBoundary = (message: Message): boolean =>
   TURN_BOUNDARY_ROLES.has(message.role)
   || readSubagentRun(message) !== undefined
   || readDispatchedSessionResult(message) !== undefined
+  || readOpenChamberResume(message) !== undefined
 
 /**
  * Fork keeping an assistant turn: the new session holds everything through

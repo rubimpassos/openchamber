@@ -603,8 +603,19 @@ const sessionMetadataStore = createSessionMetadataStore({
 
 const readStoredSessionMetadata = (sessionID) => sessionMetadataStore.get(sessionID);
 
+// A cut-off question that stops waiting (answered, dismissed, superseded)
+// takes its "Needs you" entry in the notification center with it. Called, not
+// captured: the center is declared further down.
+const settlePendingQuestionNotifications = (sessionID, patch) => {
+  if (patch?.openchamber?.pendingQuestion !== null) return;
+  void notificationCenter.markRead({ sessionId: sessionID }).catch((error) => {
+    console.warn('[notification-center] could not mark a settled question read:', error?.message ?? error);
+  });
+};
+
 const persistSessionMetadataPatch = async (sessionID, patch, { directory = '' } = {}) => {
   const metadata = await sessionMetadataStore.setSessionMetadata(sessionID, patch, { directory });
+  settlePendingQuestionNotifications(sessionID, patch);
   // The full merged object, so a client that missed an earlier patch does not
   // have to reconstruct it.
   broadcastOpenChamberUiEvent({
@@ -623,7 +634,12 @@ const persistSessionMetadataPatch = async (sessionID, patch, { directory = '' } 
 
 /** A metadata change decided against the record at write time; broadcast only when it changed. */
 const updateSessionMetadataWith = async (sessionID, decide, { directory = '' } = {}) => {
-  const result = await sessionMetadataStore.updateSessionMetadata(sessionID, decide, { directory });
+  let decided = null;
+  const result = await sessionMetadataStore.updateSessionMetadata(sessionID, (metadata) => {
+    decided = decide(metadata);
+    return decided;
+  }, { directory });
+  if (result.changed) settlePendingQuestionNotifications(sessionID, decided);
   if (result.changed) {
     broadcastOpenChamberUiEvent({
       type: 'openchamber:session-metadata',
@@ -1155,6 +1171,18 @@ const sessionInterruptionRuntime = createSessionInterruptionRuntime({
   updateMetadata: updateSessionMetadataWith,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  // A question cut off by a restart or the inactivity eviction waits for the
+  // user like a live one, so it lands in the center's "Needs you" too.
+  onPendingQuestion: ({ sessionId, directory, sessionTitle, title }) => recordCenterNotification({
+    kind: 'question',
+    priority: 'high',
+    delivery: 'delivered',
+    title: 'Interrupted question waiting for you',
+    body: title,
+    sessionId,
+    directory,
+    sessionName: sessionTitle,
+  }),
 });
 
 // Priority sessions a managed OpenCode restart cut off get one message that
@@ -1162,11 +1190,14 @@ const sessionInterruptionRuntime = createSessionInterruptionRuntime({
 const autoResumeRuntime = createAutoResumeRuntime({
   updateMetadata: updateSessionMetadataWith,
   readMemory: () => readCgroupMemory(),
-  sendPrompt: ({ sessionId, directory, text }) => {
+  sendPrompt: ({ sessionId, directory, text, description, metadata }) => {
     const headers = { ...getOpenCodeAuthHeaders() };
     if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
     return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers })
-      .session.prompt({ sessionID: sessionId, text }, { signal: AbortSignal.timeout(15_000) });
+      .session.synthetic(
+        { sessionID: sessionId, text, description, metadata, delivery: 'steer', resume: true },
+        { signal: AbortSignal.timeout(15_000) },
+      );
   },
 });
 
@@ -2877,6 +2908,7 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     scheduledTaskService,
     suggestedTasksRuntime,
+    autoResumeRuntime,
     openChamberSessionService,
     openChamberControlService,
     waitForOpenCodeReady,

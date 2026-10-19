@@ -4,15 +4,16 @@ import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
 import type { OpenCodeClient } from "@opencode/client"
 import { syncEventMessageID, syncEventSessionID, type CatalogKind, type OpenchamberNotification, type SyncEvent } from "@/lib/opencode/events"
-import type {
-  FormRequest,
-  Message,
-  Part,
-  PermissionRequest,
-  Session,
-  SessionOutcome,
-  SessionStatus,
-  StructuredError,
+import {
+  getLastConversationMessage,
+  type FormRequest,
+  type Message,
+  type Part,
+  type PermissionRequest,
+  type Session,
+  type SessionOutcome,
+  type SessionStatus,
+  type StructuredError,
 } from "@/lib/opencode/model"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -69,12 +70,14 @@ import { Binary } from "./binary"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
+import { getRestartCutTurn } from "@/lib/sessionRestartInterruption"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
 import { subscribeSpacePermissionModes } from "./permission-mode-sync"
+import { startPendingQuestionsSync, usePendingQuestion } from "./pending-questions"
 import {
   processVSCodePermissionAutoAccept,
   processVSCodeReconciledPermissionAutoAccept,
@@ -2369,6 +2372,31 @@ export function handleEvent(
     }
   }
 
+  const commitInterruptedTurn = (sessionID: string, interrupted: NonNullable<ReturnType<typeof interruptedTurnToolParts>>) => {
+    cloneField("message", (value) => ({ ...value }))
+    draft.message[sessionID] = interrupted.messages
+    if (interrupted.parts) {
+      cloneField("part", (value) => ({ ...(value ?? {}) }))
+      draft.part[interrupted.messageID] = interrupted.parts
+    }
+    if (batch) {
+      batch.states.set(store, draft as DirectoryStore)
+      batch.changedStores.add(store)
+    } else {
+      const currentState = store.getState()
+      if (interrupted.parts) {
+        store.setState({
+          message: { ...currentState.message, [sessionID]: interrupted.messages },
+          part: { ...currentState.part, [interrupted.messageID]: interrupted.parts },
+        })
+      } else {
+        store.setState({
+          message: { ...currentState.message, [sessionID]: interrupted.messages },
+        })
+      }
+    }
+  }
+
   if (payload.type === "session.idle" || payload.type === "session.error") {
     const sessionID = syncEventSessionID(payload)
     const state = getDirectoryEventState(store, batch)
@@ -2386,31 +2414,16 @@ export function handleEvent(
     if (sessionID && stopped) {
       const failure = payload.type === "session.error" ? payload.properties.error : undefined
       const interrupted = interruptedTurnToolParts(state, sessionID, Date.now(), failure)
-      if (interrupted) {
-        cloneField("message", (value) => ({ ...value }))
-        draft.message[sessionID] = interrupted.messages
-        if (interrupted.parts) {
-          cloneField("part", (value) => ({ ...(value ?? {}) }))
-          draft.part[interrupted.messageID] = interrupted.parts
-        }
-        if (batch) {
-          batch.states.set(store, draft as DirectoryStore)
-          batch.changedStores.add(store)
-        } else {
-          const currentState = store.getState()
-          if (interrupted.parts) {
-            store.setState({
-              message: { ...currentState.message, [sessionID]: interrupted.messages },
-              part: { ...currentState.part, [interrupted.messageID]: interrupted.parts },
-            })
-          } else {
-            store.setState({
-              message: { ...currentState.message, [sessionID]: interrupted.messages },
-            })
-          }
-        }
-      }
+      if (interrupted) commitInterruptedTurn(sessionID, interrupted)
     }
+  }
+
+  // The server names the turn a restart killed on the session's metadata,
+  // which reaches an open chat after its messages loaded.
+  if (payload.type === "session.patched" && payload.properties.patch.metadata !== undefined) {
+    const sessionID = payload.properties.sessionID
+    const interrupted = restartCutTurnToolParts(getDirectoryEventState(store, batch), sessionID)
+    if (interrupted) commitInterruptedTurn(sessionID, interrupted)
   }
 
   updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
@@ -2530,15 +2543,42 @@ function recordedTurnEnd(
 }
 
 /**
+ * The open turn a managed OpenCode restart killed, finalized the same way as
+ * a recorded stop. The second authoritative source next to the `idle` record:
+ * the OpenChamber server saw the process running that turn die and named the
+ * message (`restartCutTurn`, see `@/lib/sessionRestartInterruption`). OpenCode
+ * itself leaves the turn open until the session runs again. Only the exact
+ * message counts, so a turn another process runs later is never touched
+ * (#4156).
+ */
+function restartCutTurnToolParts(
+  state: DirectoryStore,
+  sessionID: string,
+): ReturnType<typeof interruptedTurnToolParts> {
+  // The directory's session list can arrive after the messages; the global
+  // list, loaded at startup, carries the same record.
+  const session = state.session.find((candidate) => candidate.id === sessionID)
+    ?? useGlobalSessionsStore.getState().entityById.get(sessionID)
+  const cut = getRestartCutTurn(session)
+  if (!cut) return null
+  if (getLastConversationMessage(state.message[sessionID])?.id !== cut.messageID) return null
+  // The turn ended when the restart was recorded, not when this client saw it.
+  return interruptedTurnToolParts(state, sessionID, cut.at)
+}
+
+/**
  * Marks the trailing turn of a freshly loaded session stopped when its history
- * records that OpenCode interrupted or failed it. Any other history, including
- * an unfinished answer with no record after it, is left as OpenCode stored it.
+ * records that OpenCode interrupted or failed it, or a managed restart cut it
+ * off. Any other history, including an unfinished answer with no record after
+ * it, is left as OpenCode stored it.
  */
 export function markRecordedInterruptedTurn(store: StoreApi<DirectoryStore>, sessionID: string): void {
   const state = store.getState()
   const end = recordedTurnEnd(state, sessionID)
-  if (end?.outcome !== "interrupted" && end?.outcome !== "failed") return
-  const interrupted = interruptedTurnToolParts(state, sessionID, Date.now(), end.outcome === "failed" ? end.error : undefined)
+  const recorded = end?.outcome === "interrupted" || end?.outcome === "failed"
+  const interrupted = recorded
+    ? interruptedTurnToolParts(state, sessionID, Date.now(), end.outcome === "failed" ? end.error : undefined)
+    : restartCutTurnToolParts(state, sessionID)
   if (!interrupted) return
 
   const interruptedParts = interrupted.parts
@@ -2940,6 +2980,7 @@ export function SyncProvider(props: {
   useEffect(() => {
     const unsubscribeQueueEvents = subscribeMessageQueueSync(runtimeKey)
     const unsubscribeSpaceModes = subscribeSpacePermissionModes(runtimeKey)
+    const stopPendingQuestions = startPendingQuestionsSync()
     const resyncAfterStreamGap = (reason: SessionMaterializationReason) => {
       // Cached transcripts may have missed events too; each revalidates its
       // tail the next time it is opened. Mark first so the active sessions'
@@ -3075,6 +3116,7 @@ export function SyncProvider(props: {
       pipeline.cleanup()
       unsubscribeQueueEvents()
       unsubscribeSpaceModes()
+      stopPendingQuestions()
     }
   }, [props.sdk, childStores, messageLoader, routingIndex, messageStreamTransport, runtimeKey, triggerDirectoryResync])
 
@@ -3616,7 +3658,15 @@ export function useSessionBlockingRequests(
       for (const unsubscribe of unsubscribers) unsubscribe()
     }
   }, [scopedStores])
-  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const blocking = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  // A question a restart or the inactivity eviction cut off waits for the
+  // user like a live form, though OpenCode reports the session idle.
+  const scopeSessionIDs = React.useMemo(() => scopes.flatMap((scope) => scope.sessionIDs), [scopes])
+  const pendingQuestion = usePendingQuestion(scopeSessionIDs)
+  return React.useMemo(
+    () => (pendingQuestion && !blocking.hasForm ? { ...blocking, hasForm: true } : blocking),
+    [blocking, pendingQuestion],
+  )
 }
 
 /** Get sessions list for a directory */
