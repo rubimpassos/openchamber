@@ -1907,6 +1907,7 @@ const AssistantMessageBody = React.memo(({
         if (!isMiniChatSurface && showMessageTTSButtons && hasCopyableText) {
             actions.push({
                 id: 'tts',
+                onPointerRow: true,
                 label: isFooterTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud'),
                 icon: <Icon name="volume-up" className={cn('h-4 w-4', isFooterTTSPlaying && 'text-[var(--primary-text)]')} />,
                 onSelect: () => {
@@ -1962,30 +1963,42 @@ const AssistantMessageBody = React.memo(({
     }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 
     const footerMenuActions = footerSheetActions.filter((action) => !action.onPointerRow);
+    const canReadFooterAloud = !isMiniChatSurface && showMessageTTSButtons && hasCopyableText;
+    const footerReadAloudLabel = isFooterTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud');
 
     const finalTurnActionButtons = (
         <>
             {onCopyFooter ? (
                 <AssistantCopyButton hasCopyableText={hasCopyableText} isTouchContext={isTouchContext} onCopyMessage={onCopyFooter} />
             ) : null}
-            {/* Reading starts from the "more" menu; stopping it should not mean
-                hunting for it there again. */}
-            {isFooterTTSPlaying ? (
+            {/* Read aloud sits on the row while the user has it on in Voice
+                settings; the same button stops a reading in progress. */}
+            {canReadFooterAloud ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6 text-[var(--primary-text)] bg-transparent hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
-                            aria-label={t('chat.messageBody.tts.stopSpeaking')}
+                            className={cn(
+                                'h-6 w-6 bg-transparent hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring',
+                                isFooterTTSPlaying && 'text-[var(--primary-text)]',
+                            )}
+                            aria-label={footerReadAloudLabel}
                             onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => { event.stopPropagation(); stopFooterTTS(); }}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                if (isFooterTTSPlaying) {
+                                    stopFooterTTS();
+                                    return;
+                                }
+                                if (assistantPlanText.trim()) void playFooterTTS(assistantPlanText);
+                            }}
                         >
-                            <Icon name="volume-up" className="h-3 w-3 text-[var(--primary-text)]" />
+                            <Icon name="volume-up" className={cn('h-3 w-3', isFooterTTSPlaying && 'text-[var(--primary-text)]')} />
                         </Button>
                     </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{t('chat.messageBody.tts.stopSpeaking')}</TooltipContent>
+                    <TooltipContent sideOffset={6}>{footerReadAloudLabel}</TooltipContent>
                 </Tooltip>
             ) : null}
             {!isMiniChatSurface && !isReviewSessionView ? (
