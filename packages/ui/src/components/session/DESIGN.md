@@ -52,6 +52,12 @@ Spatial reference: https://github.com/changeroa/StyleGallery/blob/main/patterns/
   kind and ID. Thread actions explicitly say whether the host will resolve the
   thread or leave it open. The open inspection retains the receipt and proposals
   together; a changed receipt or proposal disables publication.
+- A watching loop whose PR is ready shows "PR ready · watching for new CI and
+  reviews" in the success tone, with Stop and no Dismiss; the iteration count
+  shows only once the round has one. "Keep watching after the PR is ready" is
+  the first control in the start dialog, the edit dialog and Settings.
+- The loop's messages to the session render as one collapsed OpenChamber row in
+  the transcript, never as a user bubble; a queued one offers Remove only.
 - The loop row announces the host's review state and completed/total operations,
   including retained blockers. Configuration stays disabled while a receipt or
   pending/blocked review job exists. Posting has no separate button.

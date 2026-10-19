@@ -312,7 +312,8 @@ removal tombstones for IDs not yet loaded. Older per-loop timestamps cannot
 replace newer records. Runtime changes invalidate pending reads and writes,
 including a switch away and back to the same runtime key. Mutation failures
 leave the authoritative configuration unchanged. Terminal loops remain visible
-until a successful server DELETE dismisses them. Web, Electron, hosted mobile,
+until a successful server DELETE dismisses them. A watching loop whose PR is
+ready (`status: 'watching'`, `statusReason: 'pr-ready'`) is active, not terminal. Web, Electron, hosted mobile,
 and Capacitor use this projection; VS Code exposes no fix-loop controls.
 
 The HTTP boundary parses each loop separately. An identifiable malformed record

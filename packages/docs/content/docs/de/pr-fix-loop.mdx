@@ -1,13 +1,13 @@
 ---
 title: PR-Fix-Schleife
-description: Lass eine Sitzung einen Pull Request weiter fixen, bis CI grün ist und das Review erledigt ist.
+description: Lass eine Sitzung einen Pull Request weiter fixen, bis CI grün ist und das Review erledigt ist, und ihn danach weiter beobachten.
 ---
 
 # PR-Fix-Schleife
 
 Die Fix-Schleife hält eine Sitzung an einem Pull Request, bis er mergebereit ist. OpenChamber beobachtet die Checks und das Review des PRs. Schlägt CI fehl, bekommt die Sitzung die fehlgeschlagenen Checks mit Schritten, Annotationen und Logzeilen. Wenn jemand reviewt oder kommentiert, bekommt die Sitzung dieses Feedback, nimmt die Änderung vor und antwortet im PR. Die Schleife läuft auf deinem OpenChamber-Server und läuft deshalb auch bei geschlossener App weiter.
 
-Sie endet, wenn der PR bereit ist: CI ist grün, kein Review-Thread ist offen und niemand wartet auf angeforderte Änderungen. Dann bekommst du eine Benachrichtigung, und auch dann, wenn die Schleife aus einem anderen Grund stoppt.
+Ist der PR bereit (CI ist grün, kein Review-Thread ist offen und niemand wartet auf angeforderte Änderungen), beobachtet die Schleife ihn weiter. Ein CI-Fehler oder ein Review, das später eintrifft, geht genauso an die Sitzung, bis der PR gemergt oder geschlossen wird oder du die Schleife stoppst. Du bekommst jedes Mal eine Benachrichtigung, wenn der PR bereit wird, und wenn die Schleife aus einem anderen Grund stoppt. Ist **Keep watching after the PR is ready** ausgeschaltet, endet die Schleife, sobald der PR bereit ist.
 
 ## Die Schleife starten
 
@@ -15,27 +15,36 @@ Sie endet, wenn der PR bereit ist: CI ist grün, kein Review-Thread ist offen un
 2. Finde den Pull Request im Board [Issues und PRs](/de/issues-and-prs/), in der Pull-Request-Ansicht oder in den **Context sources** der Sitzung (Menü **⋮** in der Zeile des PRs) und wähle **Start fix loop**.
 3. Prüfe die Einstellungen im Dialog und klicke auf **Start fix loop**.
 
-Die Schleife erscheint oben im Nachrichtenfeld der Sitzung: der PR, was die Schleife gerade tut, die Anzahl der Durchläufe und der CI-Status. Von dort kannst du ihre Einstellungen ändern, den PR im Board öffnen oder sie mit **Stop** beenden.
+Die Schleife erscheint oben im Nachrichtenfeld der Sitzung: der PR, was die Schleife gerade tut, die Anzahl der Durchläufe und der CI-Status. Solange der PR bereit ist, steht dort **PR ready · watching for new CI and reviews**. Von dort kannst du ihre Einstellungen ändern, den PR im Board öffnen oder sie mit **Stop** beenden.
 
 ## Was die Sitzung bekommt
 
 - **Nach einem Push** wartet die Schleife auf CI für den neuen Commit. Schlägt er fehl, bekommt die Sitzung die fehlgeschlagenen Checks einmal pro Commit, nie zweimal denselben Fehler.
 - **Zu jedem Review, Review-Kommentar oder neuen Kommentar**, der nach deinen Einstellungen zählt, bekommt die Sitzung den Text und einen Link dazu. Sie soll im PR antworten und die Threads auflösen, die sie behoben hat. Um zu antworten und Threads aufzulösen, braucht die Sitzung eigene, authentifizierte GitHub-Tools. Das Konto der Schleife dient nur zum Lesen des PR.
 
-Ist die Sitzung beschäftigt, wartet die Nachricht in ihrer Warteschlange und geht raus, wenn der Zug endet. Ist GitHub nicht erreichbar, behält die Schleife ihren letzten Stand und meldet, dass sie nicht prüfen konnte. Einen fehlgeschlagenen Check liest sie nie als grün.
+Im Chat erscheint jede dieser Nachrichten als eine eingeklappte Zeile, etwa **Fix loop: CI failed on #5** oder **Fix loop: new review on #6**, mit Commit, Autoren und Durchlauf. Öffne sie, um alles zu lesen, was die Sitzung bekommen hat: fehlgeschlagene Checks, Schritte, Annotationen und Logzeilen, oder den Review-Text mit Autor und Link. Sie erscheint nie als Nachricht, die du getippt hast.
+
+Ist die Sitzung beschäftigt, wartet die Nachricht in ihrer Warteschlange und geht raus, wenn der Zug endet. Eine wartende Fix-Schleifen-Nachricht lässt sich entfernen, aber nicht bearbeiten oder aus der App abschicken, und sie behält ihre Zeile, wenn sie rausgeht. Ist GitHub nicht erreichbar, behält die Schleife ihren letzten Stand und meldet, dass sie nicht prüfen konnte. Einen fehlgeschlagenen Check liest sie nie als grün.
 
 ## Einstellungen
 
 Standardwerte stehen unter **Einstellungen → Integrationen → GitHub → Fix loop**, und jede Schleife kann sie ändern.
 
-- **Maximum iterations**: wie oft die Schleife Arbeit an die Sitzung schicken darf (Standard 10).
-- **Token budget**: stoppt, sobald die Sitzung seit dem Start der Schleife so viele Tokens verbraucht hat. Leer heißt kein Budget. Das Budget wird nach jedem Zug geprüft, ein Zug kann es also überschreiten.
+- **Keep watching after the PR is ready**: standardmäßig an. Schalte es aus, damit die Schleife endet, sobald der PR bereit ist.
+- **Maximum iterations**: wie oft die Schleife Arbeit an die Sitzung schicken darf, bis der PR wieder bereit ist (Standard 10). Die Zählung beginnt neu, sobald der PR bereit wird.
+- **Token budget**: stoppt, sobald die Sitzung seit dem Start der Schleife so viele Tokens verbraucht hat, über alle Runden hinweg. Leer heißt kein Budget. Das Budget wird nach jedem Zug geprüft, ein Zug kann es also überschreiten.
 - **Respond to**: **CI and reviews**, **CI only** oder **Reviews only**.
-- **Ignore my feedback**: überspringt Kommentare des GitHub-Kontos, mit dem die Schleife den PR liest. Im automatischen Modus antwortet die Sitzung mit ihrem eigenen GitHub-Konto, und weicht es vom Lesekonto ab, trägst du es unter **Blocked authors** ein. Im Freigabemodus antwortet der Server mit dem an die Schleife gebundenen GitHub-Konto, der Worker hat kein GitHub-Konto.
+- **Ignore my feedback**: überspringt Kommentare des GitHub-Kontos, mit dem die Schleife den PR liest. Standardmäßig aus, damit du den PR des Agenten mit deinem eigenen Konto reviewen kannst und die Sitzung jeden Thread bekommt. Die eigenen Antworten des Agenten werden an ihrer Markierung erkannt und übersprungen (siehe unten).
 - **Ignore bots**: überspringt Kommentare von Bots.
 - **Allowed authors** und **Blocked authors**: GitHub-Logins, durch Kommas getrennt. Mit einer Allow-Liste zählen nur diese Personen.
 - **Only comments that mention this text**: zählt einen Kommentar nur, wenn er den Erwähnungstext enthält (standardmäßig `@openchamber`).
 - **Push changes**: **Push automatically** oder **Wait for my approval**. Der automatische Modus behält den GitHub-Ablauf der Sitzung. Der Freigabemodus führt die Korrekturen in einem eingeschränkten Worker aus und braucht eine eigene Einrichtung.
+
+## Text, den der Agent auf GitHub schreibt
+
+Jeder Kommentar, jede Antwort und jedes Review des Agenten endet mit einer kurzen Zeile, **Written by the OpenChamber agent**, und einer versteckten Markierung (`<!-- openchamber-agent:v1 -->`). Die Schleife überspringt Text mit dieser Markierung immer, egal was die Autoren-Einstellungen sagen. Nutzt du dasselbe GitHub-Konto wie der Agent, kommen seine Antworten also nie als neues Feedback zu ihm zurück. Im Freigabemodus fügt der Server die Markierung zu den Antworten hinzu, die er postet. Im automatischen Modus wird die Sitzung angewiesen, sie hinzuzufügen. Vergisst die Sitzung das, überspringt die Schleife auch eine Antwort des Lesekontos, die während ihres eigenen Zugs oder in den zwei Minuten danach gepostet wurde.
+
+Die Markierung kennzeichnet Text und ist keine Signatur. Jeder kann sie in einen Kommentar einfügen, damit die Schleife auf diesen Kommentar nicht reagiert. Das unterdrückt nur eine Reaktion: Es gibt keinen Zugriff und startet keine Arbeit.
 
 ## Freigabemodus
 
@@ -77,13 +86,13 @@ Der Server führt die Schleife auch bei geschlossenen Clients aus. Web-App, Desk
 
 | Status | Grund |
 | --- | --- |
-| PR ist bereit | CI grün, keine offenen Threads, keine angeforderten Änderungen |
+| PR ist bereit | CI grün, keine offenen Threads, keine angeforderten Änderungen, und **Keep watching after the PR is ready** ist aus |
 | PR geschlossen | Der PR wurde gemergt oder geschlossen |
 | Iterationslimit | Die Schleife hat so oft Arbeit geschickt wie erlaubt |
 | Token-Budget | Die Sitzung hat das Budget aufgebraucht |
 | Gestoppt | Du hast sie gestoppt oder die Sitzung wurde gelöscht |
 
-Eine gestoppte Schleife bleibt oben im Nachrichtenfeld, bis du sie schließt. Im Freigabemodus mit ausstehendem Beleg oder ausstehenden GitHub-Antworten bleibt die Arbeit erhalten und die Schleife bestehen. Setze die bestehende Schleife mit **Resume fix loop** fort. Auf demselben PR beginnt eine neue Schleife erst, wenn keine Veröffentlichung und keine Antworten mehr ausstehen.
+Eine gestoppte Schleife bleibt oben im Nachrichtenfeld, bis du sie schließt. Eine Schleife, die als bereit endete, bevor es das Beobachten gab, bleibt beendet; schließe sie und starte sie neu, um den PR zu beobachten. Im Freigabemodus mit ausstehendem Beleg oder ausstehenden GitHub-Antworten bleibt die Arbeit erhalten und die Schleife bestehen. Setze die bestehende Schleife mit **Resume fix loop** fort. Auf demselben PR beginnt eine neue Schleife erst, wenn keine Veröffentlichung und keine Antworten mehr ausstehen.
 
 ## Stacks
 

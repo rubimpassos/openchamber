@@ -1,13 +1,13 @@
 ---
 title: PR fix loop
-description: Let a session keep fixing a pull request until CI is green and the review is done.
+description: Let a session keep fixing a pull request until CI is green and the review is done, and keep watching it after that.
 ---
 
 # PR fix loop
 
 The fix loop keeps a session working on one pull request until it's ready to merge. OpenChamber watches the PR's checks and its review. When CI fails, the session gets the failed checks with their steps, annotations and log lines. When someone reviews or comments, the session gets that feedback, makes the change and replies on the PR. The loop runs on your OpenChamber server, so it keeps going with the app closed.
 
-It ends when the PR is ready: CI is green, no review thread is left unresolved and nobody is waiting on requested changes. You get a notification then, and also when the loop stops for another reason.
+When the PR is ready (CI is green, no review thread is left unresolved and nobody is waiting on requested changes), the loop keeps watching it. A CI failure or a review that arrives later goes to the session the same way, until the PR is merged or closed or you stop the loop. You get a notification each time the PR becomes ready, and when the loop stops for another reason. With **Keep watching after the PR is ready** turned off, the loop ends as soon as the PR is ready.
 
 ## Start the loop
 
@@ -15,14 +15,16 @@ It ends when the PR is ready: CI is green, no review thread is left unresolved a
 2. Find the pull request in the [Issues and PRs](/issues-and-prs/) board, the pull request view, or the session's **Context sources** (the **⋮** menu on the PR's row), and choose **Start fix loop**.
 3. Check the settings in the dialog and click **Start fix loop**.
 
-The loop shows at the top of the session's message box: the PR, what the loop is doing, the iteration count and the CI state. From there you can change its settings, open the PR on the board, or **Stop** it.
+The loop shows at the top of the session's message box: the PR, what the loop is doing, the iteration count and the CI state. While the PR is ready it reads **PR ready · watching for new CI and reviews**. From there you can change its settings, open the PR on the board, or **Stop** it.
 
 ## What the session receives
 
 - **After a push**, the loop waits for CI on the new commit. If it fails, the session gets the failing checks once per commit, never the same failure twice.
 - **For each review, review comment or new comment** that counts under your settings, the session gets its text and a link to it. The session is asked to reply on the PR and resolve the threads it fixed. To reply and resolve threads, the session needs its own authenticated GitHub tools. The loop's account is only used to read the PR.
 
-If the session is busy, the message waits in its queue and goes out when the turn ends. If GitHub can't be reached, the loop keeps what it knew and says it couldn't check. It never reads a failed check as green.
+In the chat, each of these messages shows as one collapsed row, such as **Fix loop: CI failed on #5** or **Fix loop: new review on #6**, with the commit, the authors and the iteration. Open it to read everything the session received: failed checks, steps, annotations and log lines, or the review text with its author and link. It never shows as a message you typed.
+
+If the session is busy, the message waits in its queue and goes out when the turn ends. A waiting fix-loop message can be removed but not edited or sent from the app, and it keeps its row when it goes out. If GitHub can't be reached, the loop keeps what it knew and says it couldn't check. It never reads a failed check as green.
 
 Automatic mode accepts review feedback only from authors whose repository write access GitHub confirms. This also applies to older comments included as thread context. Allowed-author lists and mentions cannot bypass that check. If permission cannot be verified, the loop reports an error and waits. Approval mode can send external feedback to its restricted worker; publishing still needs your approval. Old queued automatic messages without verified admission stay blocked; remove them so the loop can read the feedback again.
 
@@ -30,14 +32,21 @@ Automatic mode accepts review feedback only from authors whose repository write 
 
 Defaults live in **Settings → Integrations → GitHub → Fix loop**, and each loop can change them.
 
-- **Maximum iterations**: how many times the loop may send work to the session (default 10).
-- **Token budget**: stop once the session has used this many tokens since the loop started. Empty means no budget. The budget is checked after each turn, so a turn can go past it.
+- **Keep watching after the PR is ready**: on by default. Turn it off to end the loop once the PR is ready.
+- **Maximum iterations**: how many times the loop may send work to the session before the PR is ready again (default 10). The count starts over each time the PR becomes ready.
+- **Token budget**: stop once the session has used this many tokens since the loop started, across every round. Empty means no budget. The budget is checked after each turn, so a turn can go past it.
 - **Respond to**: **CI and reviews**, **CI only**, or **Reviews only**.
-- **Ignore my feedback**: skip comments from the GitHub account the loop reads with. In automatic mode the session replies with its own GitHub account, and if that differs from the reading account, you add it to **Blocked authors**. In approval mode the server replies with the GitHub account bound to the loop, and the worker has no GitHub account.
+- **Ignore my feedback**: skip comments from the GitHub account the loop reads with. Off by default, so you can review the agent's PR with your own account and the session gets every thread. The agent's own replies are skipped by their marker (see below).
 - **Ignore bots**: skip comments from bots.
 - **Allowed authors** and **Blocked authors**: GitHub logins, separated by commas. With an allow list, only those people count.
 - **Only comments that mention this text**: count a comment only when it contains the mention text (`@openchamber` by default).
 - **Push changes**: **Push automatically**, or **Wait for my approval**. Automatic mode keeps the session's own GitHub workflow. Approval mode runs the fixes in a restricted worker and needs its own setup.
+
+## Text the agent writes on GitHub
+
+Every comment, reply and review the agent writes ends with a short line, **Written by the OpenChamber agent**, and a hidden marker (`<!-- openchamber-agent:v1 -->`). The loop always skips text with the marker, whatever the author settings say, so when you and the agent use the same GitHub account, its replies never come back to it as new feedback. In approval mode the server adds the marker to the replies it posts. In automatic mode the session is told to add it. If the session forgets, the loop also skips a reply from the reading account posted while its own turn ran or within two minutes after it.
+
+The marker labels text; it is not a signature. Anyone can paste it into a comment to keep the loop from reacting to that comment. That only suppresses a reaction: it gives no access and starts no work.
 
 ## Approval mode
 
@@ -79,13 +88,13 @@ The server runs the loop with every client closed. The web app, the desktop app 
 
 | Status | Why |
 | --- | --- |
-| PR is ready | CI green, no unresolved threads, no requested changes |
+| PR is ready | CI green, no unresolved threads, no requested changes, and **Keep watching after the PR is ready** is off |
 | PR closed | The PR was merged or closed |
 | Iteration limit | The loop sent work as many times as allowed |
 | Token budget | The session used up the budget |
 | Stopped | You stopped it, or the session was deleted |
 
-A loop that stopped stays at the top of the message box until you dismiss it. In approval mode with a pending receipt or GitHub replies, the work is retained and the loop stays; use **Resume fix loop** to continue the existing loop. Starting again on the same PR begins a new loop only when no publication or replies are pending.
+A loop that stopped stays at the top of the message box until you dismiss it. A loop that ended as ready before watching existed stays finished; dismiss it and start it again to watch the PR. In approval mode with a pending receipt or GitHub replies, the work is retained and the loop stays; use **Resume fix loop** to continue the existing loop. Starting again on the same PR begins a new loop only when no publication or replies are pending.
 
 ## Stacks
 

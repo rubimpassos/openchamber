@@ -22,6 +22,7 @@ import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
 import { readOpenChamberResume, type OpenChamberResume } from '@/lib/opencode/openchamber-resume';
+import { fixLoopTitle } from './fixLoopNoticeTitle';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { IconName } from '@/components/icon/icons';
@@ -313,7 +314,7 @@ const RESTART_CAUSE_KEYS = {
 } as const satisfies Record<Extract<OpenChamberResume, { kind: 'restart-resume' }>['cause'], I18nKey | null>;
 
 const openChamberResumeTitle = (
-    resume: OpenChamberResume,
+    resume: Exclude<OpenChamberResume, { kind: 'fix-loop' }>,
     t: ReturnType<typeof useI18n>['t'],
     formatTime: (timestamp: number) => string,
 ): string => {
@@ -343,10 +344,11 @@ const openChamberResumeBody = (resume: OpenChamberResume): string => {
 };
 
 /**
- * OpenChamber woke a session it saw cut off: a resume after an OpenCode
- * restart, or the answer to a question the restart or the inactivity eviction
- * interrupted. One collapsed line in the tool style, so it never reads as
- * something the user typed; it opens to what the agent received.
+ * A message OpenChamber wrote into the session: a resume after an OpenCode
+ * restart, the answer to a question the restart or the inactivity eviction
+ * interrupted, or what the PR fix loop found. One collapsed line in the tool
+ * style, so it never reads as something the user typed; it opens to what the
+ * agent received.
  */
 const OpenChamberResumeNotice: React.FC<{ message: SyntheticMessage; resume: OpenChamberResume }> = ({ message, resume }) => {
     const { t } = useI18n();
@@ -362,8 +364,8 @@ const OpenChamberResumeNotice: React.FC<{ message: SyntheticMessage; resume: Ope
                 text={openChamberResumeBody(resume)}
                 blockId={message.id}
                 presentation={{
-                    icon: resume.kind === 'question-answer' ? 'question' : 'restart',
-                    title: openChamberResumeTitle(resume, t, formatTime),
+                    icon: resume.kind === 'question-answer' ? 'question' : resume.kind === 'fix-loop' ? 'git-pull-request' : 'restart',
+                    title: resume.kind === 'fix-loop' ? fixLoopTitle(resume, t) : openChamberResumeTitle(resume, t, formatTime),
                     expandLabel: t('chat.openchamberResume.show'),
                     collapseLabel: t('chat.openchamberResume.hide'),
                     markdownVariant: 'assistant',

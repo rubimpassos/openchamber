@@ -57,9 +57,12 @@ export interface QueuedInput {
     context?: readonly QueuedContextPart[];
 }
 
+const isServerOwned = (message: QueuedMessage): boolean =>
+    Boolean(message.scheduledTask) || message.origin?.kind === 'pr-fix-loop';
+
 export const selectComposerQueue = (messages: readonly QueuedMessage[]): readonly QueuedMessage[] =>
-    messages.some((message) => message.scheduledTask)
-        ? messages.filter((message) => !message.scheduledTask)
+    messages.some(isServerOwned)
+        ? messages.filter((message) => !isServerOwned(message))
         : messages;
 
 /** An issue, PR or tracker item attached to the composer, as it is sent. */

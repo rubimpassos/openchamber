@@ -86,4 +86,12 @@ describe('QueuedMessagesStrip', () => {
     expect(host.textContent).toContain('Second');
     expect(buttons().filter((item) => item.getAttribute('aria-label') === 'Drag to reorder')).toHaveLength(2);
   });
+
+  test('a fix-loop item can be removed but not edited or sent by the client', async () => {
+    await setQueue({ ...queued('q1', 'Fix loop: PR #5 · CI failed'), origin: { kind: 'pr-fix-loop', id: 'fixloop_1' } });
+    expect(host.textContent).toContain('Fix loop: PR #5 · CI failed');
+    expect(button('Edit')).toBeUndefined();
+    expect(button('send')).toBeUndefined();
+    expect(button('Remove from queue')).toBeDefined();
+  });
 });

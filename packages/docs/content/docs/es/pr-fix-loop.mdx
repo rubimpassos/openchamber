@@ -1,13 +1,13 @@
 ---
 title: Bucle de corrección de PR
-description: Deja que una sesión siga corrigiendo un pull request hasta que CI esté en verde y la revisión termine.
+description: Deja que una sesión siga corrigiendo un pull request hasta que CI esté en verde y la revisión termine, y que lo siga vigilando después.
 ---
 
 # Bucle de corrección de PR
 
 El bucle de corrección mantiene a una sesión trabajando en un pull request hasta que está listo para fusionar. OpenChamber vigila los checks y la revisión del PR. Cuando CI falla, la sesión recibe los checks fallidos con sus pasos, anotaciones y líneas de log. Cuando alguien revisa o comenta, la sesión recibe ese feedback, hace el cambio y responde en el PR. El bucle corre en tu servidor de OpenChamber, así que sigue con la app cerrada.
 
-Termina cuando el PR está listo: CI en verde, ningún hilo de revisión sin resolver y nadie esperando cambios solicitados. Entonces recibes una notificación, y también cuando el bucle se detiene por otro motivo.
+Cuando el PR está listo (CI en verde, ningún hilo de revisión sin resolver y nadie esperando cambios solicitados), el bucle sigue vigilándolo. Un fallo de CI o una revisión que llegue después van a la sesión de la misma manera, hasta que el PR se fusione o se cierre, o detengas el bucle. Recibes una notificación cada vez que el PR queda listo y cuando el bucle se detiene por otro motivo. Con **Keep watching after the PR is ready** desactivado, el bucle termina en cuanto el PR está listo.
 
 ## Iniciar el bucle
 
@@ -15,27 +15,36 @@ Termina cuando el PR está listo: CI en verde, ningún hilo de revisión sin res
 2. Busca el pull request en el tablero de [Issues y PRs](/es/issues-and-prs/), en la vista de pull request o en las **Context sources** de la sesión (menú **⋮** de la fila del PR), y elige **Start fix loop**.
 3. Revisa los ajustes del diálogo y haz clic en **Start fix loop**.
 
-El bucle aparece arriba del cuadro de mensaje de la sesión: el PR, lo que está haciendo el bucle, el número de iteraciones y el estado de CI. Desde ahí puedes cambiar sus ajustes, abrir el PR en el tablero o detenerlo con **Stop**.
+El bucle aparece arriba del cuadro de mensaje de la sesión: el PR, lo que está haciendo el bucle, el número de iteraciones y el estado de CI. Mientras el PR está listo, muestra **PR ready · watching for new CI and reviews**. Desde ahí puedes cambiar sus ajustes, abrir el PR en el tablero o detenerlo con **Stop**.
 
 ## Qué recibe la sesión
 
 - **Tras un push**, el bucle espera a CI en el commit nuevo. Si falla, la sesión recibe los checks fallidos una vez por commit, nunca el mismo fallo dos veces.
 - **Por cada revisión, comentario de revisión o comentario nuevo** que cuente según tus ajustes, la sesión recibe su texto y un enlace. Se le pide que responda en el PR y resuelva los hilos que corrigió. Para responder y resolver hilos, la sesión necesita sus propias herramientas de GitHub autenticadas. La cuenta del bucle solo sirve para leer el PR.
 
-Si la sesión está ocupada, el mensaje espera en su cola y sale cuando termina el turno. Si no se puede llegar a GitHub, el bucle conserva lo que sabía y avisa de que no pudo comprobar. Nunca lee un check fallido como verde.
+En el chat, cada uno de estos mensajes aparece como una fila contraída, por ejemplo **Fix loop: CI failed on #5** o **Fix loop: new review on #6**, con el commit, los autores y la iteración. Ábrela para leer todo lo que recibió la sesión: checks fallidos, pasos, anotaciones y líneas de log, o el texto de la revisión con su autor y enlace. Nunca aparece como un mensaje que escribiste tú.
+
+Si la sesión está ocupada, el mensaje espera en su cola y sale cuando termina el turno. Un mensaje del bucle en espera se puede quitar, pero no editar ni enviar desde la app, y conserva su fila cuando sale. Si no se puede llegar a GitHub, el bucle conserva lo que sabía y avisa de que no pudo comprobar. Nunca lee un check fallido como verde.
 
 ## Ajustes
 
 Los valores por defecto están en **Settings → Integrations → GitHub → Fix loop**, y cada bucle puede cambiarlos.
 
-- **Maximum iterations**: cuántas veces puede el bucle enviar trabajo a la sesión (10 por defecto).
-- **Token budget**: se detiene cuando la sesión ha usado esta cantidad de tokens desde que empezó el bucle. Vacío significa sin presupuesto. El presupuesto se comprueba después de cada turno, así que un turno puede superarlo.
+- **Keep watching after the PR is ready**: activado por defecto. Desactívalo para que el bucle termine cuando el PR esté listo.
+- **Maximum iterations**: cuántas veces puede el bucle enviar trabajo a la sesión hasta que el PR vuelva a estar listo (10 por defecto). La cuenta empieza de nuevo cada vez que el PR queda listo.
+- **Token budget**: se detiene cuando la sesión ha usado esta cantidad de tokens desde que empezó el bucle, sumando todas las rondas. Vacío significa sin presupuesto. El presupuesto se comprueba después de cada turno, así que un turno puede superarlo.
 - **Respond to**: **CI and reviews**, **CI only** o **Reviews only**.
-- **Ignore my feedback**: omite los comentarios de la cuenta de GitHub con la que el bucle lee el PR. En modo automático la sesión responde con su propia cuenta de GitHub, y si es distinta de la cuenta de lectura, la añades a **Blocked authors**. En modo con aprobación responde el servidor con la cuenta de GitHub vinculada al ciclo, y el agente no tiene cuenta de GitHub.
+- **Ignore my feedback**: omite los comentarios de la cuenta de GitHub con la que el bucle lee el PR. Desactivado por defecto, así puedes revisar el PR del agente con tu propia cuenta y la sesión recibe todos los hilos. Las respuestas del propio agente se omiten por su marca (ver más abajo).
 - **Ignore bots**: omite los comentarios de bots.
 - **Allowed authors** y **Blocked authors**: logins de GitHub separados por comas. Con una lista de permitidos, solo cuentan esas personas.
 - **Only comments that mention this text**: cuenta un comentario solo si contiene el texto de mención (`@openchamber` por defecto).
 - **Push changes**: **Push automatically** o **Wait for my approval**. El modo automático mantiene el flujo de GitHub de la sesión. El modo con aprobación ejecuta las correcciones en un agente restringido y necesita su propia configuración.
+
+## Texto que el agente escribe en GitHub
+
+Cada comentario, respuesta y revisión que escribe el agente termina con una línea corta, **Written by the OpenChamber agent**, y una marca oculta (`<!-- openchamber-agent:v1 -->`). El bucle siempre omite el texto con la marca, sin importar los ajustes de autores, así que si tú y el agente usáis la misma cuenta de GitHub, sus respuestas nunca le vuelven como feedback nuevo. En modo con aprobación, el servidor añade la marca a las respuestas que publica. En modo automático se le indica a la sesión que la añada. Si la sesión se olvida, el bucle también omite una respuesta de la cuenta de lectura publicada mientras corría su propio turno o en los dos minutos siguientes.
+
+La marca etiqueta el texto y no es una firma. Cualquiera puede pegarla en un comentario para que el bucle no reaccione a ese comentario. Eso solo suprime una reacción: no da acceso ni inicia trabajo.
 
 ## Modo con aprobación
 
@@ -77,13 +86,13 @@ El servidor ejecuta el ciclo con todos los clientes cerrados. La app web, la de 
 
 | Estado | Motivo |
 | --- | --- |
-| PR listo | CI en verde, sin hilos sin resolver, sin cambios solicitados |
+| PR listo | CI en verde, sin hilos sin resolver, sin cambios solicitados y **Keep watching after the PR is ready** está desactivado |
 | PR cerrado | El PR se fusionó o se cerró |
 | Límite de iteraciones | El bucle envió trabajo tantas veces como se permite |
 | Presupuesto de tokens | La sesión agotó el presupuesto |
 | Detenido | Lo detuviste tú o se eliminó la sesión |
 
-Un bucle detenido permanece arriba del cuadro de mensaje hasta que lo descartes. En modo con aprobación, con un recibo o respuestas de GitHub pendientes, el trabajo se conserva y el bucle permanece; usa **Resume fix loop** para continuar el bucle existente. Iniciarlo de nuevo en el mismo PR empieza un bucle nuevo solo cuando no hay publicación ni respuestas pendientes.
+Un bucle detenido permanece arriba del cuadro de mensaje hasta que lo descartes. Un bucle que terminó como listo antes de que existiera la vigilancia sigue terminado; descártalo y vuelve a iniciarlo para vigilar el PR. En modo con aprobación, con un recibo o respuestas de GitHub pendientes, el trabajo se conserva y el bucle permanece; usa **Resume fix loop** para continuar el bucle existente. Iniciarlo de nuevo en el mismo PR empieza un bucle nuevo solo cuando no hay publicación ni respuestas pendientes.
 
 ## Stacks
 

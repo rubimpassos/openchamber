@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { markAgentText } from './agent-marker.js';
 import { approvalError, receiptSchema } from './approval-contract.js';
 
 const databaseId = z.number().int().positive();
@@ -17,7 +18,9 @@ const targetSchema = z.discriminatedUnion('kind', [
 ]);
 export const reviewTurnSchema = z.object({ id: z.uuid(), targets: z.array(targetSchema).max(200) }).strict();
 export const reviewJobSchema = z.object({ receipt: receiptSchema, completed: z.number().int().nonnegative(),
-  dispatching: z.number().int().nonnegative().nullable() }).strict();
+  dispatching: z.number().int().nonnegative().nullable(),
+  // Jobs created after the agent marker existed post marked bodies.
+  agentMarker: z.literal(1).optional() }).strict();
 const key = (target) => `${target.kind}:${target.id}`;
 
 // Only authenticated feedback selected for this turn can become a write target.
@@ -54,11 +57,17 @@ export function validateReviewActions(turnInput, value) {
   return result.actions;
 }
 
-export const reviewOperations = (turn, actions) => actions.flatMap((action, index) => {
+/**
+ * The host writes for one turn. `marked` adds the agent marker to every
+ * posted body; a job saved before the marker existed replays without it,
+ * because a replay must send the exact body its operation key was made for.
+ */
+export const reviewOperations = (turn, actions, { marked = false } = {}) => actions.flatMap((action, index) => {
   const idempotencyKey = `fix-review:${turn.id}:${index}`;
+  const posted = (text) => (marked ? markAgentText(text) : text);
   if (action.kind === 'thread') return [
-    { kind: 'thread-reply', threadId: action.id, body: action.body, idempotencyKey: `${idempotencyKey}:reply` },
+    { kind: 'thread-reply', threadId: action.id, body: posted(action.body), idempotencyKey: `${idempotencyKey}:reply` },
     ...(action.resolve ? [{ kind: 'thread-resolve', threadId: action.id, resolved: true, idempotencyKey: `${idempotencyKey}:resolve` }] : []),
   ];
-  return [{ kind: 'comment', body: `In response to ${action.kind} ${action.id}:\n\n${action.body}`, idempotencyKey }];
+  return [{ kind: 'comment', body: posted(`In response to ${action.kind} ${action.id}:\n\n${action.body}`), idempotencyKey }];
 });

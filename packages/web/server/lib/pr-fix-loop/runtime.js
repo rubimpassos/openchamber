@@ -18,9 +18,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import { z } from 'zod';
 import { approvalError, destinationOf, receiptSchema, sameDestination, workerSchema } from './approval-contract.js';
+import { AGENT_SIGNATURE, isAgentText } from './agent-marker.js';
 import { createReviewTurn, parseReviewActions, reviewInstructions, reviewJobSchema, reviewOperations, reviewTurnSchema, validateReviewActions } from './review-actions.js';
 
 const LOOPS_FILE = 'pr-fix-loops.json';
+// Marks the iteration message so the transcript renders an OpenChamber row
+// (`packages/ui/src/lib/opencode/openchamber-resume.ts`).
+const OPENCHAMBER_NOTICE_SOURCE = 'openchamber-notice';
 const MINUTE = 60_000;
 const WATCH_INTERVAL_MS = 3 * MINUTE;
 const CI_PENDING_INTERVAL_MS = MINUTE;
@@ -37,11 +41,18 @@ const MAX_TEXT = 4_000;
 
 const TERMINAL_STATUSES = new Set(['ready', 'stopped', 'closed', 'limitReached', 'budgetReached', 'error']);
 
+// After an agent turn, its own replies may still land for a short while.
+const AGENT_REPLY_GRACE_MS = 2 * MINUTE;
+const MAX_TURN_WINDOWS = 20;
+// Changing any of these makes feedback the loop skipped worth reading again.
+const ADMISSION_FIELDS = ['triggers', 'ignoreSelf', 'ignoreBots', 'allowAuthors', 'blockAuthors', 'mentionOnly', 'mentionText'];
+
 export const DEFAULT_CONFIG = Object.freeze({
+  watch: true,
   maxIterations: 10,
   tokenBudget: null,
   triggers: 'both',
-  ignoreSelf: true,
+  ignoreSelf: false,
   ignoreBots: true,
   allowAuthors: [],
   blockAuthors: [],
@@ -56,6 +67,7 @@ const loginList = z.array(z.unknown()).transform((list) => [...new Set(list
 
 // Every field is optional and parsed alone, so one bad field never drops the rest.
 const configFields = {
+  watch: z.boolean(),
   maxIterations: z.number().int().min(1).max(50),
   tokenBudget: z.number().int().positive().nullable(),
   triggers: z.enum(['both', 'ci', 'review']),
@@ -133,20 +145,58 @@ export function authorCounts(config, viewer, who) {
 const mentions = (config, body) => !config.mentionOnly || body.toLowerCase().includes(config.mentionText.toLowerCase());
 
 /**
+ * Whether one review, thread comment or conversation comment can start work,
+ * before the repository write check. In order: text carrying the agent marker
+ * never counts; `agentReply(entry, isReply)` drops an unmarked reply the agent
+ * likely posted during its own turn; then the author lists, self and bot
+ * settings, and the mention. `isReply` is true for a conversation comment and
+ * a thread comment after the first.
+ */
+const feedbackAdmission = (config, viewer, agentReply = () => false) => (entry, isReply) => (
+  !isAgentText(entry.body)
+  && !agentReply(entry, isReply)
+  && authorCounts(config, viewer, entry.author)
+  && mentions(config, entry.body)
+);
+
+const timeOf = (value) => {
+  const time = Date.parse(value ?? '');
+  return Number.isFinite(time) ? time : null;
+};
+
+const lastAgentTextAt = (snapshot) => {
+  const times = [
+    ...snapshot.threads.flatMap((thread) => thread.comments),
+    ...snapshot.reviews,
+    ...snapshot.comments,
+  ].filter((entry) => isAgentText(entry.body)).map((entry) => timeOf(entry.createdAt)).filter((time) => time !== null);
+  return times.length ? Math.max(...times) : null;
+};
+
+/**
  * The feedback in `snapshot` this loop has not handled yet. On the first read
  * only what still blocks the PR counts (unresolved threads, a pending change
- * request); earlier conversation comments are history.
+ * request); earlier reviews and conversation comments are history, except,
+ * with `mentionOnly`, those that mention the loop after the agent last wrote
+ * on the PR: a mention is an explicit request.
  */
-export function collectFeedback(snapshot, config, seen, { first }) {
-  const counts = (who, body) => authorCounts(config, snapshot.viewer, who) && mentions(config, body);
+export function collectFeedback(snapshot, config, seen, { first, agentReply }) {
+  const admits = feedbackAdmission(config, snapshot.viewer, agentReply);
   const feedback = { threads: [], reviews: [], comments: [], seen: [] };
+  const agentAt = first && config.mentionOnly ? lastAgentTextAt(snapshot) : null;
+  const mentionedSinceAgent = (entry) => {
+    if (!config.mentionOnly) return false;
+    const at = timeOf(entry.createdAt);
+    return agentAt === null || (at !== null && at > agentAt);
+  };
 
   for (const thread of snapshot.threads) {
     const fresh = thread.comments.filter((comment) => !seen.has(`t:${comment.id}`));
     feedback.seen.push(...fresh.map((comment) => `t:${comment.id}`));
     if (thread.resolved || fresh.length === 0) continue;
-    if (fresh.some((comment) => counts(comment.author, comment.body))) {
-      feedback.threads.push({ ...thread, fresh: new Set(fresh.map((comment) => comment.id)) });
+    const freshIds = new Set(fresh.map((comment) => comment.id));
+    if (thread.comments.some((comment, index) => freshIds.has(comment.id) && admits(comment, index > 0))) {
+      feedback.threads.push({ ...thread, fresh: freshIds });
     }
   }
 
@@ -156,8 +206,8 @@ export function collectFeedback(snapshot, config, seen, { first }) {
     if (seen.has(key)) continue;
     feedback.seen.push(key);
     const actionable = review.state === 'CHANGES_REQUESTED' || (review.body.trim() && review.state !== 'APPROVED');
-    if (!actionable || !counts(review.author, review.body)) continue;
-    if (first && !(requested && review.state === 'CHANGES_REQUESTED')) continue;
+    if (!actionable || !admits(review, false)) continue;
+    if (first && !(requested && review.state === 'CHANGES_REQUESTED') && !mentionedSinceAgent(review)) continue;
     feedback.reviews.push(review);
   }
 
@@ -165,11 +215,17 @@ export function collectFeedback(snapshot, config, seen, { first }) {
     const key = `c:${comment.id}`;
     if (seen.has(key)) continue;
     feedback.seen.push(key);
-    if (first || !counts(comment.author, comment.body)) continue;
+    if (!admits(comment, true) || (first && !mentionedSinceAgent(comment))) continue;
     feedback.comments.push(comment);
   }
   return feedback;
 }
+
+const handledKeys = (feedback) => [
+  ...feedback.threads.flatMap((thread) => [...thread.fresh].map((id) => `t:${id}`)),
+  ...feedback.reviews.map((review) => `r:${review.id}`),
+  ...feedback.comments.map((comment) => `c:${comment.id}`),
+];
 
 const hasFeedback = (feedback) => feedback.threads.length + feedback.reviews.length + feedback.comments.length > 0;
 
@@ -225,8 +281,48 @@ function buildIterationPrompt(loop, { failures, feedback }) {
       : '- Commit the completed changes in this space. The host exports an exact commit for approval. Publication and GitHub writes are unavailable here.',
     '- If something can only be decided by the user, say so plainly and stop.',
   ].filter(Boolean).join('\n'));
+  if (loop.config.pushMode === 'auto') {
+    sections.push([
+      '## Marking what you write on GitHub',
+      'End every comment, reply and review you write on GitHub with exactly this block. The loop skips text that carries it, so your own replies never come back to you as new feedback.',
+      fence(`\n${AGENT_SIGNATURE}`),
+    ].join('\n'));
+  }
   if (loop.internal.reviewTurn) sections.push(reviewInstructions(loop.internal.reviewTurn));
   return sections.join('\n\n');
+}
+
+const MAX_NOTICE_FEEDBACK = 200;
+
+/**
+ * What the transcript row shows for one iteration: an index of what the loop
+ * found, with links. The full text travels only in the message the agent
+ * reads, so long logs and comment bodies are not stored twice.
+ */
+function buildIterationNotice(loop, { failures, feedback, trigger }) {
+  const entries = feedback ? [
+    ...feedback.reviews.map((review) => ({ type: 'review', author: review.author.login, url: review.url })),
+    ...feedback.threads.map((thread) => {
+      const newest = thread.comments.filter((comment) => thread.fresh.has(comment.id)).at(-1) ?? thread.comments.at(-1);
+      const entry = { type: 'thread', author: newest?.author.login ?? 'ghost', url: newest?.url ?? loop.url };
+      if (thread.path) entry.path = thread.path;
+      if (thread.line) entry.line = thread.line;
+      return entry;
+    }),
+    ...feedback.comments.map((comment) => ({ type: 'comment', author: comment.author.login, url: comment.url })),
+  ].slice(0, MAX_NOTICE_FEEDBACK) : [];
+  return {
+    source: OPENCHAMBER_NOTICE_SOURCE,
+    kind: 'fix-loop',
+    loopId: loop.id,
+    pr: { owner: loop.owner, repo: loop.repo, number: loop.number, url: loop.url, title: loop.title },
+    trigger,
+    iteration: loop.iterations + 1,
+    maxIterations: loop.config.maxIterations,
+    headSha: failures?.headSha ?? loop.ci?.headSha ?? null,
+    checks: (failures?.runs ?? []).map((run) => ({ name: run.name, url: run.url ?? null })),
+    feedback: entries,
+  };
 }
 
 /**
@@ -242,7 +338,11 @@ function buildIterationPrompt(loop, { failures, feedback }) {
  * - `workerRuntime` owns protected worker preparation, verification and transport;
  * - `publication` captures immutable approval objects and exact host publication;
  * - `notify(loop)` on settling; `notifyAwaitingApproval(loop)` once per receipt that waits for the
- *   user's push approval; `broadcast(event)`; `readDefaults()` → partial config.
+ *   user's push approval; `notify` also runs once per watch round when the PR becomes ready
+ *   (`status: 'watching'`, `statusReason: 'pr-ready'`);
+ * - `resolveNotifications(loop)` when nothing the loop announced waits on the user any more: a new
+ *   round starts, a receipt is published, the loop is stopped, resumed or forgotten;
+ * - `broadcast(event)`; `readDefaults()` → partial config.
  */
 export function createFixLoopRuntime({
   dataDir,
@@ -261,6 +361,7 @@ export function createFixLoopRuntime({
   applyReviewOperation = null,
   notify = async () => undefined,
   notifyAwaitingApproval = async () => undefined,
+  resolveNotifications = async () => undefined,
   broadcast = () => undefined,
   readDefaults = async () => ({}),
   now = Date.now,
@@ -342,6 +443,31 @@ export function createFixLoopRuntime({
     return WATCH_INTERVAL_MS;
   };
 
+  const tellResolved = (loop) => {
+    Promise.resolve(resolveNotifications(publicLoop(loop)))
+      .catch((error) => log.warn?.('[pr-fix-loop] could not resolve notifications:', error?.message ?? error));
+  };
+
+  /**
+   * Automatic mode fallback for a reply the agent posted without the marker:
+   * a reply (never a review or a thread's first comment) by the account the
+   * loop reads with, created while one of the loop's own turns ran or within
+   * a short grace after it. Approval mode needs none: the host marks its writes.
+   */
+  const agentReplyFor = (loop, viewer) => (entry, isReply) => {
+    if (approval(loop) || !isReply || !viewer || entry.author.login.toLowerCase() !== viewer.toLowerCase()) return false;
+    const at = Date.parse(entry.createdAt ?? '');
+    if (!Number.isFinite(at)) return false;
+    return (loop.internal.turnWindows ?? []).some((window) => (
+      at >= window.start && at <= (window.end ?? now()) + AGENT_REPLY_GRACE_MS
+    ));
+  };
+
+  const closeTurnWindow = (loop) => {
+    const open = (loop.internal.turnWindows ?? []).at(-1);
+    if (open && open.end === null) open.end = now();
+  };
+
   const ciCounts = (loop) => loop.config.triggers !== 'review';
   const reviewCounts = (loop) => loop.config.triggers !== 'ci';
   const approval = (loop) => loop.config.pushMode === 'approval';
@@ -354,12 +480,13 @@ export function createFixLoopRuntime({
         await readAuthorPermission({ octokit, owner: loop.owner, repo: loop.repo, username }) === true);
       return permissions.get(username);
     };
+    const admits = feedbackAdmission(loop.config, snapshot.viewer, agentReplyFor(loop, snapshot.viewer));
     const threads = [];
     for (const thread of feedback.threads) {
       const comments = [];
       for (const comment of thread.comments) if (await trusted(comment.author)) comments.push(comment);
-      if (comments.some((comment) => thread.fresh.has(comment.id)
-        && authorCounts(loop.config, snapshot.viewer, comment.author) && mentions(loop.config, comment.body))) {
+      if (thread.comments.some((comment, index) => thread.fresh.has(comment.id) && comments.includes(comment)
+        && admits(comment, index > 0))) {
         threads.push({ ...thread, comments });
       }
     }
@@ -424,7 +551,7 @@ export function createFixLoopRuntime({
     const turn = reviewTurnSchema.parse(loop.internal.reviewTurn);
     // Re-parse persisted data against this turn before it can select a mutation.
     const actions = validateReviewActions(turn, { turnId: turn.id, actions: loop.review.actions });
-    const operations = reviewOperations(turn, actions);
+    const operations = reviewOperations(turn, actions, { marked: job.agentMarker === 1 });
     const receipt = receiptSchema.parse(job.receipt);
     if (job.completed > operations.length || (job.dispatching !== null && job.dispatching !== job.completed)) {
       throw approvalError('The saved review progress is invalid.');
@@ -484,6 +611,7 @@ export function createFixLoopRuntime({
         schedule(loop, approval(loop) ? 10_000 : WATCH_INTERVAL_MS);
         return;
       }
+      if (!approval(loop)) closeTurnWindow(loop);
       const accounted = await accountTurn(loop);
       if (!accounted) {
         await save(loop);
@@ -564,7 +692,9 @@ export function createFixLoopRuntime({
 
     const seen = new Set(loop.internal.seen);
     const first = !loop.internal.baselined;
-    let feedback = reviewCounts(loop) ? collectFeedback(snapshot, loop.config, seen, { first }) : null;
+    let feedback = reviewCounts(loop)
+      ? collectFeedback(snapshot, loop.config, seen, { first, agentReply: agentReplyFor(loop, snapshot.viewer) })
+      : null;
     if (!approval(loop) && feedback && hasFeedback(feedback)) {
       try {
         feedback = await trustedFeedback(loop, octokit, snapshot, feedback);
@@ -619,12 +749,19 @@ export function createFixLoopRuntime({
       }
       if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
       if (approval(loop)) loop.internal.reviewTurn = createReviewTurn(reviewWork ? feedback : null);
-      const text = buildIterationPrompt(loop, { failures, feedback: reviewWork ? feedback : null });
+      const sent = reviewWork ? feedback : null;
+      const trigger = ciFailed && reviewWork ? 'ci+review' : ciFailed ? 'ci' : 'review';
       const item = {
         content: `Fix loop: PR #${loop.number}${ciFailed ? ' · CI failed' : ''}${reviewWork ? ' · new review feedback' : ''}`,
-        text,
+        text: buildIterationPrompt(loop, { failures, feedback: sent }),
+        notice: buildIterationNotice(loop, { failures, feedback: sent, trigger }),
         origin: { kind: 'pr-fix-loop', id: loop.id },
       };
+      // A new round starts: the "PR is ready" announcement no longer holds.
+      if (loop.internal.readyAnnounced) {
+        loop.internal.readyAnnounced = false;
+        tellResolved(loop);
+      }
       if (approval(loop)) {
         await validateWorker(loop);
         if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
@@ -636,6 +773,8 @@ export function createFixLoopRuntime({
       } else {
         // Old queued prompts may contain feedback admitted before author checks.
         loop.internal.feedbackTrustVersion = 1;
+        // Saved before the queue sees it, so a reply posted as soon as the turn starts is covered.
+        loop.internal.turnWindows = [...(loop.internal.turnWindows ?? []), { start: now(), end: null }].slice(-MAX_TURN_WINDOWS);
         await save(loop);
         if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
         await enqueue(loop.sessionId, loop.directory, item);
@@ -643,12 +782,16 @@ export function createFixLoopRuntime({
       if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
       // Recorded only after the queue accepted it, so a failed enqueue is retried.
       if (feedback) for (const key of feedback.seen) seen.add(key);
+      if (sent && Array.isArray(loop.internal.handled)) {
+        loop.internal.handled = [...new Set([...loop.internal.handled, ...handledKeys(sent)])].slice(-MAX_SEEN);
+      }
       if (ciFailed) loop.internal.ciReportedSha = snapshot.headSha;
       loop.internal.baselined = true;
       loop.internal.seen = [...seen].slice(-MAX_SEEN);
       loop.iterations += 1;
+      loop.totalIterations = (loop.totalIterations ?? 0) + 1;
       loop.status = 'working';
-      loop.statusReason = ciFailed && reviewWork ? 'ci+review' : ciFailed ? 'ci' : 'review';
+      loop.statusReason = trigger;
       await save(loop);
       schedule(loop, approval(loop) ? 10_000 : WATCH_INTERVAL_MS);
       return;
@@ -660,7 +803,19 @@ export function createFixLoopRuntime({
     const ciReady = !ciCounts(loop) || ciState === 'success';
     const reviewReady = !reviewCounts(loop) || (loop.unresolvedThreads === 0 && !loop.changesRequested);
     if (ciReady && reviewReady) {
-      await settle(loop, 'ready', null);
+      if (!loop.config.watch) {
+        await settle(loop, 'ready', null);
+        return;
+      }
+      // Watching: ready is a wait. The round ends, so its iteration count starts over.
+      const announce = !loop.internal.readyAnnounced;
+      loop.internal.readyAnnounced = true;
+      loop.iterations = 0;
+      loop.status = 'watching';
+      loop.statusReason = 'pr-ready';
+      await save(loop);
+      schedule(loop, WATCH_INTERVAL_MS);
+      if (announce) await notify(publicLoop(loop)).catch((error) => log.warn?.('[pr-fix-loop] notification failed:', error?.message ?? error));
       return;
     }
     loop.status = 'watching';
@@ -699,10 +854,12 @@ export function createFixLoopRuntime({
         const parsed = storedLoop.safeParse(entry);
         if (!parsed.success) throw new Error('Invalid fix-loop record');
         requireExecutionMode(parsed.data.config);
-        const entryConfig = normalizeConfig(parsed.data.config);
+        // Loops saved before these settings existed keep the behavior they started with.
+        const entryConfig = normalizeConfig(parsed.data.config, { ...DEFAULT_CONFIG, watch: false, ignoreSelf: true });
         if (parsed.data.worker || parsed.data.pendingApproval || parsed.data.config?.pushMode === 'approval') entryConfig.pushMode = 'approval';
         const { pendingPushCommits: _legacyPushCount, ...record } = parsed.data;
-        loops.set(record.id, { ...record, config: entryConfig });
+        const totalIterations = Number.isInteger(record.totalIterations) ? record.totalIterations : record.iterations;
+        loops.set(record.id, { ...record, totalIterations, config: entryConfig });
       }
     }).catch((error) => {
       if (error?.code !== 'ENOENT') {
@@ -711,6 +868,21 @@ export function createFixLoopRuntime({
       }
     });
     return loaded;
+  };
+
+  /**
+   * A changed admission setting reads again what the loop skipped: everything
+   * it saw but never sent goes back to unread, under the first-read rules, so
+   * history stays history and an open thread it skipped is admitted. Loops
+   * saved before the loop kept `handled` cannot tell the two apart and keep
+   * what they saw.
+   */
+  const applyConfig = (loop, next) => {
+    const changed = ADMISSION_FIELDS.some((field) => JSON.stringify(loop.config[field]) !== JSON.stringify(next[field]));
+    loop.config = next;
+    if (!changed || !Array.isArray(loop.internal.handled)) return;
+    loop.internal.seen = [...loop.internal.handled];
+    loop.internal.baselined = false;
   };
 
   const requireLoop = (id) => {
@@ -792,7 +964,7 @@ export function createFixLoopRuntime({
         if (nextConfig.pushMode !== existing.config.pushMode) throw approvalError('Stop the loop before changing its execution mode.');
         if (existing.pendingApproval || existing.internal.reviewJob) throw approvalError('Complete the pending receipt and review writes before changing this loop.');
         await validateWorker(existing, true);
-        existing.config = nextConfig;
+        applyConfig(existing, nextConfig);
         await save(existing);
         schedule(existing, 0);
         return publicLoop(existing);
@@ -817,6 +989,7 @@ export function createFixLoopRuntime({
         pendingApproval: null,
         review: null,
         iterations: 0,
+        totalIterations: 0,
         tokensUsed: 0,
         ci: null,
         unresolvedThreads: null,
@@ -825,7 +998,7 @@ export function createFixLoopRuntime({
         lastError: null,
         createdAt: now(),
         updatedAt: now(),
-        internal: { seen: [], baselined: false, failures: 0 },
+        internal: { seen: [], handled: [], baselined: false, failures: 0 },
       };
       if (approval(loop)) {
         const worker = preparedWorkers.get(workerId);
@@ -874,7 +1047,7 @@ export function createFixLoopRuntime({
       if (next.pushMode !== loop.config.pushMode) throw approvalError('Stop the loop and prepare a new worker before changing execution mode.');
       await validateWorker(loop, true);
       if (loop.pendingApproval || loop.internal.reviewJob) throw approvalError('Complete the pending receipt and review writes before changing this loop.');
-      loop.config = next;
+      applyConfig(loop, next);
       await save(loop);
       if (!TERMINAL_STATUSES.has(loop.status)) schedule(loop, 0);
       return publicLoop(loop);
@@ -896,6 +1069,7 @@ export function createFixLoopRuntime({
       await load();
       const loop = requireLoop(id);
       if (!TERMINAL_STATUSES.has(loop.status)) await settle(loop, 'stopped', null);
+      tellResolved(loop);
       if (approval(loop) && loop.worker) await workerRuntime?.stop(loop);
       return publicLoop(loop);
     },
@@ -912,7 +1086,9 @@ export function createFixLoopRuntime({
       }
       loop.status = loop.pendingApproval ? 'waitingForPush' : loop.internal.turnSnapshot ? 'working' : 'watching';
       loop.lastError = null;
+      loop.internal.readyAnnounced = false;
       await save(loop);
+      tellResolved(loop);
       schedule(loop, 0);
       return publicLoop(loop);
     },
@@ -946,8 +1122,9 @@ export function createFixLoopRuntime({
         if (!alreadyPublished) await publication.publish(loop, pending, snapshot);
         if (loop.review?.state === 'awaitingPublication') {
           loop.review.state = 'pending';
-          loop.internal.reviewJob = { receipt, completed: 0, dispatching: null };
+          loop.internal.reviewJob = { receipt, completed: 0, dispatching: null, agentMarker: 1 };
         }
+        tellResolved(loop);
         loop.pendingApproval = null;
         loop.internal.publication = null;
         loop.internal.publicationState = null;
@@ -984,6 +1161,7 @@ export function createFixLoopRuntime({
       loops.delete(id);
       broadcast({ type: 'openchamber:pr-fix-loop.updated', properties: { id, removed: true } });
       await persist();
+      tellResolved(loop);
       return { ok: true };
     },
 

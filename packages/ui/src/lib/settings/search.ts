@@ -1507,6 +1507,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   ...([
+    ['watch', 'prFixLoop.config.watch'],
     ['maxIterations', 'prFixLoop.config.maxIterations'],
     ['tokenBudget', 'prFixLoop.config.tokenBudget'],
     ['triggers', 'prFixLoop.config.triggers'],

@@ -111,6 +111,8 @@ export interface QueuedMessage {
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: QueuedMessageSendConfig;
     scheduledTask?: z.infer<typeof scheduledTaskSchema>;
+    /** A server feature queued it (the PR fix loop, a restack); only the server sends it. */
+    origin?: z.infer<typeof serverOriginSchema>;
 }
 
 interface QueuedMessageInput {
@@ -199,8 +201,10 @@ const serverItemBaseSchema = z.object({
 const scheduledTaskSchema = z.object({
     projectId: z.string().min(1), taskId: z.string().min(1),
 });
+const serverOriginSchema = z.object({ kind: z.enum(['pr-fix-loop', 'pr-stack']), id: z.string().min(1) });
 const serverItemSchema = z.union([
     serverItemBaseSchema.extend({ scheduledTask: scheduledTaskSchema, sendConfig: serverSendConfigSchema.partial() }),
+    serverItemBaseSchema.extend({ origin: serverOriginSchema, sendConfig: serverSendConfigSchema.partial() }),
     serverItemBaseSchema,
 ]);
 
@@ -277,6 +281,7 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     const selection = serverSendConfigSchema.safeParse(item.sendConfig);
     if (selection.success) message.sendConfig = selection.data;
     if ('scheduledTask' in item) message.scheduledTask = item.scheduledTask;
+    if ('origin' in item) message.origin = item.origin;
     if (item.agentMention) message.agentMention = item.agentMention;
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;

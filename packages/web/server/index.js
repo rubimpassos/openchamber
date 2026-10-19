@@ -1364,10 +1364,13 @@ const prFixLoopRuntime = createFixLoopRuntime({
       budgetReached: 'Fix loop reached its token budget',
       error: 'Fix loop stopped',
     };
-    const title = titles[loop.status] ?? 'Fix loop finished';
+    // A watching loop announces each round's ready PR once and keeps watching.
+    const prReady = loop.status === 'watching' && loop.statusReason === 'pr-ready';
+    const title = prReady ? 'Pull request is ready' : titles[loop.status] ?? 'Fix loop finished';
+    const reason = prReady ? 'still watching for new CI failures and reviews' : loop.statusReason;
     const notificationPayload = {
       title,
-      body: [`#${loop.number} ${loop.title}`.trim(), loop.statusReason].filter(Boolean).join(' · ').slice(0, 240),
+      body: [`#${loop.number} ${loop.title}`.trim(), reason].filter(Boolean).join(' · ').slice(0, 240),
       tag: `pr-fix-loop-${loop.id}`,
       kind: 'goal',
       sessionId: loop.sessionId,
@@ -1377,17 +1380,18 @@ const prFixLoopRuntime = createFixLoopRuntime({
     broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
     recordCenterNotification({
       kind: 'fix-loop',
-      priority: loop.status === 'ready' || loop.status === 'closed' ? 'normal' : 'high',
+      priority: prReady || loop.status === 'ready' || loop.status === 'closed' ? 'normal' : 'high',
       delivery: 'delivered',
       title,
       body: notificationPayload.body,
       sessionId: loop.sessionId,
       directory: loop.directory,
+      requestId: loop.id,
     });
     void notificationTriggerRuntime.sendGoalSettlePush({
       sessionId: loop.sessionId,
       directory: loop.directory,
-      status: loop.status === 'ready' ? 'complete' : 'blocked',
+      status: prReady || loop.status === 'ready' ? 'complete' : 'blocked',
       title,
       body: notificationPayload.body,
     }).catch((error) => console.warn('[pr-fix-loop] push fanout failed:', error?.message || error));
@@ -1405,6 +1409,7 @@ const prFixLoopRuntime = createFixLoopRuntime({
       requestId: loop.id,
     });
   },
+  resolveNotifications: (loop) => notificationCenter.resolve({ sessionId: loop.sessionId, kinds: ['fix-loop'], requestId: loop.id }),
   broadcast: (event) => broadcastOpenChamberUiEvent(event),
   readDefaults: async () => (await readSettingsFromDisk().catch(() => ({})))?.prFixLoopDefaults ?? {},
 });

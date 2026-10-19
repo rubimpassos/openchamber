@@ -188,7 +188,8 @@ export function createSpaceWorker({ dataDir, getHost, git, gitServices, readHost
     },
     async enqueue(loop, item) {
       await validate(loop.worker);
-      const { origin: _origin, ...message } = item;
+      // The worker's turn stays an ordinary message: its turn reader uses the latest user message as the boundary.
+      const { origin: _origin, notice: _notice, ...message } = item;
       const response = await request(loop.worker, `/api/message-queue/sessions/${loop.worker.sessionId}/items`, {
         method: 'POST', body: { directory: loop.worker.spacePath, item: { ...message, sendConfig: loop.worker.model } },
       });

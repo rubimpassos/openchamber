@@ -1,6 +1,6 @@
 import type { FixLoop } from './prFixLoop';
 
-export const fixLoopStatusKeys = {
+const fixLoopStatusKeys = {
   watching: 'prFixLoop.status.watching',
   working: 'prFixLoop.status.working',
   waitingForPush: 'prFixLoop.status.waitingForPush',
@@ -11,6 +11,14 @@ export const fixLoopStatusKeys = {
   budgetReached: 'prFixLoop.status.budgetReached',
   error: 'prFixLoop.status.error',
 } as const satisfies Record<FixLoop['status'], string>;
+
+export const isFixLoopPrReady = (loop: Pick<FixLoop, 'status' | 'statusReason'>): boolean => (
+  loop.status === 'watching' && loop.statusReason === 'pr-ready'
+);
+
+export const fixLoopStatusKey = (loop: Pick<FixLoop, 'status' | 'statusReason'>) => (
+  isFixLoopPrReady(loop) ? 'prFixLoop.status.prReady' : fixLoopStatusKeys[loop.status]
+);
 
 /** A retained green sample cannot answer a failed read. */
 export const fixLoopCiState = (loop: FixLoop, projectionFailed: boolean): NonNullable<FixLoop['ci']>['state'] => (
