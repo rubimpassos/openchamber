@@ -40,6 +40,15 @@ import { formatChangeRequestReference, getSourceControlProviderLabel } from '@/l
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDetectedUpstreamContextKey, loadDetectedUpstreamRepo } from './detectedUpstreamRepo';
+import {
+  buildBaseBranchOptions,
+  getPullRequestTargetKey,
+  readRememberedTarget,
+  rememberTarget,
+  resolveDefaultTarget,
+  type PullRequestTarget,
+} from './pullRequestTarget';
+import { useStackParentBase } from './useStackParentBase';
 import type { ChangeRequest, SourceControlProvider } from '@/lib/source-control/types';
 import { prVisualStateOf, type PrVisualState } from '@/lib/source-control/prVisualState';
 import {
@@ -161,27 +170,6 @@ const normalizeBranchRef = (value: string): string => {
   return normalized;
 };
 
-const remoteBranchToName = (value: string, remoteName: string | null): string => {
-  const normalized = normalizeBranchRef(value);
-  if (!normalized || normalized.includes('->')) {
-    return '';
-  }
-
-  if (remoteName) {
-    const prefix = `${remoteName}/`;
-    if (normalized.startsWith(prefix)) {
-      return normalized.slice(prefix.length).trim();
-    }
-    return '';
-  }
-
-  const slashIndex = normalized.indexOf('/');
-  if (slashIndex > 0) {
-    return normalized.slice(slashIndex + 1).trim();
-  }
-  return normalized;
-};
-
 const getPullRequestSnapshotKey = (directory: string, branch: string): string => `${directory}::${branch}`;
 
 type PullRequestDraftSnapshot = {
@@ -190,6 +178,8 @@ type PullRequestDraftSnapshot = {
   draft: boolean;
   additionalContext: string;
   targetBaseBranch?: string;
+  /** The person picked the base (or declined the detected stack parent). */
+  baseTouched?: boolean;
 };
 
 const pullRequestDraftSnapshots = new Map<string, PullRequestDraftSnapshot>();
@@ -205,8 +195,8 @@ function useDetectedUpstreamRepo(
   const [state, setState] = React.useState<{
     contextKey: string | null;
     detectedUpstream: Project | null;
-    upstreamBranches: string[];
-  }>({ contextKey: null, detectedUpstream: null, upstreamBranches: [] });
+    viewerCanPush: boolean;
+  }>({ contextKey: null, detectedUpstream: null, viewerCanPush: false });
 
   React.useEffect(() => {
     if (!directory || !readContext || !contextKey) return;
@@ -215,13 +205,12 @@ function useDetectedUpstreamRepo(
     void (async () => {
       try {
         const result = await loadDetectedUpstreamRepo(sourceControl, readContext);
-        if (!cancelled) setState({
-          contextKey,
-          detectedUpstream: result.upstream,
-          upstreamBranches: result.branches,
-        });
+        if (!cancelled) setState({ contextKey, detectedUpstream: result.upstream, viewerCanPush: result.viewerCanPush });
       } catch {
-        // Preserve the last authoritative result for this context.
+        // An unreadable network leaves the bound repository as the target.
+        if (!cancelled) setState((previous) => previous.contextKey === contextKey
+          ? previous
+          : { contextKey, detectedUpstream: null, viewerCanPush: false });
       }
     })();
 
@@ -230,9 +219,32 @@ function useDetectedUpstreamRepo(
     };
   }, [contextKey, directory, readContext, sourceControl]);
 
-  return state.contextKey === contextKey
-    ? { detectedUpstream: state.detectedUpstream, upstreamBranches: state.upstreamBranches }
-    : { detectedUpstream: null, upstreamBranches: [] };
+  const settled = state.contextKey === contextKey;
+  return settled
+    ? { upstreamSettled: true, detectedUpstream: state.detectedUpstream, viewerCanPush: state.viewerCanPush }
+    : { upstreamSettled: false, detectedUpstream: null, viewerCanPush: false };
+}
+
+/** The parent's branches, read only while the parent is the target. */
+function useParentBranches(
+  sourceControl: SourceControlAPI,
+  readContext: SourceControlReadContext | null,
+  parent: Project | null,
+  enabled: boolean,
+) {
+  const [attempt, retry] = React.useReducer((value: number) => value + 1, 0);
+  const key = readContext && parent ? JSON.stringify([getDetectedUpstreamContextKey(readContext), parent.owner, parent.name, attempt]) : null;
+  const [state, setState] = React.useState<{ key: string; status: 'ready' | 'error'; branches: string[] } | null>(null);
+  React.useEffect(() => {
+    if (!enabled || !key || !readContext || !parent) return;
+    let cancelled = false;
+    void sourceControl.projectBranches(readContext, parent.owner, parent.name)
+      .then((branches) => { if (!cancelled) setState({ key, status: 'ready', branches }); })
+      .catch(() => { if (!cancelled) setState({ key, status: 'error', branches: [] }); });
+    return () => { cancelled = true; };
+  }, [enabled, key, parent, readContext, sourceControl]);
+  const current = state?.key === key ? state : null;
+  return { status: current?.status ?? 'loading', branches: current?.branches ?? [], retry };
 }
 
 export const PullRequestSection: React.FC<{
@@ -296,6 +308,11 @@ export const PullRequestSection: React.FC<{
     return normalizeBranchRef(baseBranch);
   });
 
+  const [baseTouched, setBaseTouched] = React.useState(() => initialSnapshot?.baseTouched === true);
+  const chooseBaseBranch = (value: string) => {
+    setBaseTouched(true);
+    setTargetBaseBranch(value);
+  };
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
 
@@ -334,12 +351,19 @@ export const PullRequestSection: React.FC<{
     | { key: string; status: 'loading' | 'error'; capabilities: null }
     | { key: string; status: 'ready'; capabilities: SourceControlCapabilities }
   >({ key: '', status: 'loading', capabilities: null });
-  const [useDetectedUpstream, setUseDetectedUpstream] = React.useState(false);
-  const { detectedUpstream, upstreamBranches } = useDetectedUpstreamRepo(
+  const { upstreamSettled, detectedUpstream, viewerCanPush } = useDetectedUpstreamRepo(
     directory,
     sourceControl,
     readContext,
   );
+  const targetKey = readContext ? getPullRequestTargetKey(readContext) : '';
+  const [chosenTarget, setChosenTarget] = React.useState<{ key: string; target: PullRequestTarget } | null>(null);
+  const rememberedTarget = React.useMemo(() => (targetKey ? readRememberedTarget(targetKey) : null), [targetKey]);
+  const target: PullRequestTarget = chosenTarget?.key === targetKey
+    ? chosenTarget.target
+    : resolveDefaultTarget({ isFork: detectedUpstream !== null, viewerCanPush, remembered: rememberedTarget });
+  const useDetectedUpstream = target === 'parent' && detectedUpstream !== null;
+  const parentBranches = useParentBranches(sourceControl, readContext, detectedUpstream, useDetectedUpstream);
 
   React.useEffect(() => {
     if (!readContext) return;
@@ -362,10 +386,6 @@ export const PullRequestSection: React.FC<{
   const sourceControlCapabilities = currentCapabilityState?.status === 'ready'
     ? currentCapabilityState.capabilities
     : null;
-
-  React.useEffect(() => {
-    setUseDetectedUpstream(false);
-  }, [directory]);
 
   const isFork = detectedUpstream !== null;
   const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork || stackBase));
@@ -390,42 +410,25 @@ export const PullRequestSection: React.FC<{
   const error = binding.error ? t('settings.gitlab.status.operationFailed') : statusEntry?.error ?? null;
   const isInitialStatusResolved = statusEntry?.isInitialStatusResolved ?? false;
 
-  const availableBaseBranches = React.useMemo(() => {
-    const baseRemoteName = useDetectedUpstream ? null : selectedRemoteName;
-    const unique = new Set<string>();
-
-    for (const remoteBranch of remoteBranches) {
-      const branchName = remoteBranchToName(remoteBranch, baseRemoteName);
-      if (!branchName || branchName === 'HEAD') {
-        continue;
-      }
-      unique.add(branchName);
-    }
-
-    // When using detected upstream, include all upstream repo branches
-    if (useDetectedUpstream) {
-      for (const b of upstreamBranches) {
-        if (b && b !== 'HEAD') {
-          unique.add(b);
-        }
-      }
-    }
-
-    const defaultBase = normalizeBranchRef(baseBranch);
-    if (defaultBase && defaultBase !== 'HEAD') {
-      unique.add(defaultBase);
-    }
-
-    const currentTarget = normalizeBranchRef(targetBaseBranch);
-    if (currentTarget && currentTarget !== 'HEAD') {
-      unique.add(currentTarget);
-    }
-
-    return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [baseBranch, remoteBranches, selectedRemoteName, targetBaseBranch, upstreamBranches, useDetectedUpstream]);
+  // The default base of the selected target: the parent's default branch, or
+  // the base derived for the bound repository (where the branch came from).
+  const targetDefaultBase = useDetectedUpstream && detectedUpstream?.defaultBranch
+    ? detectedUpstream.defaultBranch
+    : normalizeBranchRef(baseBranch);
+  const parentBranchesPending = useDetectedUpstream && parentBranches.status !== 'ready';
+  const availableBaseBranches = React.useMemo(() => buildBaseBranchOptions({
+    target: useDetectedUpstream ? 'parent' : 'origin',
+    remoteBranches,
+    primaryRemote: selectedRemoteName,
+    parentBranches: parentBranches.branches,
+    parentDefaultBranch: detectedUpstream?.defaultBranch ?? null,
+    baseBranch,
+    selected: targetBaseBranch,
+  }), [baseBranch, detectedUpstream?.defaultBranch, parentBranches.branches, remoteBranches, selectedRemoteName, targetBaseBranch, useDetectedUpstream]);
 
   React.useEffect(() => {
-    const normalizedBase = normalizeBranchRef(baseBranch);
+    if (parentBranchesPending) return;
+    const normalizedBase = targetDefaultBase;
     if (!targetBaseBranch && normalizedBase) {
       setTargetBaseBranch(normalizedBase);
       return;
@@ -443,7 +446,7 @@ export const PullRequestSection: React.FC<{
         setTargetBaseBranch(fallback);
       }
     }
-  }, [availableBaseBranches, baseBranch, targetBaseBranch]);
+  }, [availableBaseBranches, parentBranchesPending, targetBaseBranch, targetDefaultBase]);
 
   const pendingActionRefreshTimersRef = React.useRef<number[]>([]);
   const mutationKeysRef = React.useRef(new Map<string, { key: string; inFlight: boolean }>());
@@ -470,19 +473,21 @@ export const PullRequestSection: React.FC<{
     }
   }, []);
 
-  // Auto-enable detected upstream when there's no explicit upstream remote
-  React.useEffect(() => {
-    if (detectedUpstream) {
-      setUseDetectedUpstream(true);
-    }
-  }, [detectedUpstream]);
-
-  // Set target base branch to upstream's default branch when using detected upstream
+  // Moving to the parent starts from its default branch; the stack shortcut
+  // keeps its base.
   React.useEffect(() => {
     if (useDetectedUpstream && detectedUpstream?.defaultBranch && !stackBase) {
       setTargetBaseBranch(detectedUpstream.defaultBranch);
     }
   }, [useDetectedUpstream, detectedUpstream?.defaultBranch, stackBase]);
+
+  const chooseTarget = (next: PullRequestTarget) => {
+    if (!targetKey || next === target) return;
+    setChosenTarget({ key: targetKey, target: next });
+    rememberTarget(targetKey, next);
+    setBaseTouched(false);
+    if (next === 'origin' && !stackBase) setTargetBaseBranch(normalizeBranchRef(baseBranch));
+  };
 
   const pr = status?.changeRequest ?? status?.pr ?? null;
   const statusIdentity = status?.identity ?? readContext;
@@ -494,9 +499,23 @@ export const PullRequestSection: React.FC<{
   // the panel offers creating the next PR instead of a read-only detail view.
   const isHistoricalPr = pr?.state === 'merged' || pr?.state === 'closed';
   const livePr = isHistoricalPr ? null : pr;
+  const targetProject = useDetectedUpstream ? detectedUpstream : statusProject;
   const stackedBase = useStackedPullBase(readContext, targetBaseBranch, {
-    enabled: !livePr && !isVSCodeRuntime(), project: useDetectedUpstream ? detectedUpstream : statusProject,
+    enabled: !livePr && !isVSCodeRuntime(), project: targetProject,
   });
+  // Detection waits for the target to settle and steps aside for the stack
+  // shortcut, which already names its base.
+  const stackParent = useStackParentBase(readContext, branch, {
+    enabled: !livePr && !stackBase && upstreamSettled && !isVSCodeRuntime(),
+    project: targetProject,
+  });
+  const detectedParent = stackParent.state.status === 'ready' && stackParent.state.result.status === 'found'
+    ? stackParent.state.result.parent
+    : null;
+  React.useEffect(() => {
+    if (detectedParent && !baseTouched) setTargetBaseBranch(detectedParent.head);
+  }, [baseTouched, detectedParent]);
+  const declineStackParent = () => chooseBaseBranch(targetDefaultBase);
 
   const checks = status?.ci?.summary ?? status?.checks ?? null;
 
@@ -590,6 +609,7 @@ export const PullRequestSection: React.FC<{
     setBody(snapshot?.body ?? '');
     setDraft(snapshot?.draft ?? readCreateAsDraft());
     setTargetBaseBranch(snapshot?.targetBaseBranch ? normalizeBranchRef(snapshot.targetBaseBranch) : normalizeBranchRef(baseBranch));
+    setBaseTouched(snapshot?.baseTouched === true);
   }, [baseBranch, branch, snapshotKey]);
 
   React.useEffect(() => {
@@ -649,8 +669,9 @@ export const PullRequestSection: React.FC<{
       draft,
       additionalContext,
       targetBaseBranch,
+      baseTouched,
     });
-  }, [snapshotKey, title, body, draft, additionalContext, targetBaseBranch, directory, branch]);
+  }, [snapshotKey, title, body, draft, additionalContext, targetBaseBranch, baseTouched, directory, branch]);
 
   React.useEffect(() => {
     return () => {
@@ -750,7 +771,6 @@ export const PullRequestSection: React.FC<{
       toast.error(t('gitView.pr.toast.baseMustDifferFromHead'));
       return;
     }
-    const targetProject = useDetectedUpstream ? detectedUpstream : statusProject;
     if (!readContext || !targetProject) {
       // The status read's own error, such as GitHub refusing the account, says what to fix.
       toast.error(t('gitView.pr.toast.createPrFailed'), { description: error ?? t('gitView.pr.statusUnavailable') });
@@ -836,7 +856,7 @@ export const PullRequestSection: React.FC<{
       if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsCreating(false);
     }
-  }, [beginMutation, body, branch, branchPush, detectedUpstream, directory, draft, error, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, stackedBase, stackBase, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
+  }, [beginMutation, body, branch, branchPush, directory, draft, error, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, stackedBase, stackBase, targetBaseBranch, targetProject, title, useDetectedUpstream, t]);
 
   const containerClassName = 'border-0 bg-transparent rounded-none px-4 py-3';
 
@@ -1105,11 +1125,28 @@ export const PullRequestSection: React.FC<{
                   <Icon name="git-pull-request" className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 truncate typography-ui-label text-foreground" title={branch}>{branch}</span>
                   <Icon name="arrow-right" className="size-3.5 shrink-0 text-muted-foreground" />
-                  {useDetectedUpstream && detectedUpstream ? (
-                    <span className="min-w-0 shrink truncate typography-meta text-muted-foreground">{detectedUpstream.owner}/{detectedUpstream.name}</span>
+                  {detectedUpstream && statusProject ? (
+                    <Select value={target} onValueChange={(value) => { if (value === 'origin' || value === 'parent') chooseTarget(value); }}>
+                      <SelectTrigger className="w-auto min-w-0 max-w-[45%]" aria-label={t('prStacks.create.target')}>
+                        <SelectValue>
+                          {useDetectedUpstream ? `${detectedUpstream.owner}/${detectedUpstream.name}` : `${statusProject.owner}/${statusProject.name}`}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="origin">{statusProject.owner}/{statusProject.name}</SelectItem>
+                        <SelectItem value="parent">{detectedUpstream.owner}/{detectedUpstream.name}</SelectItem>
+                      </SelectContent>
+                    </Select>
                   ) : null}
-                  {availableBaseBranches.length > 0 ? (
-                    <Select value={targetBaseBranch} onValueChange={setTargetBaseBranch}>
+                  {parentBranchesPending ? (
+                    <Select value={targetBaseBranch} disabled>
+                      <SelectTrigger className="w-auto min-w-0" aria-label={t('gitView.pr.field.baseBranch')}>
+                        <SelectValue>{targetBaseBranch}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent />
+                    </Select>
+                  ) : availableBaseBranches.length > 0 ? (
+                    <Select value={targetBaseBranch} onValueChange={(value) => { if (value) chooseBaseBranch(value); }}>
                       <SelectTrigger className="w-auto min-w-0" aria-label={t('gitView.pr.field.baseBranch')}>
                         <SelectValue placeholder={t('gitView.pr.placeholder.selectBaseBranch')} />
                       </SelectTrigger>
@@ -1122,7 +1159,7 @@ export const PullRequestSection: React.FC<{
                   ) : (
                     <Input
                       value={targetBaseBranch}
-                      onChange={(e) => setTargetBaseBranch(e.target.value)}
+                      onChange={(e) => chooseBaseBranch(e.target.value)}
                       placeholder={t('gitView.pr.placeholder.main')}
                       aria-label={t('gitView.pr.field.baseBranch')}
                       className="h-7 w-32"
@@ -1145,9 +1182,42 @@ export const PullRequestSection: React.FC<{
                   </div>
                 </div>
 
-                {stackedBase || stackBase?.head === targetBaseBranch ? <p className="typography-meta text-muted-foreground">
-                  {t('prStacks.stackedOn', { number: stackedBase?.number ?? stackBase?.number ?? '' })}
-                </p> : null}
+                {/* One reserved status line under the base: stack, loading or failure. */}
+                <div className="flex min-h-5 min-w-0 items-center gap-1.5 typography-meta text-muted-foreground">
+                  {parentBranches.status === 'error' && useDetectedUpstream && detectedUpstream ? (
+                    <>
+                      <span className="min-w-0 truncate text-[var(--status-error-text)]" title={t('prStacks.create.branchesFailed', { repository: `${detectedUpstream.owner}/${detectedUpstream.name}` })}>
+                        {t('prStacks.create.branchesFailed', { repository: `${detectedUpstream.owner}/${detectedUpstream.name}` })}
+                      </span>
+                      <Button variant="link" size="xs" className="h-auto shrink-0 px-0" onClick={parentBranches.retry}>{t('settings.sourceControl.transport.retry')}</Button>
+                    </>
+                  ) : parentBranchesPending ? (
+                    <span className="min-w-0 truncate">{t('prStacks.create.branchesLoading')}</span>
+                  ) : stackedBase || stackBase?.head === targetBaseBranch ? (
+                    <>
+                      <span className="min-w-0 truncate">{t('prStacks.stackedOn', { number: stackedBase?.number ?? stackBase?.number ?? '' })}</span>
+                      {detectedParent && detectedParent.head === targetBaseBranch && targetDefaultBase && targetDefaultBase !== targetBaseBranch ? (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <Button variant="link" size="xs" className="h-auto shrink-0 px-0" onClick={declineStackParent}>
+                            {t('prStacks.create.useDefault', { branch: targetDefaultBase })}
+                          </Button>
+                        </>
+                      ) : null}
+                    </>
+                  ) : baseTouched ? null : stackParent.state.status === 'loading' ? (
+                    <span className="min-w-0 truncate">{t('prStacks.create.checking')}</span>
+                  ) : stackParent.state.status === 'error' ? (
+                    <>
+                      <span className="min-w-0 truncate" title={t('prStacks.create.checkFailed')}>{t('prStacks.create.checkFailed')}</span>
+                      <Button variant="link" size="xs" className="h-auto shrink-0 px-0" onClick={stackParent.retry}>{t('settings.sourceControl.transport.retry')}</Button>
+                    </>
+                  ) : stackParent.state.status === 'ready' && stackParent.state.result.status === 'ambiguous' ? (
+                    <span className="min-w-0 truncate" title={t('prStacks.create.ambiguous', { numbers: stackParent.state.result.candidates.map((pull) => `#${pull.number}`).join(', ') })}>
+                      {t('prStacks.create.ambiguous', { numbers: stackParent.state.result.candidates.map((pull) => `#${pull.number}`).join(', ') })}
+                    </span>
+                  ) : null}
+                </div>
                 {stackBase && livePr ? <p className="typography-meta text-[var(--status-warning-text)]">{t('prStacks.chooseBranch')}</p> : null}
 
                 <label className="space-y-1">

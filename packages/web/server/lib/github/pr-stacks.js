@@ -293,6 +293,86 @@ export async function resolvePullStack({ octokit, owner, repo, number }) {
   };
 }
 
+/**
+ * Whether each PR sits in an inferred chain, from one read of the open PRs.
+ * `true`/`false` only for open PRs; any other number is `null` (unknown), so a
+ * caller never hides stack controls for a PR it could not judge. A failed read
+ * throws.
+ */
+export async function resolveStackMembership({ octokit, owner, repo, numbers }) {
+  const { pulls } = await listOpenPulls(octokit, owner, repo);
+  const members = {};
+  for (const number of numbers) {
+    if (!pulls.some((pull) => pull.number === number)) { members[number] = null; continue; }
+    try {
+      members[number] = (inferChain(pulls, owner, repo, number)?.chain.length ?? 0) >= 2;
+    } catch {
+      members[number] = true;
+    }
+  }
+  return members;
+}
+
+const STACK_PARENT_COMMIT_LIMIT = 1000;
+const defaultBranchSchema = z.object({ default_branch: z.string().min(1) }).loose();
+
+const toStackParent = (pull) => ({
+  number: pull.number, head: pull.head.ref, title: String(pull.title ?? ''), url: String(pull.html_url ?? ''),
+});
+
+/**
+ * The open PR a new branch sits on: the one whose head commit is the nearest
+ * of the branch's own commits (`ownCommits`, nearest first). A tie is broken by
+ * the branch the reflog says it was created from, otherwise it stays
+ * ambiguous. With no ancestor PR, the reflog parent still counts when it has
+ * an open PR (that PR got commits after the branch was created). A capped
+ * commit list without a match is incomplete, never "none".
+ */
+export function selectStackParent({ pulls, owner, repo, branch, trunk, ownCommits, capped, createdFrom }) {
+  const candidates = pulls.filter((pull) => sameRepo(pull, owner, repo) && pull.head.ref !== branch && pull.head.ref !== trunk);
+  const position = new Map(ownCommits.map((sha, index) => [sha, index]));
+  let nearest = [];
+  let best = Infinity;
+  for (const pull of candidates) {
+    const at = position.get(String(pull.head?.sha ?? ''));
+    if (at === undefined || at > best) continue;
+    if (at < best) { best = at; nearest = []; }
+    nearest.push(pull);
+  }
+  if (nearest.length === 1) return { status: 'found', via: 'ancestry', parent: toStackParent(nearest[0]) };
+  if (nearest.length > 1) {
+    const chosen = createdFrom ? nearest.find((pull) => pull.head.ref === createdFrom) : null;
+    return chosen
+      ? { status: 'found', via: 'ancestry', parent: toStackParent(chosen) }
+      : { status: 'ambiguous', candidates: nearest.sort((left, right) => left.number - right.number).map(toStackParent) };
+  }
+  const fromReflog = createdFrom ? candidates.find((pull) => pull.head.ref === createdFrom) : null;
+  if (fromReflog) return { status: 'found', via: 'created-from', parent: toStackParent(fromReflog) };
+  return { status: capped ? 'incomplete' : 'none' };
+}
+
+/**
+ * Detects the stack parent of a local branch for a PR into `owner/repo`.
+ * `remote` is the configured remote of that repository; without it, or
+ * without its trunk ref locally, the answer is `unavailable`. A failed read of
+ * the open PRs throws: an unknown parent is never reported as none.
+ */
+export async function findStackParent({ octokit, owner, repo, branch, remote, listOwnCommits, readCreatedFrom }) {
+  if (!remote) return { status: 'unavailable' };
+  const { pulls, defaultBranch } = await listOpenPulls(octokit, owner, repo);
+  if (!pulls.some((pull) => sameRepo(pull, owner, repo) && pull.head.ref !== branch)) return { status: 'none' };
+  let trunk = defaultBranch;
+  if (!trunk) {
+    const metadata = defaultBranchSchema.safeParse((await octokit.rest.repos.get({ owner, repo }))?.data);
+    if (!metadata.success) throw new Error('GitHub returned invalid repository metadata');
+    trunk = metadata.data.default_branch;
+  }
+  const own = await listOwnCommits({ branch, remote, trunk, limit: STACK_PARENT_COMMIT_LIMIT });
+  if (!own) return { status: 'unavailable' };
+  const createdFrom = await readCreatedFrom({ branch, remote });
+  return selectStackParent({ pulls, owner, repo, branch, trunk, ownCommits: own.commits, capped: own.capped, createdFrom });
+}
+
 const rejected = (message, status = 409) => Object.assign(new Error(message), { status, expected: true });
 
 /**

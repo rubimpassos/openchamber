@@ -24,8 +24,8 @@ Eine Zeile kann dich auch warnen:
 ## Einen PR auf einen anderen setzen
 
 1. Checke den Branch für den neuen PR aus, mit dem Branch des obersten PRs als Ausgangspunkt.
-2. Klicke im Stack-Abschnitt auf **Open stacked PR on top** oder wähle im Erstellungsformular der **Git**-Ansicht den Branch des obersten PRs als Base.
-3. Das Formular zeigt **Stacked on #N**. Schreibe Titel und Beschreibung und erstelle den PR.
+2. Öffne das Erstellungsformular der **Git**-Ansicht. Baut der Branch auf einem offenen PR auf, wählt das Formular dessen Branch als Base und zeigt **Stacked on #N**. **Use main** (dein Standard-Branch) wechselt zurück. **Open stacked PR on top** im Stack-Abschnitt öffnet dasselbe Formular.
+3. Schreibe Titel und Beschreibung und erstelle den PR.
 
 Auf GitHub.com trägt OpenChamber den neuen PR auch im GitHub-eigenen Stack ein. Lehnt GitHub das ab (Fork, ältere Serverversion), wird der PR trotzdem erstellt und der Stack wird weiter angezeigt.
 
@@ -49,7 +49,7 @@ Merge von unten nach oben. Der Stack-Abschnitt bietet **Merge bottom PR #N** nur
 ## An einem ganzen Stack in einer Sitzung arbeiten
 
 - **Attach whole stack** im Stack-Abschnitt hängt Diff, Checks und Kommentare aller PRs an das Nachrichtenfeld, dazu eine Zusammenfassung von Reihenfolge und Branches. Lässt sich ein PR nicht lesen, werden die anderen trotzdem angehängt, und du erfährst, welcher fehlgeschlagen ist.
-- Aktiviere in der **Linked**-Liste einer Sitzung bei einem verknüpften PR **Follow whole stack**. Die Sitzung folgt dann dem Stack, wenn er sich ändert: Neue PRs obendrauf, Merges und Retargets erscheinen, ohne dass du erneut verknüpfen musst.
+- Aktiviere in den **Context sources** der Sitzung bei einem verknüpften PR **Follow whole stack**. Die Sitzung folgt dann dem Stack, wenn er sich ändert: Neue PRs obendrauf, Merges und Retargets erscheinen, ohne dass du erneut verknüpfen musst. Der Button erscheint nur bei PRs, die zu einem Stack gehören.
 
 ## Wo es funktioniert
 

@@ -1,13 +1,13 @@
 import type { SourceControlAPI, SourceControlReadContext, SourceControlMutationContext } from '@openchamber/ui/lib/api/types';
 import {
-  pullStackResultSchema, restackRunSchema, stackRegistrationSchema, stackRetargetSchema, stackMergeSchema,
+  pullStackResultSchema, restackRunSchema, stackRegistrationSchema, stackRetargetSchema, stackMergeSchema, stackParentResultSchema, stackMembershipResultSchema,
 } from '@openchamber/ui/lib/api/pull-stacks';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { z } from 'zod';
 
 type StackFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 type StackAPI = Pick<SourceControlAPI,
-  | 'githubPullStack' | 'githubPullStackRegister' | 'githubPullStackRetarget' | 'githubPullStackMerge'
+  | 'githubPullStack' | 'githubPullStackParent' | 'githubPullStackMembership' | 'githubPullStackRegister' | 'githubPullStackRetarget' | 'githubPullStackMerge'
   | 'prStackRestack' | 'prStackRestackGet' | 'prStackRestackContinue' | 'prStackRestackAbort' | 'prStackRestackAskSession'>;
 type StackBody = Parameters<StackAPI['prStackRestack']>[0] | Parameters<StackAPI['githubPullStack']>[1]
   | Parameters<StackAPI['githubPullStackRetarget']>[1] | Parameters<StackAPI['githubPullStackMerge']>[1] | SourceControlMutationContext;
@@ -59,6 +59,16 @@ export function createWebPullStackAPI(fetch: StackFetch): StackAPI {
       const query = contextQuery(context);
       query.set('owner', pull.owner); query.set('repo', pull.repo); query.set('number', String(pull.number));
       return request(stackPath, pullStackResultSchema, { query, headers: { Accept: 'application/json' } });
+    },
+    githubPullStackMembership: (context, target) => {
+      const query = contextQuery(context);
+      query.set('owner', target.owner); query.set('repo', target.repo); query.set('numbers', target.numbers.join(','));
+      return request(`${stackPath}/membership`, stackMembershipResultSchema, { query, headers: { Accept: 'application/json' } });
+    },
+    githubPullStackParent: (context, target) => {
+      const query = contextQuery(context);
+      query.set('owner', target.owner); query.set('repo', target.repo); query.set('branch', target.branch);
+      return request(`${stackPath}/parent`, stackParentResultSchema, { query, headers: { Accept: 'application/json' } });
     },
     githubPullStackRegister: (context, pull) => mutate(`${stackPath}/register`, stackRegistrationSchema, context, post({ ...context, ...pullBody(pull) })),
     githubPullStackRetarget: (context, pull) => mutate(`${stackPath}/retarget`, stackRetargetSchema, context, post({ ...context, ...pullBody(pull), base: pull.base })),

@@ -24,8 +24,8 @@ Uma linha também pode avisar:
 ## Abrir um PR em cima de outro
 
 1. Faça checkout da branch do novo PR, com a branch do PR de cima como ponto de partida.
-2. Na seção do stack, clique em **Open stacked PR on top**, ou escolha a branch do PR de cima como base no formulário de criação da visão **Git**.
-3. O formulário mostra **Stacked on #N**. Escreva o título e a descrição e crie o PR.
+2. Abra o formulário de criação da visão **Git**. Se a branch está sobre um PR aberto, o formulário escolhe a branch desse PR como base e mostra **Stacked on #N**. **Use main** (sua branch padrão) volta atrás. **Open stacked PR on top** na seção do stack abre o mesmo formulário.
+3. Escreva o título e a descrição e crie o PR.
 
 No GitHub.com, o OpenChamber também registra o novo PR no stack do próprio GitHub. Se o GitHub recusar (um fork, um servidor mais antigo), o PR é criado mesmo assim e o stack continua aparecendo.
 
@@ -49,7 +49,7 @@ Faça merge de baixo para cima. A seção do stack oferece **Merge bottom PR #N*
 ## Trabalhar em um stack inteiro numa sessão
 
 - **Attach whole stack** na seção do stack anexa ao campo de mensagem o diff, os checks e os comentários de cada PR, com um resumo da ordem e das branches. Se um PR não puder ser lido, os outros são anexados mesmo assim e você é avisado de qual falhou.
-- Na lista **Linked** de uma sessão, ative **Follow whole stack** para um PR vinculado. A sessão passa a acompanhar o stack conforme ele muda: PRs novos em cima, merges e mudanças de destino aparecem sem vincular de novo.
+- Nas **Context sources** da sessão, ative **Follow whole stack** para um PR vinculado. A sessão passa a acompanhar o stack conforme ele muda: PRs novos em cima, merges e mudanças de destino aparecem sem vincular de novo. O botão só aparece em PRs que fazem parte de um stack.
 
 ## Onde funciona
 

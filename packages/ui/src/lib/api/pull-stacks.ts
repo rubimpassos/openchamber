@@ -59,7 +59,32 @@ export const stackMergeSchema = z.discriminatedUnion('status', [
   z.object({ ok: z.literal(true), status: z.enum(['enqueued', 'pending']), merged: z.literal(false), retargeted: z.null() }),
 ]);
 
+const stackParentPullSchema = z.object({
+  number: z.number().int().positive(), head: z.string().min(1), title: z.string(), url: z.string(),
+});
+
+/** Which open PR a local branch sits on, for the create form. `ambiguous` never preselects. */
+export const stackParentResultSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(false) }),
+  z.object({
+    connected: z.literal(true),
+    result: z.discriminatedUnion('status', [
+      z.object({ status: z.literal('found'), via: z.enum(['ancestry', 'created-from']), parent: stackParentPullSchema }),
+      z.object({ status: z.literal('ambiguous'), candidates: z.array(stackParentPullSchema).min(2) }),
+      z.object({ status: z.enum(['none', 'incomplete', 'unavailable']) }),
+    ]),
+  }),
+]);
+
+/** Per PR number: in a stack, not in one, or unknown (`null`, never read as "not stacked"). */
+export const stackMembershipResultSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(false) }),
+  z.object({ connected: z.literal(true), members: z.record(z.string().regex(/^\d+$/), z.boolean().nullable()) }),
+]);
+
 export type PullStackMember = z.infer<typeof pullStackMemberSchema>;
+export type StackMembershipResult = z.infer<typeof stackMembershipResultSchema>;
+export type StackParentResult = z.infer<typeof stackParentResultSchema>;
 export type PullStack = z.infer<typeof pullStackSchema>;
 export type PullStackResult = z.infer<typeof pullStackResultSchema>;
 export type RestackRun = z.infer<typeof restackRunSchema>;

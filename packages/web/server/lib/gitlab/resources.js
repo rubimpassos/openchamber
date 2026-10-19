@@ -1160,10 +1160,14 @@ export function createGitLabResourceService({ origin, client, download, resolveP
 
     async projectUpstream(directory, remote) {
       const source = (await resolveDirectoryProjects(directory, remote)).projects[0];
+      // Developer (30) or higher, directly or through the group, can push.
+      const access = source.raw?.permissions;
+      const viewerCanPush = [access?.project_access?.access_level, access?.group_access?.access_level]
+        .some((level) => Number.isInteger(level) && level >= 30);
       const parentId = source.raw?.forked_from_project?.id;
-      if (!Number.isInteger(parentId)) return { identity, isFork: false, upstream: null };
+      if (!Number.isInteger(parentId)) return { identity, isFork: false, upstream: null, viewerCanPush };
       const parent = await showProject(parentId);
-      return { identity, isFork: true, upstream: parent.project };
+      return { identity, isFork: true, upstream: parent.project, viewerCanPush };
     },
 
     async projectBranches(directory, selector, remote) {

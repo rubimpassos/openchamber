@@ -24,26 +24,23 @@ const upstream: Project = {
 describe('detected upstream loading', () => {
   test('returns authoritative empty state when the project is not a fork', async () => {
     const result = await loadDetectedUpstreamRepo({
-      projectUpstream: async () => ({ identity: context, isFork: false, upstream: null }),
-      projectBranches: async () => ['unused'],
+      projectUpstream: async () => ({ identity: context, isFork: false, upstream: null, viewerCanPush: true }),
     }, context);
 
-    expect(result).toEqual({ upstream: null, branches: [] });
+    expect(result).toEqual({ upstream: null, viewerCanPush: true });
   });
 
-  test('returns an authoritative empty branch list', async () => {
+  test('carries the fork parent and push access without reading branches', async () => {
     const result = await loadDetectedUpstreamRepo({
-      projectUpstream: async () => ({ identity: context, isFork: true, upstream }),
-      projectBranches: async () => [],
+      projectUpstream: async () => ({ identity: context, isFork: true, upstream, viewerCanPush: false }),
     }, context);
 
-    expect(result).toEqual({ upstream, branches: [] });
+    expect(result).toEqual({ upstream, viewerCanPush: false });
   });
 
-  test('does not turn a transient branch failure into empty success', async () => {
+  test('does not turn a failed upstream read into a non-fork answer', async () => {
     await expect(loadDetectedUpstreamRepo({
-      projectUpstream: async () => ({ identity: context, isFork: true, upstream }),
-      projectBranches: async () => { throw new Error('offline'); },
+      projectUpstream: async () => { throw new Error('offline'); },
     }, context)).rejects.toThrow('offline');
   });
 });

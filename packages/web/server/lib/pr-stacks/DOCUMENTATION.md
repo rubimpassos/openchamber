@@ -5,6 +5,7 @@ Rebases a stack of branches after a lower one changed. Detection, native stack r
 ## Files
 
 - `restack.js`: `createRestackRuntime(...)` and `registerRestackRoutes(app, runtime)`.
+- `own-commits.js`: `listOwnCommits(runGit, directory, { branch, remote, trunk, limit })`, a branch's commits past `refs/remotes/<remote>/<trunk>` nearest first (`null` when either ref is missing, throws when rev-list fails), for the create form's stack parent detection in `../github/pr-stacks.js`; `normalizeCreatedFrom` turns a reflog source into a branch of that remote.
 - `restack.test.js`: real Git repositories: a clean cascade, a conflict paused and continued, the session resolving a conflict, abort, and a dirty worktree.
 
 Wiring: created in `server/index.js` after the message queue, routes registered in `opencode/feature-routes-runtime.js`, JSON bodies through `opencode/core-routes.js` (`/api/pr-stacks`).

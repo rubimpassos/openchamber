@@ -24,8 +24,8 @@ Una fila también puede avisarte:
 ## Abrir un PR encima de otro
 
 1. Haz checkout de la rama del nuevo PR, con la rama del PR superior como punto de partida.
-2. En la sección del stack, haz clic en **Open stacked PR on top**, o elige la rama del PR superior como base en el formulario de creación de la vista **Git**.
-3. El formulario dice **Stacked on #N**. Escribe el título y la descripción y crea el PR.
+2. Abre el formulario de creación de la vista **Git**. Si la rama está sobre un PR abierto, el formulario elige la rama de ese PR como base y muestra **Stacked on #N**. **Use main** (tu rama por defecto) vuelve atrás. **Open stacked PR on top** en la sección del stack abre el mismo formulario.
+3. Escribe el título y la descripción y crea el PR.
 
 En GitHub.com, OpenChamber también registra el nuevo PR en el stack propio de GitHub. Si GitHub lo rechaza (un fork, un servidor antiguo), el PR se crea igualmente y el stack se sigue mostrando.
 
@@ -49,7 +49,7 @@ Fusiona de abajo arriba. La sección del stack ofrece **Merge bottom PR #N** sol
 ## Trabajar en un stack completo en una sesión
 
 - **Attach whole stack** en la sección del stack adjunta al cuadro de mensaje el diff, los checks y los comentarios de cada PR, con un resumen del orden y las ramas. Si un PR no se puede leer, los demás se adjuntan igualmente y se te dice cuál falló.
-- En la lista **Linked** de una sesión, activa **Follow whole stack** en un PR vinculado. La sesión sigue entonces el stack mientras cambia: los PRs nuevos encima, las fusiones y los cambios de destino aparecen sin vincular de nuevo.
+- En las **Context sources** de la sesión, activa **Follow whole stack** en un PR vinculado. La sesión sigue entonces el stack mientras cambia: los PRs nuevos encima, las fusiones y los cambios de destino aparecen sin vincular de nuevo. El botón solo aparece en PRs que forman parte de un stack.
 
 ## Dónde funciona
 

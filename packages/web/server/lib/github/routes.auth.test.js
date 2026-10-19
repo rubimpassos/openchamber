@@ -896,6 +896,23 @@ describe('GitHub account routes', () => {
       .query(boundQuery(account.accountId)).expect(500);
   });
 
+  it.each([true, false])('answers the origin push access %s of a fork', async (viewerCanPush) => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
+    vi.stubGlobal('fetch', vi.fn(async (url) => new URL(url).pathname.includes('/git/ref/')
+      ? Response.json({ object: { sha: 'abc' } })
+      : Response.json({ default_branch: 'main' })));
+    const app = makeApp({
+      resolveGitHubRepoFromDirectory: vi.fn(async () => ({ repo: { owner: 'team', repo: 'project' } })),
+      resolveRepoNetwork: vi.fn(async () => [
+        { owner: 'team', repo: 'project', source: 'origin', viewerCanPush },
+        { owner: 'upstream', repo: 'project', source: 'upstream', url: 'https://github.com/upstream/project' },
+      ]),
+    });
+    const response = await request(app).get('/api/source-control/github/repo/upstream')
+      .query(boundQuery(account.accountId)).expect(200);
+    expect(response.body).toMatchObject({ isFork: true, viewerCanPush, upstream: { owner: 'upstream', repo: 'project' } });
+  });
+
   it('retires legacy upstream metadata fallback behavior', async () => {
     await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ message: 'unavailable' }, { status: 503 })));

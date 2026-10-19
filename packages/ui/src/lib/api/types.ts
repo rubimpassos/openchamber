@@ -1,7 +1,7 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
-import type { PullStackResult, PullStackRegistration, PullStackMerge, RestackInput, RestackRun } from './pull-stacks';
+import type { PullStackResult, PullStackRegistration, PullStackMerge, RestackInput, RestackRun, StackMembershipResult, StackParentResult } from './pull-stacks';
 import type {
   ChangeRequest,
   ChangeRequestContext,
@@ -1854,6 +1854,7 @@ export type GitHubRepoUpstreamResult = {
   connected: boolean;
   isFork: boolean;
   upstream: { owner: string; repo: string; url: string; defaultBranch: string; defaultBranchSha: string | null; remoteName: string | null } | null;
+  viewerCanPush: boolean;
 };
 
 export type GitHubIssueGetResult = {
@@ -1995,6 +1996,10 @@ export interface SourceControlAPI {
   githubPullStatuses(context: SourceControlReadContext, pulls: GitHubPullRequestRef[]): Promise<GitHubPullStatusesResult>;
   /** GitHub's native stack, or a live inferred chain; null means this PR is not stacked. */
   githubPullStack(context: SourceControlReadContext, pull: GitHubPullRequestRef): Promise<PullStackResult>;
+  /** GitHub only: which of up to 50 PRs of one repository sit in a stack, from one read. Throws on failure. */
+  githubPullStackMembership(context: SourceControlReadContext, target: GitHubRepoSelector & { numbers: number[] }): Promise<StackMembershipResult>;
+  /** GitHub only: the open PR in `target` that local `branch` sits on. Throws on failure. */
+  githubPullStackParent(context: SourceControlReadContext, target: GitHubRepoSelector & { branch: string }): Promise<StackParentResult>;
   githubPullStackRegister(context: GitHubStackMutationContext, pull: GitHubPullRequestRef): Promise<PullStackRegistration>;
   githubPullStackRetarget(context: GitHubStackMutationContext, pull: GitHubPullRequestRef & { base: string }): Promise<{ ok: true }>;
   githubPullStackMerge(context: GitHubStackMutationContext, pull: GitHubPullRequestRef & { method: 'merge' | 'squash' | 'rebase' }): Promise<PullStackMerge>;

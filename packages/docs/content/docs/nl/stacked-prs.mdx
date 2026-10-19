@@ -24,8 +24,8 @@ Een rij kan u ook waarschuwen:
 ## Een PR boven op een andere openen
 
 1. Check de branch voor de nieuwe PR uit, met de branch van de bovenste PR als startpunt.
-2. Klik in de stacksectie op **Open stacked PR on top**, of kies de branch van de bovenste PR als basis in het aanmaakformulier van de **Git**-weergave.
-3. Het formulier zegt **Stacked on #N**. Schrijf titel en beschrijving en maak de PR aan.
+2. Open het aanmaakformulier van de **Git**-weergave. Staat de branch op een open PR, dan kiest het formulier de branch van die PR als basis en toont **Stacked on #N**. **Use main** (uw standaardbranch) zet het terug. **Open stacked PR on top** in de stacksectie opent hetzelfde formulier.
+3. Schrijf de titel en beschrijving en maak de PR aan.
 
 Op GitHub.com registreert OpenChamber de nieuwe PR ook in de eigen stack van GitHub. Weigert GitHub dat (een fork, een oudere server), dan wordt de PR toch aangemaakt en blijft de stack zichtbaar.
 
@@ -49,7 +49,7 @@ Merge van onder naar boven. De stacksectie biedt **Merge bottom PR #N** alleen a
 ## Aan een hele stack werken in een sessie
 
 - **Attach whole stack** in de stacksectie voegt de diff, checks en opmerkingen van elke PR toe aan het berichtenveld, met een samenvatting van de volgorde en de branches. Kan één PR niet gelezen worden, dan worden de andere toch toegevoegd en hoort u welke is mislukt.
-- Zet in de **Linked**-lijst van een sessie **Follow whole stack** aan voor een gekoppelde PR. De sessie volgt de stack dan terwijl hij verandert: nieuwe PR's bovenop, merges en retargets verschijnen zonder opnieuw te koppelen.
+- Zet in de **Context sources** van de sessie **Follow whole stack** aan voor een gekoppelde PR. De sessie volgt de stack dan terwijl hij verandert: nieuwe PR's bovenop, merges en retargets verschijnen zonder opnieuw te koppelen. De knop verschijnt alleen bij PR's die bij een stack horen.
 
 ## Waar het werkt
 
