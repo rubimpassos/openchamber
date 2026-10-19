@@ -609,8 +609,8 @@ const readStoredSessionMetadata = (sessionID) => sessionMetadataStore.get(sessio
 // captured: the center is declared further down.
 const settlePendingQuestionNotifications = (sessionID, patch) => {
   if (patch?.openchamber?.pendingQuestion !== null) return;
-  void notificationCenter.markRead({ sessionId: sessionID }).catch((error) => {
-    console.warn('[notification-center] could not mark a settled question read:', error?.message ?? error);
+  void notificationCenter.resolve({ sessionId: sessionID, kinds: ['question'] }).catch((error) => {
+    console.warn('[notification-center] could not resolve a settled question:', error?.message ?? error);
   });
 };
 

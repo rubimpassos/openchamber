@@ -220,6 +220,8 @@ server capability.
   question when its form or waiting page settles (`form.settled`,
   `openchamber:page-settled`) and a permission when it is replied
   (`permission.replied`), narrowed to that request when the entry names one.
+  A question a restart cut off ("Interrupted question waiting for you")
+  resolves when the session's `pendingQuestion` is cleared.
   Resolving also marks read. Every other kind stays until it is read, removed
   or ages out. `remove(ids)` deletes entries.
 - Read state lives on the server, so every client sees the same. Changes are
