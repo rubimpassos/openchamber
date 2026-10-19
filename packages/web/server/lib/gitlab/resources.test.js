@@ -351,6 +351,18 @@ describe('GitLab resource service', () => {
     expect(client.Projects.show).not.toHaveBeenCalledWith('other/secret');
   });
 
+  it.each([
+    [{ project_access: { access_level: 30 } }, true],
+    [{ project_access: null, group_access: { access_level: 40 } }, true],
+    [{ project_access: { access_level: 20 } }, false],
+    [undefined, false],
+  ])('reports push access to the source project from permissions %j', async (permissions, viewerCanPush) => {
+    const { service } = setup({
+      Projects: { show: vi.fn(async (id) => Number(id) === 2 ? targetProject : { ...sourceProject, permissions }) },
+    });
+    await expect(service.projectUpstream('/repo', 'origin')).resolves.toMatchObject({ isFork: true, viewerCanPush });
+  });
+
   it('propagates branch fork-network resolution failures', async () => {
     const failure = Object.assign(new Error('upstream unavailable'), { status: 503 });
     const { service, client } = setup({

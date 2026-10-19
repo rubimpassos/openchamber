@@ -24,8 +24,8 @@ Wiersz może też ostrzegać:
 ## Otwórz PR na wierzchu innego
 
 1. Przełącz się na gałąź nowego PR-a, wychodząc od gałęzi najwyższego PR-a.
-2. W sekcji stosu kliknij **Open stacked PR on top** albo wybierz gałąź najwyższego PR-a jako bazę w formularzu tworzenia w widoku **Git**.
-3. Formularz pokazuje **Stacked on #N**. Wpisz tytuł i opis i utwórz PR.
+2. Otwórz formularz tworzenia w widoku **Git**. Jeśli gałąź leży na otwartym PR-ze, formularz wybiera jego gałąź jako bazę i pokazuje **Stacked on #N**. **Use main** (twoja domyślna gałąź) przywraca bazę. **Open stacked PR on top** w sekcji stosu otwiera ten sam formularz.
+3. Wpisz tytuł i opis, a potem utwórz PR.
 
 Na GitHub.com OpenChamber rejestruje nowy PR także we własnym stosie GitHuba. Jeśli GitHub odmówi (fork, starszy serwer), PR i tak powstaje, a stos nadal się wyświetla.
 
@@ -49,7 +49,7 @@ Scalaj od dołu. Sekcja stosu oferuje **Merge bottom PR #N** tylko dla najniższ
 ## Pracuj nad całym stosem w sesji
 
 - **Attach whole stack** w sekcji stosu dołącza do pola wiadomości diff, checki i komentarze każdego PR-a wraz z podsumowaniem kolejności i gałęzi. Jeśli jednego PR-a nie da się odczytać, pozostałe i tak się dołączą, a ty dowiesz się, który zawiódł.
-- Na liście **Linked** sesji włącz **Follow whole stack** przy powiązanym PR-ze. Sesja śledzi wtedy stos, gdy się zmienia: nowe PR-y na górze, scalenia i zmiany celu pojawiają się bez ponownego łączenia.
+- W **Context sources** sesji włącz **Follow whole stack** przy powiązanym PR-ze. Sesja śledzi wtedy stos, gdy się zmienia: nowe PR-y na górze, scalenia i zmiany celu pojawiają się bez ponownego łączenia. Przycisk pojawia się tylko przy PR-ach należących do stosu.
 
 ## Gdzie to działa
 

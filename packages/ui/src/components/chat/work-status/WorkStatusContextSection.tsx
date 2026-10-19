@@ -28,6 +28,7 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
 import { LinkedPullStackFollow } from './LinkedPullStackFollow';
+import { useLinkedPullStackMembership } from './useLinkedPullStackMembership';
 import { LinkedPrFixLoopControl } from '@/components/session/PrFixLoopControl';
 
 
@@ -159,6 +160,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const pinnedCount = visibleKnowledge.notes.length + visibleKnowledge.plans.length;
 
   const linked = React.useMemo(() => getDistinctLinkedIssues(session), [session]);
+  const stackMembership = useLinkedPullStackMembership(linked, directory);
   // Live state of the session's linked PRs, merge requests and issues, from
   // the server's tracked items. This panel follows its own session too: the
   // session need not be on screen in the sidebar.
@@ -390,8 +392,10 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           value={(() => {
             const pull = getGitHubThreadRef(entry);
             return pull?.thread === 'pull' ? <>
-              <LinkedPullStackFollow entry={entry} sessionId={sessionId} directory={directory} />
+              {/* Fix loop first: the follow chip can hide, and nothing after it shifts. */}
               <LinkedPrFixLoopControl pull={pull} sessionId={sessionId} directory={directory} />
+              <LinkedPullStackFollow entry={entry} sessionId={sessionId} directory={directory}
+                membership={stackMembership(pull.owner, pull.repo, pull.number)} />
             </> : null;
           })()}
           muted

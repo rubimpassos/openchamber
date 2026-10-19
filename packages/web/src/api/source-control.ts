@@ -1840,18 +1840,24 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         const payload = await request<ProjectUpstream & ErrorResponse>(fetch, normalized, '/repo/upstream', {}, query);
         if (!payload || !hasMatchingIdentity(payload.identity, normalized) || !isBooleanValue(payload.isFork)
           || (payload.upstream !== null && payload.upstream === undefined)
-          || payload.isFork !== Boolean(payload.upstream)) {
+          || payload.isFork !== Boolean(payload.upstream) || !isBooleanValue(payload.viewerCanPush)) {
           throw new Error('Source control response contained an invalid upstream');
         }
-        return { identity: normalized, isFork: payload.isFork, upstream: payload.upstream ? parseSourceProject(payload.upstream, normalized) : null };
+        return {
+          identity: normalized, isFork: payload.isFork, viewerCanPush: payload.viewerCanPush,
+          upstream: payload.upstream ? parseSourceProject(payload.upstream, normalized) : null,
+        };
       }
       const payload = await request<GitHubRepoUpstreamResult & ErrorResponse>(fetch, normalized, '/repo/upstream', {}, query);
       requireConnected(payload.connected);
       if (!isBooleanValue(payload.isFork) || (payload.upstream !== null && payload.upstream === undefined)
-        || payload.isFork !== Boolean(payload.upstream)) {
+        || payload.isFork !== Boolean(payload.upstream) || !isBooleanValue(payload.viewerCanPush)) {
         throw new Error('Source control response contained an invalid upstream');
       }
-      return { identity: normalized, isFork: payload.isFork, upstream: payload.upstream ? mapProject(payload.upstream, normalized) : null };
+      return {
+        identity: normalized, isFork: payload.isFork, viewerCanPush: payload.viewerCanPush,
+        upstream: payload.upstream ? mapProject(payload.upstream, normalized) : null,
+      };
     },
     projectBranches: async (context, owner, project) => {
       const normalized = normalizeIdentity(context);

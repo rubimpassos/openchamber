@@ -3,25 +3,20 @@ import { sourceControlReadContextParts } from '@/lib/source-control/identity';
 
 type DetectedUpstreamResult = {
   upstream: Project | null;
-  branches: string[];
+  viewerCanPush: boolean;
 };
 
 export const getDetectedUpstreamContextKey = (context: SourceControlReadContext): string =>
   JSON.stringify(sourceControlReadContextParts(context));
 
+/** The fork parent and push access; the parent's branches load only when it is the target. */
 export const loadDetectedUpstreamRepo = async (
-  sourceControl: Pick<SourceControlAPI, 'projectUpstream' | 'projectBranches'>,
+  sourceControl: Pick<SourceControlAPI, 'projectUpstream'>,
   context: SourceControlReadContext,
 ): Promise<DetectedUpstreamResult> => {
   const result = await sourceControl.projectUpstream(context);
-  if (!result?.isFork || !result.upstream) {
-    return { upstream: null, branches: [] };
-  }
-
-  const branches = await sourceControl.projectBranches(
-    context,
-    result.upstream.owner,
-    result.upstream.name,
-  );
-  return { upstream: result.upstream, branches };
+  return {
+    upstream: result?.isFork && result.upstream ? result.upstream : null,
+    viewerCanPush: result?.viewerCanPush === true,
+  };
 };

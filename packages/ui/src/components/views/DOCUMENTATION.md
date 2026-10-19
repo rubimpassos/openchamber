@@ -97,6 +97,24 @@ It shows the parent PR and registers a successfully created stacked PR through
 the stack registration route. A refused or unavailable native registration
 leaves the created PR valid and reports a quiet inferred-stack note.
 
+Without a stack shortcut, `git/useStackParentBase.ts` asks
+`githubPullStackParent` which open PR in the target the branch sits on, and the
+form preselects that PR's head as the base unless the person already picked
+one (`baseTouched` in the draft snapshot). The reserved status line under the
+base shows the check, "Stacked on #N" with a "Use <default>" switch back,
+ambiguity (no preselection) or a failed check with retry. A failed check never
+counts as "not stacked" and never changes the base.
+
+The target repository follows `git/pullRequestTarget.ts`: a repository that is
+not a fork targets itself; a fork targets the person's last explicit choice
+for that repository (`localStorage` `openchamber:pr-create-target:v1`, at most
+50 entries), else itself when the bound account can push to it
+(`viewerCanPush` from the upstream read), else its parent. The base list holds
+only the selected target's branches: the bound remote's refs for the fork, the
+provider's branch list for the parent, read only while the parent is selected.
+Until that list arrives the base select is disabled and the status line says
+so; a failed read offers retry instead of an empty or foreign list.
+
 `git/StackedPullCreateDialog.tsx` reuses that form with the top open stack head
 prefilled. An existing PR on the checked-out branch disables creation and points
 to Git's branch controls. Web, Electron and both mobile shells share the form;

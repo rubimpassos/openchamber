@@ -506,14 +506,14 @@ describe('createWebSourceControlAPI', () => {
     runtimeFetchMock
       .mockResolvedValueOnce(Response.json({ connected: true, repo: null, issue: null }))
       .mockResolvedValueOnce(Response.json({ connected: true, repo: null, comments: [] }))
-      .mockResolvedValueOnce(Response.json({ connected: true, isFork: false, upstream: null }))
+      .mockResolvedValueOnce(Response.json({ connected: true, isFork: false, upstream: null, viewerCanPush: true }))
       .mockResolvedValueOnce(Response.json({ branches: ['main'] }));
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
 
     await expect(api.issueGet(readContext, 17, { owner: 'openchamber', name: 'openchamber' })).resolves.toBeNull();
     await expect(api.issueComments(readContext, 17, { owner: 'openchamber', name: 'openchamber' })).resolves.toEqual([]);
     await expect(api.projectUpstream(readContext)).resolves.toEqual({
-      identity: { provider: 'github', instance: 'github.com' }, isFork: false, upstream: null,
+      identity: { provider: 'github', instance: 'github.com' }, isFork: false, upstream: null, viewerCanPush: true,
     });
     await expect(api.projectBranches(readContext, 'openchamber', 'openchamber')).resolves.toEqual(['main']);
 
@@ -559,7 +559,10 @@ describe('createWebSourceControlAPI', () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, repo: null }));
     await expect(api.issueComments(readContext, 1)).rejects.toThrow('invalid comments');
 
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, isFork: true, upstream: null }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, isFork: true, upstream: null, viewerCanPush: false }));
+    await expect(api.projectUpstream(readContext)).rejects.toThrow('invalid upstream');
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, isFork: false, upstream: null }));
     await expect(api.projectUpstream(readContext)).rejects.toThrow('invalid upstream');
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ branches: ['main', 7] }));

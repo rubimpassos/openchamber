@@ -24,8 +24,8 @@ Bir satır sizi uyarabilir de:
 ## Başka bir PR'ın üstüne PR açın
 
 1. Yeni PR'ın dalını, en üstteki PR'ın dalını başlangıç noktası alarak checkout edin.
-2. Stack bölümünde **Open stacked PR on top**'a tıklayın veya **Git** görünümünün oluşturma formunda en üstteki PR'ın dalını base olarak seçin.
-3. Form **Stacked on #N** der. Başlığı ve açıklamayı yazıp PR'ı oluşturun.
+2. **Git** görünümünün oluşturma formunu açın. Dal açık bir PR'ın üzerindeyse form o PR'ın dalını taban olarak seçer ve **Stacked on #N** gösterir. **Use main** (varsayılan dalınız) geri alır. Stack bölümündeki **Open stacked PR on top** aynı formu açar.
+3. Başlığı ve açıklamayı yazın ve PR'ı oluşturun.
 
 GitHub.com'da OpenChamber yeni PR'ı GitHub'ın kendi stack'ine de kaydeder. GitHub reddederse (bir fork, daha eski bir sunucu), PR yine de oluşturulur ve stack görünmeye devam eder.
 
@@ -49,7 +49,7 @@ Alttan yukarı doğru birleştirin. Stack bölümü **Merge bottom PR #N** seçe
 ## Bir oturumda tüm stack üzerinde çalışın
 
 - Stack bölümündeki **Attach whole stack**, her PR'ın diff'ini, check'lerini ve yorumlarını sıra ve dalların özetiyle birlikte mesaj kutusuna ekler. Bir PR okunamazsa diğerleri yine eklenir ve hangisinin başarısız olduğu size söylenir.
-- Bir oturumun **Linked** listesinde, bağlı bir PR için **Follow whole stack**'i açın. Oturum bundan sonra stack'i değiştikçe izler: üstteki yeni PR'lar, birleştirmeler ve hedef değişiklikleri yeniden bağlamadan görünür.
+- Oturumun **Context sources** bölümünde, bağlı bir PR için **Follow whole stack**'i açın. Oturum bundan sonra stack'i değiştikçe izler: üstteki yeni PR'lar, birleştirmeler ve hedef değişiklikleri yeniden bağlamadan görünür. Düğme yalnızca bir stack'e ait PR'larda görünür.
 
 ## Nerede çalışır
 

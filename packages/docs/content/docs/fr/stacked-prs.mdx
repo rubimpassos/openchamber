@@ -24,8 +24,8 @@ Une ligne peut aussi t'avertir :
 ## Ouvrir une PR au-dessus d'une autre
 
 1. Récupère (checkout) la branche de la nouvelle PR, avec la branche de la PR du haut comme point de départ.
-2. Dans la section de la pile, clique sur **Open stacked PR on top**, ou choisis la branche de la PR du haut comme base dans le formulaire de création de la vue **Git**.
-3. Le formulaire indique **Stacked on #N**. Écris le titre et la description, puis crée la PR.
+2. Ouvre le formulaire de création de la vue **Git**. Si la branche repose sur une PR ouverte, le formulaire prend la branche de cette PR comme base et affiche **Stacked on #N**. **Use main** (ta branche par défaut) revient en arrière. **Open stacked PR on top** dans la section de la pile ouvre le même formulaire.
+3. Écris le titre et la description, puis crée la PR.
 
 Sur GitHub.com, OpenChamber enregistre aussi la nouvelle PR dans la pile propre à GitHub. Si GitHub refuse (un fork, un serveur plus ancien), la PR est quand même créée et la pile s'affiche toujours.
 
@@ -49,7 +49,7 @@ Fusionne de bas en haut. La section de la pile propose **Merge bottom PR #N** un
 ## Travailler sur toute une pile dans une session
 
 - **Attach whole stack** dans la section de la pile joint au champ de message le diff, les checks et les commentaires de chaque PR, avec un résumé de l'ordre et des branches. Si une PR est illisible, les autres sont jointes quand même et on te dit laquelle a échoué.
-- Dans la liste **Linked** d'une session, active **Follow whole stack** pour une PR liée. La session suit alors la pile au fil de ses changements : nouvelles PR au-dessus, fusions et changements de cible apparaissent sans avoir à lier à nouveau.
+- Dans les **Context sources** de la session, active **Follow whole stack** pour une PR liée. La session suit alors la pile au fil de ses changements : nouvelles PR au-dessus, fusions et changements de cible apparaissent sans avoir à lier à nouveau. Le bouton n'apparaît que sur les PR qui font partie d'une pile.
 
 ## Où ça fonctionne
 

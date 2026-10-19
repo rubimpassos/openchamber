@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { inferChain, mergeStackBottom, registerPullStack, resolvePullStack } from './pr-stacks.js';
+import { findStackParent, inferChain, mergeStackBottom, registerPullStack, resolvePullStack, resolveStackMembership, selectStackParent } from './pr-stacks.js';
 
 const pull = (number, head, base, extra = {}) => ({
   number,
@@ -279,5 +279,73 @@ describe('stack writes', () => {
     expect(result).toEqual({ merged: true, status: 'merged', retargeted: 2 });
     expect(octokit.calls).toContainEqual(['merge', 1, 'squash', 'sha-1']);
     expect(octokit.calls).toContainEqual(['update', 2, 'main']);
+  });
+});
+
+describe('stack parent of a new branch', () => {
+  const base = { owner: 'acme', repo: 'app', branch: 'three', trunk: 'main', capped: false, createdFrom: null };
+
+  test('picks the open PR whose head is the nearest of the branch commits', () => {
+    const pulls = [pull(3, 'one', 'main'), pull(4, 'two', 'one')];
+    const result = selectStackParent({ ...base, pulls, ownCommits: ['own', 'sha-4', 'sha-3'] });
+    expect(result).toEqual({ status: 'found', via: 'ancestry', parent: { number: 4, head: 'two', title: 'PR 4', url: 'https://github.com/acme/app/pull/4' } });
+  });
+
+  test('breaks a tie on the same commit with the reflog parent, otherwise reports ambiguity', () => {
+    const pulls = [pull(4, 'two', 'one'), pull(7, 'copy', 'main', { head: { ref: 'copy', sha: 'sha-4', repo: { full_name: 'acme/app' } } })];
+    expect(selectStackParent({ ...base, pulls, ownCommits: ['own', 'sha-4'], createdFrom: 'copy' }))
+      .toMatchObject({ status: 'found', parent: { number: 7 } });
+    expect(selectStackParent({ ...base, pulls, ownCommits: ['own', 'sha-4'] }))
+      .toMatchObject({ status: 'ambiguous', candidates: [{ number: 4 }, { number: 7 }] });
+  });
+
+  test('falls back to the reflog parent when that PR got commits after the branch was created', () => {
+    const pulls = [pull(4, 'two', 'one')];
+    expect(selectStackParent({ ...base, pulls, ownCommits: ['own', 'older-two'], createdFrom: 'two' }))
+      .toMatchObject({ status: 'found', via: 'created-from', parent: { number: 4 } });
+  });
+
+  test('ignores fork heads, the branch itself and the trunk', () => {
+    const pulls = [
+      pull(5, 'two', 'main', { head: { ref: 'two', sha: 'sha-5', repo: { full_name: 'someone/app' } } }),
+      pull(6, 'three', 'main'),
+      pull(8, 'main', 'release'),
+    ];
+    expect(selectStackParent({ ...base, pulls, ownCommits: ['sha-6', 'sha-5', 'sha-8'], createdFrom: 'two' })).toEqual({ status: 'none' });
+  });
+
+  test('a capped commit list without a match is incomplete, never none', () => {
+    expect(selectStackParent({ ...base, pulls: [pull(3, 'one', 'main')], ownCommits: ['own'], capped: true })).toEqual({ status: 'incomplete' });
+  });
+
+  test('a failed open PR read throws instead of answering none', async () => {
+    const octokit = { rest: { pulls: { list: async () => { throw Object.assign(new Error('boom'), { status: 500 }); } } } };
+    await expect(findStackParent({
+      octokit, owner: 'acme', repo: 'app', branch: 'three', remote: 'origin',
+      listOwnCommits: async () => ({ commits: [], capped: false }), readCreatedFrom: async () => null,
+    })).rejects.toThrow('boom');
+  });
+
+  test('answers unavailable without a remote for the target or a local trunk ref', async () => {
+    const octokit = fakeOctokit({ open: [pull(3, 'one', 'main')] });
+    const input = { octokit, owner: 'acme', repo: 'app', branch: 'three', readCreatedFrom: async () => null };
+    expect(await findStackParent({ ...input, remote: null, listOwnCommits: async () => null })).toEqual({ status: 'unavailable' });
+    expect(await findStackParent({ ...input, remote: 'origin', listOwnCommits: async () => null })).toEqual({ status: 'unavailable' });
+    expect(await findStackParent({ ...input, remote: 'origin', listOwnCommits: async ({ trunk }) => (trunk === 'main' ? { commits: ['sha-3'], capped: false } : null) }))
+      .toMatchObject({ status: 'found', parent: { number: 3 } });
+  });
+});
+
+describe('stack membership of several PRs', () => {
+  test('answers in a stack, not in one, and unknown for PRs that are not open, from one list read', async () => {
+    const octokit = fakeOctokit({ open: [pull(3, 'one', 'main'), pull(4, 'two', 'one'), pull(5, 'lone', 'main')] });
+    expect(await resolveStackMembership({ octokit, owner: 'acme', repo: 'app', numbers: [3, 4, 5, 9] }))
+      .toEqual({ 3: true, 4: true, 5: false, 9: null });
+    expect(octokit.calls.filter(([kind]) => kind === 'list')).toHaveLength(1);
+  });
+
+  test('a failed list read throws instead of answering not stacked', async () => {
+    const octokit = { rest: { pulls: { list: async () => { throw Object.assign(new Error('boom'), { status: 500 }); } } } };
+    await expect(resolveStackMembership({ octokit, owner: 'acme', repo: 'app', numbers: [3] })).rejects.toThrow('boom');
   });
 });

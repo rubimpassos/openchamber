@@ -9,10 +9,12 @@ import { useI18n } from '@/lib/i18n';
 import { getGitHubThreadRef, type LinkedIssue } from '@/lib/linkedIssues';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import * as sessionActions from '@/sync/session-actions';
+import { shouldShowStackFollow, type StackMembership } from './useLinkedPullStackMembership';
 
 /** A following link stores only the anchor PR; this control reads its current membership on demand. */
-export function LinkedPullStackFollow(props: { entry: LinkedIssue; sessionId: string | null; directory: string | null }) {
+export function LinkedPullStackFollow(props: { entry: LinkedIssue; sessionId: string | null; directory: string | null; membership: StackMembership }) {
   if (isVSCodeRuntime() || props.entry.kind !== 'pull' || !getGitHubThreadRef(props.entry) || !props.directory || !props.sessionId) return null;
+  if (!shouldShowStackFollow(props.membership, props.entry.followStack === true)) return null;
   return <FollowControl entry={props.entry} sessionId={props.sessionId} directory={props.directory} />;
 }
 

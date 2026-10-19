@@ -553,6 +553,12 @@ API and are never copied into session metadata. The button's tooltip names the
 current members. Reattaching a PR preserves an existing following choice;
 explicitly switching the toggle off removes it without unlinking the PR.
 `LinkedPullStackFollow.tsx` owns this control, leaving fix-loop controls separate.
+The button shows only where it applies: `useLinkedPullStackMembership.ts`
+makes one `githubPullStackMembership` read per repository among the linked PRs
+(refreshed on the same events as the live stack read) and hides the button for
+a PR answered as outside every stack. Loading, failed, disconnected and unknown
+answers keep it, and a stack already followed always keeps it so it can be
+turned off. It sits after the fix-loop control so hiding it moves nothing else.
 
 Writes happen **after** the send promise resolves and are deliberately
 swallowed on failure: the message went out, and a missing bookkeeping entry

@@ -91,7 +91,8 @@ export async function resolveRepoNetwork(octokit, directory, remoteName = 'origi
   }
   if (!metadata) return [{ ...repo, source: 'origin' }];
 
-  const result = [{ ...repo, source: 'origin' }];
+  // Missing permissions (anonymous or narrow tokens) count as no push.
+  const result = [{ ...repo, source: 'origin', viewerCanPush: metadata?.permissions?.push === true }];
   const seenKeys = new Set([normalizeRepoKey(repo.owner, repo.repo)]);
 
   const parent = metadata?.parent;

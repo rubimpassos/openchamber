@@ -24,8 +24,8 @@ description: 查看、创建并合并一条层层叠加的拉取请求链。
 ## 在另一个 PR 之上开 PR
 
 1. 以最上面 PR 的分支为起点，检出新 PR 的分支。
-2. 在堆叠区块中点击 **Open stacked PR on top**，或在 **Git** 视图的创建表单中选择最上面 PR 的分支作为基础分支。
-3. 表单会显示 **Stacked on #N**。填写标题和描述，然后创建 PR。
+2. 打开 **Git** 视图的创建表单。如果分支位于某个开放的 PR 之上，表单会把该 PR 的分支选为基准并显示 **Stacked on #N**。**Use main**（你的默认分支）可以改回。堆叠区块中的 **Open stacked PR on top** 也会打开同一个表单。
+3. 填写标题和描述，然后创建 PR。
 
 在 GitHub.com 上，OpenChamber 还会把新 PR 登记到 GitHub 自己的堆叠中。如果 GitHub 拒绝（fork 或较旧的服务器），PR 仍会创建，堆叠也仍会显示。
 
@@ -49,7 +49,7 @@ restack 会停在有冲突的 PR 上。它下面的分支保持已 restack 的�
 ## 在会话中处理整个堆叠
 
 - 堆叠区块中的 **Attach whole stack** 会把每个 PR 的 diff、检查和评论附加到消息框，并附上顺序和分支的摘要。如果某个 PR 无法读取，其余的仍会附加，并告诉你哪个失败了。
-- 在会话的 **Linked** 列表中，为某个已关联的 PR 打开 **Follow whole stack**。之后会话会随堆叠的变化而跟进：上方的新 PR、合并和改基都会出现，无需重新关联。
+- 在会话的 **Context sources** 中，为某个已关联的 PR 打开 **Follow whole stack**。之后会话会随堆叠的变化而跟进：上方的新 PR、合并和改基都会出现，无需重新关联。这个按钮只在属于某个堆叠的 PR 上显示。
 
 ## 适用范围
 

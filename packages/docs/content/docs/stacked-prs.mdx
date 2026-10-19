@@ -24,8 +24,8 @@ A row can also warn you:
 ## Open a PR on top of another
 
 1. Check out the branch for the new PR, with the top PR's branch as its starting point.
-2. In the stack section, click **Open stacked PR on top**, or pick the top PR's branch as the base in the **Git** view's create form.
-3. The form says **Stacked on #N**. Write the title and description and create the PR.
+2. Open the **Git** view's create form. When the branch sits on an open PR, the form picks that PR's branch as the base and says **Stacked on #N**. **Use main** (your default branch) switches back. **Open stacked PR on top** in the stack section opens the same form.
+3. Write the title and description and create the PR.
 
 On GitHub.com, OpenChamber also registers the new PR in GitHub's own stack. If GitHub refuses (a fork, an older server), the PR is still created and the stack still shows.
 
@@ -49,7 +49,7 @@ Merge from the bottom up. The stack section offers **Merge bottom PR #N** only f
 ## Work on a whole stack in a session
 
 - **Attach whole stack** in the stack section attaches every PR's diff, checks and comments to the message box, with a summary of the order and the branches. If one PR can't be read, the others still attach and you're told which one failed.
-- In a session's **Linked** list, turn on **Follow whole stack** for a linked PR. The session then keeps up with the stack as it changes: new PRs on top, merges and retargets show up without linking again.
+- In the session's **Context sources**, turn on **Follow whole stack** for a linked PR. The session then keeps up with the stack as it changes: new PRs on top, merges and retargets show up without linking again. The button shows only on PRs that belong to a stack.
 
 ## Where it works
 

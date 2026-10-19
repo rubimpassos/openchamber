@@ -2037,7 +2037,7 @@ export function registerGitHubRoutes(app, options = {}) {
 
       const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
       if (!octokit) {
-        return res.json({ connected: false, isFork: false, upstream: null });
+        return res.json({ connected: false, isFork: false, upstream: null, viewerCanPush: false });
       }
 
       const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
@@ -2054,8 +2054,9 @@ export function registerGitHubRoutes(app, options = {}) {
         : await resolveRepoNetwork(octokit, directory, remoteName);
       if (canonical) requireGitHubRepoNetwork(network);
 
+      const viewerCanPush = network?.find((r) => r.source === 'origin')?.viewerCanPush === true;
       if (!network || network.length <= 1) {
-        return res.json({ connected: true, isFork: false, upstream: null });
+        return res.json({ connected: true, isFork: false, upstream: null, viewerCanPush });
       }
 
       const upstream = network.find((r) => r.source === 'upstream') || null;
@@ -2102,6 +2103,7 @@ export function registerGitHubRoutes(app, options = {}) {
         connected: true,
         isFork: Boolean(upstream),
         upstream: upstream ? { owner: upstream.owner, repo: upstream.repo, url: upstream.url, defaultBranch, defaultBranchSha, remoteName: upstreamRemoteName } : null,
+        viewerCanPush,
       });
     } catch (error) {
       if (isReadContextError(error)) {
@@ -2437,14 +2439,22 @@ export function registerGitHubRoutes(app, options = {}) {
   });
 
   // Stack reads retain read admission; writes use canonical durable execution.
-  const runStackRead = (handler) => async (req, res) => {
+  const runStackRead = (handler, { selector = 'number' } = {}) => async (req, res) => {
     const directory = readQueryString(req, 'directory');
     const source = req.query;
     const owner = String(source.owner ?? '').trim();
     const repoName = String(source.repo ?? '').trim();
     const number = Number(source.number);
-    if (!directory || !owner || !repoName || !Number.isSafeInteger(number) || number < 1) {
-      return res.status(400).json({ error: 'directory, owner, repo and number are required' });
+    const branch = String(source.branch ?? '').trim();
+    const { isSafeBranchName } = await import('../pr-stacks/own-commits.js');
+    const numbers = String(source.numbers ?? '').split(',').filter(Boolean).map(Number);
+    const selectorValid = selector === 'number'
+      ? Number.isSafeInteger(number) && number >= 1
+      : selector === 'numbers'
+        ? numbers.length > 0 && numbers.length <= 50 && numbers.every((value) => Number.isSafeInteger(value) && value >= 1)
+        : isSafeBranchName(branch);
+    if (!directory || !owner || !repoName || !selectorValid) {
+      return res.status(400).json({ error: `directory, owner, repo and ${selector} are required` });
     }
     try {
       const trustedContext = await validateReadContext(req, directory);
@@ -2462,7 +2472,7 @@ export function registerGitHubRoutes(app, options = {}) {
       });
       if (!repo) return res.status(400).json({ error: 'Repository is not part of this project' });
       const stacks = await import('./pr-stacks.js');
-      return res.json(await handler({ stacks, octokit, owner: repo.owner, repo: repo.repo, number }));
+      return res.json(await handler({ stacks, octokit, owner: repo.owner, repo: repo.repo, number, numbers, branch, directory, trustedContext }));
     } catch (error) {
       if (isReadContextError(error)) return res.status(error.status ?? 400).json(readContextErrorBody(error));
       const accountError = sendExactAccountError(res, error);
@@ -2488,6 +2498,38 @@ export function registerGitHubRoutes(app, options = {}) {
   app.get(canonicalGitHubRoutePath('/pulls/stack'), runStackRead(async ({ stacks, octokit, owner, repo, number }) => (
     { connected: true, stack: await stacks.resolvePullStack({ octokit, owner, repo, number }) }
   )));
+  const findRemoteForRepo = async (directory, primaryRemote, target) => {
+    const resolveRepo = options.resolveGitHubRepoFromDirectory ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+    const matches = async (remoteName) => {
+      const { repo } = await resolveRepo(directory, remoteName).catch(() => ({ repo: null }));
+      return Boolean(repo) && `${repo.owner}/${repo.repo}`.toLowerCase() === `${target.owner}/${target.repo}`.toLowerCase();
+    };
+    if (await matches(primaryRemote)) return primaryRemote;
+    const listRemotes = options.listGitRemotes ?? (await import('../git/index.js')).getRemotes;
+    for (const remote of await listRemotes(directory)) {
+      if (remote?.name && remote.name !== primaryRemote && await matches(remote.name)) return remote.name;
+    }
+    return null;
+  };
+
+  app.get(canonicalGitHubRoutePath('/pulls/stack/membership'), runStackRead(async ({ stacks, octokit, owner, repo, numbers }) => (
+    { connected: true, members: await stacks.resolveStackMembership({ octokit, owner, repo, numbers }) }
+  ), { selector: 'numbers' }));
+  app.get(canonicalGitHubRoutePath('/pulls/stack/parent'), runStackRead(async ({ stacks, octokit, owner, repo, branch, directory, trustedContext }) => {
+    const git = await import('../git/index.js');
+    const { listOwnCommits, normalizeCreatedFrom } = await import('../pr-stacks/own-commits.js');
+    const runGit = options.runGitCommand ?? git.runGitCommandNoEditor;
+    const readBranchBase = options.getBranchBase ?? git.getBranchBase;
+    const remote = await findRemoteForRepo(directory, trustedContext.primaryRemote, { owner, repo });
+    const result = await stacks.findStackParent({
+      octokit, owner, repo, branch, remote,
+      listOwnCommits: (input) => listOwnCommits(runGit, directory, input),
+      readCreatedFrom: async ({ branch: name, remote: remoteName }) => normalizeCreatedFrom(
+        (await readBranchBase(directory, name).catch(() => ({ base: null }))).base, remoteName,
+      ),
+    });
+    return { connected: true, result };
+  }, { selector: 'branch' }));
   app.post(canonicalGitHubRoutePath('/pulls/stack/register'), (req, res) => runCanonicalMutation('stack-register', req, res));
   app.post(canonicalGitHubRoutePath('/pulls/stack/retarget'), (req, res) => runCanonicalMutation('stack-retarget', req, res));
   app.post(canonicalGitHubRoutePath('/pulls/stack/merge'), (req, res) => runCanonicalMutation('stack-merge', req, res));

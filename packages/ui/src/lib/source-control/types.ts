@@ -480,6 +480,8 @@ export interface ProjectUpstream {
   identity: SourceControlIdentity;
   isFork: boolean;
   upstream: Project | null;
+  /** Whether the bound account can push to the primary remote's repository. */
+  viewerCanPush: boolean;
 }
 
 export interface SourceControlDeviceFlowStart {

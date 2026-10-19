@@ -137,7 +137,7 @@ const serveStackProvider = ({ native = false, mergeStatus = 'merged', changedLis
   return { fetch, writes };
 };
 
-const makeApp = ({ store = makeStore(), validateReadContext, validateMutationContext, resolveRepo, resolveNetwork, resolveStatus } = {}) => {
+const makeApp = ({ store = makeStore(), validateReadContext, validateMutationContext, resolveRepo, resolveNetwork, resolveStatus, git } = {}) => {
   const app = express();
   app.use(express.json());
   const routeOptions = {
@@ -150,6 +150,7 @@ const makeApp = ({ store = makeStore(), validateReadContext, validateMutationCon
     resolveRepoNetwork: resolveNetwork ?? (async () => null),
   };
   if (resolveStatus) routeOptions.resolveGitHubPrStatus = resolveStatus;
+  if (git) Object.assign(routeOptions, git);
   const service = registerGitHubRoutes(app, routeOptions);
   return { app, store, service };
 };
@@ -213,6 +214,62 @@ describe('canonical GitHub mutations', () => {
     expect(validateMutationContext).not.toHaveBeenCalled();
     expect(store.records.size).toBe(0);
     expect(provider.writes).toEqual([]);
+  });
+
+  it('finds the stack parent of a local branch from the open PR heads and its own commits', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    serveStackProvider();
+    const runGitCommand = vi.fn(async (_directory, args) => (args[0] === 'rev-list'
+      ? { success: true, stdout: 'own\ntop-sha\nabc123\n' }
+      : { success: true, stdout: 'sha\n' }));
+    const { app, store } = makeApp({ git: {
+      runGitCommand, getBranchBase: async () => ({ base: 'top' }), listGitRemotes: async () => [{ name: 'origin' }],
+    } });
+    const { target: _target, idempotencyKey: _key, ...readContext } = context(account.accountId);
+    const response = await request(app).get('/api/source-control/github/pulls/stack/parent')
+      .query({ ...readContext, owner: 'acme', repo: 'app', branch: 'next' }).expect(200);
+    expect(response.body).toEqual({ connected: true, result: {
+      status: 'found', via: 'ancestry', parent: { number: 8, head: 'top', title: 'Title', url: 'https://github.com/acme/app/pull/7' },
+    } });
+    expect(runGitCommand).toHaveBeenCalledWith('/repo', ['rev-list', '--topo-order', '--max-count=1001', 'refs/heads/next', '--not', 'refs/remotes/origin/main']);
+    expect(store.records.size).toBe(0);
+  });
+
+  it('answers stack membership of several PRs through the real web adapter', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    serveStackProvider();
+    const { app } = makeApp();
+    const { createWebPullStackAPI } = await import('../../../src/api/pull-stacks.ts');
+    const api = createWebPullStackAPI(async (endpoint, options) => {
+      const response = await request(app).get(endpoint).query(Object.fromEntries(options.query));
+      return Response.json(response.body, { status: response.status });
+    });
+    const { target: _target, idempotencyKey: _key, ...readContext } = context(account.accountId);
+    expect(await api.githubPullStackMembership(readContext, { owner: 'acme', repo: 'app', numbers: [7, 8, 99] }))
+      .toEqual({ connected: true, members: { 7: true, 8: true, 99: null } });
+    await request(app).get('/api/source-control/github/pulls/stack/membership').query({ ...readContext, owner: 'acme', repo: 'app', numbers: 'x' }).expect(400);
+  });
+
+  it('fails the stack parent read instead of answering none when GitHub cannot list the PRs', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ message: 'unavailable' }, 502)));
+    const { app } = makeApp({ git: { runGitCommand: vi.fn(), getBranchBase: vi.fn(), listGitRemotes: async () => [] } });
+    const { target: _target, idempotencyKey: _key, ...readContext } = context(account.accountId);
+    const response = await request(app).get('/api/source-control/github/pulls/stack/parent')
+      .query({ ...readContext, owner: 'acme', repo: 'app', branch: 'next' });
+    expect(response.status).toBeGreaterThanOrEqual(500);
+    expect(response.body.result).toBeUndefined();
+  });
+
+  it('rejects a stack parent read without a safe branch or outside the fork network', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const provider = serveStackProvider();
+    const { app } = makeApp();
+    const { target: _target, idempotencyKey: _key, ...readContext } = context(account.accountId);
+    await request(app).get('/api/source-control/github/pulls/stack/parent').query({ ...readContext, owner: 'acme', repo: 'app' }).expect(400);
+    await request(app).get('/api/source-control/github/pulls/stack/parent').query({ ...readContext, owner: 'acme', repo: 'app', branch: '--all' }).expect(400);
+    await request(app).get('/api/source-control/github/pulls/stack/parent').query({ ...readContext, owner: 'outside', repo: 'app', branch: 'next' }).expect(400);
+    expect(provider.fetch).not.toHaveBeenCalled();
   });
 
   it.each(['register', 'retarget', 'merge'])('rejects out-of-network stack %s before provider work', async (kind) => {
