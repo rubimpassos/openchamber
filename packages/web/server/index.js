@@ -3007,6 +3007,7 @@ async function main(options = {}) {
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
     openchamberVersion: OPENCHAMBER_VERSION,
     isOpenCodeRunning: () => Boolean(openCodePort && isOpenCodeReady && !isRestartingOpenCode),
+    isLocalMcpScopeSupported: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
     onGuestDeactivated: async (event) => {
       guestSurfaceRuntime?.endForGuest(event.guestId);
       return browserControlRouter.handleGuestDeactivated(event);

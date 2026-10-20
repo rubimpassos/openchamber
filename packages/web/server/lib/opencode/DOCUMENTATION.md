@@ -35,6 +35,7 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration. OpenCode 2 watches these files, so a write is live as soon as it lands and the route answers plain success.
+- `packages/web/server/lib/opencode/mcp-config-runtime.js`: combines file-backed MCP configuration with OpenChamber's personal project entries. `user` is global, `project` writes the repository's OpenCode configuration, and `local` writes only the host's OpenChamber data directory. The existing MCP routes expose the effective entry and edit or delete its owning source; they do not move entries between scopes. Names remain unique when creating an entry. A personal entry wins if a later repository update introduces the same name, and deleting that personal entry reveals the current file-backed definition.
 - `packages/web/server/lib/opencode/websearch-config.js`: writes OpenCode's `websearch` choice (`PUT /api/config/websearch` in `routes.js`; body `{ selection: false | null | "random" | "<provider id>" }`, `null` removes the key, so OpenCode falls back to the answer given in its chat consent form, which it keeps in its own store) to `OPENCODE_CONFIG` when set, else the user config. `GET /api/config/websearch` returns `{ projectPath }`: the project config whose `websearch` overrides that write (OpenCode merges user < project < `OPENCODE_CONFIG`), so Settings disables the choice and names the file instead of letting it snap back; `findWebSearchProjectOverride` in `config-v2.js` holds the rule. The pure transform is `writeWebSearchSelection` in `config-v2.js`, shared with the VS Code bridge (`api:config/websearch`).
 - `packages/web/server/lib/opencode/config-mutation-response.js`: shared response builders for applied config mutations and external manual-restart guidance.
 - `packages/web/server/lib/opencode/snippets.js`: opencode-snippets-compatible snippet file CRUD, discovery, and hashtag expansion.
@@ -57,15 +58,19 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, system prompt optimizer) and publishes them in a file OpenCode watches.
 
 ### Managed plugins on OpenCode 2.x
+A managed child always loads the personal-project MCP plugin, even when there are no personal entries yet. Each active location watches only its own project's private document and refreshes its MCP transform after a change. Saving a personal entry does not rewrite the global managed config, restart OpenCode, or initialize other locations. Configuration persistence and MCP connection status remain separate: a saved server may still require OAuth or fail to connect.
+
+The MCP Settings surface uses the connected host's storage on web, Electron, hosted mobile, and Capacitor mobile. Managed VS Code uses the same private storage and plugin from its extension host. External OpenCode receives no plugin injection: `GET /api/config/mcp-capabilities` answers `{ projectLocal: false }`, and personal-project mutations are refused before writing. The global and shared-project scopes keep their existing behavior. These are user-configured MCP tools, so enterprise mode keeps the existing Settings MCP behavior and OpenCode policy enforcement.
+
 A configured plugin must be a DIRECTORY holding a `package.json` that resolves an
 entrypoint; a path to a `.js` file is skipped with "configured plugin path must
 be a directory". The config key is `plugins` (an array of absolute directory
 paths), not `plugin`.
 
-The generated entrypoint has no imports. OpenCode loads it with a plain dynamic
-`import()`, and resolution happens from the plugin's own directory, where nothing
-is installed — `import { Plugin } from "@opencode/plugin"` fails there. None of
-it is needed: a plugin only has to default-export `{ id, setup }`, and a tool's
+Generated entrypoints use Node built-ins only or have no imports. OpenCode loads
+them with a plain dynamic `import()`, and resolution happens from the plugin's
+own directory, where no dependencies are installed. Importing `@opencode/plugin`
+fails there. A plugin only has to default-export `{ id, setup }`, and a tool's
 `input` accepts plain JSON Schema.
 
 Two v1 affordances are gone and the generated tools work around them: a tool
