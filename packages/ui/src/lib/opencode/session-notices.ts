@@ -31,6 +31,9 @@
  *   it folds into the user message as context chips.
  * - A background subagent's report and a dispatched session's result: they
  *   render as their own rows already (`subagent-run`, `dispatched-session`).
+ * - OpenChamber waking a session (a resume after a managed OpenCode restart,
+ *   the answer to an interrupted question, a PR fix-loop message): each opens
+ *   a turn of its own with its own row (`openchamber-resume`).
  * - A background shell command's completion: it finishes the shell call's
  *   own row (`background-shell`).
  * - OpenChamber's notes to the agent that the user stopped a subagent or a
@@ -46,6 +49,7 @@ import { readContextPart } from "@/lib/messages/contextParts"
 import { readShellCancellation, readShellCompletion } from "./background-shell"
 import { readDispatchedSessionResult } from "./dispatched-session"
 import type { Message, Metadata, Part, ToolPart } from "./model"
+import { readOpenChamberResume } from "./openchamber-resume"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
 
 export type SessionNotice =
@@ -79,7 +83,7 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (!description) return undefined
   const metadata = message.metadata ?? {}
   if (readContextPart({ type: "text", metadata: message.metadata })) return undefined
-  if (readSubagentRun(message) || readDispatchedSessionResult(message)) return undefined
+  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readOpenChamberResume(message)) return undefined
   if (readShellCompletion(message) || readShellCancellation(message) || isSubagentCancellationNote(message)) return undefined
   if (HIDDEN_DESCRIPTIONS.has(description) || instructionsLoadedSchema.safeParse(metadata).success) return undefined
   const text = message.text

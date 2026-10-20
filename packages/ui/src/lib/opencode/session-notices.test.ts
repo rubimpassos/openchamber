@@ -77,6 +77,13 @@ describe("readSessionNotice: hidden", () => {
     expect(readSessionNotice(synthetic("Fix it", { source: "openchamber-session", sessionID: "ses_d", state: "completed" }))).toBeUndefined()
   })
 
+  test("OpenChamber waking the session: a restart resume, a question answer, a fix-loop message", () => {
+    const source = "openchamber-notice"
+    expect(readSessionNotice(synthetic("OpenChamber resumed this session after OpenCode restarted", { source, kind: "restart-resume", trigger: "auto", at: 1, cause: "memory-pressure", tool: null }))).toBeUndefined()
+    expect(readSessionNotice(synthetic("Answered", { source, kind: "question-answer", cause: "opencode-restart", at: 1, answers: [] }))).toBeUndefined()
+    expect(readSessionNotice(synthetic("Fix CI", { source, kind: "fix-loop", loopId: "loop_1" }))).toBeUndefined()
+  })
+
   test("a background command's completion", () => {
     expect(readSessionNotice(synthetic("ls", { source: "shell", shellID: "sh_1", state: "error" }))).toBeUndefined()
   })
