@@ -21,7 +21,7 @@ import {
   GUEST_MESSAGE_TONES,
   isFileEditorPattern,
 } from '@openchamber/sdk';
-import { loopbackContributionSchema } from '@openchamber/sdk/schemas';
+import { guestPlanProvidersSchema, loopbackContributionSchema } from '@openchamber/sdk/schemas';
 import { z } from 'zod';
 
 import type { GuestCatalog, InstalledGuest } from './types.ts';
@@ -156,6 +156,7 @@ const installedGuestSchema = z.object({
   messages: z.array(guestMessageSchema).max(GUEST_MESSAGES_MAX).optional(),
   goal: z.object({ driver: z.string().min(1) }).optional(),
   fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
+  plans: guestPlanProvidersSchema.optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),
     granted: z.array(z.enum(GUEST_CAPABILITIES)),

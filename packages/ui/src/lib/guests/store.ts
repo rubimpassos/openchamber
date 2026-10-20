@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import type { GuestUpdate, InstalledGuest, UnreadableGuest } from './types.ts';
 import type { GuestRequestFailure } from './request-failure.ts';
 
-type GuestsStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unsupported';
+export type GuestsStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unsupported';
 
 type GuestsState = {
   status: GuestsStatus;

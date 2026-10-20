@@ -14,6 +14,7 @@ import {
   GUEST_GENERATE_TEXT_MAX,
   GUEST_FILE_CONTENT_MAX,
   GUEST_FILE_PATH_MAX,
+  GUEST_PLAN_CONTENT_MAX,
   guestFramePolicy,
   isGuestRequestPath,
   requestedGuestCapabilities,
@@ -29,6 +30,7 @@ import {
   toPublicGuest,
 } from './catalog.js';
 import { runGuestFileOperation } from './files.js';
+import { authorizeGuestPlanProvider, listGuestPlans, readGuestPlan, writeGuestPlan } from './plans.js';
 import { createGuestFileWatchRegistry, GUEST_FILE_WATCH_LEASE_MS, GUEST_FILE_WATCH_PATHS_MAX, resolveWatchPaths } from './file-watch.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
 import { injectGuestDocumentStyles } from './html-styles.js';
@@ -104,6 +106,19 @@ const fileBodySchema = z.object({
   path: z.string().min(1).max(GUEST_FILE_PATH_MAX),
   content: z.string().max(GUEST_FILE_CONTENT_MAX).optional(),
 }).refine((value) => value.op !== 'write' || typeof value.content === 'string', { path: ['content'] });
+
+const planProviderIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/).max(64);
+const planListBodySchema = z.object({ provider: planProviderIdSchema }).strict();
+const planFileBodySchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('read'), provider: planProviderIdSchema, path: z.string().min(1).max(GUEST_FILE_PATH_MAX) }).strict(),
+  z.object({
+    op: z.literal('write'),
+    provider: planProviderIdSchema,
+    path: z.string().min(1).max(GUEST_FILE_PATH_MAX),
+    content: z.string().max(GUEST_PLAN_CONTENT_MAX),
+    expectedHash: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict(),
+]);
 
 const generateBodySchema = z.object({
   prompt: z.string().trim().min(1).max(GUEST_GENERATE_PROMPT_MAX),
@@ -220,6 +235,9 @@ export const registerGuestRoutes = (app, {
   isRequestOriginAllowed,
   // Delivers `openchamber:guest-files-changed` to connected clients.
   emitGuestFilesChanged = () => undefined,
+  // Whether a canonical directory is a registered project or one of its
+  // worktrees. Plan routes refuse every other directory.
+  isPlanDirectoryAllowed = async () => false,
 }) => {
   const fileWatches = createGuestFileWatchRegistry({ emit: emitGuestFilesChanged });
   const persistPath = extensionsPersistPath(openchamberDataDir);
@@ -650,6 +668,71 @@ export const registerGuestRoutes = (app, {
       // Only the failure class is logged: never the path or the file content.
       console.error('Failed to run guest file operation:', error?.code ?? error?.name ?? 'error');
       res.status(500).json({ error: 'Failed to run guest file operation' });
+    }
+  });
+
+  // Plan providers (`contributes.plans`). The UI names the worktree in
+  // `x-opencode-directory`; it must be a registered project or one of its
+  // worktrees. The answer never includes a path outside the provider's root.
+  const resolvePlanRequest = async (req, res) => {
+    const guest = await loadGuest(req.params.id);
+    if (!guest) {
+      res.status(404).json({ error: 'not-found' });
+      return null;
+    }
+    const store = await readExtensionStore(persistPath);
+    const providerId = typeof req.body?.provider === 'string' ? req.body.provider : '';
+    const authorized = authorizeGuestPlanProvider(guest, providerId, { disabled: Boolean(store.disabledGuests?.[guest.id]) });
+    if (!authorized.ok) {
+      res.status(authorized.code === 'NOT_FOUND' ? 404 : 400).json({ error: authorized.code, message: authorized.message });
+      return null;
+    }
+    const { directory, error } = await resolveOptionalProjectDirectory(req);
+    if (!directory || error) {
+      res.status(400).json({ error: 'NO_DIRECTORY', message: 'No worktree is open.' });
+      return null;
+    }
+    if (!(await isPlanDirectoryAllowed(directory))) {
+      res.status(400).json({ error: 'BAD_PATH', message: 'That folder is not a registered project or worktree.' });
+      return null;
+    }
+    return { provider: authorized.provider, directory };
+  };
+
+  const sendPlanResult = (res, result) => {
+    if (result.ok) return res.json({ ok: true, result: result.result });
+    const status = result.code === 'NOT_FOUND' ? 404 : result.code === 'CONFLICT' ? 409 : 400;
+    const body = { error: result.code, message: result.message };
+    if (result.code === 'CONFLICT') body.hash = result.hash ?? null;
+    return res.status(status).json(body);
+  };
+
+  app.post('/api/guests/:id/plans/list', json16, async (req, res) => {
+    try {
+      if (!planListBodySchema.safeParse(req.body).success) return res.status(400).json({ error: 'invalid-request' });
+      const context = await resolvePlanRequest(req, res);
+      if (!context) return;
+      sendPlanResult(res, await listGuestPlans(context));
+    } catch (error) {
+      console.error('Failed to list guest plans:', error?.code ?? error?.name ?? 'error');
+      res.status(500).json({ error: 'Failed to list plans' });
+    }
+  });
+
+  app.post('/api/guests/:id/plans/file', jsonFiles, async (req, res) => {
+    try {
+      const parsed = planFileBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: 'invalid-request' });
+      const context = await resolvePlanRequest(req, res);
+      if (!context) return;
+      const result = parsed.data.op === 'read'
+        ? await readGuestPlan({ ...context, path: parsed.data.path })
+        : await writeGuestPlan({ ...context, path: parsed.data.path, content: parsed.data.content, expectedHash: parsed.data.expectedHash });
+      sendPlanResult(res, result);
+    } catch (error) {
+      // Only the failure class is logged: never the path or the plan text.
+      console.error('Failed to run guest plan operation:', error?.code ?? error?.name ?? 'error');
+      res.status(500).json({ error: 'Failed to run plan operation' });
     }
   });
 

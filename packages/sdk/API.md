@@ -263,6 +263,34 @@ Omit `options`, or pass `{ scope: 'instance' }`, for this existing server-owned 
 
 The host keeps the file. It hands you the text (`onFileOpen`), asks for the edited text when it saves or when the user switches to the source view or fullscreen (`onFileSnapshot`), and tells you which snapshot reached the disk (`onFileSaved`). Saving, autosave, the unsaved-changes prompt, line endings, and external changes are the host's. Your page never reads or writes the file and needs no `files` capability for it. Report every change with `reportFileChange`; `createFileSaveTracker(version)` does the dirty bookkeeping. A file you cannot open goes back with `reportFileUnsupported`. Files over 20 000 000 characters (text) or bytes (binary) stay with the host's own view, and a snapshot over that is refused. An editor that hands back the wrong kind (text from a binary editor or bytes from a text one) fails the save. The page is reloaded, with the file handed over again, when the file changes on disk, the user discards changes, or the editor moves to or from fullscreen. A file-editor-only package may declare `capabilities`, `service`, `integration`, and `filesystem`; `page`, `attach`, `actions`, and `commands` still need `panel.entry` or `background.entry`. Web and desktop only; `examples/checklist-editor` is a complete editor.
 
+### Plan providers
+
+`contributes.plans` shows plans another tool keeps as files in the worktree in OpenChamber's Plans area, next to the user's own Project knowledge plans. The files stay where they are and stay the only copy: nothing is imported or converted, and no `## Steps` checklist is required.
+
+```json
+"plans": [{
+  "id": "shelf",
+  "label": "Shelf plans",
+  "root": ".plan-shelf",
+  "match": ["*.md"],
+  "actions": [
+    { "id": "review", "kind": "review", "label": "Review", "run": { "type": "prompt", "text": "Review the plan in {plan.path}." } },
+    { "id": "execute", "kind": "execute", "label": "Run", "run": { "type": "command", "name": "plan-shelf-run", "arguments": "{plan.name}" }, "agent": "build" },
+    { "id": "resume", "kind": "resume", "label": "Resume", "run": { "type": "skill", "name": "plan-shelf", "text": "Resume {plan.name}." } }
+  ]
+}]
+```
+
+- 1 to 4 providers (`GUEST_PLAN_PROVIDERS_MAX`), each a unique kebab-case `id`, a `label` of 1 to 40 characters, and a worktree-relative `root` (segments of letters, digits, `.`, `_`, `-`; never `.`, `..`, absolute, or with a backslash). `match` is 1 to 8 file-name patterns with the `fileEditors` rules, default `["*.md"]`. A plan is a regular file under `root`, at most `GUEST_PLAN_DEPTH_MAX` (4) folders below it, whose name matches. Anything else is `invalid-plans`.
+- `actions` is 1 to 6 entries: unique kebab-case `id`, `kind` `review` | `execute` | `resume`, `label`, optional `agent`, and `run`: `{ type: "command", name, arguments? }` runs that OpenCode command, `{ type: "skill", name, text }` sends `text` with that skill attached, `{ type: "prompt", text }` sends `text` as written (a leading `/` is not a command). Templates may only use `{plan.path}` (the worktree-relative path) and `{plan.name}` (file name without extension). `name` matches `GUEST_PLAN_RUN_NAME`.
+- Declaring providers requests the `plans` capability. The approval card shows every root and the exact command, skill or prompt of every action; any change to a root, a pattern or an action asks again (`guestPlanProvidersScope`). A provider needs a `panel.entry` or `background.entry` frame to describe its plans.
+
+The host lists the files itself (`POST /api/guests/:id/plans/list`), including plans that never ran, and asks the extension to describe them. Register `host.onPlans(handler)` synchronously after `connectHost`: it receives `{ provider, directory, plans: [{ path }] }` and returns `GuestPlanAnnotation[]`, each `{ path, title?, progress?: { done, total }, status?: { label, tone? }, actions?: string[] }`. Leave a plan out to say nothing about it; it stays listed by its file name. `actions` names the declared ids that apply now (omitted: all). A thrown error or no answer within 20 s leaves every plan listed and the provider's actions unavailable. `connectHost` clamps the answer (`clampGuestPlanAnnotations`). The frame that answers is hidden, pinned to that worktree, and attached to no session (`ctx.directory` is the worktree, `ctx.session` is `null`).
+
+`host.readPlan(provider, path)` returns `{ content, hash }` (SHA-256 of the bytes) for a plan of a declared provider in the frame's directory; it needs the `plans` grant and refuses any other path as `BAD_PATH`. `host.plansChanged(provider)` asks the host to list again; the host also re-reads every 15 s while plans are on screen.
+
+The user opens, edits and saves the original file in the host. A save sends the hash of the text it was based on; a file that changed meanwhile is a conflict the user resolves (load the file, or save over it with the new hash). An action is confirmed in a dialog that shows the plan, the worktree, the exact command or text, the agent and the model. Before anything is created the host checks again that the extension is active with `plans`, the action is still declared the same way, the file still has the confirmed hash, and the worktree has the command, skill and agent; any failed check creates nothing and runs nothing else. Then it creates a new session in the plan's worktree and sends. A paused, unapproved or removed extension keeps its section with a notice and no actions. Web and desktop only, like every guest; `examples/plan-shelf` is a complete provider.
+
 `sent` **values** (`startSession` / `prompt`): `sent` | `no-model` | `skipped` | `failed`. After `no-model` / `failed` on `startSession`, the session still exists.
 
 **File path rules** (`readFile` / `writeFile` / `listDir` / `stat`): a relative path (`README.md`, `src/x.ts`, `.`) is joined to the project that is open when the call runs and needs the `files` capability; no open project is `NO_DIRECTORY`. A path starting with `/` or `~/` is outside the project, must match one of the package's `contributes.filesystem` globs, and needs the `filesystem` capability. Any `..` segment, a backslash, or a symlink that leads out of the allowed tree is `BAD_PATH`. The host compares canonical (realpath) paths, so `/tmp/x` on macOS is checked as `/private/tmp/x` and a pattern's literal prefix is canonicalized the same way. Content over 2 000 000 characters is `FILE_TOO_LARGE` in both directions; an OS permission refusal is `DENIED`.

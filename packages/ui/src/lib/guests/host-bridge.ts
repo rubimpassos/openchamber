@@ -35,6 +35,10 @@ import {
   type HostRequestErrorCode,
   type HostResultPayload,
   type ResolveResultPayload,
+  type PlanReadRequest,
+  type PlanReadResult,
+  type PlansAnnotateRequest,
+  type PlansAnnotateResultPayload,
   type SessionSnapshot,
   type StartSessionResult,
   type ToastRequest,
@@ -103,6 +107,15 @@ type HostBridgeEffects = ReturnType<typeof createGuestLoopback> & {
   resize: (height: number) => void;
   /** The guest answered a host `resolve` with this id. Not a request, so no `result` goes back. */
   resolveResult: (id: string, payload: ResolveResultPayload) => void;
+  /** One plan of a declared provider in the frame's directory; the pane checks the `plans` grant and the declaration. */
+  planRead: (request: PlanReadRequest) => Promise<
+    | { ok: true; result: PlanReadResult }
+    | { ok: false; code: HostRequestErrorCode; message: string }
+  >;
+  /** The guest says a provider's plans changed; the pane checks the declaration. */
+  plansChanged: (provider: string) => void;
+  /** The guest answered a host `plans-annotate` with this id. Not a request, so no `result` goes back. */
+  plansAnnotateResult: (id: string, payload: PlansAnnotateResultPayload) => void;
   openPopover?: (request: GuestPopoverRequest) => void;
   closePopover?: (id: string, reason: 'closed' | 'escape' | undefined) => void;
   setPopoverAnchorActive?: (id: string, active: boolean) => void;
@@ -158,6 +171,14 @@ export const buildResolveMessage = (id: string, command: string, args: string): 
   type: 'resolve',
   id,
   payload: { command, args },
+});
+
+export const buildPlansAnnotateMessage = (id: string, request: PlansAnnotateRequest): HostMessage => ({
+  channel: OPENCHAMBER_SDK_CHANNEL,
+  v: OPENCHAMBER_SDK_API_VERSION,
+  type: 'plans-annotate',
+  id,
+  payload: request,
 });
 
 export const buildSessionLifecycleMessage = (event: SessionLifecycleEvent): HostMessage => ({
@@ -410,6 +431,16 @@ export const answerGuestMessage = async (
     case 'resolve-result':
       effects.resolveResult(message.id, message.payload);
       return null;
+    case 'plans-annotate-result':
+      effects.plansAnnotateResult(message.id, message.payload);
+      return null;
+    case 'plan-read': {
+      const result = await effects.planRead(message.payload);
+      return result.ok ? okResult(message.id, result.result) : errorResult(message.id, result.message, result.code);
+    }
+    case 'plans-changed':
+      effects.plansChanged(message.payload.provider);
+      return okResult(message.id);
     case 'popover-open':
       if (!effects.openPopover) return errorResult(message.id, 'This host does not support popovers.', 'UNSUPPORTED');
       effects.openPopover(message.payload);

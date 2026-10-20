@@ -47,6 +47,8 @@ const capabilityScopeSchema = z.object({
     exec: z.array(z.string().min(1)),
     sockets: z.array(z.string().min(1)),
   }).optional(),
+  // `guestPlanProvidersScope`: the canonical JSON of roots, patterns and actions.
+  plans: z.string().min(1).optional(),
 });
 
 /** @returns {Record<string, z.infer<typeof capabilityScopeSchema>>} */

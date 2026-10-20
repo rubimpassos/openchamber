@@ -1,6 +1,7 @@
 // allow: SIZE_OK — existing manifest contract registry; the new loopback policy is owned by loopback.ts, not this registry.
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
 import type { FileEditorContribution } from './file-editor.ts';
+import type { GuestPlanProviderContribution } from './plan-providers.ts';
 import { isLoopbackContribution, type LoopbackContribution } from './loopback.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
@@ -430,10 +431,11 @@ export const serviceProvides = (
  * for more is re-approved. `prompt`, `sessions`, `files`, `model`, and
  * `shells` are declared under `contributes.capabilities`; `service`, `network`,
  * `filesystem` and `origins` follow from `contributes.service`,
- * `contributes.integration`, `contributes.filesystem` and `contributes.origins`. `model` is one-off text generation with the
+ * `contributes.integration`, `contributes.filesystem` and `contributes.origins`; `plans` follows from
+ * `contributes.plans` (list, read and write the declared plan files, run the declared plan actions). `model` is one-off text generation with the
  * user's Small Model (`host.generate`), outside any session.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'loopback'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'loopback', 'plans'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -500,6 +502,8 @@ export type OpenChamberContributes = {
   goal?: GuestGoalContribution;
   /** Editors the Files view opens matching files in. */
   fileEditors?: FileEditorContribution[];
+  /** Plan files of another tool, shown in the Plans area. Grants `plans`. */
+  plans?: GuestPlanProviderContribution[];
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -514,7 +518,7 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'loopback'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'loopback' | 'plans'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(DECLARED_GUEST_CAPABILITIES.filter((capability) => contributes.capabilities?.includes(capability)));
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
@@ -523,6 +527,7 @@ export const requestedGuestCapabilities = (
   if (contributes.filesystem && contributes.filesystem.length > 0) declared.add('filesystem');
   if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
   if (contributes.loopback && isLoopbackContribution(contributes.loopback)) declared.add('loopback');
+  if (contributes.plans && contributes.plans.length > 0) declared.add('plans');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
@@ -629,7 +634,8 @@ export type ParseManifestErrorCode =
   | 'invalid-tools'
   | 'invalid-messages'
   | 'invalid-goal'
-  | 'invalid-file-editors';
+  | 'invalid-file-editors'
+  | 'invalid-plans';
 
 export type ParseManifestFailure = {
   ok: false;

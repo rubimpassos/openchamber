@@ -34,6 +34,7 @@ import {
   buildDirectoryMessage,
   buildItemMessage,
   buildReadyMessage,
+  buildPlansAnnotateMessage,
   buildResolveMessage,
   buildSessionLifecycleMessage,
   buildSessionMessage,
@@ -55,6 +56,9 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/resolve';
+import { registerGuestPlanAnnotator, type GuestPlanAnnotateOutcome } from '@/lib/guests/plans/frames';
+import { findGuestPlanProvider, invalidateGuestPlans } from '@/lib/guests/plans/catalog';
+import { readGuestPlanFile } from '@/lib/guests/plans/api';
 import type { GuestBackgroundAction } from '@/lib/guests/run-action';
 import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
 import { useGuestItemStore } from '@/lib/guests/item-store';
@@ -136,6 +140,12 @@ type PluginPaneProps = {
   isActive?: () => boolean;
   onPopoverClosed?: (event: GuestPopoverClosedEvent) => void;
   onPopoverActivity?: (active: boolean) => void;
+  /**
+   * Hidden frame that describes this extension's plans in one worktree
+   * (`contributes.plans`): pinned to that directory, attached to no session,
+   * and the only frame that answers `plans-annotate` for it.
+   */
+  planHostDirectory?: string;
 };
 
 // Sandboxed frames without allow-same-origin have an opaque origin.
@@ -184,15 +194,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   isActive,
   onPopoverClosed,
   onPopoverActivity,
+  planHostDirectory,
 }) => {
   const { t, locale } = useI18n();
   const { currentTheme } = useThemeSystem();
   const effectiveDirectory = useEffectiveDirectory();
   const selectedSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const directory = popoverHost?.directory ?? pinnedDirectory ?? (backgroundAction ? backgroundAction.item.directory ?? ''
+  const directory = planHostDirectory ?? popoverHost?.directory ?? pinnedDirectory ?? (backgroundAction ? backgroundAction.item.directory ?? ''
     : surface === 'status' && statusDirectory !== undefined ? statusDirectory ?? '' : effectiveDirectory);
   const statusContextKey = surface === 'status' ? directory : null;
-  const currentSessionId = backgroundAction ? backgroundAction.item.sessionId : selectedSessionId;
+  const currentSessionId = planHostDirectory ? null : backgroundAction ? backgroundAction.item.sessionId : selectedSessionId;
   const session = useSession(currentSessionId, directory || undefined);
   const sessionStatus = useSessionStatus(currentSessionId ?? '', directory || undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
@@ -383,6 +394,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   // Outstanding `resolve` requests this pane sent; answered by `resolve-result`.
   const resolveWaitersRef = React.useRef(new Map<string, (outcome: GuestResolveOutcome) => void>());
   const resolveIdsRef = React.useRef(0);
+  // Outstanding `plans-annotate` requests; answered by `plans-annotate-result`.
+  const annotateWaitersRef = React.useRef(new Map<string, (outcome: GuestPlanAnnotateOutcome) => void>());
 
   const stopOauthPoll = React.useCallback(() => {
     if (oauthPollRef.current != null) {
@@ -443,6 +456,42 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       });
     });
   }, [headless, surface]);
+  const unregisterAnnotatorRef = React.useRef<(() => void) | null>(null);
+  const registerAnnotator = React.useCallback(() => {
+    if (!planHostDirectory || unregisterAnnotatorRef.current) return;
+    const registeredGuest = guestRef.current;
+    const runtimeKey = getRuntimeKey();
+    unregisterAnnotatorRef.current = registerGuestPlanAnnotator(guestIdRef.current, planHostDirectory, (request) => {
+      const currentGuest = useGuestsStore.getState().guests.find((candidate) => candidate.id === registeredGuest?.id);
+      if (getRuntimeKey() !== runtimeKey || !currentGuest || !guestMay(currentGuest, 'plans')
+        || currentGuest.version !== registeredGuest?.version || currentGuest.storageId !== registeredGuest?.storageId
+        || request.directory !== planHostDirectory || !findGuestPlanProvider(currentGuest, request.provider)) {
+        return Promise.resolve({ ok: false, reason: 'unavailable' });
+      }
+      return new Promise((resolve) => {
+        resolveIdsRef.current += 1;
+        const id = `plans-${resolveIdsRef.current}`;
+        const timer = window.setTimeout(() => {
+          annotateWaitersRef.current.delete(id);
+          resolve({ ok: false, reason: 'timeout' });
+        }, GUEST_REQUEST_TIMEOUT_MS);
+        annotateWaitersRef.current.set(id, (outcome) => {
+          window.clearTimeout(timer);
+          annotateWaitersRef.current.delete(id);
+          resolve(outcome);
+        });
+        iframeRef.current?.contentWindow?.postMessage(buildPlansAnnotateMessage(id, request), OPAQUE_FRAME_TARGET_ORIGIN);
+      });
+    });
+  }, [planHostDirectory]);
+  React.useEffect(() => () => {
+    unregisterAnnotatorRef.current?.();
+    unregisterAnnotatorRef.current = null;
+    for (const waiter of annotateWaitersRef.current.values()) {
+      waiter({ ok: false, reason: 'unavailable' });
+    }
+    annotateWaitersRef.current.clear();
+  }, [frameKey, src, srcDoc, planHostDirectory]);
   React.useEffect(() => () => {
     unregisterResolverRef.current?.();
     unregisterResolverRef.current = null;
@@ -587,6 +636,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         pushHostState();
         connectFileChannel();
         registerResolver();
+        registerAnnotator();
         sendBackgroundAction();
         return;
       }
@@ -880,6 +930,32 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           // The guest measures in its own CSS pixels; the host sizes the zoomed frame.
           onResizeRef.current?.(Math.ceil(height * frameZoomRef.current));
         },
+        plansAnnotateResult: (id, payload) => {
+          const waiter = annotateWaitersRef.current.get(id);
+          if (!waiter) return;
+          waiter('error' in payload ? { ok: false, reason: 'error', message: payload.error } : { ok: true, annotations: payload.annotations });
+        },
+        planRead: (request) => {
+          const current = currentGuest();
+          if (!guestMay(current, 'plans')) {
+            return Promise.resolve({ ok: false as const, code: 'NOT_GRANTED' as const, message: NOT_GRANTED_MESSAGE });
+          }
+          if (!findGuestPlanProvider(current, request.provider)) {
+            return Promise.resolve({ ok: false as const, code: 'NOT_FOUND' as const, message: 'This extension declares no such plan provider.' });
+          }
+          const planDirectory = directoryRef.current || null;
+          if (!planDirectory) {
+            return Promise.resolve({ ok: false as const, code: 'NO_DIRECTORY' as const, message: 'No project is open.' });
+          }
+          return readGuestPlanFile(requestingGuestId, request.provider, planDirectory, request.path).then((read) => (
+            read.ok
+              ? { ok: true as const, result: { content: read.result.content, hash: read.result.hash } }
+              : { ok: false as const, code: read.code === 'CONFLICT' ? 'HOST_REJECTED' as const : read.code, message: read.message }
+          ));
+        },
+        plansChanged: (provider) => {
+          if (findGuestPlanProvider(currentGuest(), provider)) invalidateGuestPlans(requestingGuestId, provider);
+        },
         resolveResult: (id, payload: ResolveResultPayload) => {
           const waiter = resolveWaitersRef.current.get(id);
           if (!waiter) return;
@@ -975,7 +1051,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
-  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
+  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerAnnotator, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
 
   // A project switch retires header callbacks, not the still-mounted frame's
   // workspace observers or unrelated in-flight requests.
@@ -1081,6 +1157,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         pushHostState();
         connectFileChannel();
         registerResolver();
+        registerAnnotator();
         sendBackgroundAction();
       }}
       />

@@ -4,6 +4,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
+import { extensionPlansI18n } from './extension-plans.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
@@ -148,6 +149,7 @@ export const dict = {
   ...referencePickerI18n.de,
   ...sessionMenuHintsI18n.de,
   ...projectKnowledgeI18n.de,
+  ...extensionPlansI18n.de,
   ...linearPanelI18n.de,
   ...routingI18n.de,
   ...pluginPanelI18n.de,

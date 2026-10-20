@@ -5,6 +5,7 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
+import { extensionPlansI18n } from './extension-plans.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
@@ -159,6 +160,7 @@ export const dict: Record<I18nKey, string> = {
   ...referencePickerI18n.es,
   ...sessionMenuHintsI18n.es,
   ...projectKnowledgeI18n.es,
+  ...extensionPlansI18n.es,
   ...linearPanelI18n.es,
   ...routingI18n.es,
   ...pluginPanelI18n.es,
