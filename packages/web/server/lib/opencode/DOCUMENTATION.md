@@ -1097,6 +1097,14 @@ under a running child.
   and steer agents away from `openchamber_web`. A project config listing
   `opencode.browser` re-enables it. The fallback path merges the same entry. Its layer sits above the user's
   global `opencode.json` and below their project config.
+- `createManagedConfigRuntime` takes two directories and both are required.
+  `instanceDir` holds the config file and this process's agent-tool plugin.
+  `dataDir` is the persistent data dir: the project-local MCP plugin lives in
+  `<data-dir>/mcp-project-local/plugin` and reads the entries every server
+  stores there, so it must not move into the per-process folder, which is
+  removed when its server is gone. The factory throws when either path is
+  missing or relative; in 2.5.2 the missing `dataDir` only surfaced at spawn,
+  and the server stayed up with no OpenCode.
 - `OPENCODE_CONFIG_CONTENT` is passed through untouched, so whatever the user
   put there still applies.
 - `OPENCHAMBER_AGENT_TOOL_URL` and a fresh `OPENCHAMBER_AGENT_TOOL_TOKEN` are

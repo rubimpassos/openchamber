@@ -12,11 +12,15 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
+// The data dir and the instance dir are separate folders, as in production
+// (`<data-dir>/run/instances/<pid>`), so a test fails when one stands in for the other.
 const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true } = {}) => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
-  temporaryDirectories.push(dataDir);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
+  temporaryDirectories.push(root);
+  const dataDir = path.join(root, 'data');
+  const instanceDir = path.join(root, 'instance');
   const agentToolRuntime = {
-    pluginDirectory: path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'),
+    pluginDirectory: path.join(instanceDir, 'agent-tool', 'openchamber-agent-tool'),
     materializePlugin: vi.fn(async (flags) => {
       await fs.mkdir(agentToolRuntime.pluginDirectory, { recursive: true });
       await fs.writeFile(path.join(agentToolRuntime.pluginDirectory, 'flags.json'), JSON.stringify(flags));
@@ -31,29 +35,32 @@ const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true }
   const runtime = createManagedConfigRuntime({
     fsPromises: fs,
     path,
-    instanceDir: dataDir,
+    dataDir,
+    instanceDir,
     env,
     agentToolRuntime,
     readSettings: () => current.settings,
     isAgentMemoryAvailable: () => memoryAvailable,
   });
-  const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
-  return { dataDir, runtime, agentToolRuntime, current, readConfigFile };
+  const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(instanceDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
+  return { dataDir, instanceDir, runtime, agentToolRuntime, current, readConfigFile };
 };
+
+const readLocalMcpPluginSource = (dataDir) => fs.readFile(path.join(localMcpDirectory(dataDir), 'index.js'), 'utf8');
 
 describe('managed OpenCode config file', () => {
   it('points the child at a config file listing the enabled plugins', async () => {
-    const { dataDir, runtime, readConfigFile } = await createHarness({
+    const { dataDir, instanceDir, runtime, readConfigFile } = await createHarness({
       settings: {},
     });
 
     const childEnv = await runtime.buildManagedChildEnv();
 
-    expect(childEnv.OPENCODE_CONFIG).toBe(path.join(dataDir, MANAGED_CONFIG_FILE_NAME));
+    expect(childEnv.OPENCODE_CONFIG).toBe(path.join(instanceDir, MANAGED_CONFIG_FILE_NAME));
     expect(childEnv.OPENCODE_CONFIG_CONTENT).toBeUndefined();
     expect(childEnv.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('token');
     expect(await readConfigFile()).toEqual({
-      plugins: ['-opencode.browser', localMcpDirectory(dataDir), path.join(dataDir, 'agent-tool', 'openchamber-agent-tool')],
+      plugins: ['-opencode.browser', localMcpDirectory(dataDir), path.join(instanceDir, 'agent-tool', 'openchamber-agent-tool')],
     });
   });
 
@@ -188,7 +195,7 @@ describe('managed OpenCode config file', () => {
   });
 
   it('leaves a config file the user owns alone and keeps the restart requirement', async () => {
-    const { dataDir, runtime } = await createHarness({
+    const { dataDir, instanceDir, runtime } = await createHarness({
       settings: {},
       env: { OPENCODE_CONFIG: '/home/user/opencode.json', OPENCODE_CONFIG_CONTENT: '{"model":"test/model"}' },
     });
@@ -198,19 +205,19 @@ describe('managed OpenCode config file', () => {
     expect(childEnv.OPENCODE_CONFIG).toBeUndefined();
     expect(JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT)).toEqual({
       model: 'test/model',
-      plugins: ['-opencode.browser', localMcpDirectory(dataDir), path.join(dataDir, 'agent-tool', 'openchamber-agent-tool')],
+      plugins: ['-opencode.browser', localMcpDirectory(dataDir), path.join(instanceDir, 'agent-tool', 'openchamber-agent-tool')],
     });
-    await expect(fs.stat(path.join(dataDir, MANAGED_CONFIG_FILE_NAME))).rejects.toThrow();
+    await expect(fs.stat(path.join(instanceDir, MANAGED_CONFIG_FILE_NAME))).rejects.toThrow();
     expect(await runtime.refreshManagedConfigFile()).toEqual({ updated: false, reason: 'external-config' });
   });
 
   it('leaves no temp file behind and never publishes a partial list', async () => {
-    const { dataDir, runtime } = await createHarness({ settings: {} });
+    const { instanceDir, runtime } = await createHarness({ settings: {} });
 
     await runtime.buildManagedChildEnv();
     await runtime.refreshManagedConfigFile();
 
-    const entries = await fs.readdir(dataDir);
+    const entries = await fs.readdir(instanceDir);
     expect(entries.filter((entry) => entry.includes('.tmp-'))).toEqual([]);
     expect(entries).toContain(MANAGED_CONFIG_FILE_NAME);
   });
@@ -225,5 +232,37 @@ describe('managed OpenCode config file', () => {
 
     expect(agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
     expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', localMcpDirectory(dataDir)] });
+  });
+
+  it('reads project-local MCP entries from the data dir on spawn and on refresh', async () => {
+    const { dataDir, instanceDir, runtime, current, readConfigFile } = await createHarness({ settings: {} });
+
+    await runtime.buildManagedChildEnv();
+    expect((await readConfigFile()).plugins[1]).toBe(localMcpDirectory(dataDir));
+    expect(await readLocalMcpPluginSource(dataDir)).toContain(`dataDir: ${JSON.stringify(dataDir)}`);
+
+    current.settings = { agentWebToolEnabled: false };
+    expect(await runtime.refreshManagedConfigFile()).toEqual({ updated: true });
+    expect((await readConfigFile()).plugins[1]).toBe(localMcpDirectory(dataDir));
+    expect(await readLocalMcpPluginSource(dataDir)).toContain(`dataDir: ${JSON.stringify(dataDir)}`);
+
+    // Per-process files stay in the instance dir; the persistent entries never move there.
+    await expect(fs.stat(path.join(instanceDir, 'mcp-project-local'))).rejects.toThrow();
+    await expect(fs.stat(path.join(dataDir, MANAGED_CONFIG_FILE_NAME))).rejects.toThrow();
+  });
+
+  it('refuses to build without both directories', () => {
+    const dependencies = {
+      fsPromises: fs,
+      path,
+      dataDir: '/data',
+      instanceDir: '/data/run/instances/1',
+      readSettings: () => ({}),
+      isAgentMemoryAvailable: () => false,
+    };
+
+    expect(() => createManagedConfigRuntime({ ...dependencies, dataDir: undefined })).toThrow(/dataDir/);
+    expect(() => createManagedConfigRuntime({ ...dependencies, instanceDir: 'relative' })).toThrow(/instanceDir/);
+    expect(() => createManagedConfigRuntime(dependencies)).not.toThrow();
   });
 });

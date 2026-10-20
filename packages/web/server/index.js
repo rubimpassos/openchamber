@@ -2496,6 +2496,7 @@ async function main(options = {}) {
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,
     path,
+    dataDir: OPENCHAMBER_DATA_DIR,
     instanceDir,
     env: process.env,
     agentToolRuntime,

@@ -37,7 +37,10 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  * @param {object} dependencies
  * @param {typeof import('node:fs/promises')} dependencies.fsPromises
  * @param {typeof import('node:path')} dependencies.path
- * @param {string} dependencies.instanceDir this server's own directory (`instance-dir.js`)
+ * @param {string} dependencies.dataDir the persistent OpenChamber data directory; the
+ *   project-local MCP plugin reads the entries stored there by every server
+ * @param {string} dependencies.instanceDir this server's own directory (`instance-dir.js`),
+ *   which holds the config file and this process's plugins
  * @param {NodeJS.ProcessEnv} [dependencies.env] environment the managed child inherits
  * @param {object|null} [dependencies.agentToolRuntime]
  * @param {() => Promise<object|null>} dependencies.readSettings
@@ -46,12 +49,20 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
 export const createManagedConfigRuntime = ({
   fsPromises,
   path,
+  dataDir,
   instanceDir,
   env = process.env,
   agentToolRuntime = null,
   readSettings,
   isAgentMemoryAvailable,
 }) => {
+  // Fail at construction: a missing directory otherwise only surfaces when the
+  // managed OpenCode child is about to spawn, leaving the server up without it.
+  for (const [name, value] of [['dataDir', dataDir], ['instanceDir', instanceDir]]) {
+    if (!value || !path.isAbsolute(value)) {
+      throw new TypeError(`createManagedConfigRuntime: ${name} must be an absolute path`);
+    }
+  }
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
