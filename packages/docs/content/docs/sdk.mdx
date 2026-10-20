@@ -214,6 +214,27 @@ Writes are atomic: OpenChamber writes a temporary file and renames it, so a read
 
 Your page sees `ctx.surface` as `status`. OpenChamber loads it only while the Work Status panel is visible and your section is expanded, and unloads it when the user collapses the section, so keep nothing there you can't rebuild. A section-only extension can use capabilities, a service, an integration, and files, but not `page`, `attach`, `actions`, or `commands`. Web and desktop only. The `git-graph-status` example is a complete section.
 
+## Plans your tool keeps in files
+
+`contributes.plans` shows plans another tool writes into the project, such as `.plan-shelf/*.md`, in Project knowledge → Plans. The files stay where they are: OpenChamber lists, opens and saves them in place and never copies them.
+
+```json
+"plans": [{
+  "id": "shelf",
+  "label": "Shelf plans",
+  "root": ".plan-shelf",
+  "actions": [
+    { "id": "execute", "kind": "execute", "label": "Run", "run": { "type": "command", "name": "plan-shelf-run", "arguments": "{plan.name}" } }
+  ]
+}]
+```
+
+- `root` is a folder relative to the worktree; `match` (default `["*.md"]`) picks the files.
+- An action runs a command, a skill or a prompt written in the manifest. Only `{plan.path}` and `{plan.name}` are filled in. The user approves all of it when they allow the extension, and confirms each run with exactly what will be sent.
+- Your frame describes the plans: register `host.onPlans` and return a title, progress, a status and which actions apply, per path. `host.readPlan` reads one; `host.plansChanged` asks OpenChamber to list again.
+
+A command, skill or agent the worktree doesn't have refuses the action, and nothing else runs instead. Web and desktop only. The `plan-shelf` example is a complete provider.
+
 ## An editor for your file type
 
 `contributes.fileEditors` opens files in your page instead of the text editor. When the user opens a matching file in Files, OpenChamber shows your editor there, with the same source toggle, fullscreen button, and save button the built-in viewers have.

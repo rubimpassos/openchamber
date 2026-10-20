@@ -27,9 +27,19 @@ import { memoryDeleteKey, noteDeleteKey, planDeleteKey, usePendingKnowledgeDelet
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
+import { useGuestPlanProviders } from '@/lib/guests/plans/useGuestPlanProviders';
+import { ExtensionPlansSection } from './ExtensionPlansSection';
+import {
+  extensionPlanEntryId,
+  parseExtensionPlanEntryId,
+  visibleExtensionPlans,
+  type ExtensionPlanSelection,
+} from '@/lib/guests/plans/selection';
 
 /** Lazy: the plan editor is a large view, and most panel visits never open it. */
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
+const ExtensionPlanView = React.lazy(() => import('@/components/views/ExtensionPlanView').then((module) => ({ default: module.ExtensionPlanView })));
 
 interface ProjectNotesTodoPanelProps {
   projectRef: ProjectRef | null;
@@ -218,6 +228,17 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const openNote = React.useCallback((id: string | null) => openEntryIn('notes', id), [openEntryIn]);
   const openMemory = React.useCallback((id: string | null) => openEntryIn('memory', id), [openEntryIn]);
   const openPlan = React.useCallback((plan: { id: string }) => openEntryIn('plans', plan.id), [openEntryIn]);
+  const openExtensionPlan = React.useCallback((selection: ExtensionPlanSelection) => (
+    openEntryIn('plans', extensionPlanEntryId(selection))
+  ), [openEntryIn]);
+
+  // Extension plans live in a worktree, so they follow the session's own
+  // directory (a worktree of this project) and fall back to the project root.
+  // Chats have no worktree and no extension plans.
+  const extensionPlanDirectory = projectRef && projectRef.id !== CHAT_DRAFT_PROJECT_ID
+    ? (currentSessionDirectory || projectRef.path)
+    : null;
+  const extensionPlans = useGuestPlanProviders(extensionPlanDirectory, visible && activeTab === 'plans');
   const trimmedQuery = query.trim().toLowerCase();
 
   // Completed items sink to the bottom in the list; storage order is untouched.
@@ -238,12 +259,12 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     todos: todos.filter((todo) => matchesRankQuery([todo.text], query)).length,
     plans: contextEntry.plans.filter((plan) => (
       !(projectRef && pendingDeletes.has(planDeleteKey(projectRef, plan.id))) && matchesRankQuery([plan.title], query)
-    )).length,
+    )).length + extensionPlans.providers.reduce((total, view) => total + visibleExtensionPlans(view, query).length, 0),
     memory: [
       ...globalMemory.filter((entry) => !pendingDeletes.has(memoryDeleteKey('global', entry.id))),
       ...projectMemory.filter((entry) => !pendingDeletes.has(memoryDeleteKey('project', entry.id))),
     ].filter((entry) => matchesRankQuery([entry.title, entry.body], query)).length,
-  }), [contextEntry.notes, contextEntry.plans, globalMemory, pendingDeletes, projectMemory, projectRef, query, todos]);
+  }), [contextEntry.notes, contextEntry.plans, extensionPlans.providers, globalMemory, pendingDeletes, projectMemory, projectRef, query, todos]);
 
   // Counted across both scopes against their own marks: a new global memory is
   // the one the user most needs to see, and it would be invisible behind the
@@ -313,6 +334,15 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   React.useEffect(() => {
     setOpenEntry((current) => (current && current.section !== activeTab ? null : current));
   }, [activeTab]);
+
+  // An extension plan belongs to one worktree: switching to another worktree
+  // of the same project closes it rather than showing the other tree's file.
+  React.useEffect(() => {
+    setOpenEntry((current) => {
+      const selection = current ? parseExtensionPlanEntryId(current.id) : null;
+      return selection && selection.directory !== extensionPlanDirectory ? null : current;
+    });
+  }, [extensionPlanDirectory]);
 
   // A plan an agent asked to show. Declared after the resets above so a request
   // that switched the tab or mounted the panel is not closed again by them. A
@@ -468,6 +498,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
 
   const plansList = (
+    <div className="space-y-4">
     <PlansSection
       projectRef={projectRef}
       plans={contextEntry.plans}
@@ -479,9 +510,38 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       // desktop panel the plan opens here, in place of the list or beside it.
       onOpenPlan={onOpenPlan ?? openPlan}
     />
+    {extensionPlanDirectory ? (
+      <ExtensionPlansSection
+        providers={extensionPlans.providers}
+        directory={extensionPlanDirectory}
+        query={query}
+        selectedEntryId={split ? openPlanId : null}
+        onOpen={openExtensionPlan}
+      />
+    ) : null}
+    </div>
   );
 
-  const planView = (planId: string, withBack: boolean) => (
+  const extensionPlanView = (selection: ExtensionPlanSelection, withBack: boolean) => (
+    <React.Suspense fallback={null}>
+      <ExtensionPlanView
+        selection={selection}
+        visible={visible}
+        leading={withBack ? (
+          <KnowledgeBackButton
+            label={t('rightSidebar.contextNotesTodo.plans.actions.back')}
+            onClick={() => setOpenEntry(null)}
+          />
+        ) : null}
+        onNavigatedToChat={() => setOpenEntry(null)}
+      />
+    </React.Suspense>
+  );
+
+  const planView = (planId: string, withBack: boolean) => {
+    const extensionSelection = parseExtensionPlanEntryId(planId);
+    if (extensionSelection) return extensionPlanView(extensionSelection, withBack);
+    return (
     <React.Suspense fallback={null}>
       {/* The panel header belongs to this panel's tabs; the plan keeps its
           own title row inside the panel body. */}
@@ -499,7 +559,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         />
       </ContextPanelHeaderSlotProvider>
     </React.Suspense>
-  );
+    );
+  };
 
   return (
     <div ref={setRootNode} className={cn('flex h-full min-h-0 w-full min-w-0 flex-col', className)}>

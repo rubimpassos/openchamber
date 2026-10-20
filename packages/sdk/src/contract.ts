@@ -7,6 +7,7 @@ import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, Gue
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import type { GuestStatusSummaryItem } from './status-summary.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestTooltipRequest } from './popover.ts';
+import type { PlanReadRequest, PlanReadResult, PlansAnnotateRequest, PlansAnnotateResultPayload, PlansChangedRequest } from './plan-providers.ts';
 
 export type HostThemeMode = 'light' | 'dark';
 
@@ -189,7 +190,8 @@ export type HostResultPayload =
   | FileWriteResult
   | FileListResult
   | FileStatResult
-  | GenerateResult;
+  | GenerateResult
+  | PlanReadResult;
 
 export const isStartSessionResult = (
   value: HostResultPayload | undefined,
@@ -611,6 +613,8 @@ export type HostPopoverClosedMessage = Envelope & { type: 'popover-closed'; payl
 /** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
 export type HostResolveMessage = Envelope & { type: 'resolve'; id: string; payload: ResolveRequest };
 export type HostActionMessage = Envelope & { type: 'action'; id: string; payload: GuestActionItem };
+/** Host → guest request. The guest answers with `plans-annotate-result` carrying the same `id`. */
+export type HostPlansAnnotateMessage = Envelope & { type: 'plans-annotate'; id: string; payload: PlansAnnotateRequest };
 /** The file a `file` surface edits; pushed after `ready` and again whenever the frame reconnects. */
 export type HostFileOpenMessage = Envelope & { type: 'file-open'; payload: FileEditorDocument };
 /** Host → guest request. The guest answers with `file-snapshot-result` carrying the same `id`. */
@@ -644,6 +648,7 @@ export type HostMessage =
   | HostPopoverClosedMessage
   | HostResolveMessage
   | HostActionMessage
+  | HostPlansAnnotateMessage
   | HostFileOpenMessage
   | HostFileSnapshotMessage
   | HostFileSavedMessage
@@ -676,6 +681,8 @@ export type GuestFileWriteMessage = GuestCall<'file-write', FileWriteRequest>;
 export type GuestFileListMessage = GuestCall<'file-list', FileListRequest>;
 export type GuestFileStatMessage = GuestCall<'file-stat', FileStatRequest>;
 export type GuestGenerateMessage = GuestCall<'generate', GenerateRequest>;
+export type GuestPlanReadMessage = GuestCall<'plan-read', PlanReadRequest>;
+export type GuestPlansChangedMessage = GuestCall<'plans-changed', PlansChangedRequest>;
 export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
 export type GuestResizeMessage = GuestCall<'resize', ResizeRequest>;
 export type GuestOpenCommitMessage = GuestCall<'open-commit', OpenCommitRequest>;
@@ -686,6 +693,8 @@ export type GuestPopoverCloseMessage = GuestCall<'popover-close', { id: string; 
 export type GuestPopoverAnchorMessage = GuestCall<'popover-anchor', { id: string; active: boolean }>;
 /** Answers a host `resolve` by `id`. The host sends no `result` back for it. */
 export type GuestResolveResultMessage = Envelope & { type: 'resolve-result'; id: string; payload: ResolveResultPayload };
+/** Answers a host `plans-annotate` by `id`. The host sends no `result` back for it. */
+export type GuestPlansAnnotateResultMessage = Envelope & { type: 'plans-annotate-result'; id: string; payload: PlansAnnotateResultPayload };
 /** Completes a host `action`. The host sends no `result` back. */
 export type GuestActionResultMessage = Envelope & { type: 'action-result'; id: string; payload: ActionResultPayload };
 /** Answers a host `file-snapshot` by `id`. The host sends no `result` back. */
@@ -739,6 +748,9 @@ export type GuestMessage =
   | GuestFileListMessage
   | GuestFileStatMessage
   | GuestGenerateMessage
+  | GuestPlanReadMessage
+  | GuestPlansChangedMessage
+  | GuestPlansAnnotateResultMessage
   | GuestBadgeMessage
   | GuestResizeMessage
   | GuestOpenCommitMessage
@@ -784,6 +796,12 @@ export const isFileStatResult = (
   value && 'kind' in value && 'size' in value && fileStatKindSet.has(String(value.kind)) && Number.isFinite(value.size),
 );
 
+export const isPlanReadResult = (
+  value: HostResultPayload | undefined,
+): value is PlanReadResult => Boolean(
+  value && 'content' in value && 'hash' in value && String(value.content) === value.content && String(value.hash) === value.hash,
+);
+
 export const isGenerateResult = (
   value: HostResultPayload | undefined,
 ): value is GenerateResult => Boolean(value && 'text' in value && String(value.text) === value.text && !('status' in value));
@@ -792,7 +810,7 @@ const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'workspace',
   'shells',
   'files-changed',
-  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
+  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action', 'plans-annotate',
   'status-control-event', 'popover-closed',
   'file-open', 'file-snapshot', 'file-saved',
 ]);

@@ -7,6 +7,7 @@ import type {
   GuestCommandContribution,
   GuestGoalContribution,
   GuestMessageContribution,
+  GuestPlanProviderContribution,
   GuestSurfaceDock,
   GuestToolContribution,
   LoopbackContribution,
@@ -77,6 +78,8 @@ export type InstalledGuest = {
   goal?: GuestGoalContribution;
   /** Declared `contributes.fileEditors`; the Files view opens matching files in them only for an active guest. */
   fileEditors?: FileEditorContribution[];
+  /** Declared `contributes.plans`; the Plans area shows them only for an active guest. */
+  plans?: GuestPlanProviderContribution[];
   /** What the package asks for and what the user approved at install. */
   capabilities: PublicGuestCapabilities;
   /** Capabilities enterprise mode refuses this package: it is not from a repository the administrator allowed. */

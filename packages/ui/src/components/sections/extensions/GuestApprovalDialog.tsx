@@ -27,6 +27,7 @@ const CAPABILITY_ROWS = {
   network: { icon: 'plug', titleKey: 'settings.extensions.capability.network', detailKey: 'settings.extensions.capability.network.detail' },
   origins: { icon: 'global', titleKey: 'settings.extensions.capability.origins', detailKey: 'settings.extensions.capability.origins.detail' },
   loopback: { icon: 'plug', titleKey: 'settings.extensions.capability.loopback', detailKey: 'settings.extensions.capability.loopback.detail' },
+  plans: { icon: 'file-list-2', titleKey: 'settings.extensions.capability.plans', detailKey: 'settings.extensions.capability.plans.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -52,6 +53,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const providesBrowser = serviceProvides(guest?.service, 'browser');
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
   const loopback = guest?.loopback;
+  const planProviders = guest?.plans ?? [];
   let loopbackTarget: React.ReactNode = null;
   if (loopback) {
     switch (loopback.status) {
@@ -150,6 +152,28 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                       {t('settings.extensions.capability.service.sockets')}{' '}
                       <span className="break-all font-mono">{serviceSockets.join(', ')}</span>
                     </p>
+                  ) : null}
+                  {capability === 'plans' && planProviders.length > 0 ? (
+                    <ul className="mt-1 space-y-1">
+                      {planProviders.map((provider) => (
+                        <li key={provider.id}>
+                          <p className="typography-meta break-all font-mono text-foreground">
+                            {t('settings.extensions.capability.plans.provider', { label: provider.label, root: provider.root })}
+                          </p>
+                          <ul className="ms-3 space-y-0.5">
+                            {(provider.actions ?? []).map((action) => (
+                              <li key={action.id} className="typography-meta break-all font-mono text-muted-foreground">
+                                {action.run.type === 'command'
+                                  ? t('settings.extensions.capability.plans.command', { label: action.label, name: action.run.name, arguments: action.run.arguments ?? '' })
+                                  : action.run.type === 'skill'
+                                    ? t('settings.extensions.capability.plans.skill', { label: action.label, name: action.run.name, text: action.run.text })
+                                    : t('settings.extensions.capability.plans.prompt', { label: action.label, text: action.run.text })}
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
                   ) : null}
                   {capability === 'service' && providesBrowser ? (
                     <p className="typography-meta mt-0.5 text-foreground">

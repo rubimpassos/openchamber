@@ -53,6 +53,36 @@ import {
   type HostMessage,
 } from './contract.ts';
 import { GUEST_FILE_EDITOR_CONTENT_MAX, GUEST_FILE_EDITOR_VERSION_MAX } from './file-editor.ts';
+import {
+  GUEST_PLAN_ACTIONS_MAX,
+  GUEST_PLAN_CONTENT_MAX,
+  GUEST_PLAN_ERROR_MAX,
+  GUEST_PLAN_PROGRESS_MAX,
+  GUEST_PLAN_STATUS_MAX,
+  GUEST_PLAN_STATUS_TONES,
+  GUEST_PLAN_TITLE_MAX,
+  GUEST_PLANS_MAX,
+  isGuestPlanPath,
+} from './plan-providers.ts';
+import { PANEL_ID } from './manifest.ts';
+
+const planPathSchema = z.string().min(1).max(GUEST_FILE_PATH_MAX).refine(isGuestPlanPath);
+const planCountSchema = z.number().int().min(0).max(GUEST_PLAN_PROGRESS_MAX);
+const planAnnotationSchema = z.object({
+  path: planPathSchema,
+  title: z.string().trim().min(1).max(GUEST_PLAN_TITLE_MAX).optional(),
+  progress: z.object({ done: planCountSchema, total: planCountSchema }).strict()
+    .refine((progress) => progress.done <= progress.total).optional(),
+  status: z.object({
+    label: z.string().trim().min(1).max(GUEST_PLAN_STATUS_MAX),
+    tone: z.enum(GUEST_PLAN_STATUS_TONES).optional(),
+  }).strict().optional(),
+  actions: z.array(z.string().regex(PANEL_ID).max(64)).max(GUEST_PLAN_ACTIONS_MAX).optional(),
+}).strict();
+const planReadResultPayloadSchema = z.object({
+  content: z.string().max(GUEST_PLAN_CONTENT_MAX),
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+});
 
 // Structured clone recreates a frame's Uint8Array in the receiving realm, so
 // `instanceof` holds for bytes that crossed postMessage.
@@ -186,6 +216,8 @@ const hostResultPayloadSchema = z.union([
   requestResultPayloadSchema,
   promptResultPayloadSchema,
   serviceStatusResultPayloadSchema,
+  // Before the file read: both carry `content`, and zod would strip `hash`.
+  planReadResultPayloadSchema,
   fileReadResultPayloadSchema,
   fileWriteResultPayloadSchema,
   fileListResultPayloadSchema,
@@ -401,6 +433,16 @@ export const hostMessageSchema = z.union([
     }),
   }),
   hostResultSchema,
+  z.object({
+    ...envelope,
+    type: z.literal('plans-annotate'),
+    id: z.string().min(1),
+    payload: z.object({
+      provider: z.string().regex(PANEL_ID).max(64),
+      directory: z.string().min(1),
+      plans: z.array(z.object({ path: planPathSchema })).max(GUEST_PLANS_MAX),
+    }),
+  }),
   z.object({
     ...envelope,
     type: z.literal('action'),
@@ -673,6 +715,27 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
       z.object({ item: attachPayloadSchema.nullable() }),
       z.object({ error: z.string().trim().min(1).max(GUEST_RESOLVE_ERROR_MAX) }),
     ]),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('plans-annotate-result'),
+    id: z.string().min(1),
+    payload: z.union([
+      z.object({ annotations: z.array(planAnnotationSchema).max(GUEST_PLANS_MAX) }).strict(),
+      z.object({ error: z.string().trim().min(1).max(GUEST_PLAN_ERROR_MAX) }).strict(),
+    ]),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('plan-read'),
+    id: z.string().min(1),
+    payload: z.object({ provider: z.string().regex(PANEL_ID).max(64), path: planPathSchema }).strict(),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('plans-changed'),
+    id: z.string().min(1),
+    payload: z.object({ provider: z.string().regex(PANEL_ID).max(64) }).strict(),
   }),
   z.object({
     ...envelope,

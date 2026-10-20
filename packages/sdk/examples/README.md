@@ -1,6 +1,6 @@
 # Extension gallery
 
-Eight examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Nine examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -11,6 +11,7 @@ Eight examples to use, explore, and adapt. The five panel extensions also have f
 | `config-editor` | **Config Studio** | Browse and filter JSON keys, edit or format the raw file, then compare the on-disk content with your draft before saving. Reads only the declared `~/.config/opencode/opencode.json` path on the connected instance. |
 | `git-graph-status` | **Git Graph** | Open a chat in a git project and expand **Recent commits** in Work Status. It draws the project's history with the same lanes and curves as the Git view, branch, remote and tag badges, and a row for uncommitted changes. Switch between Auto (your branch and its upstream), All, and Manual (tick the branches you want). A supporting host places the range select and Refresh button in the section header; older hosts keep them in the body. Click a commit to see its details, copy its hash, open it on GitHub, or open its diff. It has no rail icon and no panel, only that section. Approve its local service at install; the service only reads git. See [its README](./git-graph-status/README.md). |
 | `checklist-editor` | **Checklist** | Create a file named `todo.checklist.md` in a project and open it in Files: its `- [ ]` lines become a checklist you tick, edit, add to, and remove from, while every other line stays as written. Save with Cmd/Ctrl+S or let autosave do it, switch to the source view and back, or open it fullscreen. It has no rail icon and no panel, only the editor. OpenChamber keeps the file; the editor never reads or writes it. |
+| `plan-shelf` | **Plan Shelf** | Add files like `.plan-shelf/auth.md` (`# Title`, a `status: draft|running|blocked|done` line and `- [ ]` tasks) to a project, then open Project knowledge → Plans. The plans appear under **Shelf plans** with their progress and status, open and save in place, and offer Review, Run and Resume, each confirmed before a session starts. Run needs a `/plan-shelf-run` command and Resume a `plan-shelf` skill in the project; without them the host refuses the action and runs nothing. No panel; the background frame only describes the plans. |
 | `tools-only` | **Tool Gallery** | Render review findings and project checks as tables inside chat. This extension has no panel. Its optional read-only MCP fixture makes the results reproducible; see [its README](./tools-only/README.md). |
 
 ## Install and explore
@@ -56,6 +57,7 @@ bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tools-only
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/git-graph-status/status/main.ts packages/sdk/examples/git-graph-status/status/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/git-graph-status/service/main.ts packages/sdk/examples/git-graph-status/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/checklist-editor/editor/main.ts packages/sdk/examples/checklist-editor/editor/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/plan-shelf/background/main.ts packages/sdk/examples/plan-shelf/background/main.js
 ```
 
 Rebuild all panels after editing `shared.ts` or the SDK. Commit built files with the extension; installation never builds source or installs dependencies. Bump the extension's own version when publishing an update through Git.

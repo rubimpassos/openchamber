@@ -1060,6 +1060,42 @@ describe('connectHost resolve and badge', () => {
     host.dispose();
   });
 
+  test('answers plans-annotate with clamped annotations or an error, and sends plan reads', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const annotate = (id: string): HostMessage => ({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'plans-annotate', id,
+      payload: { provider: 'shelf', directory: '/repo', plans: [{ path: 'plans/a.md' }] },
+    });
+
+    guest.dispatch(new MessageEvent('message', { data: annotate('a-0') }));
+    await flush();
+    expect(parent.posted.at(-1)).toMatchObject({ type: 'plans-annotate-result', id: 'a-0', payload: { error: 'This extension does not describe plans.' } });
+
+    host.onPlans((request) => {
+      if (request.directory !== '/repo') throw new Error('wrong directory');
+      return [{ path: 'plans/a.md', progress: { done: 1, total: 2 } }, { path: '../escape.md' }];
+    });
+    guest.dispatch(new MessageEvent('message', { data: annotate('a-1') }));
+    await flush();
+    expect(parent.posted.at(-1)).toEqual({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'plans-annotate-result', id: 'a-1',
+      payload: { annotations: [{ path: 'plans/a.md', progress: { done: 1, total: 2 } }] },
+    });
+
+    await expect(host.readPlan('shelf', '../a.md')).rejects.toMatchObject({ code: 'BAD_PATH' });
+    const read = host.readPlan('shelf', 'plans/a.md');
+    const sent = parent.posted.at(-1);
+    expect(sent).toMatchObject({ type: 'plan-read', payload: { provider: 'shelf', path: 'plans/a.md' } });
+    if (sent && 'id' in sent) {
+      guest.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'result', id: sent.id, ok: true, payload: { content: '# A', hash: 'b'.repeat(64) } } }));
+    }
+    await expect(read).resolves.toEqual({ content: '# A', hash: 'b'.repeat(64) });
+    host.dispose();
+  });
+
   test('setBadge clamps to 0..999 and sends null to clear', async () => {
     const parent = createFrame();
     const guest = createFrame();

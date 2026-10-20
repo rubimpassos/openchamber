@@ -1,4 +1,13 @@
 // allow: SIZE_OK — existing iframe RPC orchestration shares one pending-call lifetime; loopback mechanics live in loopback-client.ts and loopback-watch.ts.
+import {
+  clampGuestPlanAnnotations,
+  GUEST_PLAN_ERROR_MAX,
+  isGuestPlanPath,
+  type GuestPlanAnnotation,
+  type PlanReadResult,
+  type PlansAnnotateRequest,
+  type PlansAnnotateResultPayload,
+} from './plan-providers.ts';
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import { HostRequestError } from './host-errors.ts';
 import { createLoopbackClient, type LoopbackClient } from './loopback-client.ts';
@@ -75,6 +84,7 @@ import {
   isGenerateResult,
   isFileListResult,
   isFileReadResult,
+  isPlanReadResult,
   isFileStatResult,
   isJsonValue,
   isFileWriteResult,
@@ -166,6 +176,24 @@ export type HostClient = LoopbackClient & {
    * this handler settles. Throw to report failure. One handler at a time.
    */
   onAction: (handler: (item: GuestActionItem) => void | Promise<void>) => () => void;
+  /**
+   * Describe the plans of one of this package's `contributes.plans`
+   * providers. The host found the files under the provider's `root` in
+   * `request.directory` (this frame's directory) and asks for a title,
+   * progress, a status and which declared actions apply, per path. Leave a
+   * plan out to say nothing about it. A thrown error leaves every plan
+   * listed without a description and the provider's actions unavailable.
+   * One handler at a time; the returned function removes it.
+   */
+  onPlans: (handler: (request: PlansAnnotateRequest) => Promise<GuestPlanAnnotation[]> | GuestPlanAnnotation[]) => () => void;
+  /**
+   * Read one plan of a declared provider in this frame's directory, with the
+   * SHA-256 of its bytes. Needs the `plans` grant; a path outside the
+   * provider's `root` and `match` is `BAD_PATH`, a missing file `NOT_FOUND`.
+   */
+  readPlan: (provider: string, path: string) => Promise<PlanReadResult>;
+  /** Tell the host a provider's plans changed (added, removed, progress) so it lists them again. */
+  plansChanged: (provider: string) => Promise<void>;
   toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
   /**
@@ -314,6 +342,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   const popoverClosedListeners = new Set<(event: GuestPopoverClosedEvent) => void>();
   let resolveHandler: ((request: ResolveRequest) => Promise<AttachIssueRequest | null> | AttachIssueRequest | null) | null = null;
   let actionHandler: ((item: GuestActionItem) => void | Promise<void>) | null = null;
+  let plansHandler: ((request: PlansAnnotateRequest) => Promise<GuestPlanAnnotation[]> | GuestPlanAnnotation[]) | null = null;
   const fileOpenListeners = new Set<(file: FileEditorDocument) => void>();
   const fileSavedListeners = new Set<(version: string) => void>();
   let fileSnapshotHandler: ((purpose: FileSnapshotPurpose) => Promise<FileEditorSnapshot> | FileEditorSnapshot) | null = null;
@@ -516,6 +545,33 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         },
         (error) => fail(error instanceof Error ? error.message : String(error)),
       );
+      return;
+    }
+
+    if (message.type === 'plans-annotate') {
+      const answer = (payload: PlansAnnotateResultPayload): void => {
+        post({
+          channel: OPENCHAMBER_SDK_CHANNEL,
+          v: OPENCHAMBER_SDK_API_VERSION,
+          type: 'plans-annotate-result',
+          id: message.id,
+          payload,
+        });
+      };
+      const handler = plansHandler;
+      if (!handler) {
+        answer({ error: 'This extension does not describe plans.' });
+        return;
+      }
+      Promise.resolve()
+        .then(() => handler(message.payload))
+        .then(
+          (annotations) => answer({ annotations: clampGuestPlanAnnotations(Array.isArray(annotations) ? annotations : []) }),
+          (error) => {
+            const text = (error instanceof Error ? error.message : String(error)).trim();
+            answer({ error: (text || 'Could not describe plans.').slice(0, GUEST_PLAN_ERROR_MAX) });
+          },
+        );
       return;
     }
 
@@ -1072,6 +1128,31 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         post({ ...envelope, type: 'files-unwatch', id: nextId(ids), payload: { subscriptionId } });
       };
     },
+    onPlans: (handler) => {
+      plansHandler = handler;
+      return () => {
+        if (plansHandler === handler) plansHandler = null;
+      };
+    },
+    readPlan: (provider, path) => (isGuestPlanPath(path) ? send({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'plan-read',
+      id: nextId(ids),
+      payload: { provider, path },
+    }) : rejectBadFilePath()).then((result) => {
+      if (!isPlanReadResult(result)) {
+        throw new HostRequestError('HOST_REJECTED', 'Host did not return the plan.');
+      }
+      return result;
+    }),
+    plansChanged: (provider) => request({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'plans-changed',
+      id: nextId(ids),
+      payload: { provider },
+    }),
     readFile: (path) => (isGuestFilePath(path) ? send({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,
@@ -1217,6 +1298,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       disposed = true;
       resolveHandler = null;
       actionHandler = null;
+      plansHandler = null;
       fileSnapshotHandler = null;
       fileOpenListeners.clear();
       fileSavedListeners.clear();

@@ -1311,6 +1311,14 @@ class OpencodeService {
     directory?: string | null
     /** Skills named inline; attached to the prompt so OpenCode loads them with it. */
     skills?: SkillMentions
+    /**
+     * Every named skill must attach: an unknown name or a skill removed
+     * before the prompt fails the send instead of falling back to an
+     * instruction. For sends whose whole meaning is the skill (an extension's
+     * plan action), where running the text without it would be a different
+     * operation than the one the user confirmed.
+     */
+    skillsRequired?: boolean
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey)
 
@@ -1367,6 +1375,9 @@ class OpencodeService {
     try {
       await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
       const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory)
+      if (params.skillsRequired && skills.unresolved.length > 0) {
+        throw new Error(`Skill not available: ${skills.unresolved.join(", ")}`)
+      }
       const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
       for (const item of context) {
         await admitSynthetic(item)
@@ -1378,7 +1389,7 @@ class OpencodeService {
         // The skill list and the prompt are two requests: a skill removed in
         // between fails preparation before anything is admitted, so the same
         // message id is safe to send again without the attachment.
-        if (skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
+        if (params.skillsRequired || skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
         const instruction = params.skills?.instructionFor(skills.attached.map((skill) => skill.name)) ?? null
         if (instruction) await admitSynthetic({ text: instruction })
         await prompt([])

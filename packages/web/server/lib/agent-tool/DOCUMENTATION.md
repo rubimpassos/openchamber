@@ -26,6 +26,11 @@ the user can want independently:
   `agentKnowledgeToolEnabled` is not `false`, and the control service refuses
   these actions when it is, so a stale plugin cannot keep writing. Writes are
   attributed to the session OpenCode reported, never to a payload field.
+  Its description sends plans here only when nothing the agent follows (its
+  instructions, a loaded skill, its workflow) says where plans live and how
+  they are handed over; a planner with its own protocol keeps its own files
+  and steps, and the panel shows those through extension plan providers. The
+  wording names no agent, so it holds for any specialized planner.
 - `openchamber_render` — `render.page`, a self-contained HTML page (`html`,
   `title`) the chat draws inline above the agent's answer, such as a chart or
   table. The page travels in the call's input, which OpenCode stores and

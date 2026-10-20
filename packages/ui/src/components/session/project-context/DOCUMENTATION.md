@@ -191,6 +191,14 @@ within two seconds for a file edit, which `PlanView` finds with the same
 next save writes it over the agent's version. The editor ignores its own echo
 of text it was handed, so opening a plan no longer writes it back.
 
+### Plans from extensions
+
+Below the user's own plans, the Plans tab shows plans other tools keep as files in the worktree, through extensions that declare `contributes.plans` (`ExtensionPlansSection.tsx`, data in `lib/guests/plans/`). The worktree is the current session's directory, falling back to the project root; Chats have none. Each provider is a group named by its label and extension. A paused or unapproved extension keeps its group with a notice; loading, a failed listing (with Try again) and an empty folder are separate states, and a failed or late description from the extension leaves the files listed without progress or actions. A search filters these rows by title, file name and path, and the tab count includes them.
+
+The server lists the files; the extension only describes them, from a hidden frame per extension and worktree that `GuestHosts` mounts while the tab shows that worktree (`frames.ts`). Each catalog is keyed by runtime, package identity, provider and worktree, and an answer that is no longer the newest for its key is dropped (`catalog.ts`).
+
+A row opens `ExtensionPlanView` in place, with its entry id carrying extension, provider, worktree and path (`extensionPlanEntryId`), so two worktrees with the same plan name never share a view; switching worktree closes it. The view reads and writes the original file through the plan routes, saves explicitly (button or Cmd/Ctrl+S) with the hash it loaded, takes outside changes while nothing is typed, and turns them into a conflict banner otherwise. It has no Improve or Implement and no pin, share or delete: its only actions are the extension's declared ones, confirmed with exactly what runs and checked again before a session is created (`actions.ts`). Unsaved edits or a conflict disable them.
+
 ### Progress and the session working on a plan
 
 A plan row shows how many steps of its `## Steps` checklist are ticked ("2/4"),

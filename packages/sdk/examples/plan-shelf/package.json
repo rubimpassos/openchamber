@@ -1,0 +1,28 @@
+{
+  "name": "@openchamber/example-plan-shelf",
+  "version": "1.0.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": { "id": "plan-shelf", "name": "Plan Shelf", "icon": "file-list-2" },
+      "background": { "entry": "background/index.html" },
+      "plans": [
+        {
+          "id": "shelf",
+          "label": "Shelf plans",
+          "root": ".plan-shelf",
+          "match": ["*.md"],
+          "actions": [
+            { "id": "review", "kind": "review", "label": "Review", "run": { "type": "prompt", "text": "Review the plan in {plan.path}. Point out gaps and risks, and do not change any file." } },
+            { "id": "execute", "kind": "execute", "label": "Run", "run": { "type": "command", "name": "plan-shelf-run", "arguments": "{plan.name}" } },
+            { "id": "resume", "kind": "resume", "label": "Resume", "run": { "type": "skill", "name": "plan-shelf", "text": "Resume the plan {plan.name} from its first open step." } }
+          ]
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

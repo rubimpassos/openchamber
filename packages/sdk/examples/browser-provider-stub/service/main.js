@@ -102,6 +102,7 @@ var HOST_PUSH_TYPES = new Set([
   "item",
   "resolve",
   "action",
+  "plans-annotate",
   "status-control-event",
   "popover-closed",
   "file-open",

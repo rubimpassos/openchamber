@@ -316,6 +316,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.messages?.length) {
     guest.messages = parsed.manifest.contributes.messages.map((message) => ({ ...message }));
   }
+  if (parsed.manifest.contributes.plans?.length) {
+    guest.plans = structuredClone(parsed.manifest.contributes.plans);
+  }
   if (parsed.manifest.contributes.service) {
     const serviceEntry = await resolveGuestAssetPath(packageRoot, parsed.manifest.contributes.service.entry);
     if (!serviceEntry) {
@@ -431,6 +434,11 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.messages) && guest.messages.length > 0) {
     row.messages = guest.messages.map((message) => ({ ...message }));
+  }
+  // Plan providers as declared: the approval card shows each root and the
+  // exact command, skill or prompt an action runs.
+  if (Array.isArray(guest.plans) && guest.plans.length > 0) {
+    row.plans = structuredClone(guest.plans);
   }
   const granted = Array.isArray(guest.capabilityGrants) ? guest.capabilityGrants : [];
   row.capabilities = {

@@ -6,6 +6,7 @@ export {
   loopbackUrlRequestSchema, loopbackUrlResultSchema,
 } from './loopback-schemas.ts';
 export {
+  guestPlanProvidersSchema,
   openChamberManifestSchema,
   PACKAGE_VERSION_PATTERN,
   packageManifestSchema,

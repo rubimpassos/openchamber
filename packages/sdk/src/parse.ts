@@ -5,6 +5,18 @@ import { OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
 import { OPENCHAMBER_ENGINE_PATTERN } from './host-version.ts';
 import { loopbackContributionSchema } from './loopback-schemas.ts';
 import {
+  GUEST_PLAN_ACTION_KINDS,
+  GUEST_PLAN_ACTIONS_MAX,
+  GUEST_PLAN_AGENT_MAX,
+  GUEST_PLAN_LABEL_MAX,
+  GUEST_PLAN_MATCH_MAX,
+  GUEST_PLAN_PROVIDERS_MAX,
+  GUEST_PLAN_RUN_NAME,
+  isGuestPlanMatchPattern,
+  isGuestPlanRoot,
+  isGuestPlanTemplate,
+} from './plan-providers.ts';
+import {
   DECLARED_GUEST_CAPABILITIES,
   GUEST_ACTIONS_MAX,
   GUEST_ACTION_LABEL_MAX,
@@ -311,6 +323,34 @@ const fileEditorSchema = z.object({
 const fileEditorsSchema = z.array(fileEditorSchema).min(1).max(GUEST_FILE_EDITORS_MAX)
   .refine((editors) => uniqueBy(editors, (editor) => editor.id), { message: 'file editor ids must be unique' });
 
+const planTemplateSchema = z.string().refine(isGuestPlanTemplate);
+
+const planActionSchema = z.object({
+  id: z.string().trim().max(64).regex(PANEL_ID),
+  kind: z.enum(GUEST_PLAN_ACTION_KINDS),
+  label: z.string().trim().min(1).max(GUEST_PLAN_LABEL_MAX),
+  run: z.discriminatedUnion('type', [
+    z.object({ type: z.literal('command'), name: z.string().regex(GUEST_PLAN_RUN_NAME), arguments: planTemplateSchema.optional() }).strict(),
+    z.object({ type: z.literal('skill'), name: z.string().regex(GUEST_PLAN_RUN_NAME), text: planTemplateSchema.refine((value) => value.trim().length > 0) }).strict(),
+    z.object({ type: z.literal('prompt'), text: planTemplateSchema.refine((value) => value.trim().length > 0) }).strict(),
+  ]),
+  agent: z.string().trim().min(1).max(GUEST_PLAN_AGENT_MAX).refine((value) => [...value].every((character) => character.charCodeAt(0) >= 0x20)).optional(),
+}).strict();
+
+const planProviderSchema = z.object({
+  id: z.string().trim().max(64).regex(PANEL_ID),
+  label: z.string().trim().min(1).max(GUEST_PLAN_LABEL_MAX),
+  root: z.string().refine(isGuestPlanRoot),
+  match: z.array(z.string().refine(isGuestPlanMatchPattern)).min(1).max(GUEST_PLAN_MATCH_MAX).optional(),
+  actions: z.array(planActionSchema).min(1).max(GUEST_PLAN_ACTIONS_MAX)
+    .refine((actions) => uniqueBy(actions, (action) => action.id), { message: 'plan action ids must be unique' })
+    .optional(),
+}).strict();
+
+/** `contributes.plans`; the host reuses it to read the catalog row. */
+export const guestPlanProvidersSchema = z.array(planProviderSchema).min(1).max(GUEST_PLAN_PROVIDERS_MAX)
+  .refine((providers) => uniqueBy(providers, (provider) => provider.id), { message: 'plan provider ids must be unique' });
+
 const contributesSchema = z.object({
   panel: panelSchema,
   background: z.object({
@@ -346,6 +386,7 @@ const contributesSchema = z.object({
   messages: messagesSchema.optional(),
   goal: z.object({ driver: z.string().regex(GUEST_GOAL_DRIVER) }).strict().optional(),
   fileEditors: fileEditorsSchema.optional(),
+  plans: guestPlanProvidersSchema.optional(),
 });
 
 /**
@@ -366,6 +407,9 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   if (contributes.loopback !== undefined) declared.push('loopback');
   if (contributes.actions !== undefined) declared.push('actions');
   if (contributes.commands !== undefined) declared.push('commands');
+  // The extension describes its plans from a frame; without one the Plans
+  // area could list files but never say anything about them.
+  if (contributes.plans !== undefined) declared.push('plans');
   return declared;
 };
 
@@ -413,6 +457,7 @@ export const openChamberManifestSchema = z.object({
       if (contributes.attach !== undefined && contributes.attach !== false) needsFrame.push('attach');
       if (contributes.actions !== undefined) needsFrame.push('actions');
       if (contributes.commands !== undefined) needsFrame.push('commands');
+      if (contributes.plans !== undefined) needsFrame.push('plans');
       if (needsFrame.length > 0) ctx.addIssue({
         code: 'custom', path: ['panel'],
         message: `${needsFrame.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; a status section or file editor only hosts itself.`,
@@ -568,6 +613,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-file-editors',
       `contributes.fileEditors lists 1 to ${GUEST_FILE_EDITORS_MAX} editors with a unique kebab-case id, a title of 1 to ${GUEST_FILE_EDITOR_TITLE_MAX} characters, match: 1 to ${GUEST_FILE_EDITOR_PATTERNS_MAX} file-name patterns (no "/", not only wildcards, like "*.excalidraw"), an entry ending in .html inside the package, and optional content "text" or "binary".`,
+    );
+  }
+  if (path.startsWith('contributes.plans')) {
+    return fail(
+      'invalid-plans',
+      `contributes.plans lists 1 to ${GUEST_PLAN_PROVIDERS_MAX} providers with a unique kebab-case id, a label of 1 to ${GUEST_PLAN_LABEL_MAX} characters, a worktree-relative root (segments of letters, digits, ".", "_", "-"; no "." or ".."), optional match (1 to ${GUEST_PLAN_MATCH_MAX} file-name patterns), and optional actions (1 to ${GUEST_PLAN_ACTIONS_MAX}, each with a unique kebab-case id, kind "review" | "execute" | "resume", a label, run { type: "command", name, arguments? } | { type: "skill", name, text } | { type: "prompt", text }, and optional agent). Templates may only use {plan.path} and {plan.name}.`,
     );
   }
   if (path.startsWith('contributes.integration')) {

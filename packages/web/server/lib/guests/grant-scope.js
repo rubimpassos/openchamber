@@ -1,4 +1,4 @@
-import { resolveIntegrationApi } from '@openchamber/sdk';
+import { guestPlanProvidersScope, resolveIntegrationApi } from '@openchamber/sdk';
 import { resolveLoopbackTarget } from './loopback-target.js';
 
 // What a grant covered when the user approved it. `filesystem` is the
@@ -10,7 +10,7 @@ import { resolveLoopbackTarget } from './loopback-target.js';
 const sortedUnique = (values) => [...new Set(values)].sort();
 
 /**
- * @param {Pick<import('@openchamber/sdk').OpenChamberContributes, 'filesystem' | 'origins' | 'integration' | 'service' | 'loopback'>} guest
+ * @param {Pick<import('@openchamber/sdk').OpenChamberContributes, 'filesystem' | 'origins' | 'integration' | 'service' | 'loopback' | 'plans'>} guest
  * @param {import('./loopback-target.js').LoopbackTarget | undefined} loopbackTarget
  */
 export const guestGrantScope = (guest, loopbackTarget = guest.loopback ? resolveLoopbackTarget(guest.loopback) : undefined) => {
@@ -44,6 +44,10 @@ export const guestGrantScope = (guest, loopbackTarget = guest.loopback ? resolve
   if (loopbackTarget?.status === 'ready') {
     scope.loopback = loopbackTarget.scope;
   }
+  // Roots, patterns and the exact command, skill or prompt of every action.
+  if (Array.isArray(guest.plans) && guest.plans.length > 0) {
+    scope.plans = guestPlanProvidersScope(guest.plans);
+  }
   return scope;
 };
 
@@ -64,7 +68,7 @@ const sameList = (a, b) => a.length === b.length && a.every((value, index) => va
 
 /**
  * The grants that still hold for the package as it is now. A scoped
- * capability (`filesystem`, `origins`, `network`, `service`, `loopback`) only counts when the stored
+ * capability (`filesystem`, `origins`, `network`, `service`, `loopback`, `plans`) only counts when the stored
  * scope equals the current one; without a stored scope it never counts.
  * @param {string[]} granted
  * @param {ReturnType<typeof guestGrantScope> | undefined} stored
@@ -86,6 +90,9 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
     return Boolean(stored?.service)
       && sameList(stored.service.exec, current.service?.exec ?? [])
       && sameList(stored.service.sockets, current.service?.sockets ?? []);
+  }
+  if (capability === 'plans') {
+    return typeof stored?.plans === 'string' && stored.plans === current.plans;
   }
   if (capability === 'loopback') {
     return Boolean(stored?.loopback && current.loopback)
