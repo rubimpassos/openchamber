@@ -690,6 +690,17 @@ shapes)"). Agents carry `system`, `steps`, `request.body.temperature` /
 rule list; commands carry `template` and `subagent`; MCP servers carry
 `disabled`, `codemode` and `timeout: { startup, catalog, execution }`.
 
+`mcpConfigResponse.ts` parses the MCP list into its transport-specific shape
+before `useMcpConfigStore` publishes it. Scope is `user`, `project`, or `local`;
+missing and null legacy scope remain readable. Invalid scope or malformed config
+fails the read and preserves the previous directory snapshot. A local scope
+remains local through editor hydration and POST serialization. Existing-server
+PATCH and DELETE send the observed scope so the server can reject a mutation
+whose effective owner changed. `deleteMcp` accepts that scope as its optional
+third argument; older callers may omit it, while UI callers supply it. Scope
+selection creates an entry and never moves one. Only selection is browser-persisted, so the new scope
+requires no client-storage migration.
+
 Two rules follow from the routes:
 
 - **The list is not the config.** `opencodeClient.listAgents` answers OpenCode's

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { McpDraft } from './useMcpConfigStore';
+import type { McpDraft, McpScope } from './useMcpConfigStore';
 
 /** The parts of the MCP write body these tests make claims about. */
 type CapturedMcpBody = {
+  scope?: McpScope;
   protocol?: string | null;
   codemode?: boolean | null;
   oauth?: {
@@ -15,6 +16,7 @@ type CapturedMcpBody = {
 type CapturedRequest = { url: string; method: string; body: CapturedMcpBody };
 
 let captured: CapturedRequest[] = [];
+let capturedHeaders = new Headers();
 let listResponse: unknown[] = [];
 
 const runtimeFetchMock = async (url: string, init?: RequestInit) => {
@@ -23,6 +25,7 @@ const runtimeFetchMock = async (url: string, init?: RequestInit) => {
     return new Response(JSON.stringify(listResponse), { headers: { 'Content-Type': 'application/json' } });
   }
   captured.push({ url, method, body: JSON.parse(String(init?.body ?? '{}')) });
+  capturedHeaders = new Headers(init?.headers);
   return new Response(JSON.stringify({}), { headers: { 'Content-Type': 'application/json' } });
 };
 
@@ -82,6 +85,32 @@ describe('useMcpConfigStore MCP body', () => {
     captured = [];
     listResponse = [];
   });
+
+  for (const scope of ['user', 'project', 'local'] as const) {
+    test(`creating a server preserves the ${scope} owner`, async () => {
+      // Given
+      const draft = remoteDraft({ scope });
+      // When
+      await useMcpConfigStore.getState().createMcp(draft, '/workspace/selected-project');
+      // Then
+      expect(captured.map((request) => ({ method: request.method, url: request.url, scope: request.body.scope }))).toEqual([{
+        method: 'POST', url: '/api/config/mcp/example?directory=%2Fworkspace%2Fselected-project', scope,
+      }]);
+    });
+
+    test(`deleting a server sends the expected ${scope} owner`, async () => {
+      // Given
+      const directory = '/workspace/selected-project';
+      // When
+      await useMcpConfigStore.getState().deleteMcp('example', directory, scope);
+      // Then
+      expect(captured).toEqual([{
+        method: 'DELETE', url: '/api/config/mcp/example?directory=%2Fworkspace%2Fselected-project', body: { scope },
+      }]);
+      expect(capturedHeaders.get('Content-Type')).toBe('application/json');
+      expect(capturedHeaders.get('x-opencode-directory')).toBe(directory);
+    });
+  }
 
   test('saving legacy writes a removal so the config file stays clean', async () => {
     await useMcpConfigStore.getState().updateMcp('example', remoteDraft({ protocol: 'legacy' }));
@@ -176,5 +205,43 @@ describe('useMcpConfigStore round trip', () => {
     const entry = useMcpConfigStore.getState().getMcpByName('old');
     expect(entry?.legacy).toBe(true);
     expect(entry?.protocol).toBeUndefined();
+  });
+
+  test('a private project entry remains local when loaded and edited', async () => {
+    // Given
+    listResponse = [{ name: 'example', type: 'remote', url: 'https://mcp.example.com', scope: 'local' }];
+    await useMcpConfigStore.getState().loadMcpConfigs({ force: true });
+    const entry = useMcpConfigStore.getState().getMcpByName('example');
+    // When
+    await useMcpConfigStore.getState().updateMcp('example', remoteDraft({ scope: entry?.scope ?? 'user' }));
+    // Then
+    expect(lastBody().scope).toBe('local');
+  });
+
+  test('an invalid owner fails the read without replacing a valid directory snapshot', async () => {
+    // Given
+    listResponse = [{ name: 'example', type: 'local', command: ['mcp'], scope: 'local' }];
+    await useMcpConfigStore.getState().loadMcpConfigs({ force: true });
+    listResponse = [{ name: 'other', type: 'local', command: ['mcp'], scope: 'invalid' }];
+    // When
+    const loaded = await useMcpConfigStore.getState().loadMcpConfigs({ force: true });
+    // Then
+    expect(loaded).toBe(false);
+    expect(useMcpConfigStore.getState().getMcpServersForDirectory()).toEqual([
+      { name: 'example', type: 'local', command: ['mcp'], scope: 'local' },
+    ]);
+  });
+
+  test('deleting a local entry keeps the selected directory and owner inference', async () => {
+    // Given
+    const directory = '/workspace/selected-project';
+    listResponse = [{ name: 'example', type: 'local', command: ['mcp'], scope: 'local' }];
+    await useMcpConfigStore.getState().loadMcpConfigs({ force: true, directory });
+    listResponse = [];
+    // When
+    const result = await useMcpConfigStore.getState().deleteMcp('example', directory);
+    // Then
+    expect(result.ok).toBe(true);
+    expect(captured).toEqual([{ method: 'DELETE', url: '/api/config/mcp/example?directory=%2Fworkspace%2Fselected-project', body: {} }]);
   });
 });
