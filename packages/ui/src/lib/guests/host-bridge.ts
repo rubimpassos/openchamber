@@ -34,6 +34,7 @@ import {
   type HostReadyContext,
   type HostRequestErrorCode,
   type HostResultPayload,
+  type LateGenerateResult,
   type ResolveResultPayload,
   type PlanReadRequest,
   type PlanReadResult,
@@ -47,6 +48,7 @@ import {
 import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files';
 import type { GuestGenerateProxyResult } from '@/lib/guests/generate';
 import type { GuestOpenCommitResult } from '@/lib/guests/open-commit';
+import type { GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
 import type { createGuestLoopback } from '@/lib/guests/loopback';
 
@@ -69,7 +71,8 @@ type HostBridgeEffects = ReturnType<typeof createGuestLoopback> & {
   openSession: (sessionId: string) => void;
   toast: (request: ToastRequest) => void;
   openUrl: (url: string) => Promise<boolean>;
-  openSurface: (mode: ContextPanelMode) => void;
+  /** Open a context panel surface; the pane owns directory and runtime support. */
+  openSurface: (mode: ContextPanelMode) => GuestOpenSurfaceResult;
   writeClipboard: (text: string) => Promise<boolean>;
   compose: (text: string, mode: 'replace' | 'append') => void;
   attach: (issue: AttachIssueRequest) => void;
@@ -179,6 +182,13 @@ export const buildPlansAnnotateMessage = (id: string, request: PlansAnnotateRequ
   type: 'plans-annotate',
   id,
   payload: request,
+});
+
+export const buildGenerateLateMessage = (result: LateGenerateResult): HostMessage => ({
+  channel: OPENCHAMBER_SDK_CHANNEL,
+  v: OPENCHAMBER_SDK_API_VERSION,
+  type: 'generate-late',
+  payload: result,
 });
 
 export const buildSessionLifecycleMessage = (event: SessionLifecycleEvent): HostMessage => ({
@@ -309,6 +319,7 @@ export const answerGuestMessage = async (
     case 'file-change':
     case 'file-save':
     case 'file-unsupported':
+    case 'generate-late-listen':
       return null;
     case 'toast':
       effects.toast(message.payload);
@@ -324,8 +335,8 @@ export const answerGuestMessage = async (
       if (!isContextPanelMode(message.payload.surfaceId)) {
         return errorResult(message.id, 'Unknown surface.');
       }
-      effects.openSurface(message.payload.surfaceId);
-      return okResult(message.id);
+      const opened = effects.openSurface(message.payload.surfaceId);
+      return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'clipboard-write': {
       const copied = await effects.writeClipboard(message.payload.text);

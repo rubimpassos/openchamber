@@ -172,7 +172,7 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 
 ## Browser provider (`provides: ["browser"]`)
 
-The host's `openchamber_web` tool gives agents twelve `browser.*` actions. By default a connected desktop app answers them with its browser panel; on a server with no desktop client the agent gets nothing. A service that declares `provides: ["browser"]` can answer instead, from a browser it runs itself (headless Chrome over CDP, for instance). The agent sees one tool either way.
+The host's `openchamber_web` tool gives agents fourteen `browser.*` actions. By default a connected desktop app answers them with its browser panel; on a server with no desktop client the agent gets nothing. A service that declares `provides: ["browser"]` can answer instead, from a browser it runs itself (headless Chrome over CDP, for instance). The agent sees one tool either way.
 
 Every chat's browser runs on a disposable copy of one saved profile (cookies, storage, logins). A provider that keeps profiles takes the copy when the chat's browser first opens and discards it when the chat ends; nothing the agent does — a login it renews, a cookie it accepts — reaches another chat unless it explicitly calls `browser.saveProfile`, and `browser.requestHelp` with `kind: 'login'` saves it for the agent once the person is done. A provider without a profile store answers every action against a single shared browser instead, same as before; `browser.saveProfile` is then meaningless and can refuse it.
 
@@ -221,11 +221,12 @@ Parameters the host sends and `data` the service answers; types are exported fro
 | `browser.inspect` | `selector` | `selector`, `tag`, `label`, `bounds`, `inViewport`, `styles` (computed, as strings) |
 | `browser.capture` | `label?` | `base64`, `mime`, `width`, `height`, `url`, `title`, `viewport`; the host writes the file into the project and returns its path |
 | `browser.resize` | `viewport` (`mobile`/`tablet`/`desktop`/`fill`) | `viewport` |
+| `browser.close` | none (see `tabId` below) | `closed: true`, optional `tabId`; a provider with a single page answers `ok: false` instead |
 | `browser.requestHelp` | `reason` (1-300 chars, what the person must do), `timeoutSeconds` (30-900, host default 300), `kind?` (`login`/`page`, default `page`) | `outcome` (`handed-back`/`signed-in`/`timeout`), `url`, `title`, `waitedSeconds` |
 | `browser.saveProfile` | none beyond `tabId` | `saved: true`, `profile`, `version`, `reopenedTabs` |
 | `browser.dialog` | `accept` (OK or Leave when `true`, Cancel or Stay when `false`), `promptText?` | `answered` (`{ type, message, defaultPrompt? }`), `accepted`, `url`, `title`, `tabId?`, `dialog?` (the next one, when the page opened another right away) |
 
-Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your snapshot listed (`[{ id, title, url, active }]`, `active` being the tab the user sees), passed through from the agent untouched. Without it, act on the tab the user sees, except `browser.open`: without `tabId` it opens a new background tab and answers its id as `tabId` (`BrowserOpenData`), so the agent never replaces the user's page. Refuse an id you did not issue with `ok: false`; never act on another tab instead. A provider with one page lists no tabs and refuses every id.
+Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your snapshot listed (`[{ id, title, url, active }]`, `active` being the tab the user sees), passed through from the agent untouched. Without it, act on the tab the user sees, except `browser.open`: without `tabId` it opens a new background tab and answers its id as `tabId` (`BrowserOpenData`), so the agent never replaces the user's page. Refuse an id you did not issue with `ok: false`; never act on another tab instead. A provider with one page lists no tabs and refuses every id. `browser.close` is the exception to "the tab the user sees": it closes a tab the agent opened, so without `tabId` it closes the one this caller opened most recently and refuses a tab it did not open.
 
 ### `browser.requestHelp`
 

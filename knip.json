@@ -54,6 +54,7 @@
         "main.mjs",
         "early-startup.mjs",
         "preload.mjs",
+        "browser-panel-preload.cjs",
         "*.{test,spec}.{js,cjs,mjs}",
         "scripts/**/*.{js,cjs,mjs}"
       ],

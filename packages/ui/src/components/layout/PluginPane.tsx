@@ -36,6 +36,7 @@ import {
   buildReadyMessage,
   buildPlansAnnotateMessage,
   buildResolveMessage,
+  buildGenerateLateMessage,
   buildSessionLifecycleMessage,
   buildSessionMessage,
   buildSettingsMessage,
@@ -50,8 +51,10 @@ import { guestPackageIdentity } from '@/lib/guests/automatic-backgrounds';
 import { guestFileOperation } from '@/lib/guests/files';
 import { watchGuestFiles } from '@/lib/guests/file-watch';
 import { guestGenerate } from '@/lib/guests/generate';
+import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
+import { openGuestSurface } from '@/lib/guests/open-surface';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -90,10 +93,10 @@ import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { closeGuestTabsEverywhere } from '@/lib/guests/tabs';
 import { pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
-import { useUIStore } from '@/stores/useUIStore';
 import { useInputStore } from '@/sync/input-store';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession, useSessionStatus } from '@/sync/sync-context';
@@ -264,7 +267,11 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     if (surface === 'status' && onStatusSummary) features.statusSummary = true;
     if (!popoverHost && !popover && !headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime()
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
-    if (!headless) features.tooltips = true;
+    // A hidden frame is nobody's panel: it neither takes kept answers nor leaves any.
+    if (!headless) {
+      features.lateGenerateResults = true;
+      features.tooltips = true;
+    }
     return {
     theme: {
       mode: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
@@ -345,6 +352,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   readyRef.current = ready;
   const directoryRef = React.useRef(directory);
   directoryRef.current = directory;
+  const effectiveDirectoryRef = React.useRef(effectiveDirectory);
+  effectiveDirectoryRef.current = effectiveDirectory;
   const sessionIdRef = React.useRef(currentSessionId);
   sessionIdRef.current = currentSessionId;
   const sessionBusyRef = React.useRef(sessionBusy);
@@ -396,6 +405,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const resolveIdsRef = React.useRef(0);
   // Outstanding `plans-annotate` requests; answered by `plans-annotate-result`.
   const annotateWaitersRef = React.useRef(new Map<string, (outcome: GuestPlanAnnotateOutcome) => void>());
+  // Counts `hello`s: each one is a new document in the frame, which has no
+  // waiter for a `generate` the previous document sent.
+  const frameDocumentRef = React.useRef(0);
 
   const stopOauthPoll = React.useCallback(() => {
     if (oauthPollRef.current != null) {
@@ -604,6 +616,15 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     statusControlsRef.current = statusControls;
     const clearSubscriptions = () => { for (const unsubscribe of subscriptions.values()) unsubscribe(); subscriptions.clear(); };
+    const generateOwner = (): GenerateOwner => ({
+      runtimeKey,
+      guestId: requestingGuestId,
+      storageId: installation?.storageId ?? null,
+      surface: readyRef.current.surface,
+      directory: directoryRef.current || null,
+    });
+    let stopLateGenerate: (() => void) | null = null;
+    const stopLateGenerateListening = () => { stopLateGenerate?.(); stopLateGenerate = null; };
     const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; lifetime.abort(); closeActivePopover('owner'); statusControls.dispose(); onStatusSummaryRef.current?.([]); clearSubscriptions(); stopOauthPoll(); });
     const requireSessions = () => {
       if (!guestMay(currentGuest(), 'sessions')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
@@ -631,6 +652,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       if (!ownsFrame()) return;
 
       if (message.type === 'hello') {
+        frameDocumentRef.current += 1;
+        stopLateGenerateListening();
         acknowledgeHandshake();
         clearSubscriptions();
         pushHostState();
@@ -646,10 +669,29 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         return;
       }
 
+      if (message.type === 'generate-late-listen') {
+        if (headless) return;
+        stopLateGenerateListening();
+        stopLateGenerate = guestGenerateResults.listen({
+          owner: generateOwner,
+          deliver: (result) => {
+            if (!ownsFrame() || iframeRef.current !== frame) return false;
+            postToGuest(buildGenerateLateMessage(result));
+            return true;
+          },
+        });
+        return;
+      }
+
       if (isGuestFileMessage(message)) {
         fileChannelRef.current?.receive(message);
         return;
       }
+
+      // A generate answer that finds its frame gone, or a new document in
+      // it, is kept for the next frame of this extension that listens.
+      const requestOwner = message.type === 'generate' && !headless ? generateOwner() : null;
+      const requestDocument = frameDocumentRef.current;
 
       void answerGuestMessage(message, {
         ...createGuestLoopback({
@@ -741,10 +783,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           showGuestToast(request);
         },
         openUrl: openExternalUrl,
-        openSurface: (surfaceMode) => {
-          const dir = directoryRef.current || '';
-          if (dir) useUIStore.getState().openContextSurface(dir, surfaceMode);
-        },
+        openSurface: (surfaceMode) => openGuestSurface({
+          mode: surfaceMode,
+          // A status section in a chat draft without a project has no
+          // directory of its own; the rail opens its panels under the chat's.
+          directory: directoryRef.current || effectiveDirectoryRef.current || null,
+          supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
+        }),
         writeClipboard: async (text) => {
           const result = await copyTextToClipboard(text);
           return result.ok;
@@ -1033,9 +1078,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           setGuestTooltip(request && frame ? placeGuestTooltip(request, frame) : null);
         },
       }).then((reply) => {
+        if (!reply) return;
         const current = currentGuest();
-        if (reply && ownsFrame() && frame === iframeRef.current
-          && current && guestPackageIdentity(current) === packageIdentity) postToGuest(reply);
+        const deliverable = ownsFrame() && frame === iframeRef.current
+          && current != null && guestPackageIdentity(current) === packageIdentity;
+        if (message.type === 'generate' && requestOwner && !(deliverable && frameDocumentRef.current === requestDocument)) {
+          const late = lateGenerateResult(message.payload, reply);
+          if (late) guestGenerateResults.keep(requestOwner, late);
+          return;
+        }
+        if (deliverable) postToGuest(reply);
       });
     };
 
@@ -1048,6 +1100,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       onStatusSummaryRef.current?.([]);
       lifetime.abort();
       clearSubscriptions();
+      stopLateGenerateListening();
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };

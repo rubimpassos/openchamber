@@ -7,6 +7,7 @@
 
 import { create } from "zustand"
 import { useNotificationCenterStore } from "@/stores/useNotificationCenterStore"
+import { clearDesktopSessionNotifications } from "@/lib/desktop"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -152,9 +153,12 @@ export function appendNotification(notification: Notification) {
 }
 
 /** Viewing a session also reads its entries in the server's notification center. */
+// Also clears the session's native notifications, including ones that left
+// no unseen mark, such as a permission request.
 export function markSessionViewed(sessionId: string) {
   useNotificationStore.getState().markSessionViewed(sessionId)
   useNotificationCenterStore.getState().markSessionRead(sessionId)
+  clearDesktopSessionNotifications(sessionId)
 }
 
 // ---------------------------------------------------------------------------

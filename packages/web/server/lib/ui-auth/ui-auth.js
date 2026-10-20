@@ -1046,6 +1046,15 @@ export const createUiAuth = ({
     }
   };
 
+  const handlePasskeyRename = (req, res) => {
+    try {
+      const result = passkeyController.renamePasskey(req, req.params?.id, req.body?.label);
+      res.json(result);
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
   const handleResetAuth = (req, res) => {
     try {
       const passkeyResult = passkeyController.clearAllPasskeys();
@@ -1085,6 +1094,7 @@ export const createUiAuth = ({
     handlePasskeyAuthenticationVerify,
     handlePasskeyList,
     handlePasskeyRevoke,
+    handlePasskeyRename,
     handleResetAuth,
     ensureSessionToken: (req, _res) => {
       const urlAuth = authenticateUrlAuthToken(req);

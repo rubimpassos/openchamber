@@ -23,6 +23,7 @@ export const BROWSER_CONTROL_ACTIONS = [
   'browser.inspect',
   'browser.capture',
   'browser.resize',
+  'browser.close',
   'browser.requestHelp',
   'browser.saveProfile',
   'browser.dialog',
@@ -76,6 +77,7 @@ export type BrowserScrollParameters = BrowserTabTarget & { selector?: string; di
 export type BrowserInspectParameters = BrowserTabTarget & { selector: string };
 export type BrowserCaptureParameters = BrowserTabTarget & { label?: string };
 export type BrowserResizeParameters = BrowserTabTarget & { viewport: BrowserViewportMode };
+export type BrowserCloseParameters = BrowserTabTarget;
 export const BROWSER_REQUEST_HELP_KINDS = ['login', 'page'] as const;
 export type BrowserRequestHelpKind = (typeof BROWSER_REQUEST_HELP_KINDS)[number];
 /**
@@ -126,6 +128,7 @@ export type BrowserProviderRequest = ProviderRequestEnvelope & (
   | { action: 'browser.inspect'; parameters: BrowserInspectParameters }
   | { action: 'browser.capture'; parameters: BrowserCaptureParameters }
   | { action: 'browser.resize'; parameters: BrowserResizeParameters }
+  | { action: 'browser.close'; parameters: BrowserCloseParameters }
   | { action: 'browser.requestHelp'; parameters: BrowserRequestHelpParameters }
   | { action: 'browser.saveProfile'; parameters: BrowserSaveProfileParameters }
   | { action: 'browser.dialog'; parameters: BrowserDialogParameters }
@@ -236,6 +239,13 @@ export type BrowserCaptureData = {
 };
 export type BrowserResizeData = { viewport: BrowserViewportSummary };
 /**
+ * A closed tab: what the provider or panel actually removed. `tabId` names it
+ * when the provider has tabs; a provider with a single page refuses the action
+ * rather than reporting a close it did not do.
+ */
+export type BrowserCloseData = { closed: true; tabId?: string };
+
+/**
  * `handed-back` is the person releasing control after doing what the agent
  * asked, `kind` unset or `'page'`; `signed-in` is the same release for
  * `kind: 'login'`, where the provider also saved the profile — the agent's
@@ -289,6 +299,7 @@ export type BrowserProviderData =
   | BrowserInspectData
   | BrowserCaptureData
   | BrowserResizeData
+  | BrowserCloseData
   | BrowserRequestHelpData
   | BrowserSaveProfileData
   | BrowserDialogData;

@@ -1,6 +1,6 @@
 import type { Session } from '@/lib/opencode/model';
 import { isJsonValue, type JsonValue } from '@openchamber/sdk';
-import { getSessionMetadata, type SessionMetadataRecord } from './sessionReviewMetadata';
+import { getSessionMetadata } from './sessionReviewMetadata';
 
 /**
  * Source-control issues and change requests, and tracker issues, a user has
@@ -221,7 +221,7 @@ export const buildLinkedIssue = (input: {
     authorAvatarUrl: input.author?.avatarUrl ?? undefined,
     linkedAt: input.linkedAt,
   };
-  // Absent, not undefined: `withLinkedIssue` keeps a stored flag when the key is missing.
+  // Absent, not undefined: the server's link transform keeps a stored flag when the key is missing.
   if (input.kind === 'pull' && input.followStack) entry.followStack = true;
   return entry;
 };
@@ -472,45 +472,4 @@ export const getLinkedSidebarIssues = (session: Session | null | undefined): Lin
     }
     return [];
   });
-};
-
-const normalizedThreadUrl = (url: string): string => url.trim().replace(/\/+$/, '').toLowerCase();
-
-/**
- * Whether two entries name the same thread. A repository entry stored before
- * ids carried the host matches its new id by its address instead.
- */
-const isSameLinkedEntry = (entry: LinkedIssue, issue: LinkedIssue): boolean => {
-  if (entry.id === issue.id) return true;
-  return (entry.kind === 'issue' || entry.kind === 'pull')
-    && entry.kind === issue.kind
-    && entry.number === issue.number
-    && normalizedThreadUrl(entry.url) === normalizedThreadUrl(issue.url);
-};
-
-export const withLinkedIssue = (
-  metadata: SessionMetadataRecord,
-  issue: LinkedIssue,
-  linked: boolean,
-): SessionMetadataRecord => {
-  const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
-  const current = Array.isArray(openchamber.linked_issues)
-    ? openchamber.linked_issues.filter(isLinkedIssue)
-    : [];
-  const withoutIssue = current.filter((entry) => !isSameLinkedEntry(entry, issue));
-  // Re-linking an existing entry replaces it, so a stale title can be refreshed
-  // by linking again.
-  const existing = current.find((entry) => isSameLinkedEntry(entry, issue));
-  const replacement = issue.kind === 'pull' && existing?.kind === 'pull' && existing.followStack && !('followStack' in issue)
-    ? { ...issue, followStack: true as const }
-    : issue;
-  const next = linked ? [...withoutIssue, replacement] : withoutIssue;
-
-  return {
-    ...metadata,
-    openchamber: {
-      ...openchamber,
-      linked_issues: next,
-    },
-  };
 };

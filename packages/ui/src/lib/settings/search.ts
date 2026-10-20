@@ -210,6 +210,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktop && !ctx.isMobile && !ctx.isVSCode,
   },
   {
+    id: 'appearance.live-browser-tabs',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.liveBrowserTabs',
+    descriptionKey: 'settings.openchamber.visual.field.liveBrowserTabsInfo',
+    keywords: ['browser', 'tabs', 'memory', 'reload', 'background', 'loaded'],
+    isAvailable: (ctx) => ctx.isDesktop && !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
+    id: 'layout.mobile-workspace-tabs',
+    page: 'general',
+    titleKey: 'settings.layout.general.mobileTabs.title',
+    descriptionKey: 'settings.layout.general.mobileTabs.info',
+    keywords: ['tabs', 'workspace', 'panel', 'order', 'hide', 'git', 'files', 'terminal', 'mcp', 'mobile'],
+    isAvailable: (ctx) => ctx.isMobile,
+  },
+  {
     id: 'appearance.open-tracker-links-on-board',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.openTrackerLinksOnBoard',
@@ -337,9 +353,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'chat.sticky-user-header',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.stickyUserHeader',
-    keywords: ['messages', 'header'],
-    // Only a phone draws it (ChatContainer gates the strip on isMobile).
-    isAvailable: (ctx) => ctx.isMobile,
+    keywords: ['sticky', 'pin', 'prompt', 'header', 'user messages'],
   },
   {
     id: 'chat.prompt-navigator',
@@ -403,6 +417,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.allowPromptingSubagentSessions',
     keywords: ['subagent', 'read only', 'prompt', 'banner'],
+  },
+  {
+    id: 'chat.save-pasted-images',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.savePastedImagesAsFiles',
+    descriptionKey: 'settings.openchamber.visual.field.savePastedImagesAsFilesInfo',
+    keywords: ['image', 'screenshot', 'paste', 'vision', 'text-only', 'model', 'path', 'attachment', 'file', 'link'],
   },
   {
     id: 'chat.tool-file-icons',
@@ -553,7 +574,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.sessionWarming',
     descriptionKey: 'settings.openchamber.defaults.field.sessionWarmingInfo',
-    keywords: ['warming', 'warm', 'cache', 'prompt cache', 'keep-alive', 'idle'],
+    keywords: ['warming', 'warm', 'cache', 'prompt cache', 'keep-alive', 'idle', 'per session', 'keep warm'],
+  },
+  {
+    id: 'sessions.warming-duration',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.sessionWarming.duration',
+    keywords: ['warming', 'warm', 'duration', 'how long', 'hour', 'cache'],
+    // VS Code shows only OpenCode's switch, without a duration.
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'sessions.permission-default',
@@ -754,7 +783,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentControlTool',
     descriptionKey: 'settings.openchamber.tools.field.agentControlToolInfo',
-    keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'schedule', 'control'],
+    keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'worktree', 'control'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-schedule-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentScheduleTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentScheduleToolInfo',
+    keywords: ['agent', 'tool', 'schedule', 'scheduled', 'task', 'cron', 'recurring', 'openchamber'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -988,6 +1025,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectIcon',
     keywords: ['icon', 'favicon', 'upload', 'color', 'accent color', 'appearance', 'project metadata'],
+  },
+  {
+    id: 'projects.close',
+    page: 'projects',
+    titleKey: 'settings.projects.page.actions.closeProject',
+    keywords: ['close', 'remove', 'delete', 'forget', 'project'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'projects.actions',
@@ -1559,7 +1603,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.thirdParty.title',
     descriptionKey: 'settings.integrations.thirdParty.info',
     keywords: ['plugin', 'provider', 'install', 'update', 'remove', 'subscription'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.enterpriseMode,
   },
   {
     id: 'integrations.third-party.opencode-claude',
@@ -1567,7 +1611,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.thirdParty.opencodeClaude.name',
     descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
     keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.enterpriseMode,
   },
   {
     id: 'integrations.extensions',

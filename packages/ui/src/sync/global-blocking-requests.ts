@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 import type { FormRequest, PermissionRequest } from '@/lib/opencode/model';
+import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 
 // Cross-directory index of permission requests and forms still waiting for an
 // answer. Directory stores remain the source for open directories; this index
@@ -11,7 +13,7 @@ import type { FormRequest, PermissionRequest } from '@/lib/opencode/model';
 //
 // It is fed by the same rare events the directory reducer consumes
 // (`permission.asked`/`permission.replied`, `form.created`/`form.settled`,
-// `session.deleted`) and seeded once from the host. Pages that wait for the
+// `session.deleted`) and seeded from the host. Pages that wait for the
 // user's answer have no OpenCode event and no directory store; the server
 // announces them (`applyWaitingPageEvent`), and this index is their only home. Nothing streams through
 // here, so consumers subscribe per session ID without cost.
@@ -46,6 +48,12 @@ type GlobalBlockingRequestsState = {
 };
 
 const EMPTY: readonly never[] = [];
+type WaitingPageEvent = Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' | 'session.deleted' }>;
+const pageSnapshotObservers = new Set<(event: WaitingPageEvent) => void>();
+
+const recordWaitingPageEvent = (event: WaitingPageEvent): void => {
+  for (const observer of pageSnapshotObservers) observer(event);
+};
 
 export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState>(() => ({
   bySession: new Map(),
@@ -53,6 +61,7 @@ export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState
 }));
 
 export const resetGlobalBlockingRequests = (): void => {
+  pageSnapshotObservers.clear();
   useGlobalBlockingRequestsStore.setState({ bySession: new Map(), hostSeeded: false });
 };
 
@@ -171,6 +180,7 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
         continue;
       }
       case 'session.deleted': {
+        recordWaitingPageEvent(payload);
         const { sessionID } = payload.properties;
         if (sessionID) reducer.remove(sessionID);
         continue;
@@ -194,6 +204,7 @@ export const applyWaitingPageEvent = (
   event: Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' }>,
   resolveDirectory: (sessionId: string) => string | null,
 ): void => {
+  recordWaitingPageEvent(event);
   const reducer = new Reducer(useGlobalBlockingRequestsStore.getState());
   if (event.type === 'openchamber.page-settled') {
     reducer.settle('pages', event.properties.sessionID, event.properties.pageID);
@@ -206,35 +217,70 @@ export const applyWaitingPageEvent = (
   reducer.publish();
 };
 
-/**
- * Seeds requests the host still holds for sessions this client has no entry
- * for. Additive by session; absence from the host never clears anything,
- * because a live reply may already have settled a request the host map lags on.
- * Called only with the host's successful answer, so it also marks the index
- * as covering what the host knows.
- */
-export const seedGlobalBlockingRequests = (
-  entries: ReadonlyArray<{
-    sessionId: string;
-    directory: string;
-    permissions: readonly BlockingPermissionRequest[];
-    forms: readonly BlockingFormRequest[];
-    pages?: readonly BlockingPageRequest[];
-  }>,
-): void => {
-  const state = useGlobalBlockingRequestsStore.getState();
-  const reducer = new Reducer(state);
-  for (const entry of entries) {
-    if (state.bySession.has(entry.sessionId)) continue;
-    const pages = entry.pages ?? EMPTY;
-    if (entry.permissions.length === 0 && entry.forms.length === 0 && pages.length === 0) continue;
-    reducer.write(entry.sessionId, {
-      directory: normalizeDirectory(entry.directory),
-      permissions: entry.permissions,
-      forms: entry.forms,
-      pages,
-    });
-  }
-  reducer.publish();
+const markHostSeeded = (): void => {
   if (!useGlobalBlockingRequestsStore.getState().hostSeeded) useGlobalBlockingRequestsStore.setState({ hostSeeded: true });
+};
+
+/**
+ * The host owns page waits directly, unlike permissions and forms forwarded
+ * from OpenCode. Its complete pending map can clear pages after a missed end
+ * event. Overlay events received during the read, including settlements whose
+ * ask was missed, so a delayed response cannot bring an answered page back.
+ * Only this in-flight read retains those mutations. A successful read also
+ * marks the index as covering what the host knows (`hostSeeded`).
+ */
+export const readHostBlockingRequestsSnapshot = async (
+  read: () => Promise<HostSessionStatusSnapshot | null>,
+  resolveDirectory: (sessionId: string) => string | null,
+): Promise<HostSessionStatusSnapshot | null> => {
+  const changes = new Map<string, Map<string, BlockingPageRequest | null> | null>();
+  const observe = (event: WaitingPageEvent): void => {
+    const sessionId = event.properties.sessionID;
+    if (event.type === 'session.deleted') {
+      changes.set(sessionId, null);
+      return;
+    }
+    const pages = changes.get(sessionId) ?? new Map<string, BlockingPageRequest | null>();
+    if (event.type === 'openchamber.page-settled') pages.set(event.properties.pageID, null);
+    else pages.set(event.properties.page.id, { id: event.properties.page.id, sessionID: sessionId, title: event.properties.page.title });
+    changes.set(sessionId, pages);
+  };
+  pageSnapshotObservers.add(observe);
+  try {
+    const snapshot = await read();
+    if (!snapshot || !pageSnapshotObservers.has(observe)) return null;
+    // Omitted pending is unsupported, not an authoritative empty map.
+    if (!snapshot.pending) {
+      markHostSeeded();
+      return snapshot;
+    }
+    const pending = snapshot.pending;
+    const state = useGlobalBlockingRequestsStore.getState();
+    const reducer = new Reducer(state);
+    const sessionIds = new Set([...state.bySession.keys(), ...Object.keys(pending), ...changes.keys()]);
+    for (const sessionId of sessionIds) {
+      if (changes.get(sessionId) === null) continue;
+      const current = state.bySession.get(sessionId);
+      const directory = current?.directory ?? resolveDirectory(sessionId);
+      // The host snapshot says nothing about waits owned by a space server.
+      if (!directory || isSpaceDirectory(directory)) continue;
+      const entry = pending[sessionId];
+      const pagesById = new Map((entry?.pages ?? EMPTY).map(page => [page.id, page]));
+      for (const [id, page] of changes.get(sessionId) ?? []) {
+        if (page) pagesById.set(id, page);
+        else pagesById.delete(id);
+      }
+      const pages = [...pagesById.values()];
+      if (current && JSON.stringify(current.pages) === JSON.stringify(pages)) continue;
+      const permissions = current?.permissions ?? entry?.permissions ?? EMPTY;
+      const forms = current?.forms ?? entry?.forms ?? EMPTY;
+      if (!current && permissions.length === 0 && forms.length === 0 && pages.length === 0) continue;
+      reducer.write(sessionId, { directory: normalizeDirectory(directory), permissions, forms, pages });
+    }
+    reducer.publish();
+    markHostSeeded();
+    return snapshot;
+  } finally {
+    pageSnapshotObservers.delete(observe);
+  }
 };

@@ -62,6 +62,7 @@ function installGuestScrollbarActivity(doc) {
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
 // packages/sdk/src/contract.ts
 var GUEST_FILE_STAT_KINDS = ["file", "directory", "other", "missing"];
+var GUEST_GENERATE_LATE_KEEP_MS = 60 * 60000;
 var HOST_REQUEST_ERROR_CODES = [
   "HOST_UNAVAILABLE",
   "HOST_TIMEOUT",
@@ -107,7 +108,8 @@ var HOST_PUSH_TYPES = new Set([
   "popover-closed",
   "file-open",
   "file-snapshot",
-  "file-saved"
+  "file-saved",
+  "generate-late"
 ]);
 
 // packages/sdk/src/loopback.ts
@@ -120,6 +122,11 @@ var methods = new Set(GUEST_LOOPBACK_METHODS);
 var GUEST_MESSAGE_TEXT_SCAN_MAX = 64 * 1024;
 // packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
+// packages/sdk/src/plan-providers.ts
+var GUEST_PLAN_STATUS_TONES = ["neutral", "info", "success", "warning", "error"];
+var GUEST_PLAN_PLACEHOLDERS = ["plan.path", "plan.name"];
+var PLACEHOLDER_NAMES = new Set(GUEST_PLAN_PLACEHOLDERS);
+var STATUS_TONES = new Set(GUEST_PLAN_STATUS_TONES);
 // packages/sdk/src/service-providers.ts
 var BROWSER_PROVIDER_PATH = "/browser-control";
 var BROWSER_CONTROL_ACTIONS = [
@@ -133,6 +140,7 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.inspect",
   "browser.capture",
   "browser.resize",
+  "browser.close",
   "browser.requestHelp",
   "browser.saveProfile",
   "browser.dialog"
@@ -407,6 +415,8 @@ Name: ${page.fields.get("#name") ?? ""}`,
     case "browser.resize":
       page.viewport = request.parameters.viewport;
       return { ok: true, data: { viewport: viewport() } };
+    case "browser.close":
+      return { ok: false, error: "This browser has a single page and no tabs; there is nothing to close." };
     case "browser.requestHelp": {
       const { outcome, waitedSeconds } = await waitForHandBack(request.parameters.timeoutSeconds);
       if (outcome === "handed-back" && request.parameters.kind === "login") {

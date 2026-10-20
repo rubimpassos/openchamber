@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildLinkedIssue, getLinkedIssues, withLinkedIssue } from './linkedIssues';
+import { buildLinkedIssue, getLinkedIssues } from './linkedIssues';
 import type { Session } from './opencode/model';
 import type { SessionMetadataRecord } from './sessionReviewMetadata';
 
@@ -13,18 +13,10 @@ const session = (metadata: SessionMetadataRecord): Session => ({
 describe('stack-following session links', () => {
   test('round-trips a stack-following PR through the metadata parser', () => {
     const link = buildLinkedIssue({ ...input, followStack: true });
-    const stored = withLinkedIssue({}, link, true);
-    expect(getLinkedIssues(session(stored))).toEqual([link]);
+    expect(getLinkedIssues(session({ openchamber: { linked_issues: [link] } }))).toEqual([link]);
   });
-  test('keeps followStack when reattaching a PR with a fresh title', () => {
-    const stored = withLinkedIssue({}, buildLinkedIssue({ ...input, followStack: true }), true);
-    const refreshed = withLinkedIssue(stored, buildLinkedIssue({ ...input, title: 'Fresh' }), true);
-    expect(getLinkedIssues(session(refreshed))[0]).toMatchObject({ title: 'Fresh', followStack: true });
-  });
-  test('allows explicitly disabling followStack without unlinking the PR', () => {
-    const link = buildLinkedIssue({ ...input, followStack: true });
-    const stored = withLinkedIssue({ openchamber: { linked_issues: [link] } }, { ...link, followStack: undefined }, true);
-    expect(getLinkedIssues(session(stored))).toMatchObject([{ number: 7, followStack: undefined }]);
+  test('leaves followStack absent on a PR that does not follow its stack', () => {
+    expect('followStack' in buildLinkedIssue(input)).toBe(false);
   });
   test('rejects a false or non-PR followStack entry while retaining unrelated valid links', () => {
     const valid = buildLinkedIssue(input);

@@ -24,9 +24,10 @@ describe('browser provider contract', () => {
     expect(readBrowserProviderRequest(JSON.stringify({ requestId: 'r', action: 'browser.back' }))).toBeNull();
   });
 
-  test('the action list is the tool\'s thirteen browser actions', () => {
-    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(13);
+  test('the action list is the tool\'s fourteen browser actions', () => {
+    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(14);
     expect(isBrowserControlAction('browser.snapshot')).toBe(true);
+    expect(isBrowserControlAction('browser.close')).toBe(true);
     expect(isBrowserControlAction('browser.requestHelp')).toBe(true);
     expect(isBrowserControlAction('browser.saveProfile')).toBe(true);
     expect(isBrowserControlAction('browser.dialog')).toBe(true);
