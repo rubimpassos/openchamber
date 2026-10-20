@@ -352,7 +352,33 @@ Bridge surface (`bridge-config-runtime.ts`), matching the web routes:
 - `api:config/commands` — same, with `resource: "config"` and a `CommandEntity`;
   `subtask` is accepted as the v1 name for `subagent`.
 - `api:config/mcp` — `McpEntity` bodies; entries carry `sectionKey` and
-  `legacy`.
+  `legacy`. MCP alone accepts the `user`, `project`, and `local` scopes.
+  Local entries merge last and mutations target their private store. The bridge
+  awaits local writes before reporting success. Existing file-owned entries
+  keep their original write paths and JSONC handling.
+  PATCH and DELETE accept an optional expected `scope`. A changed or missing
+  owner rejects with `MCP_SCOPE_CONFLICT` before writing, so a stale private
+  editor cannot update or delete the shared definition underneath it. Calls
+  without an expected scope continue to infer the current owner.
+  Each mutation captures that owner once before dispatch. If a captured local
+  entry disappears afterward, its private mutation fails without falling through
+  to the shared configuration.
+- `api:config/mcp-capabilities` — the webview handles
+  `GET /api/config/mcp-capabilities` explicitly and returns `{ projectLocal }`
+  from the manager's managed/external mode. External OpenCode rejects local
+  creates and mutations of local-owned entries before a disk write.
+
+`local-mcp-runtime.ts` consumes the shared `createLocalMcpStore` and
+`materializeLocalMcpPlugin` modules under `web/server/lib/opencode/`. Its data
+root is the absolute `OPENCHAMBER_DATA_DIR` override, otherwise the extension's
+OpenChamber root from `getOpenChamberDataDir` (`~/.config/openchamber`, or
+`%APPDATA%\openchamber` on Windows). The core store owns repository identity,
+linked-worktree sharing, private file permissions, and atomic writes.
+Every managed launch in `opencode.ts` materializes the plugin, even with no
+local entries, and appends its directory through `appendManagedPlugin` to the
+child's `OPENCODE_CONFIG_CONTENT`. User config files and the extension host's
+environment are unchanged. External connections never materialize or inject
+the plugin. Invalid config content aborts managed startup.
 - `api:config/websearch` — `PUT /api/config/websearch`; `{ selection }` is
   `false`, `null` (remove the key), `"random"` or a provider id, written with
   the shared `writeWebSearchSelection` to `OPENCODE_CONFIG` or the user config.

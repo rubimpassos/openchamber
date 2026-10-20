@@ -17,6 +17,7 @@ import {
 } from 'jsonc-parser';
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
 import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
+import { localMcpStore } from './local-mcp-runtime';
 import {
   toAgentEntity,
   fromAgentEntity,
@@ -1553,9 +1554,11 @@ export const queryPluginRegistry = async (
   return { results };
 };
 
+export type McpScope = 'user' | 'project' | 'local';
+
 export type McpConfigEntry = McpEntity & {
   name: string;
-  scope?: AgentScope | null;
+  scope?: McpScope | null;
   /** `mcp.servers` for a native entry, `mcp` for a v1 entry still in place. */
   sectionKey?: string | null;
   legacy?: boolean;
@@ -1591,19 +1594,27 @@ export const listMcpConfigs = (workingDirectory?: string): McpConfigEntry[] => {
   const layers = readConfigLayers(workingDirectory);
   const entries = readMcpEntriesAcrossLayers(layers);
   if (entries.size === 0) throwIfLayerError(layers, layers.paths.userOverridePath);
-  return Array.from(entries.entries()).map(([name, entry]) => {
+  const merged = new Map<string, McpConfigEntry>(Array.from(entries.entries()).map(([name, entry]) => {
     const source = getJsonEntrySource(layers, 'mcp', name);
-    return {
+    return [name, {
       name,
       ...toMcpEntity(entry.value),
       scope: resolveMcpScopeFromPath(layers, source.path),
       sectionKey: source.sectionKey,
       legacy: Boolean(source.legacy),
-    };
-  });
+    }];
+  }));
+  if (workingDirectory) {
+    for (const [name, server] of Object.entries(localMcpStore().read(workingDirectory).servers)) {
+      merged.set(name, { ...server, name, scope: 'local', sectionKey: 'mcp.servers', legacy: false });
+    }
+  }
+  return Array.from(merged.values());
 };
 
 export const getMcpConfig = (name: string, workingDirectory?: string): McpConfigEntry | null => {
+  const local = workingDirectory ? localMcpStore().read(workingDirectory).servers : undefined;
+  if (local && Object.hasOwn(local, name)) return { ...local[name], name, scope: 'local', sectionKey: 'mcp.servers', legacy: false };
   const layers = readConfigLayers(workingDirectory);
   const entry = readMcpEntriesAcrossLayers(layers).get(name);
   if (!entry) {
@@ -1624,14 +1635,24 @@ export const createMcpConfig = (
   name: string,
   mcpConfig: Record<string, unknown>,
   workingDirectory?: string,
-  scope?: AgentScope,
+  scope?: McpScope,
 ) => {
   validateMcpName(name);
+
+  if (workingDirectory && Object.hasOwn(localMcpStore().read(workingDirectory).servers, name)) {
+    throw new Error(`MCP server "${name}" already exists`);
+  }
 
   const layers = readConfigLayers(workingDirectory);
   const source = getJsonEntrySource(layers, 'mcp', name);
   if (source.exists) {
     throw new Error(`MCP server "${name}" already exists`);
+  }
+
+  if (scope === 'local') {
+    if (!workingDirectory) throw new Error('Local scope requires working directory');
+    for (const failed of layers.layerErrors) throwIfLayerError(layers, failed.path);
+    return localMcpStore().create(name, toMcpEntity(mcpConfig), workingDirectory);
   }
 
   let targetPath = CONFIG_FILE;
@@ -1662,6 +1683,14 @@ export const createMcpConfig = (
  * `mcp.servers` in the same file.
  */
 export const updateMcpConfig = (name: string, updates: Record<string, unknown>, workingDirectory?: string) => {
+  const entry = getMcpConfig(name, workingDirectory);
+  const expectedScope = updates.scope;
+  if (expectedScope !== undefined && entry?.scope !== expectedScope) {
+    throw codedError('MCP server scope changed; reload its configuration before saving', 'MCP_SCOPE_CONFLICT');
+  }
+  if (workingDirectory && entry?.scope === 'local') {
+    return localMcpStore().update(name, updates, workingDirectory);
+  }
   const layers = readConfigLayers(workingDirectory);
   const source = getJsonEntrySource(layers, 'mcp', name);
   if (!source.exists) {
@@ -1679,7 +1708,14 @@ export const updateMcpConfig = (name: string, updates: Record<string, unknown>, 
   return { path: targetPath };
 };
 
-export const deleteMcpConfig = (name: string, workingDirectory?: string) => {
+export const deleteMcpConfig = (name: string, workingDirectory?: string, expectedScope?: McpScope) => {
+  const entry = getMcpConfig(name, workingDirectory);
+  if (expectedScope !== undefined && entry?.scope !== expectedScope) {
+    throw codedError('MCP server scope changed; reload its configuration before deleting', 'MCP_SCOPE_CONFLICT');
+  }
+  if (workingDirectory && entry?.scope === 'local') {
+    return localMcpStore().remove(name, workingDirectory);
+  }
   const layers = readConfigLayers(workingDirectory);
   const source = getJsonEntrySource(layers, 'mcp', name);
   const targetPath = source.path || CONFIG_FILE;
