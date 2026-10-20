@@ -65,6 +65,32 @@ on disk. Once the entity exists, the page switches to the autosave rules above.
 `skills/` follows the same split for supporting files: editing an existing file
 writes when the dialog closes, while a new file is only created on confirm.
 
+### MCP configuration scopes
+
+MCP creation offers Global (`user`), Shared project (`project`), and Local project
+(`local`). Scope is fixed after creation. Global applies to every project;
+Shared project writes repository config that may be committed. Local project
+stays on the server host outside the repository and applies to the project and
+its worktrees. Cards and detail pages name the effective scope, and local
+deletion confirms removal from private project settings without naming a
+repository config file.
+
+`mcp/mcpScope.ts` reads `/api/config/mcp-capabilities` through `runtimeFetch`
+once per Settings page visit. Only a parsed `{ projectLocal: true }` and a
+selected project directory enable local creation. Unknown support, failed or
+malformed reads, and unsupported runtimes keep that option disabled with an
+explanation. Capability reads abort when the page unmounts; runtime switches
+remount Settings. Existing local entries remain editable regardless of whether
+creation capability has loaded. PATCH and DELETE carry the displayed scope as
+an expected-owner precondition. If that owner changed, the server refuses the
+mutation instead of writing a lower-precedence entry. Scope never requests a
+migration. Grid deletion retains the card's scope through its confirmation.
+
+Web, Electron, hosted mobile, and Capacitor use the connected server's
+capability. VS Code requires its own explicit capability response; until then
+local creation remains unavailable. These controls reuse the existing Settings
+primitives, and existing-server edits keep the normal autosave flow.
+
 ## GitHub automation defaults
 
 Settings > Integrations > GitHub includes all PR fix-loop defaults and the

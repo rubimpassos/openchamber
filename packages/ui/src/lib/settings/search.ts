@@ -1201,7 +1201,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'mcp.create',
     page: 'mcp',
     titleKey: 'settings.mcp.sidebar.actions.addServerTitle',
-    keywords: ['create', 'add', 'server'],
+    keywords: ['create', 'add', 'server', 'scope', 'global', 'shared project', 'local project', 'private'],
   },
   {
     id: 'mcp.server',

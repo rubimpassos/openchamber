@@ -12,6 +12,7 @@ import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { reapOrphanedProcesses } from './opencodeProcessRegistry';
 import { applyProviderEnvAliases } from './provider-env-aliases';
 import { assignInjectedEnv } from './injected-env';
+import { withLocalMcpPlugin } from './local-mcp-runtime';
 import { checkOpenCodeVersionOutput } from './opencodeVersion';
 import { isSameOpenCodeServer } from './opencodeServiceUrl';
 import { runOpenCodeCliUpgrade } from '../../web/server/lib/opencode/cli-upgrade.js';
@@ -858,7 +859,8 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       fs.mkdirSync(serverCwd, { recursive: true });
       const port = await allocateManagedOpenCodePort();
       startup.signal.throwIfAborted();
-      serverEnv = applyProviderEnvAliases({ ...process.env });
+      serverEnv = await withLocalMcpPlugin(applyProviderEnvAliases({ ...process.env }));
+      startup.signal.throwIfAborted();
       server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal, serverEnv);
       await server.ready;
 

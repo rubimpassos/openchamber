@@ -6,8 +6,10 @@ import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { mcpServerListSchema, type McpScope, type McpTimeout, type McpOAuthConfig, type McpProtocol, type McpServerWithScope } from './mcpConfigResponse';
 
-export type McpScope = 'user' | 'project';
+export { MCP_PROTOCOLS } from './mcpConfigResponse';
+export type { McpScope, McpOAuthConfig, McpProtocol } from './mcpConfigResponse';
 
 type McpMutationResult = {
   ok: boolean;
@@ -51,35 +53,6 @@ const getConfigDirectory = (): string | null => {
 // ============== TYPES ==============
 
 /**
- * OpenCode 2 splits an MCP server's timeouts by phase, all in milliseconds.
- * `startup` only applies to a local (spawned) server.
- */
-interface McpTimeout {
-  startup?: number;
-  catalog?: number;
-  execution?: number;
-}
-
-/** OAuth fields as OpenCode 2 spells them in config (snake_case). */
-export interface McpOAuthConfig {
-  client_id?: string;
-  client_secret?: string;
-  scope?: string;
-  callback_port?: number;
-  redirect_uri?: string;
-  /** Added in OpenCode 2.0.8; points at the authorization server metadata document. */
-  auth_server_metadata_url?: string;
-}
-
-/**
- * How OpenCode opens the MCP connection (2.0.8+). An absent key means
- * `legacy`, so the config file only ever carries the other two.
- */
-export type McpProtocol = 'legacy' | 'auto' | '2026-07-28';
-
-export const MCP_PROTOCOLS: readonly McpProtocol[] = ['legacy', 'auto', '2026-07-28'];
-
-/**
  * Code Mode as the form offers it. `default` is an absent key: OpenCode then
  * decides per server (on, except servers its own defaults exclude, such as
  * executor.sh). `on` and `off` write an explicit value that OpenCode keeps.
@@ -90,39 +63,6 @@ export const MCP_CODEMODE_CHOICES: readonly McpCodemodeChoice[] = ['default', 'o
 
 export const codemodeChoiceOf = (value: boolean | undefined): McpCodemodeChoice =>
   value === undefined ? 'default' : value ? 'on' : 'off';
-
-interface McpConfigBase {
-  environment?: Record<string, string>;
-  /** v2 replaced the v1 `enabled` flag; absent means the server is active. */
-  disabled?: boolean;
-  /** Expose the server's tools through Code Mode instead of one tool each. */
-  codemode?: boolean;
-  timeout?: McpTimeout;
-  protocol?: McpProtocol;
-}
-
-interface McpLocalConfig extends McpConfigBase {
-  type: 'local';
-  command: string[];
-  cwd?: string;
-}
-
-interface McpRemoteConfig extends McpConfigBase {
-  type: 'remote';
-  url: string;
-  headers?: Record<string, string>;
-  oauth?: McpOAuthConfig | false;
-}
-
-type McpServerConfig = (McpLocalConfig | McpRemoteConfig) & { name: string };
-
-type McpServerWithScope = McpServerConfig & {
-  scope?: McpScope | null;
-  /** The config file the entry lives in. */
-  path?: string | null;
-  /** The entry still uses v1 spellings; the next save rewrites it in v2. */
-  legacy?: boolean;
-};
 
 export interface McpDraft {
   name: string;
@@ -201,7 +141,7 @@ interface McpConfigStore {
   loadMcpConfigs: (options?: { force?: boolean; directory?: string | null }) => Promise<boolean>;
   createMcp: (config: McpDraft, directory?: string | null) => Promise<McpMutationResult>;
   updateMcp: (name: string, config: Partial<McpDraft>, directory?: string | null) => Promise<McpMutationResult>;
-  deleteMcp: (name: string, directory?: string | null) => Promise<McpMutationResult>;
+  deleteMcp: (name: string, directory?: string | null, scope?: McpScope) => Promise<McpMutationResult>;
   getMcpByName: (name: string, directory?: string | null) => McpServerWithScope | undefined;
   getMcpServersForDirectory: (directory?: string | null) => McpServerWithScope[];
 }
@@ -265,7 +205,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               if (!response.ok) {
                 throw new Error('Failed to load MCP configs');
               }
-              const data: McpServerWithScope[] = await response.json();
+              const data = mcpServerListSchema.parse(await response.json());
               set((state) => {
                 const next: Partial<McpConfigStore> = {
                   serversByDirectory: { ...state.serversByDirectory, [cacheKey]: data },
@@ -413,13 +353,16 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           }
         },
 
-        deleteMcp: async (name: string, directory?: string | null) => {
+        deleteMcp: async (name: string, directory?: string | null, scope?: McpScope) => {
           try {
             const configDirectory = resolveDirectory(directory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
+            const headers: HeadersInit = { 'Content-Type': 'application/json' };
+            if (configDirectory) headers['x-opencode-directory'] = configDirectory;
             const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              headers,
+              body: JSON.stringify({ scope }),
             });
 
             const payload = await response.json().catch(() => null);

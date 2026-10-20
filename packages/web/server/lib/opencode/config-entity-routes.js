@@ -33,6 +33,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     createMcpConfig,
     updateMcpConfig,
     deleteMcpConfig,
+    getMcpCapabilities = () => ({ projectLocal: false }),
     listSnippets,
     getSnippet,
     createSnippet,
@@ -41,10 +42,9 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     expandSnippets,
   } = dependencies;
 
-  // Persist to disk immediately; OpenCode restart is deferred to an explicit
-  // Apply & Restart so settings edits do not interrupt live sessions.
+  // File-backed entries and the personal-project plugin both apply live.
   const completeMcpMutation = async (res, action, name, applyChange) => {
-    const result = applyChange();
+    const result = await applyChange();
     const past = action === 'delete' ? 'deleted' : `${action}d`;
     return res.json(buildAppliedResponse(
       `MCP server "${name}" ${past}.`,
@@ -200,6 +200,10 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/config/mcp-capabilities', (_req, res) => {
+    res.json(getMcpCapabilities());
+  });
+
   app.get('/api/config/mcp', async (req, res) => {
     try {
       const { directory, error } = await resolveOptionalProjectDirectory(req);
@@ -245,7 +249,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       await completeMcpMutation(res, 'create', name, () => createMcpConfig(name, config, directory, scope));
     } catch (error) {
       console.error('[API:POST /api/config/mcp/:name] Failed:', error);
-      res.status(500).json({ error: error.message || 'Failed to create MCP server' });
+      res.status(error.status || 500).json({ error: error.message || 'Failed to create MCP server' });
     }
   });
 
@@ -265,7 +269,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (error?.message === `MCP server "${req.params.name}" not found`) {
         return res.status(404).json({ error: error.message });
       }
-      res.status(500).json({ error: error.message || 'Failed to update MCP server' });
+      res.status(error.status || 500).json({ error: error.message || 'Failed to update MCP server' });
     }
   });
 
@@ -278,10 +282,10 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:DELETE /api/config/mcp] Deleting MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'delete', name, () => deleteMcpConfig(name, directory));
+      await completeMcpMutation(res, 'delete', name, () => deleteMcpConfig(name, directory, req.body?.scope));
     } catch (error) {
       console.error('[API:DELETE /api/config/mcp/:name] Failed:', error);
-      res.status(500).json({ error: error.message || 'Failed to delete MCP server' });
+      res.status(error.status || 500).json({ error: error.message || 'Failed to delete MCP server' });
     }
   });
 

@@ -434,15 +434,18 @@ export async function handleConfigBridgeMessage(
       return { id, type, success: true, data: { success: true, changed: result.changed } };
     }
 
+    case 'api:config/mcp-capabilities':
+      return { id, type, success: true, data: { projectLocal: ctx?.manager?.getDebugInfo().mode === 'managed' } };
+
     case 'api:config/mcp': {
-      const { method, name, body, directory } = (payload || {}) as {
-        method?: string;
-        name?: string;
-        body?: Record<string, unknown>;
-        directory?: string;
-      };
+      const { method, name, body, directory } = z.object({
+        method: z.string().optional(),
+        name: z.string().optional(),
+        body: z.record(z.string(), z.unknown()).optional(),
+        directory: z.string().optional(),
+      }).parse(payload || {});
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
-      const mcpName = typeof name === 'string' ? name.trim() : '';
+      const mcpName = (name || (typeof body?.name === 'string' ? body.name : '')).trim();
       const workingDirectory = resolveWorkingDirectory(ctx, directory);
 
       if (normalizedMethod === 'GET' && !mcpName) {
@@ -463,8 +466,11 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'POST') {
-        const scope = body?.scope as 'user' | 'project' | undefined;
-        const created = createMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
+        const scope = z.enum(['user', 'project', 'local']).optional().parse(body?.scope);
+        if (scope === 'local' && ctx?.manager?.getDebugInfo().mode !== 'managed') {
+          return { id, type, success: false, error: 'Project-local MCP requires managed OpenCode' };
+        }
+        const created = await createMcpConfig(mcpName, body || {}, workingDirectory, scope);
         return {
           id,
           type,
@@ -474,7 +480,12 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'PATCH') {
-        const updated = updateMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory);
+        const scope = z.enum(['user', 'project', 'local']).optional().parse(body?.scope);
+        if ((scope === 'local' || getMcpConfig(mcpName, workingDirectory)?.scope === 'local')
+          && ctx?.manager?.getDebugInfo().mode !== 'managed') {
+          return { id, type, success: false, error: 'Project-local MCP requires managed OpenCode' };
+        }
+        const updated = await updateMcpConfig(mcpName, { ...body, scope }, workingDirectory);
         return {
           id,
           type,
@@ -484,7 +495,12 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'DELETE') {
-        const deleted = deleteMcpConfig(mcpName, workingDirectory);
+        const scope = z.enum(['user', 'project', 'local']).optional().parse(body?.scope);
+        if ((scope === 'local' || getMcpConfig(mcpName, workingDirectory)?.scope === 'local')
+          && ctx?.manager?.getDebugInfo().mode !== 'managed') {
+          return { id, type, success: false, error: 'Project-local MCP requires managed OpenCode' };
+        }
+        const deleted = await deleteMcpConfig(mcpName, workingDirectory, scope);
         return {
           id,
           type,

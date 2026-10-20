@@ -538,8 +538,9 @@ export function IntegrationsCatalogView(): React.ReactNode {
       let failed = false;
       let errorDetail: string | null = null;
       const mcp = catalogMcpComponent(entry);
-      if (mcp && isMcpInstalled(entry)) {
-        const result = await deleteMcp(entry.id);
+      const configuredMcp = mcpServers.find((server) => server.name === entry.id);
+      if (mcp && configuredMcp) {
+        const result = await deleteMcp(entry.id, undefined, configuredMcp.scope ?? 'user');
         if (!result.ok) {
           failed = true;
           errorDetail = t('integrationsCatalog.uninstall.mcpDetail', { name: entry.id });
@@ -584,7 +585,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
     } finally {
       setBusyId(null);
     }
-  }, [currentDirectory, deleteMcp, deletePluginEntry, isExtensionInstalled, isMcpInstalled, isPluginInstalled, isSkillInstalled, pluginEntries, t]);
+  }, [currentDirectory, deleteMcp, deletePluginEntry, isExtensionInstalled, isPluginInstalled, isSkillInstalled, mcpServers, pluginEntries, t]);
 
   const canInstallEntry = (entry: CatalogEntry): boolean => {
     const mcp = catalogMcpComponent(entry);

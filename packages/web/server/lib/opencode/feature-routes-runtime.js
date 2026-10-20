@@ -50,7 +50,7 @@ import { registerOpenCodeRoutes } from './routes.js';
 import { getProviderSources, removeProviderConfig, upsertProviderConfig } from './providers.js';
 import { getAgentSources, getAgentConfig, getAgentPermissions, createAgent, updateAgent, deleteAgent, listDisabledAgents } from './agents.js';
 import { getCommandSources, getCommandConfig, createCommand, updateCommand, deleteCommand } from './commands.js';
-import { listMcpConfigs, getMcpConfig, createMcpConfig, updateMcpConfig, deleteMcpConfig } from './mcp.js';
+import { createMcpConfigRuntime } from './mcp-config-runtime.js';
 import { listSnippets, getSnippet, createSnippet, updateSnippet, deleteSnippet, expandSnippets } from './snippets.js';
 import {
   listPluginEntries,
@@ -285,6 +285,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       globalEventHub,
       openchamberVersion,
       isOpenCodeRunning,
+      isLocalMcpScopeSupported,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -372,6 +373,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenCodeAuthHeaders,
     });
 
+    const mcpConfigRuntime = createMcpConfigRuntime({
+      dataDir: openchamberDataDir,
+      isLocalScopeSupported: isLocalMcpScopeSupported,
+    });
     registerConfigEntityRoutes(app, {
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
@@ -389,11 +394,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createCommand,
       updateCommand,
       deleteCommand,
-      listMcpConfigs,
-      getMcpConfig,
-      createMcpConfig,
-      updateMcpConfig,
-      deleteMcpConfig,
+      ...mcpConfigRuntime,
       listSnippets,
       getSnippet,
       createSnippet,

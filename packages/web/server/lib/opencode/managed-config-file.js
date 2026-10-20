@@ -1,4 +1,5 @@
 import { appendManagedPlugin } from './managed-plugin-config.js';
+import { materializeLocalMcpPlugin } from './mcp-local-plugin.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
@@ -86,7 +87,7 @@ export const createManagedConfigRuntime = ({
     const includeRender = settings?.agentRenderToolEnabled !== false;
     const codeMode = settings?.agentToolsCodeMode === true;
 
-    const directories = [];
+    const directories = [await materializeLocalMcpPlugin({ dataDir })];
     if (agentToolRuntime && (includeControl || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender)) {
       directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }));
     }
