@@ -32,6 +32,7 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { MCP_DRAFT_OAUTH_UNSET } from './mcpDraft';
+import { MCP_SCOPE_LABEL_KEYS } from './mcpScope';
 
 const nextServerName = (existing: readonly { name: string }[]): string => {
   const baseName = 'new-mcp-server';
@@ -75,7 +76,7 @@ export const McpGrid: React.FC = () => {
     loadMcpConfigs: state.loadMcpConfigs,
     deleteMcp: state.deleteMcp,
   })));
-  const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = React.useState<Pick<McpDraft, 'name' | 'scope'> | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const servers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, settingsDirectory));
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(settingsDirectory));
@@ -127,9 +128,9 @@ export const McpGrid: React.FC = () => {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    const name = deleteTarget;
+    const { name, scope } = deleteTarget;
     setIsDeleting(true);
-    const result = await deleteMcp(name, settingsDirectory);
+    const result = await deleteMcp(name, settingsDirectory, scope);
     if (result.ok) {
       if (result.reloadFailed) {
         toast.warning(result.message || t('settings.mcp.page.toast.serverDeletedReloadFailed', { name }), {
@@ -207,12 +208,12 @@ export const McpGrid: React.FC = () => {
               muted={!enabled || blocked}
               footer={(
                 <>
-                  <span>
+                  <span className="min-w-0 truncate">
                     {server.type === 'local'
                       ? t('settings.mcp.sidebar.serverType.localTitle')
                       : t('settings.mcp.sidebar.serverType.remoteTitle')}
                   </span>
-                  {server.scope === 'project' ? <SettingsCardChip>{t('settings.mcp.grid.scope.project')}</SettingsCardChip> : null}
+                  <SettingsCardChip>{t(MCP_SCOPE_LABEL_KEYS[server.scope ?? 'user'])}</SettingsCardChip>
                 </>
               )}
               onOpen={() => {
@@ -224,7 +225,7 @@ export const McpGrid: React.FC = () => {
                 label: t('settings.common.actions.delete'),
                 icon: 'delete-bin',
                 destructive: true,
-                onSelect: () => setDeleteTarget(server.name),
+                onSelect: () => setDeleteTarget({ name: server.name, scope: server.scope ?? 'user' }),
               }]}
             />
           );
@@ -234,12 +235,14 @@ export const McpGrid: React.FC = () => {
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !isDeleting) setDeleteTarget(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{t('settings.mcp.page.deleteDialog.title', { name: deleteTarget ?? '' })}</DialogTitle>
+            <DialogTitle>{t('settings.mcp.page.deleteDialog.title', { name: deleteTarget?.name ?? '' })}</DialogTitle>
             <DialogDescription>
-              {t('settings.mcp.page.deleteDialog.descriptionPrefix')}{' '}
-              <code className="text-foreground">opencode.json</code>.
-              {' '}
-              {t('settings.mcp.page.deleteDialog.descriptionSuffix')}
+              {deleteTarget?.scope === 'local' ? t('settings.mcp.page.deleteDialog.localDescription') : <>
+                {t('settings.mcp.page.deleteDialog.descriptionPrefix')}{' '}
+                <code className="text-foreground">opencode.json</code>.
+                {' '}
+                {t('settings.mcp.page.deleteDialog.descriptionSuffix')}
+              </>}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -29,6 +29,8 @@ import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { McpGrid } from './McpGrid';
+import { McpScopeSelect } from './McpScopeSelect';
+import { getLocalMcpUnavailableReason, MCP_SCOPE_INFO_KEYS, MCP_SCOPE_LABEL_KEYS, useMcpProjectLocalCapability } from './mcpScope';
 import { SettingsLegacyFormatNote } from '@/components/sections/shared/SettingsLegacyFormatNote';
 import {
   useAutosave,
@@ -573,6 +575,8 @@ export const McpPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const currentDirectory = useSettingsDirectory();
+  const projectLocal = useMcpProjectLocalCapability();
+  const localScopeUnavailable = getLocalMcpUnavailableReason(projectLocal, currentDirectory);
   const isBlocked = useIntegrationPolicyBlock(currentDirectory);
 
   // The page opens on the server grid. A selection made before it mounts (the
@@ -598,6 +602,10 @@ export const McpPage: React.FC = () => {
   // ── form state ──
   const [draftName, setDraftName] = React.useState('');
   const [draftScope, setDraftScope] = React.useState<McpScope>('user');
+  const effectiveScope = isNewServer ? draftScope : selectedServer?.scope ?? 'user';
+  const plainTextWarning = t(effectiveScope === 'local'
+    ? 'settings.mcp.page.env.localPlainTextWarning'
+    : 'settings.mcp.page.env.plainTextWarning');
   const [mcpType, setMcpType] = React.useState<'local' | 'remote'>('local');
   const [command, setCommand] = React.useState<string[]>([]);
   const [url, setUrl] = React.useState('');
@@ -742,7 +750,7 @@ export const McpPage: React.FC = () => {
     if (isNewServer && mcpDraft) {
       hydratedSelectionRef.current = null;
       setDraftName(mcpDraft.name);
-      setDraftScope(mcpDraft.scope || 'user');
+      setDraftScope(mcpDraft.scope);
       setMcpType(mcpDraft.type);
       setCommand(mcpDraft.command);
       setUrl(mcpDraft.url);
@@ -780,7 +788,7 @@ export const McpPage: React.FC = () => {
       return;
     }
     if (selectedServer) {
-      setDraftScope(selectedServer.scope === 'project' ? 'project' : 'user');
+      setDraftScope(selectedServer.scope ?? 'user');
       const envArr = envRecordToArray(selectedServer.environment);
       // SAFETY: `type` discriminates the union the MCP route answers with.
       const remoteServer = selectedServer.type === 'remote' ? selectedServer : null;
@@ -956,6 +964,9 @@ export const McpPage: React.FC = () => {
   const { requestSave } = autosave;
 
   const handleCreate = async () => {
+    if (draftScope === 'local' && localScopeUnavailable) {
+      toast.error(t(localScopeUnavailable)); return;
+    }
     const name = draftName.trim();
     if (!name) { toast.error(t('settings.mcp.page.toast.nameRequired')); return; }
     if (mcpServers.some((s) => s.name === name)) {
@@ -1000,7 +1011,7 @@ export const McpPage: React.FC = () => {
   const handleDelete = async () => {
     if (!selectedMcpName) return;
     setIsDeleting(true);
-    const result = await deleteMcp(selectedMcpName, currentDirectory);
+    const result = await deleteMcp(selectedMcpName, currentDirectory, effectiveScope);
     if (result.ok) {
       if (result.reloadFailed) {
         toast.warning(result.message || t('settings.mcp.page.toast.serverDeletedReloadFailed', { name: selectedMcpName }), {
@@ -1177,7 +1188,7 @@ export const McpPage: React.FC = () => {
         ) : undefined}
         description={isNewServer
           ? t('settings.mcp.page.header.configureNewServer')
-          : t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}
+          : `${t(MCP_SCOPE_LABEL_KEYS[effectiveScope])} · ${t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}`}
         headerEnd={!isNewServer ? (
           <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -1207,7 +1218,7 @@ export const McpPage: React.FC = () => {
 
 
 
-        {!isNewServer && selectedServer && (
+        {!isNewServer && selectedServer && effectiveScope !== 'local' && (
           <SettingsLegacyFormatNote legacy={selectedServer.legacy === true} path={selectedServer.path} />
         )}
 
@@ -1223,9 +1234,7 @@ export const McpPage: React.FC = () => {
                   </div>
                   <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
                   <p className="typography-micro text-muted-foreground/80">
-                    {draftScope === 'project'
-                      ? t('settings.mcp.page.status.projectScopedTo', { directory: currentDirectory ?? t('settings.mcp.page.status.activeProject') })
-                      : t('settings.mcp.page.status.userScoped')}
+                    {t(MCP_SCOPE_INFO_KEYS[effectiveScope])}
                   </p>
                 </div>
 
@@ -1292,33 +1301,13 @@ export const McpPage: React.FC = () => {
                     className="h-7 w-48 min-w-0 max-w-full shrink font-mono px-2"
                     autoFocus
                   />
-                  <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger className="!h-7 min-w-0 max-w-full gap-1.5 px-2">
-                      <Icon
-                        name={draftScope === 'user' ? 'user-3' : 'folder'}
-                        className="h-3.5 w-3.5 shrink-0"
-                      />
-                      <span className="truncate">
-                        {draftScope === 'user'
-                          ? t('settings.mcp.page.scope.everywhere')
-                          : t('settings.mcp.page.scope.thisProject')}
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                      <SelectItem value="user">
-                        <div className="flex items-center gap-2">
-                          <Icon name="user-3" className="h-3.5 w-3.5" />
-                          <span>{t('settings.mcp.page.scope.everywhere')}</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="project">
-                        <div className="flex items-center gap-2">
-                          <Icon name="folder" className="h-3.5 w-3.5" />
-                          <span>{t('settings.mcp.page.scope.thisProject')}</span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <McpScopeSelect value={draftScope} onChange={setDraftScope} projectLocal={projectLocal} directory={currentDirectory} />
+              </SettingsFieldRow>
+            )}
+
+            {!isNewServer && (
+              <SettingsFieldRow label={t('settings.mcp.page.scope.label')} info={t(MCP_SCOPE_INFO_KEYS[effectiveScope])}>
+                <span className="typography-meta text-muted-foreground">{t(MCP_SCOPE_LABEL_KEYS[effectiveScope])}</span>
               </SettingsFieldRow>
             )}
 
@@ -1562,7 +1551,7 @@ export const McpPage: React.FC = () => {
                         hideValueTitle={t('settings.mcp.page.env.hide')}
                         showValueTitle={t('settings.mcp.page.env.show')}
                         addVariable={t('settings.mcp.page.env.addVariable')}
-                        plainTextWarning={t('settings.mcp.page.env.plainTextWarning')}
+                        plainTextWarning={plainTextWarning}
                         removeVariableAria={t('settings.mcp.page.env.removeVariableAria')}
                       />
                     </div>
@@ -1644,7 +1633,7 @@ export const McpPage: React.FC = () => {
                 hideValueTitle={t('settings.mcp.page.env.hide')}
                 showValueTitle={t('settings.mcp.page.env.show')}
                 addVariable={t('settings.mcp.page.env.addVariable')}
-                plainTextWarning={t('settings.mcp.page.env.plainTextWarning')}
+                plainTextWarning={plainTextWarning}
                 removeVariableAria={t('settings.mcp.page.env.removeVariableAria')}
               />
             )}
@@ -1655,7 +1644,7 @@ export const McpPage: React.FC = () => {
             <>
               <Button
                 onClick={() => void handleCreate()}
-                disabled={isCreating || !draftName.trim()}
+                disabled={isCreating || !draftName.trim() || (draftScope === 'local' && localScopeUnavailable !== null)}
                 size="xs"
                 className="!font-normal"
               >
@@ -1770,10 +1759,12 @@ export const McpPage: React.FC = () => {
           <DialogHeader>
             <DialogTitle>{t('settings.mcp.page.deleteDialog.title', { name: selectedMcpName ?? '' })}</DialogTitle>
             <DialogDescription>
-              {t('settings.mcp.page.deleteDialog.descriptionPrefix')}{' '}
-              <code className="text-foreground">opencode.json</code>.
-              {' '}
-              {t('settings.mcp.page.deleteDialog.descriptionSuffix')}
+              {effectiveScope === 'local' ? t('settings.mcp.page.deleteDialog.localDescription') : <>
+                {t('settings.mcp.page.deleteDialog.descriptionPrefix')}{' '}
+                <code className="text-foreground">opencode.json</code>.
+                {' '}
+                {t('settings.mcp.page.deleteDialog.descriptionSuffix')}
+              </>}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
