@@ -1,6 +1,11 @@
-# Keeps this fork current with upstream, daily.
+# Keeps this fork current with upstream's latest release, checked daily.
 #
-# `main` is the only branch. Each sync merges upstream into it, bumps the patch
+# The sync follows upstream's latest published release, never upstream's `main`,
+# so work still in progress upstream does not reach this fork's users. Commits
+# of upstream's `main` that this fork already merged by hand stay; the sync does
+# nothing until upstream publishes a release this fork does not contain yet.
+#
+# `main` is the only branch. Each sync merges that release into it, bumps the patch
 # version, tags it, and the tag starts the release, so an upstream release
 # reaches users as an ordinary update in the app.
 #
@@ -41,8 +46,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  UPSTREAM_SLUG: openchamber/openchamber
   UPSTREAM_REPO: https://github.com/openchamber/openchamber.git
-  UPSTREAM_BRANCH: main
   BRANCH: main
   # In a fork `gh` resolves the repo to the parent and returns 403; pinning it to
   # this fork is what makes the issue lookup work.
@@ -86,12 +91,23 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config merge.conflictStyle zdiff3
 
-      # No tags: a pushed v* tag starts a release here, so upstream's version
-      # tags must never reach this repository.
-      - name: Fetch upstream
+      # releases/latest skips drafts and prereleases. The tag is fetched into a
+      # remote-tracking ref, never into refs/tags: a pushed v* tag starts a
+      # release here, so upstream's version tags must never reach this repository.
+      - name: Fetch upstream's latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          tag=$(gh api "repos/$UPSTREAM_SLUG/releases/latest" --jq .tag_name)
+          if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unexpected tag on upstream's latest release: $tag"
+            exit 1
+          fi
           git remote add upstream "$UPSTREAM_REPO"
-          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
+          git fetch --no-tags upstream "+refs/tags/$tag:refs/remotes/upstream/release"
+          echo "UPSTREAM_TAG=$tag" >> "$GITHUB_ENV"
+          echo "Upstream's latest release is $tag."
 
       # COPILOT_GITHUB_TOKEN is a fine-grained token owned by a personal account
       # with only the "Copilot Requests" account permission. Copilot Free is
@@ -103,16 +119,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          if git merge-base --is-ancestor "upstream/$UPSTREAM_BRANCH" HEAD; then
-            echo "$BRANCH already contains the latest upstream; nothing to do."
+          if git merge-base --is-ancestor "upstream/release^{commit}" HEAD; then
+            echo "$BRANCH already contains upstream $UPSTREAM_TAG; nothing to do until the next upstream release."
             echo "status=up-to-date" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "fork_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-          message="Merge upstream/$UPSTREAM_BRANCH"
-          if git merge --no-edit -m "$message" "upstream/$UPSTREAM_BRANCH"; then
+          message="Merge upstream $UPSTREAM_TAG"
+          if git merge --no-edit -m "$message" "upstream/release^{commit}"; then
             echo "status=merged" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -152,7 +168,7 @@ jobs:
           if [ "${#sources[@]}" -gt 0 ]; then
             npm install --global --silent "@github/copilot@$COPILOT_CLI_VERSION"
 
-            prompt="You are finishing a git merge of upstream/$UPSTREAM_BRANCH into this fork's $BRANCH. The merge stopped with conflicts in:
+            prompt="You are finishing a git merge of upstream release $UPSTREAM_TAG into this fork's $BRANCH. The merge stopped with conflicts in:
           $(printf -- '- %s\n' "${sources[@]}")
 
           In each conflict, the part between <<<<<<< and ||||||| is the fork, the part between ||||||| and ======= is the common ancestor, and the part between ======= and >>>>>>> is upstream.
@@ -220,8 +236,8 @@ jobs:
               echo "\`$BRANCH\` was left untouched and nothing was released. Resolve the conflicts above by hand:"
               echo
               echo '```bash'
-              echo "git fetch upstream $UPSTREAM_BRANCH"
-              echo "git merge upstream/$UPSTREAM_BRANCH   # resolve the conflicts, then git commit"
+              echo "git fetch --no-tags upstream refs/tags/$UPSTREAM_TAG"
+              echo "git merge FETCH_HEAD   # resolve the conflicts, then git commit"
               echo "node scripts/bump-version.mjs <next version> && git commit -am 'release v<next version>'"
               echo "git push origin $BRANCH && git tag v<next version> && git push origin v<next version>"
               echo '```'
@@ -236,7 +252,7 @@ jobs:
           FORK_VERSION: ${{ steps.merge.outputs.fork_version }}
         run: |
           set -euo pipefail
-          upstream_version=$(git show "upstream/$UPSTREAM_BRANCH:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          upstream_version=$(git show "upstream/release:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
           latest_tag=$(git for-each-ref --count=1 --sort=-version:refname --format='%(refname:short)' 'refs/tags/v[0-9]*.[0-9]*.[0-9]*')
           next=$(node -e '
             const versions = process.argv.slice(1).filter(Boolean)
@@ -249,7 +265,7 @@ jobs:
           git add -A
           git commit -m "release v$next
 
-          Upstream sync: merged upstream/$UPSTREAM_BRANCH.
+          Upstream sync: merged upstream release $UPSTREAM_TAG.
           Previous fork version was $FORK_VERSION; upstream is at $upstream_version."
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
@@ -288,8 +304,8 @@ jobs:
             echo "Resolve it locally, then release the result:"
             echo
             echo '```bash'
-            echo "git fetch upstream $UPSTREAM_BRANCH"
-            echo "git merge upstream/$UPSTREAM_BRANCH   # resolve the conflicts, then git commit"
+            echo "git fetch --no-tags upstream refs/tags/$UPSTREAM_TAG"
+            echo "git merge FETCH_HEAD   # resolve the conflicts, then git commit"
             echo "node scripts/bump-version.mjs <next version> && git commit -am 'release v<next version>'"
             echo "git push origin $BRANCH && git tag v<next version> && git push origin v<next version>"
             echo '```'
