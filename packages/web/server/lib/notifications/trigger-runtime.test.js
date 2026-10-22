@@ -364,6 +364,27 @@ describe('subagent finish with subagent notifications off', () => {
     vi.unstubAllGlobals();
   });
 
+  it('does not announce a subagent error, and still announces a main session error', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session/ses_child') return Response.json({ data: { id: 'ses_child', parentID: 'ses_parent' } });
+      if (url.pathname === '/api/session/ses_main') return Response.json({ data: { id: 'ses_main' } });
+      return Response.json({ data: [], cursor: {} });
+    }));
+    const { runtime, emitDesktopNotification } = makeSubtaskRuntime();
+    const errored = (sessionID) => ({
+      type: 'message.updated',
+      properties: { sessionID, info: { id: `m_${sessionID}`, sessionID, role: 'assistant', finish: 'error' } },
+    });
+
+    await runtime.maybeSendPushForTrigger(errored('ses_child'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    await runtime.maybeSendPushForTrigger(errored('ses_main'));
+    expect(emitDesktopNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', sessionId: 'ses_main' }));
+    vi.unstubAllGlobals();
+  });
+
   it('a partial session update does not erase a known parent', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));

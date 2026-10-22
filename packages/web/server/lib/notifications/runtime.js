@@ -379,6 +379,21 @@ export const createNotificationTriggerRuntime = (deps) => {
     return parentID;
   };
 
+  // With subagent notifications off, only a session known to have no parent
+  // announces; one whose parent cannot be read stays quiet.
+  const isKnownMainSession = async (payload, sessionId, directory, spaceId) => {
+    const parentID = getParentIdFromPayload(payload) || await fetchSessionParentId(sessionId, directory, spaceId);
+    return parentID === null;
+  };
+
+  /**
+   * Whether a host session is a subagent's, for callers outside the event
+   * stream such as plugin notices. A session whose record cannot be read
+   * counts as a main session, so an explicit notice is not lost to a failed
+   * lookup.
+   */
+  const isSubagentSession = async (sessionId, directory) => Boolean(await fetchSessionParentId(sessionId, directory));
+
   // Mirrors client-side autoRespondsPermission: a session auto-accepts if it
   // OR any ancestor is flagged. Walks the parent chain via fetchSessionParentId.
   const isSessionAutoAccepting = async (sessionId, directory) => {
@@ -541,15 +556,8 @@ export const createNotificationTriggerRuntime = (deps) => {
         payload = { ...payload, properties: { ...payload.properties, info } };
         const settings = await readSettingsFromDisk();
 
-        if (settings.notifyOnSubtasks === false) {
-          const parentIDFromPayload = getParentIdFromPayload(payload);
-          const parentID = parentIDFromPayload
-            ? parentIDFromPayload
-            : await fetchSessionParentId(sessionId, notificationDirectory, spaceId);
-
-          if (parentID !== null) {
-            return;
-          }
+        if (settings.notifyOnSubtasks === false && !(await isKnownMainSession(payload, sessionId, notificationDirectory, spaceId))) {
+          return;
         }
 
         if (settings.notifyOnCompletion === false) {
@@ -663,6 +671,9 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
+        // A subagent's failure reaches its parent as the task's result, and
+        // the parent's own turn end or error is what the user acts on.
+        if (settings.notifyOnSubtasks === false && !(await isKnownMainSession(payload, sessionId, notificationDirectory, spaceId))) return;
 
         const now = Date.now();
         const lastAt = lastErrorNotificationAt.get(sessionId) ?? 0;
@@ -1069,5 +1080,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     clearPendingPushBadge,
     sendGoalSettlePush,
     sendBrowserHelpPush,
+    isSubagentSession,
   };
 };

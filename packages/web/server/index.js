@@ -2253,6 +2253,7 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
   emitDesktopNotification,
   broadcastUiNotification,
   recordNotification: recordCenterNotification,
+  isSubagentSession: (sessionId, directory) => notificationTriggerRuntime.isSubagentSession(sessionId, directory),
 });
 
 // Suggested tasks: scans timed by the scheduler above, run as read-only lens

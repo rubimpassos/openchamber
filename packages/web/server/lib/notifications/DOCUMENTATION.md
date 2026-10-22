@@ -56,7 +56,7 @@ This module provides notification message preparation utilities for the web serv
     guest's shared surface alongside the session.
 - Owns:
   - completion/error/question/permission trigger routing (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
-  - session parent cache for subtask suppression
+  - session parent cache for subtask suppression: with `notifyOnSubtasks` off, a turn end or an error announces only for a session known to have no parent, since a subagent's result and failure reach its parent session. Questions, forms and permissions announce for every session, because the ask itself waits on the subagent. `isSubagentSession(sessionId, directory)` answers the same question for the plugin route, counting a session whose record cannot be read as a main session
   - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
   - an MCP elicitation form (session id `global`, owned by no session) notifies without a session: no session title lookup, and the deep link opens the app
   - template resolution and fallback behavior
@@ -100,6 +100,7 @@ This module provides notification message preparation utilities for the web serv
 - Callers: a plugin in the managed OpenCode (agent-tool bearer token, the only reason for the pre-auth registration) or any client that passes regular API auth. No other auth path exists.
 - Body `{ title?, body?, tag?, sessionId?, directory?, showWhenFocused? }`, at least one of title/body; title ≤120, body ≤500 chars, 16kb JSON. `kind` is always `plugin` so callers cannot trigger kinds the UI treats specially.
 - One shared rate window: 10 notifications per 10s, then 429 with `Retry-After`.
+- With `notifyOnSubtasks` off, a notice whose `sessionId` is a subagent session is dropped (`{ delivered: false, reason: 'subagent-notifications-disabled' }`); plugins such as Oh-My-OpenAgent name a subagent session for its own background tasks.
 - Follows `nativeNotificationsEnabled` (returns `{ delivered: false }`) and `notificationMode`; focused plugin notices use an in-app info toast, while OS/browser notifications stay hidden until the window is not focused. `showWhenFocused: true` opts into the focused toast. Live delivery only: no web push or APNs fanout.
 - Advertised as the `api.notifications.emit.v1` server capability.
 
