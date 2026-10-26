@@ -159,8 +159,20 @@ jobs:
           # the run.
           sources=()
           ported=()
+          generated=()
           for file in "${files[@]}"; do
             [ "$file" = bun.lock ] && continue
+            case "$file" in
+              packages/sdk/examples/*)
+                # Generated guest bundles (`bun scripts/bundle-guest.ts` in
+                # packages/sdk builds them): merging build artifacts invites
+                # nonsense, so take upstream's build now and let the fork's
+                # own rebuild regenerate fork-side examples on top.
+                git checkout -q --theirs -- "$file" && git add -- "$file"
+                generated+=("$file")
+                continue
+                ;;
+            esac
             stages=$(git ls-files -u -- "$file" | awk '{print $3}' | sort -u | tr -d '\n')
             if [[ $stages != *2*3* ]]; then
               if [[ $stages == *2* ]]; then
@@ -190,8 +202,15 @@ jobs:
             fi
             npm install --global --silent "@github/copilot@$COPILOT_CLI_VERSION"
 
-            prompt="You are finishing a git merge of upstream release $UPSTREAM_TAG into this fork's $BRANCH. The merge stopped with conflicts in:
-          $(printf -- '- %s\n' "${sources[@]}")
+            # Copilot can run out of steam or misread its scope on a long
+            # file list; each retry gets only what still carries markers.
+            remaining=("${sources[@]}")
+            attempt=0
+            while [ "${#remaining[@]}" -gt 0 ] && [ "$attempt" -lt 3 ]; do
+              attempt=$((attempt + 1))
+
+              prompt="You are finishing a git merge of upstream release $UPSTREAM_TAG into this fork's $BRANCH (attempt $attempt). The merge stopped with conflicts in:
+          $(printf -- '- %s\n' "${remaining[@]}")
 
           In each conflict, the part between <<<<<<< and ||||||| is the fork, the part between ||||||| and ======= is the common ancestor, and the part between ======= and >>>>>>> is upstream.
           To see what each side changed in a file and why:
@@ -202,19 +221,29 @@ jobs:
           A conflict on the \"version\" field of a package.json can take either value; a later step rewrites it.
           ${deleted_note}Edit only the files listed above. Do not edit, create or delete any other file, including documentation, changelogs or tests, even when repository instructions such as AGENTS.md ask for it. Do not run git commands that change the index, the history or the working tree."
 
-            copilot -p "$prompt" -s --no-ask-user \
-              --allow-tool=write \
-              --allow-tool='shell(git show:*)' \
-              --allow-tool='shell(git diff:*)' \
-              --allow-tool='shell(git log:*)' \
-              || give_up "Copilot CLI failed."
+              copilot -p "$prompt" -s --no-ask-user \
+                --allow-tool=write \
+                --allow-tool='shell(git show:*)' \
+                --allow-tool='shell(git diff:*)' \
+                --allow-tool='shell(git log:*)' \
+                --allow-tool='shell(grep:*)' \
+                || give_up "Copilot CLI failed."
 
-            stray=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | grep -vxF -f "$conflicts" || true)
-            if [ -n "$stray" ]; then
-              give_up "Copilot changed files outside the conflict: $(tr '\n' ' ' <<<"$stray")"
-            fi
-            if grep -nE '^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)( |$)' -- "${sources[@]}"; then
-              give_up "Conflict markers remain after Copilot."
+              stray=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | grep -vxF -f "$conflicts" || true)
+              if [ -n "$stray" ]; then
+                give_up "Copilot changed files outside the conflict: $(tr '\n' ' ' <<<"$stray")"
+              fi
+
+              next=()
+              for file in "${remaining[@]}"; do
+                if grep -qE '^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)( |$)' -- "$file"; then
+                  next+=("$file")
+                fi
+              done
+              if [ "${#next[@]}" -gt 0 ]; then remaining=("${next[@]}"); else remaining=(); fi
+            done
+            if [ "${#remaining[@]}" -gt 0 ]; then
+              give_up "Conflict markers remain after $attempt Copilot attempts: $(printf -- '%s, ' "${remaining[@]}" | sed 's/, $//')."
             fi
             git add -- "${sources[@]}"
           fi
@@ -230,11 +259,13 @@ jobs:
           git commit --no-edit -m "$message" \
             -m "Resolved to upstream's structure — re-land the fork delta on top:
           $(printf -- '- %s\n' "${ported[@]}")" \
+            -m "Generated files taken from upstream — regenerate fork-side builds on top:
+          $(printf -- '- %s\n' "${generated[@]}")" \
             -m "Copilot resolved conflicts in:
           $(printf -- '- %s\n' "${sources[@]}")"
 
           echo "status=merged" >> "$GITHUB_OUTPUT"
-          if [ "${#ported[@]}" -gt 0 ] || [ "${#sources[@]}" -gt 0 ]; then
+          if [ "${#ported[@]}" -gt 0 ] || [ "${#generated[@]}" -gt 0 ] || [ "${#sources[@]}" -gt 0 ]; then
             echo "resolved=true" >> "$GITHUB_OUTPUT"
           fi
           {
@@ -243,6 +274,11 @@ jobs:
             if [ "${#ported[@]}" -gt 0 ]; then
               echo "Resolved to upstream's structure. Re-land the fork delta on top in a follow-up commit; it stays recoverable from \`main\`'s first parent:"
               printf -- '- `%s`\n' "${ported[@]}"
+              echo
+            fi
+            if [ "${#generated[@]}" -gt 0 ]; then
+              echo "Generated files taken from upstream; regenerate fork-side builds on top (packages/sdk: \`bun scripts/bundle-guest.ts\`):"
+              printf -- '- `%s`\n' "${generated[@]}"
               echo
             fi
             if [ "${#sources[@]}" -gt 0 ]; then
