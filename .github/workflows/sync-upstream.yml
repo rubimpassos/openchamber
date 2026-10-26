@@ -15,10 +15,13 @@
 # resolved once, in the merge commit, and later syncs only meet what upstream
 # changed since the last merge.
 #
-# When the merge stops on a conflict, Copilot CLI resolves it. A resolved merge
-# must pass type-check and the web build before it is pushed. If Copilot cannot
-# resolve it, or the checks fail, the run fails and leaves `main` untouched; the
-# run summary lists the files to resolve by hand.
+# When the merge stops on a conflict, text conflicts with both sides present
+# go to Copilot CLI; a modify/delete conflict resolves to upstream's structure,
+# and the fork's delta on that file is re-landed on top in a follow-up commit
+# (it stays recoverable from main's first parent). A resolved merge must pass
+# type-check and the web build before it is pushed. If Copilot cannot resolve
+# it, or the checks fail, the run fails and leaves `main` untouched; the run
+# summary lists the files to resolve by hand.
 #
 # Versioning: the fork keeps its own plain-semver line rather than upstream's
 # number with a suffix. A `-fork.N` prerelease would be skipped by
@@ -148,24 +151,43 @@ jobs:
           # to the manual conflict report.
           trap 'give_up "Resolving the conflict failed at line $LINENO."' ERR
 
-          if [ -z "${COPILOT_GITHUB_TOKEN:-}" ]; then
-            give_up "The merge stopped on a conflict and the COPILOT_GITHUB_TOKEN secret is not set, so nothing resolved it."
-          fi
-
-          # Copilot only resolves text conflicts with both sides present. In a
-          # modify/delete or binary conflict git leaves one side in the tree
-          # without markers, and adding it would silently drop the other side.
+          # Text conflicts with both sides present go to Copilot. A
+          # modify/delete conflict has no text to merge: upstream's structure
+          # wins (its refactor moved or removed the file) and the fork's delta
+          # on that file is re-landed deliberately afterwards — it stays
+          # recoverable from main's first parent. Binary conflicts still fail
+          # the run.
           sources=()
+          ported=()
           for file in "${files[@]}"; do
             [ "$file" = bun.lock ] && continue
             stages=$(git ls-files -u -- "$file" | awk '{print $3}' | sort -u | tr -d '\n')
-            if [[ $stages != *2*3* ]] || ! grep -qE '^<<<<<<<( |$)' -- "$file"; then
-              give_up "\`$file\` has a conflict Copilot cannot resolve (deleted on one side, or binary)."
+            if [[ $stages != *2*3* ]]; then
+              if [[ $stages == *2* ]]; then
+                git rm -q -- "$file" # deleted upstream, modified here: take the deletion
+              else
+                git checkout -q --theirs -- "$file" && git add -- "$file" # deleted here, changed upstream: keep upstream's
+              fi
+              ported+=("$file")
+            elif ! grep -qE '^<<<<<<<( |$)' -- "$file"; then
+              give_up "\`$file\` has a conflict Copilot cannot resolve (binary)."
+            else
+              sources+=("$file")
             fi
-            sources+=("$file")
           done
 
+          deleted_note=""
+          if [ "${#ported[@]}" -gt 0 ]; then
+            deleted_note="Upstream deleted some of the conflicted files; they are already resolved as upstream structured them: $(printf -- '%s, ' "${ported[@]}" | sed 's/, $//').
+          When a fork change you are reapplying depended on such a deleted file, follow upstream's new structure — the module, route or component that replaced it — instead of reintroducing the old file.
+
+          "
+          fi
+
           if [ "${#sources[@]}" -gt 0 ]; then
+            if [ -z "${COPILOT_GITHUB_TOKEN:-}" ]; then
+              give_up "The merge stopped on a text conflict and the COPILOT_GITHUB_TOKEN secret is not set, so nothing resolved it."
+            fi
             npm install --global --silent "@github/copilot@$COPILOT_CLI_VERSION"
 
             prompt="You are finishing a git merge of upstream release $UPSTREAM_TAG into this fork's $BRANCH. The merge stopped with conflicts in:
@@ -178,8 +200,7 @@ jobs:
 
           Resolve every conflict in those files. Keep upstream's code and reapply the fork's change on top of it, so both survive. Where upstream already makes the fork's change, keep upstream's version. Remove every conflict marker.
           A conflict on the \"version\" field of a package.json can take either value; a later step rewrites it.
-
-          Edit only the files listed above. Do not edit, create or delete any other file, including documentation, changelogs or tests, even when repository instructions such as AGENTS.md ask for it. Do not run git commands that change the index, the history or the working tree."
+          ${deleted_note}Edit only the files listed above. Do not edit, create or delete any other file, including documentation, changelogs or tests, even when repository instructions such as AGENTS.md ask for it. Do not run git commands that change the index, the history or the working tree."
 
             copilot -p "$prompt" -s --no-ask-user \
               --allow-tool=write \
@@ -206,15 +227,28 @@ jobs:
             git add bun.lock
           fi
 
-          git commit --no-edit -m "$message" -m "Copilot resolved conflicts in:
-          $(printf -- '- %s\n' "${files[@]}")"
+          git commit --no-edit -m "$message" \
+            -m "Resolved to upstream's structure — re-land the fork delta on top:
+          $(printf -- '- %s\n' "${ported[@]}")" \
+            -m "Copilot resolved conflicts in:
+          $(printf -- '- %s\n' "${sources[@]}")"
 
           echo "status=merged" >> "$GITHUB_OUTPUT"
-          echo "resolved=true" >> "$GITHUB_OUTPUT"
+          if [ "${#ported[@]}" -gt 0 ] || [ "${#sources[@]}" -gt 0 ]; then
+            echo "resolved=true" >> "$GITHUB_OUTPUT"
+          fi
           {
-            echo "### Copilot resolved upstream sync conflicts"
+            echo "### Upstream sync conflicts resolved"
             echo
-            printf -- '- `%s`\n' "${files[@]}"
+            if [ "${#ported[@]}" -gt 0 ]; then
+              echo "Resolved to upstream's structure. Re-land the fork delta on top in a follow-up commit; it stays recoverable from \`main\`'s first parent:"
+              printf -- '- `%s`\n' "${ported[@]}"
+              echo
+            fi
+            if [ "${#sources[@]}" -gt 0 ]; then
+              echo "Resolved by Copilot:"
+              printf -- '- `%s`\n' "${sources[@]}"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node.js
@@ -223,7 +257,8 @@ jobs:
         with:
           node-version: '24'
 
-      # Only Copilot's work is checked here; a clean merge releases as before.
+      # Resolved work (Copilot or structure resolutions) is checked here; a
+      # clean merge releases as before.
       - name: Check the resolved code
         if: steps.merge.outputs.resolved == 'true'
         run: |
