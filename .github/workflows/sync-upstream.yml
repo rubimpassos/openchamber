@@ -245,6 +245,48 @@ jobs:
             if [ "${#remaining[@]}" -gt 0 ]; then
               give_up "Conflict markers remain after $attempt Copilot attempts: $(printf -- '%s, ' "${remaining[@]}" | sed 's/, $//')."
             fi
+
+            # A marker-clean join can still be syntactically broken (the sdk
+            # build met a TS1005 from one). Bun's native transpiler catches
+            # parse errors per file without node_modules, and Copilot gets
+            # the compiler's own words to fix the join.
+            syntax_fix=0
+            while true; do
+              broken=""
+              for file in "${sources[@]}"; do
+                case "$file" in
+                  *.ts|*.tsx|*.js|*.jsx|*.mjs) ;;
+                  *) continue ;;
+                esac
+                if ! err=$(bun build --no-bundle --target=node "$file" 2>&1); then
+                  broken+="  - $file
+            $(printf '%s\n' "$err" | grep -E 'error|at ' | head -3)
+          "
+                fi
+              done
+              [ -z "$broken" ] && break
+              syntax_fix=$((syntax_fix + 1))
+              if [ "$syntax_fix" -gt 2 ]; then
+                give_up "Files remain syntactically broken after two Copilot fix passes:
+          $broken"
+              fi
+
+              copilot -p "The merge resolution left these files syntactically broken; the transpiler says:
+          $broken
+          Fix only the broken syntax or badly joined merge hunks in these files, keeping upstream's structure and the fork's intent on top. Do not edit, create or delete any other file. Do not run git commands that change the index, the history or the working tree." \
+                -s --no-ask-user \
+                --allow-tool=write \
+                --allow-tool='shell(git show:*)' \
+                --allow-tool='shell(git diff:*)' \
+                --allow-tool='shell(git log:*)' \
+                --allow-tool='shell(grep:*)' \
+                || give_up "Copilot CLI failed."
+
+              stray=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | grep -vxF -f "$conflicts" || true)
+              if [ -n "$stray" ]; then
+                give_up "Copilot changed files outside the conflict: $(tr '\n' ' ' <<<"$stray")"
+              fi
+            done
             git add -- "${sources[@]}"
           fi
 
