@@ -537,6 +537,18 @@ test.skipIf(noChrome)('types editing keys, Enter, select-all, and composed chara
     const afterSelectAll = await evaluate(selection);
     await press('Enter', 'Enter');
 
+    // When the viewer types punctuation whose character code equals an editing
+    // key's code ('.' is Delete's 46, '-' Insert's 45, '%' to '(' the arrows).
+    await evaluate('document.querySelector("#notes").value = ""; document.querySelector("#notes").focus()');
+    for (const [key, code, shift] of [
+      ['.', 'Period'], ['-', 'Minus'], [',', 'Comma'], ['!', 'Digit1', true], ['"', 'Quote', true],
+      ['#', 'Digit3', true], ['$', 'Digit4', true], ['%', 'Digit5', true], ['&', 'Digit7', true],
+      ["'", 'Quote'], ['(', 'Digit9', true], [')', 'Digit0', true], ['*', 'Digit8', true], ['+', 'Equal', true],
+    ]) await press(key, code, shift ? { shift: true } : {});
+
+    // Then every character is typed and nothing is deleted or moved.
+    expect(await evaluate('document.querySelector("#notes").value')).toBe('.-,!"#$%&\'()*+');
+
     // Then each key runs Chrome's default action, and Enter submits the form.
     expect(afterEnd).toBe('[11,11]');
     expect(afterHome).toBe('[0,0]');
