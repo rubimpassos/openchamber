@@ -36,6 +36,8 @@ export type ServerBrowserTab = {
   /** Older services do not report these. */
   readonly dialog?: ServerBrowserDialog | null;
   readonly fileChooser?: ServerBrowserFileChooser | null;
+  /** The page's icon as a data URL, once the service fetched it for its origin. */
+  readonly favicon?: string | null;
 };
 
 /** A file a page downloaded, kept on the server; `path` is set once it is complete. */
@@ -64,7 +66,7 @@ export type ServerBrowserProfile = {
   readonly users: number;
 };
 
-export type ServerBrowserHelpKind = 'login' | 'page';
+export type ServerBrowserHelpKind = 'login' | 'page' | 'profile';
 
 export type ServerBrowserHelp = {
   readonly scopeId: string;
@@ -74,6 +76,8 @@ export type ServerBrowserHelp = {
   readonly reason: string;
   readonly tabId: string | null;
   readonly since: number;
+  /** A `profile` request: the saved profile the agent asks to keep this chat's logins in. */
+  readonly profile?: { readonly name: string; readonly exists: boolean };
 };
 
 export type ServerBrowserChromeStatus = {

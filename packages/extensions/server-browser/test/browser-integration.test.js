@@ -11,6 +11,9 @@ import { createProfileStore } from '../src/profile-store.js';
 
 const modifiers = Object.freeze({ alt: false, ctrl: false, meta: false, shift: false });
 
+// A 1x1 PNG the fixture serves as every page's /favicon.ico.
+const FAVICON_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(0, '127.0.0.1', () => resolve(server.address().port));
@@ -38,6 +41,11 @@ body { margin: 0; font-family: sans-serif; min-height: 2400px; }
 
 const startWebFixture = async () => {
   const server = http.createServer((request, response) => {
+    if (request.url === '/favicon.ico') {
+      response.setHeader('content-type', 'image/png');
+      response.end(FAVICON_PNG);
+      return;
+    }
     response.setHeader('content-type', 'text/html; charset=utf-8');
     if (request.url === '/selects') {
       response.setHeader('content-security-policy', "default-src 'self'; style-src 'none'; script-src 'unsafe-inline'");
@@ -772,6 +780,38 @@ test.skipIf(noChrome)('lets the agent name tabs by id without moving the viewer 
   }
 });
 
+test.skipIf(noChrome)('closes only the tabs the agent opened, and reports each page\'s icon', async () => {
+  // Given a browser whose first page the agent opened, a second agent tab, and a tab the person opened.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
+    cleanups.push(() => runtime.close());
+    const first = await runtime.perform('browser.open', { url: `${web.origin}/next` });
+    const second = await runtime.perform('browser.open', { url: `${web.origin}/` });
+    await runtime.command('tab-new');
+    const personTab = runtime.tabs.find((tab) => tab.id !== first.tabId && tab.id !== second.tabId).id;
+
+    // Then every loaded page reports its site's icon.
+    await waitFor(() => runtime.tabs.filter((tab) => tab.url.startsWith(web.origin)).every((tab) => tab.favicon));
+    expect(runtime.tabs.find((tab) => tab.id === first.tabId).favicon).toBe(`data:image/png;base64,${FAVICON_PNG.toString('base64')}`);
+
+    // When the agent closes the person's tab, then it is refused and stays open.
+    await expect(runtime.perform('browser.close', { tabId: personTab })).rejects.toThrow(/opened by the user/);
+    expect(runtime.tabs.some((tab) => tab.id === personTab)).toBe(true);
+
+    // When it closes without naming a tab, then its most recent tab closes; naming one closes that one.
+    expect(await runtime.perform('browser.close', {})).toEqual({ closed: true, tabId: second.tabId });
+    expect(await runtime.perform('browser.close', { tabId: first.tabId })).toEqual({ closed: true, tabId: first.tabId });
+    expect(runtime.tabs.map((tab) => tab.id)).toEqual([personTab]);
+
+    // When no tab of its own is left, then nothing is closed.
+    await expect(runtime.perform('browser.close', {})).rejects.toThrow(/no tab the agent opened/);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
 test.skipIf(noChrome)('streams frames when the viewer\'s first frame request opens the page', async () => {
   // Given a scope with no page yet, like one opened from the dock for a chat.
   const web = await startWebFixture();
@@ -942,6 +982,44 @@ test.skipIf(noChrome)('captures console and network for the inspector and runs J
       thrown = error;
     }
     expect(thrown?.code).toBe('CAPTURE_GONE');
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('moves a throwaway chat\'s login into a new profile once the person approves', async () => {
+  // Given a chat in an unbound project, signed into a site in its throwaway browser.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'profile-request-'));
+    cleanups.push(() => fs.rmSync(scratch, { recursive: true, force: true }));
+    const store = createProfileStore({ root: path.join(scratch, 'store'), keyFile: path.join(scratch, 'key', 'profile.key'), workRoot: path.join(scratch, 'run') });
+    const manager = createBrowserManager({
+      profiles: store,
+      createRuntime: (_scope, profile) => createBrowserRuntime({
+        chromePath,
+        allowedOrigins: [web.origin],
+        profile: profile ? { ...profile, checkout: () => store.checkout(profile.id), checkin: (directory, version) => store.checkin(profile.id, directory, version) } : null,
+      }),
+    });
+    cleanups.push(() => manager.close());
+    const chat = { directory: scratch, sessionId: 'ses_login' };
+    await manager.perform('browser.open', { url: `${web.origin}/login` }, undefined, chat);
+
+    // When the agent asks to keep the login in "Acme" and the person allows it.
+    const asked = manager.requestHelp({ reason: 'Keep the fixture login', timeoutSeconds: 60, kind: 'profile', profileName: 'Acme' }, undefined, chat);
+    await waitFor(() => manager.state().help?.kind === 'profile');
+    manager.answerProfileRequest(true, {});
+    const result = await asked;
+    expect(result.outcome).toBe('approved');
+    expect(result.profileSaved).toBe(true);
+
+    // Then the project is bound to Acme, and another chat of the project starts signed in.
+    expect((await store.resolve(scratch))?.name).toBe('Acme');
+    const other = { directory: scratch, sessionId: 'ses_other' };
+    await manager.perform('browser.open', { url: `${web.origin}/whoami` }, undefined, other);
+    expect((await manager.perform('browser.snapshot', {}, undefined, other)).text).toMatch(/cookie present/);
   } finally {
     for (const cleanup of cleanups) await cleanup();
   }

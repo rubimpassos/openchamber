@@ -47,6 +47,9 @@ const createRuntimeFactory = () => {
       async pageCapture() { calls.push(['capture']); return { base64: 'AA==', mime: 'image/png', width: 10, height: 20 }; },
       async pageClear(what) { calls.push(['clear', what]); },
       async close(options) { calls.push(options?.save ? ['close', { save: true }] : ['close']); return null; },
+      cookies: [],
+      async exportCookies() { return runtime.cookies; },
+      async importCookies(cookies) { calls.push(['import-cookies', cookies]); runtime.cookies = cookies; },
       deathListeners: new Set(),
       onDead(listener) {
         runtime.deathListeners.add(listener);
@@ -712,6 +715,13 @@ const fakeProfiles = (bindings) => {
     },
     async version(id) { return this.versions.get(id); },
     async list() { return [...profiles.values()]; },
+    async create(name) {
+      const profile = { id: `p${profiles.size + 1}`, name };
+      profiles.set(profile.id, profile);
+      this.versions.set(profile.id, 0);
+      return profile;
+    },
+    async bind(id, directory) { bindings[directory] = id; return profiles.get(id); },
     async remove(id) { removed.push(id); profiles.delete(id); },
     async revokeAll() { this.revoked = true; profiles.clear(); },
   };
@@ -790,6 +800,24 @@ test('saves a chat\'s copy into the profile and continues on it with its tabs re
 
   // A chat without a profile has nothing to save.
   await assert.rejects(manager.saveProfile({}, undefined, context('/other', 'ses_x')), /does not use a saved profile/);
+});
+
+test('tells a chat whose project was bound after its browser started how to get onto the profile', async () => {
+  // Given a chat browsing before its project is bound, then bound to Work.
+  const bindings = {};
+  const store = fakeProfiles(bindings);
+  const { factory, runtimes } = copyRuntimes(store);
+  const manager = createBrowserManager({ createRuntime: factory, profiles: store });
+  await manager.perform('browser.open', { url: 'https://app.test' }, undefined, context('/late', 'ses_one'));
+  bindings['/late'] = 'p1';
+
+  // When the agent saves, then nothing is saved and the error names the profile and the way onto it.
+  await assert.rejects(
+    manager.saveProfile({}, undefined, context('/late', 'ses_one')),
+    /started before its project was bound to the browser profile "Work".*Close this chat's browser/s,
+  );
+  assert.equal(store.versions.get('p1'), 0);
+  assert.equal(runtimes.get('ses_one').calls.some(([name]) => name === 'close'), false);
 });
 
 test('refuses to save a copy taken before another chat saved, and gives the chat a fresh copy', async () => {
@@ -890,6 +918,71 @@ test('a login request opens the profile for signing in on the chat\'s page and c
   assert.ok(all.length >= 3);
 });
 
+test('asks the person before keeping a chat\'s logins in a new profile, then moves the chat onto it', async () => {
+  // Given a chat in an unbound project, logged into a site, with two pages.
+  const bindings = {};
+  const store = fakeProfiles(bindings);
+  const { factory, runtimes, all } = copyRuntimes(store);
+  const manager = createBrowserManager({ createRuntime: factory, profiles: store });
+  await manager.perform('browser.open', { url: 'https://app.test' }, undefined, context('/acme', 'ses_one'));
+  const throwaway = runtimes.get('ses_one');
+  throwaway.tabs = [{ id: 't1', url: 'https://app.test/home', active: true }, { id: 't2', url: 'https://app.test/docs', active: false }];
+  throwaway.cookies = [{ name: 'session', value: 'abc', domain: 'app.test', path: '/' }];
+
+  // When the agent asks to keep its logins in "Acme".
+  const asked = manager.requestHelp({ reason: 'Keep the app.test login', timeoutSeconds: 60, kind: 'profile', profileName: 'Acme' }, undefined, context('/acme', 'ses_one'));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // Then nothing changed yet: the panel shows the request, and no profile exists or is bound.
+  assert.deepEqual(manager.state().help.profile, { name: 'Acme', exists: false });
+  assert.equal(manager.state().help.kind, 'profile');
+  assert.equal((await store.list()).some((profile) => profile.name === 'Acme'), false);
+  assert.equal(bindings['/acme'], undefined);
+
+  // When the person allows it.
+  manager.answerProfileRequest(true, {});
+  const result = await asked;
+
+  // Then the profile exists, the project is bound, the cookies went into a copy that was saved, and the chat runs on a fresh copy with its pages.
+  const acme = (await store.list()).find((profile) => profile.name === 'Acme');
+  assert.equal(bindings['/acme'], acme.id);
+  assert.equal(result.outcome, 'approved');
+  assert.equal(result.profileSaved, true);
+  assert.equal(result.carriedCookies, 1);
+  assert.equal(store.versions.get(acme.id), 1);
+  const copy = all.find((runtime) => runtime.calls.some(([name]) => name === 'import-cookies'));
+  assert.deepEqual(copy.calls.find(([name]) => name === 'import-cookies')[1], throwaway.cookies);
+  assert.deepEqual(copy.calls.at(-1), ['close', { save: true }]);
+  const fresh = runtimes.get('ses_one');
+  assert.notEqual(fresh, copy);
+  assert.equal(fresh.profileVersion, 1);
+  assert.deepEqual(fresh.calls.filter(([name]) => name === 'perform').map(([, , parameters]) => parameters.url), ['https://app.test/home', 'https://app.test/docs']);
+  assert.equal(manager.state().help, null);
+});
+
+test('changes nothing when the person declines a profile request, and refuses an answer nobody asked for', async () => {
+  const bindings = {};
+  const store = fakeProfiles(bindings);
+  const { factory, runtimes } = copyRuntimes(store);
+  const manager = createBrowserManager({ createRuntime: factory, profiles: store });
+  assert.throws(() => manager.answerProfileRequest(true, {}), /No profile request is waiting/);
+
+  // When the agent asks to use the existing Work profile and the person declines.
+  const asked = manager.requestHelp({ reason: 'Keep the login', timeoutSeconds: 60, kind: 'profile', profileName: 'work' }, undefined, context('/repo', 'ses_one'));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(manager.state().help.profile, { name: 'Work', exists: true });
+  manager.answerProfileRequest(false, {});
+
+  // Then the answer says so, and the chat keeps its own browser, unbound.
+  const result = await asked;
+  assert.equal(result.outcome, 'declined');
+  assert.equal(bindings['/repo'], undefined);
+  assert.equal(runtimes.get('ses_one').calls.some(([name]) => name === 'close'), false);
+  assert.equal(store.versions.get('p1'), 0);
+});
+
 test('asks the person for help on the chat\'s tab and resumes when they hand back', async () => {
   // Given a chat with a background tab, and the viewer on another chat.
   const { factory, runtimes } = createRuntimeFactory();
@@ -916,7 +1009,27 @@ test('asks the person for help on the chat\'s tab and resumes when they hand bac
   await manager.surfaceControl('none');
   const result = await asked;
   assert.equal(result.outcome, 'handed-back');
+  assert.equal(result.profileSaved, undefined);
   assert.equal(manager.state().help, null);
+});
+
+test('a login request in a chat without a profile hands the page over and says the login was not saved', async () => {
+  // Given a chat whose project is bound to no profile.
+  const { factory } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory, profiles: fakeProfiles({}) });
+
+  // When the agent asks for a login and the person hands back.
+  const asked = manager.requestHelp({ reason: 'Sign in', timeoutSeconds: 60, kind: 'login' }, undefined, context('/repo', 'ses_one'));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await manager.surfaceControl('user', 'viewer-a');
+  await manager.surfaceControl('none');
+
+  // Then the answer says nothing outlives the chat's browser.
+  const result = await asked;
+  assert.equal(result.outcome, 'handed-back');
+  assert.equal(result.profileSaved, false);
+  assert.match(result.note, /not saved anywhere/);
 });
 
 test('stops waiting for help at its time limit or when cancelled', async () => {
@@ -1063,6 +1176,24 @@ test('opens a chat scope for a viewer whose last frame showed a scope that has s
   // When it opens its chat's scope carrying that old frame, then the scope opens.
   await manager.openScope({ directory: '/repo', sessionId: 'ses_two' }, manager.state().generation, { viewer: 'v1', frameSeq: shown.sequence });
   assert.notEqual(manager.state().selectedScopeId, null);
+});
+
+test('lets a viewer pick a tab right after switching chats, before it drew the new chat\'s picture', async () => {
+  // Given a viewer that drew the second chat's page and then went back to the first chat.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  await manager.perform('browser.open', { url: 'https://two.test' }, undefined, context('/repo', 'ses_two'));
+  await manager.openScope(context('/repo', 'ses_two'), manager.state().generation);
+  const shown = await manager.surfaceFrame({ after: 0, wait: 0 });
+  await manager.openScope(context('/repo', 'ses_one'), manager.state().generation, { viewer: 'v1', frameSeq: shown.sequence });
+
+  // When it picks a tab of the first chat carrying that frame of the second, then the tab is shown.
+  await manager.selectTab('tab-2', manager.state().generation, { viewer: 'v1', frameSeq: shown.sequence });
+  assert.deepEqual(runtimes.get('ses_one').calls.at(-1), ['command', 'tab-select', { tabId: 'tab-2' }]);
+
+  // Driving the page still waits for a picture of it.
+  await assert.rejects(manager.navigate('https://one.test/next', manager.state().generation, { viewer: 'v1', frameSeq: shown.sequence }), /view changed/i);
 });
 
 test('closes a named tab even after the view moved on since the dock last looked', async () => {

@@ -2331,6 +2331,7 @@ const announceBrowserAgentActivity = ({ guestId, action, context }) => {
 };
 const BROWSER_HELP_NOTIFICATION_TITLE = 'The agent needs your help in the browser';
 const BROWSER_HELP_LOGIN_NOTIFICATION_TITLE = 'The agent needs you to sign in';
+const BROWSER_HELP_PROFILE_NOTIFICATION_TITLE = 'The agent asks to save its logins in a browser profile';
 const BROWSER_HELP_REASON_MAX = 500;
 
 /**
@@ -2353,7 +2354,9 @@ const notifyBrowserHelp = async ({ guestId, reason, kind, context }) => {
   }
   const sessionId = context?.sessionId || null;
   const directory = context?.directory || null;
-  const title = kind === 'login' ? BROWSER_HELP_LOGIN_NOTIFICATION_TITLE : BROWSER_HELP_NOTIFICATION_TITLE;
+  const title = kind === 'login'
+    ? BROWSER_HELP_LOGIN_NOTIFICATION_TITLE
+    : kind === 'profile' ? BROWSER_HELP_PROFILE_NOTIFICATION_TITLE : BROWSER_HELP_NOTIFICATION_TITLE;
   const body = reason.trim().slice(0, BROWSER_HELP_REASON_MAX);
   const tag = `browser-help-${sessionId || guestId}`;
   const notificationPayload = {

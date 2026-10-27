@@ -19,6 +19,7 @@ import {
 import { resolveAnnotationOverlayTheme } from '@/lib/browser/overlayTheme';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
+import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { toDisplayUrl } from '@/lib/browser/devTunnel';
 import { FILL_VIEWPORT, VIEWPORT_PRESETS, type BrowserViewport } from '@/lib/browser/viewport';
 import {
@@ -386,6 +387,14 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     }
   }, [claims, directory, panelTabs, scope, setContextPanelTabTargetPath]);
 
+  // Their icons too: the tab strip finds icons by the origin of the address it shows.
+  const putFavicon = useBrowserFaviconStore((store) => store.put);
+  React.useEffect(() => {
+    for (const chromeTab of scope?.tabs ?? []) {
+      if (chromeTab.favicon) putFavicon(toDisplayUrl(chromeTab.url), chromeTab.favicon);
+    }
+  }, [putFavicon, scope?.tabs]);
+
   const isSignInScope = Boolean(scope?.directory.startsWith('profile:'));
 
   // ---- the agent's tab ------------------------------------------------------
@@ -519,6 +528,11 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     void serverBrowser.closeScope(scope.id).finally(() => setSignIn(null));
   }, [isSignInScope, scope, serverBrowser, setSignIn]);
 
+  const answerProfileRequest = React.useCallback(async (approve: boolean) => {
+    const answered = await serverBrowser.answerProfileRequest(approve);
+    if (!answered) toast.error(t('contextPanel.browser.server.help.profileAnswerFailed'));
+  }, [serverBrowser, t]);
+
   const handleViewportChange = React.useCallback((next: BrowserViewport) => {
     void serverBrowser.setViewport(toServiceViewport(next));
   }, [serverBrowser]);
@@ -526,14 +540,25 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const zoomLevel = scope?.zoomLevel ?? 0;
   const zoomPercent = Math.round(1.2 ** zoomLevel * 100);
 
-  const help = state?.help ?? null;
-  const helpTargetsThisScope = Boolean(help && scope && (help.forScopeId ?? help.scopeId) === scope.id);
-
   const loaded = Boolean(showingMine && scope && scope.url && scope.url !== BLANK_URL);
 
   // ---- what the page in front asks of the person ---------------------------
   const { files } = useRuntimeAPIs();
   const shownTab = showingMine ? scope?.tabs.find((tab) => tab.active) ?? null : null;
+  const help = state?.help ?? null;
+  // A request for help names the page it is about; other tabs of the chat do not show it.
+  const helpTargetsThisScope = Boolean(help && scope && (help.forScopeId ?? help.scopeId) === scope.id
+    && (help.tabId === null || shownTab?.id === help.tabId));
+  // A new request brings its tab in front once; the person may then look elsewhere.
+  const helpPanelTabId = help?.tabId && scope && help.scopeId === scope.id
+    ? panelTabsByChromeTab(claims, scope.id).get(help.tabId) ?? null
+    : null;
+  const shownHelpRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (!help || !helpPanelTabId || shownHelpRef.current === help.since) return;
+    shownHelpRef.current = help.since;
+    if (helpPanelTabId !== tabID) setActiveContextPanelTab(directory, helpPanelTabId);
+  }, [directory, help, helpPanelTabId, setActiveContextPanelTab, tabID]);
   // Someone else holds control: only they can answer the page.
   const answerLocked = control.controller === 'user' && !control.mine;
   const answerDialog = React.useCallback(async (accept: boolean, promptText?: string) => {
@@ -665,6 +690,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         helpTargetsThisScope={helpTargetsThisScope}
         onSaveSignIn={handleSaveSignIn}
         savingSignIn={savingSignIn}
+        onAnswerProfileRequest={answerProfileRequest}
         chrome={state?.chrome ?? null}
       />
       <div className="relative flex min-h-0 flex-1 flex-col">

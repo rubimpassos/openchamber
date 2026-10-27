@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { createChromeProcess, visibleUserAgent } from './chrome-process.js';
 import { MENU_BINDING, MENU_WORLD, createContextMenu } from './context-menu.js';
 import { createDownloads } from './downloads.js';
+import { createFavicons } from './favicons.js';
 import { InspectorError, createInspector } from './inspector.js';
 import { networkGrants, originGrants } from './config.js';
 import { createNativeSelectCompatibility } from './native-select-compatibility.js';
@@ -35,6 +36,9 @@ const createTab = (targetId, sessionId, openerId) => ({
   problems: [],
   compatibility: null,
   lastActive: 0,
+  // Opened by the agent (browser.open, or a page an agent tab opened):
+  // only such a tab may be closed by browser.close; the person's stay.
+  openedByAgent: false,
   // What the page asks of the person; see page-requests.js.
   dialog: null,
   fileChooser: null,
@@ -93,6 +97,7 @@ export const createBrowserRuntime = ({
   const backgroundTargets = new Set();
   let targetCreation = Promise.resolve();
   const tabListeners = new Set();
+  const favicons = createFavicons();
   let activeTargetId = null;
   // The tab the agent last opened or worked in: an action that names no tab
   // runs there, whichever tab the viewer has in front.
@@ -187,6 +192,7 @@ export const createBrowserRuntime = ({
         id: current.targetId,
         url: current.url,
         title: current.title,
+        favicon: favicons.of(current.url),
         isLoading: current.isLoading,
         active: current.targetId === activeTargetId,
         dialog: current.dialog ? { id: current.dialog.id, ...publicDialog(current.dialog) } : null,
@@ -375,6 +381,7 @@ export const createBrowserRuntime = ({
           if (backgroundTargets.delete(current.targetId)) return current;
           // A page the agent's tab opened is where its work continues.
           if (current.openerId && current.openerId === agentTargetId) agentTargetId = current.targetId;
+          if (tabs.get(current.openerId)?.openedByAgent) current.openedByAgent = true;
           return activate(current);
         })
         .catch(() => {});
@@ -444,6 +451,11 @@ export const createBrowserRuntime = ({
     if (event.method === 'Page.frameStoppedLoading' && event.params.frameId === current.mainFrameId) {
       current.isLoading = false;
       void refreshNavigation(current);
+      void favicons.load({
+        pageUrl: current.url,
+        frameId: current.mainFrameId,
+        send: (method, params) => cdp.sendSession(current.sessionId, method, params),
+      });
     }
     if (event.method === 'Page.screencastFrame') scheduleNavigationRefresh(current);
     if (event.method === 'Runtime.bindingCalled' && event.params.name === MENU_BINDING) {
@@ -602,10 +614,38 @@ export const createBrowserRuntime = ({
   // background tab, unless the viewer is on an untouched blank tab.
   runtime.agentOpenPage = async (tabId) => {
     const current = await agentTab(tabId);
-    if (tabId !== undefined || (current.url === 'about:blank' && !current.canGoBack && !current.canGoForward)) {
+    if (tabId !== undefined) return claimForAction(current);
+    // An untouched blank tab becomes the agent's page, so it is the agent's tab.
+    if (current.url === 'about:blank' && !current.canGoBack && !current.canGoForward) {
+      current.openedByAgent = true;
       return claimForAction(current);
     }
-    return claimForAction(await openTab({ background: true }));
+    const opened = await openTab({ background: true });
+    opened.openedByAgent = true;
+    return claimForAction(opened);
+  };
+
+  // browser.close: the named tab, or the agent's most recent one. A tab the
+  // person opened is refused, never closed.
+  runtime.agentCloseTab = async (tabId) => {
+    let current;
+    if (tabId === undefined) {
+      const owned = [...tabs.values()].filter((tab) => tab.openedByAgent);
+      current = tabs.get(agentTargetId)?.openedByAgent
+        ? tabs.get(agentTargetId)
+        : owned.reduce((best, candidate) => (!best || candidate.lastActive > best.lastActive ? candidate : best), null);
+      if (!current) {
+        throw new Error('This chat\'s browser has no tab the agent opened, so nothing was closed. Agent actions never close a tab the user opened.');
+      }
+    } else {
+      current = await agentTab(tabId);
+      if (!current.openedByAgent) {
+        throw new Error(`The browser tab ${tabId} was opened by the user, not by this chat's agent, so it was not closed.`);
+      }
+    }
+    await cdp.send('Target.closeTarget', { targetId: current.targetId });
+    removeTab(current.targetId);
+    return { closed: true, tabId: current.targetId };
   };
 
   // browser.dialog: the one action a paused page still takes.
@@ -945,6 +985,31 @@ export const createBrowserRuntime = ({
   // per-context HTTP cache, so cache clearing is browser-wide plus the
   // visible tab's own origin storage (service worker caches, IndexedDB,
   // WebSQL), never its cookies.
+  // The cookies of this browser, so another browser (a profile copy the chat
+  // moves onto) can take over its logins. A browser that never started has none.
+  // Partitioned cookies stay behind: replayed without their partition they
+  // would become readable by every site.
+  runtime.exportCookies = async () => {
+    if (!cdp) return [];
+    const request = {};
+    if (!profile) request.browserContextId = contextId;
+    const { cookies = [] } = await cdp.send('Storage.getCookies', request);
+    return cookies
+      .filter((cookie) => !cookie.partitionKey)
+      .map(({ name, value, domain, path: cookiePath, secure, httpOnly, sameSite, expires, session, priority, sourceScheme, sourcePort }) => {
+        const copied = { name, value, domain, path: cookiePath, secure, httpOnly, sameSite, priority, sourceScheme, sourcePort };
+        if (!session) copied.expires = expires;
+        return copied;
+      });
+  };
+  runtime.importCookies = async (cookies) => {
+    if (cookies.length === 0) return;
+    await ensureStarted();
+    const request = { cookies };
+    if (!profile) request.browserContextId = contextId;
+    await cdp.send('Storage.setCookies', request);
+  };
+
   runtime.pageClear = async (what) => {
     const page = await runtime.ensurePage();
     requireNoDialog(activeTab());

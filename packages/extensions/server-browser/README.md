@@ -86,7 +86,36 @@ person reach the Browser pane instead:
   picking a tab, and closing a chat's browser stay allowed then, and run
   outside the operation queue except the close; driving the agent's own page
   (navigate, reload, zoom) waits until the agent lets go. Other chats' pages
-  are not held.
+  are not held. Picking a chat or a tab never checks which frame the viewer
+  drew last: right after a chat switch that frame is still the other chat's,
+  and only commands that act on the page (navigate, input) need a picture of
+  it.
+- **The agent closes only its own tabs.** `browser.close` closes a tab the
+  agent opened (`browser.open`, or a page one of its tabs opened), naming it
+  or, without `tabId`, its most recent one. A tab the person opened is
+  refused and stays open.
+- **Login help needs a profile to last.** `browser.requestHelp` with
+  `kind: 'login'` signs into the project's bound profile. A chat without one
+  gets the ordinary hand-over of its page, and the answer carries
+  `profileSaved: false` and a `note`, so the agent does not take the login
+  for saved. A profile bound after a chat's browser started does not reach
+  that browser; `browser.saveProfile` says so and how to restart onto it.
+- **An agent asks before it touches profiles.** `browser.requestHelp` with
+  `kind: 'profile'` (and `profileName`, default the project folder's name)
+  shows the person a request in the Browser panel to create that profile
+  or reuse the one of that name, bind the chat's project to it, and keep
+  the chat's logins there. Nothing changes until they press Allow
+  (`POST /help/profile`, open to the viewer like a page dialog's answer).
+  Then the chat's cookies, except partitioned ones, go into a copy of the
+  profile, that copy is saved, and the chat continues on a fresh copy with
+  its pages. Local storage does not move. Declining or the time limit leaves
+  everything as it was. An agent never creates, binds, or renames a
+  profile any other way.
+- **Tab icons.** Headless Chrome loads no favicons, so the service fetches
+  each origin's icon once a page finishes loading (its `<link rel="icon">`,
+  else `/favicon.ico`) through Chrome's own network stack
+  (`Network.loadNetworkResource`, so the egress policy applies), capped at
+  32 KB, and reports it as a data URL on `tabs[].favicon`.
 
 ### Why the page does not follow the panel by default
 

@@ -6,6 +6,7 @@ import {
   BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S,
   BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S,
   BROWSER_REQUEST_HELP_KINDS,
+  BROWSER_REQUEST_HELP_PROFILE_NAME_MAX,
 } from '@openchamber/sdk';
 import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
@@ -844,9 +845,19 @@ export const createOpenChamberControlService = (dependencies) => {
       parameters.timeoutSeconds = helpTimeoutSeconds;
       const kind = asNonEmptyString(input.kind);
       if (kind !== null && !BROWSER_REQUEST_HELP_KINDS.includes(kind)) {
-        throw new OpenChamberControlError(`kind must be ${BROWSER_REQUEST_HELP_KINDS.join(' or ')}`, 400);
+        throw new OpenChamberControlError(`kind must be one of ${BROWSER_REQUEST_HELP_KINDS.join(', ')}`, 400);
       }
       parameters.kind = kind ?? 'page';
+      const profileName = asNonEmptyString(input.profileName);
+      if (profileName !== null) {
+        if (parameters.kind !== 'profile') {
+          throw new OpenChamberControlError('profileName goes with kind profile only', 400);
+        }
+        if (profileName.length > BROWSER_REQUEST_HELP_PROFILE_NAME_MAX) {
+          throw new OpenChamberControlError(`profileName must be at most ${BROWSER_REQUEST_HELP_PROFILE_NAME_MAX} characters`, 400);
+        }
+        parameters.profileName = profileName;
+      }
     }
 
     // Opening a page waits for the navigation to settle, so its budget has to

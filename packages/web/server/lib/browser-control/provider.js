@@ -87,7 +87,7 @@ export const isBrowserProviderGuest = (guest) => (
  *   createId: () => string,
  *   proxyServiceRequest?: typeof proxyGuestServiceRequest,
  *   surfaceControl?: { userControls: (guestId: string) => boolean, noteAgentActivity: (guestId: string) => void },
- *   notifyBrowserHelp?: (event: { guestId: string, guestName: string, reason: string, kind: 'login' | 'page' | undefined, context: { directory: string | null, sessionId: string | null } }) => Promise<unknown>,
+ *   notifyBrowserHelp?: (event: { guestId: string, guestName: string, reason: string, kind: 'login' | 'page' | 'profile' | undefined, context: { directory: string | null, sessionId: string | null } }) => Promise<unknown>,
  *   announceAgentActivity?: (event: { guestId: string, action: string, context: { directory: string | null, sessionId: string | null } }) => void,
  * }} deps `surfaceControl` is the shared-surface lease: an action is refused
  * while the user is driving the extension's surface, and every action the

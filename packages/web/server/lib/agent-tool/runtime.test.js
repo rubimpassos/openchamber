@@ -302,9 +302,9 @@ describe('managed agent tool runtime', () => {
     for (const tool of ['openchamber', 'openchamber_web', 'openchamber_memory']) {
       for (const field of ['kind', 'expected', 'completed', 'planId', 'dependsOn', 'ready']) {
         const toolParameters = tools[tool].input.properties.parameters.properties;
-        // This fork's browser.requestHelp takes its own `kind`: login or page.
+        // This fork's browser.requestHelp takes its own `kind`: login, page, or profile.
         if (tool === 'openchamber_web' && field === 'kind') {
-          expect(toolParameters.kind.enum).toEqual(['login', 'page']);
+          expect(toolParameters.kind.enum).toEqual(['login', 'page', 'profile']);
           continue;
         }
         expect(toolParameters).not.toHaveProperty(field);

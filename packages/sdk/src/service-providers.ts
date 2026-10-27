@@ -82,7 +82,9 @@ export type BrowserInspectParameters = BrowserTabTarget & { selector: string };
 export type BrowserCaptureParameters = BrowserTabTarget & { label?: string };
 export type BrowserResizeParameters = BrowserTabTarget & { viewport: BrowserViewportMode };
 export type BrowserCloseParameters = BrowserTabTarget;
-export const BROWSER_REQUEST_HELP_KINDS = ['login', 'page'] as const;
+export const BROWSER_REQUEST_HELP_KINDS = ['login', 'page', 'profile'] as const;
+/** Longest `profileName` a `kind: 'profile'` request may carry. */
+export const BROWSER_REQUEST_HELP_PROFILE_NAME_MAX = 80;
 export type BrowserRequestHelpKind = (typeof BROWSER_REQUEST_HELP_KINDS)[number];
 /**
  * `kind` tells the provider what the surface is for, so it can save the
@@ -90,9 +92,16 @@ export type BrowserRequestHelpKind = (typeof BROWSER_REQUEST_HELP_KINDS)[number]
  * person signs into the chat's disposable profile copy and the provider
  * saves it, so other chats get the fresh login); `'page'` (default) is a
  * CAPTCHA, one-time code, or confirmation scoped to this page only, saved
- * nowhere.
+ * nowhere; `'profile'` asks the person to approve keeping the chat's logins
+ * in the saved profile `profileName` (created when missing) and binding the
+ * chat's project to it. Nothing changes until the person approves.
  */
-export type BrowserRequestHelpParameters = BrowserTabTarget & { reason: string; timeoutSeconds: number; kind?: BrowserRequestHelpKind };
+export type BrowserRequestHelpParameters = BrowserTabTarget & {
+  reason: string;
+  timeoutSeconds: number;
+  kind?: BrowserRequestHelpKind;
+  profileName?: string;
+};
 export type BrowserSaveProfileParameters = BrowserTabTarget;
 
 export type BrowserDialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
@@ -273,11 +282,17 @@ export type BrowserCloseData = { closed: true; tabId?: string };
  * person did (or the page unchanged, on a timeout).
  */
 export type BrowserRequestHelpData = {
-  outcome: 'handed-back' | 'signed-in' | 'timeout';
+  /** `approved`/`declined` answer a `kind: 'profile'` request. */
+  outcome: 'handed-back' | 'signed-in' | 'timeout' | 'approved' | 'declined';
   tabId?: string;
   url: string;
   title: string;
   waitedSeconds: number;
+  /** `false` when a `kind: 'login'` request had no saved profile to sign into, so nothing outlives the chat's browser; `note` says so to the agent. */
+  profileSaved?: boolean;
+  /** The profile a `kind: 'profile'` request is about. */
+  profile?: string;
+  note?: string;
 };
 
 /**

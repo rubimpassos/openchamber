@@ -68,7 +68,13 @@ itself; it can only ask and wait.
   help request. `kind` (`'login'` or `'page'`, from the agent's parameters)
   only changes the notification's title (`../notifications/DOCUMENTATION.md`)
   — the router passes it through untouched, the provider decides what to do
-  with it. `notifyBrowserHelp` (wired in `../../index.js`) sends both the
+  with it. The built-in provider answers a `login` it had no saved profile
+  for with `profileSaved: false` and a `note`, so the agent never takes a
+  plain hand-over for a saved login. `kind: 'profile'` (with an optional
+  `profileName`, at most 80 characters, refused with any other kind) asks
+  the person to approve keeping the chat's logins in that saved profile; the
+  provider changes nothing until they do and answers `approved`, `declined`,
+  or `timeout`. `notifyBrowserHelp` (wired in `../../index.js`) sends both the
   live in-app notification and, unlike every other agent-facing notification
   path, a web-push/APNs fanout through the notification trigger runtime — see
   `../notifications/DOCUMENTATION.md` for why it is not gated by the notify
@@ -116,7 +122,9 @@ itself; it can only ask and wait.
   never navigates an existing tab: the registered opener (`ContextPanel`,
   `useUIStore.openAgentBrowserTab`) makes a new background tab in the calling
   session's project, owned by that session, and the answer carries its `tabId`.
-  `browser.close` removes a tab the calling session opened. Closing is panel
+  `browser.close` removes a tab the calling session opened; on a provider the
+  service applies the same rule to its own tabs (the built-in one closes only
+  tabs its agent opened). In the in-app view closing is panel
   state rather than a page action, so the panel registers a closer the way it
   registers the opener; without `tabId` the session closes its own most recent
   tab, and a tab the user or another session opened is refused, never closed,

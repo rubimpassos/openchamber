@@ -71,7 +71,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
  * in the other tool's schema, which is both misleading and paid for in context
  * on every call.
  */
-const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'reason', 'timeoutSeconds', 'kind', 'accept', 'promptText'];
+const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'reason', 'timeoutSeconds', 'kind', 'profileName', 'accept', 'promptText'];
 // `title` is shared with the control tool, so it is not listed here — only the
 // names memory alone introduces are kept out of the other schemas.
 const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
@@ -163,7 +163,8 @@ const ALL_PARAMETER_PROPERTIES = {
   tabId: { type: 'string', description: "From the tabs browser.snapshot lists. Default: the tab you last used; else the user's open tab, if they opened it in this project" },
   reason: { type: 'string', description: 'browser.requestHelp: what the person must do (sign in, solve a CAPTCHA, enter a code). Never a password or code itself' },
   timeoutSeconds: { type: 'integer', minimum: BROWSER_PROVIDER_HELP_TIMEOUT_MIN_S, maximum: BROWSER_PROVIDER_HELP_TIMEOUT_MAX_S, description: 'browser.requestHelp: seconds to wait for the person (default 300)' },
-  kind: { type: 'string', enum: [...BROWSER_REQUEST_HELP_KINDS], description: 'browser.requestHelp: login saves the signed-in profile for the next chats; page (default) is for this page only' },
+  kind: { type: 'string', enum: [...BROWSER_REQUEST_HELP_KINDS], description: 'browser.requestHelp: login saves the signed-in profile for the next chats; page (default) is for this page only; profile asks the user to approve keeping this chat\'s logins in the saved profile profileName and binding the project to it' },
+  profileName: { type: 'string', description: 'browser.requestHelp with kind profile: the saved profile to create or reuse; default: the project folder name' },
   accept: { type: 'boolean', description: 'browser.dialog: true presses OK (Leave on "leave this page?"), false presses Cancel (Stay)' },
   promptText: { type: 'string', description: 'browser.dialog on a prompt: the text to submit; omit to submit what the page proposed' },
   body: { type: 'string', description: 'At most 2000 characters; longer is rejected. Written to make sense without this conversation' },

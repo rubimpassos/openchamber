@@ -130,6 +130,8 @@ export const createBrowserActions = (runtime) => async (action, parameters, sign
     }));
   }
 
+  if (action === 'browser.close') return withAbort(signal, runtime.agentCloseTab(parameters.tabId));
+
   const page = await runtime.agentPage(parameters.tabId);
   if (action === 'browser.snapshot') {
     const data = await runPageScript(page, buildSnapshotScript(parameters), signal);

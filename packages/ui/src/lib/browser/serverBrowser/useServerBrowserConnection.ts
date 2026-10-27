@@ -16,6 +16,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import {
   answerServerBrowserDialog,
   answerServerBrowserFileChooser,
+  answerServerBrowserProfileRequest,
   captureServerBrowserPage,
   clearServerBrowserData,
   closeServerBrowserScope,
@@ -71,6 +72,7 @@ type ServerBrowserConnection = {
   /** Resolve to null when the answer was refused (the dialog or request is gone, someone else is in control). */
   readonly answerDialog: (answer: { tabId: string; dialogId: number; accept: boolean; promptText?: string }) => Promise<ServerBrowserState | null>;
   readonly answerFileChooser: (answer: { tabId: string; chooserId: number; files: readonly string[] | null }) => Promise<ServerBrowserState | null>;
+  readonly answerProfileRequest: (approve: boolean) => Promise<ServerBrowserState | null>;
 };
 
 export const useServerBrowserConnection = (
@@ -268,5 +270,6 @@ export const useServerBrowserConnection = (
       viewerId,
       files === null ? { tabId, chooserId, cancel: true } : { tabId, chooserId, files },
     )),
+    answerProfileRequest: (approve) => act(() => answerServerBrowserProfileRequest(guestId, viewerId, approve)),
   };
 };

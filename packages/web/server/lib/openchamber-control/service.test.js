@@ -1145,10 +1145,24 @@ describe('browser requestHelp validation', () => {
     );
   });
 
-  it('rejects a kind that is not login or page', async () => {
+  it('rejects a kind that is not login, page, or profile', async () => {
     const { service } = createBrowserService();
     await expect(service.execute('browser.requestHelp', { reason: 'Sign in', kind: 'admin' }, '/repo'))
-      .rejects.toThrow(/kind must be login or page/);
+      .rejects.toThrow(/kind must be one of login, page, profile/);
+  });
+
+  it('passes profileName with kind profile and refuses it with any other kind or past 80 characters', async () => {
+    const { service, request } = createBrowserService();
+    await service.execute('browser.requestHelp', { reason: 'Keep the login', kind: 'profile', profileName: 'Acme' }, '/repo');
+    expect(request).toHaveBeenCalledWith(
+      'browser.requestHelp',
+      { reason: 'Keep the login', timeoutSeconds: 300, kind: 'profile', profileName: 'Acme' },
+      expect.anything(),
+    );
+    await expect(service.execute('browser.requestHelp', { reason: 'Sign in', kind: 'login', profileName: 'Acme' }, '/repo'))
+      .rejects.toThrow(/profileName goes with kind profile only/);
+    await expect(service.execute('browser.requestHelp', { reason: 'Sign in', kind: 'profile', profileName: 'x'.repeat(81) }, '/repo'))
+      .rejects.toThrow(/at most 80 characters/);
   });
 
   it('rejects a timeoutSeconds outside 30-900', async () => {

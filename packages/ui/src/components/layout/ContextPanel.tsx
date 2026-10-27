@@ -813,7 +813,15 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         label,
         labelFolder: tab.mode === 'file' ? fileFolders.get(tabPathLabel) : undefined,
         icon: agentTab
-          ? <Icon name="robot-2" className={cn('h-3.5 w-3.5 shrink-0 text-primary', agentTab.acting && 'animate-busy-pulse')} aria-hidden="true" />
+          ? (
+            // The tab strip gives an icon one 16px slot, so the robot is a badge on the page's icon.
+            <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+              {getTabIcon(tab, faviconByOrigin)}
+              <span className="absolute -bottom-1 -end-1 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-background">
+                <Icon name="robot-2" className={cn('h-2 w-2 text-primary', agentTab.acting && 'animate-busy-pulse')} aria-hidden="true" />
+              </span>
+            </span>
+          )
           : getTabIcon(tab, faviconByOrigin),
         title: agentTab ? t('contextPanel.browser.server.agentTab', { title }) : title,
         closeLabel: t('contextPanel.tab.closeTabAria', { label }),
