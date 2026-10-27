@@ -1,5 +1,7 @@
 import type { Session } from '@/lib/opencode/model';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { normalizePath } from '@/lib/pathNormalization';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import type { SessionGroup, SessionNode } from '../types';
 import type { ProjectSection } from '../projects/sessionProjectRender';
 
@@ -38,6 +40,12 @@ export const worktreeFolderMemberId = (directory: string | null): string | null 
 };
 
 const sessionWorkKey = (rootSessionId: string): string => `session:${rootSessionId}`;
+
+/** Whether a session can place its work in the In work zone. */
+export const isInWorkZoneSession = (session: Session, priorityIds: ReadonlySet<string>): boolean => (
+  !priorityIds.has(session.id)
+  && !session.parentID && !session.time?.archived && !isChatDirectoryPath(session.directory) && isSessionInWork(session)
+);
 
 /** Which work each listed session belongs to, from the project sections. */
 export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): SidebarWorkIndex => {

@@ -57,7 +57,7 @@ import { deriveTimelineActivityItems, matchZoneSessionsForSidebarQuery, pruneSes
 import { resolveSidebarSessionLocations } from '../recent/sessionLocation';
 import { buildSessionSidebarRowModel, type SessionSidebarWorkEntry } from '../sessionSidebarRowModel';
 import { useRemovingWorktreePaths } from '@/lib/worktrees/worktreeRemovalState';
-import { buildSidebarWorkIndex, isWorktreeWorkGroup, orderSidebarWorks, type SidebarWorkRef } from '../works/sidebarWorks';
+import { buildSidebarWorkIndex, isInWorkZoneSession, isWorktreeWorkGroup, orderSidebarWorks, type SidebarWorkRef } from '../works/sidebarWorks';
 import { useSessionDraftsStore, type SessionDraft } from '@/stores/useSessionDraftsStore';
 import { useSidebarGroupStatus } from './useSidebarGroupStatus';
 import { getSessionFolderOwnerKey, getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
@@ -460,9 +460,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     const work = showWork
       // A subagent's own work state never puts its run in work: the user works
       // in the sessions they started, as the Done button on a row reads it.
-      ? orderSidebarWorks(collection.orderedSessions, workIndex, (session) => (
-        !session.parentID && !session.time?.archived && !isChatDirectoryPath(session.directory) && isSessionInWork(session)
-      )).filter((ref) => ref.kind !== 'session' || (!priorityIds.has(ref.rootSessionId) && !pinnedIds.has(ref.rootSessionId)))
+      ? orderSidebarWorks(collection.orderedSessions, workIndex, (session) => isInWorkZoneSession(session, priorityIds))
+        .filter((ref) => ref.kind !== 'session' || (!priorityIds.has(ref.rootSessionId) && !pinnedIds.has(ref.rootSessionId)))
       : [];
     // A worktree with no session yet is in work while a draft is begun there:
     // the user just made it for a task. It opens the block, as the newest.

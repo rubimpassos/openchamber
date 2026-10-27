@@ -582,7 +582,8 @@ Priority sessions get a `priority` activity zone above Chats, in both views,
 whatever the display toggles say. It lists top-level, unarchived project
 sessions in the shared lifecycle order; a priority session is listed there
 only, never also in Pinned or In work, and stays in its project like the other
-zones (`zoneSessionIds`). A priority chat stays in Chats. The phone sheet shows
+zones (`zoneSessionIds`). A worktree appears in In work only when another
+eligible, non-priority session in it is in work. A priority chat stays in Chats. The phone sheet shows
 the same section above Chats. After an OpenCode restart cut a priority session
 off, the server resumes it on its own (see
 `packages/web/server/lib/session-interruption/DOCUMENTATION.md`), and its
