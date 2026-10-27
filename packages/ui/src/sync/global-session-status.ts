@@ -14,6 +14,7 @@ import {
 } from './session-activity-timing';
 import { countSyncPerformance } from './performance-diagnostics';
 import { hasRunningShell, useBackgroundShellsStore } from './background-shells';
+import { useWorkflowActivityStore } from './workflow-activity';
 
 // Shared live busy/retry index for every directory. Global events update it
 // incrementally and authoritative directory snapshots reconcile it, so each
@@ -146,19 +147,35 @@ export const useActiveSubagentCount = (sessionId: string): number => useGlobalSe
 );
 /**
  * What keeps the session's turn open, or null when nothing does: the session
- * runs itself, or it idles while a subagent below it runs, or while a command
- * it started in the background runs. The session's own run wins; a pause with
- * both kinds of background work reports the subagent.
+ * runs itself, or it idles while a workflow run it proposed runs, or while a
+ * subagent below it runs, or while a command it started in the background
+ * runs. The session's own run wins; a workflow comes next, because its agents
+ * are subagents too and the run says what they are doing; then a subagent.
+ * The workflow state is the run's own (the OpenChamber server's runs, kept by
+ * its events, see `workflow-activity.ts`), so it holds between phases when no
+ * agent happens to be busy.
  */
-type SessionTurnActivity = 'running' | 'subagent' | 'shell';
+type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell';
+
+/** The order above: the session's own run, a workflow, a subagent, a command. */
+export const resolveSessionTurnActivity = (
+  status: 'running' | 'subagent' | null,
+  workflowRunning: boolean,
+  waitingOnShell: boolean,
+): SessionTurnActivity | null => {
+  if (status === 'running') return status;
+  if (workflowRunning) return 'workflow';
+  return status ?? (waitingOnShell ? 'shell' : null);
+};
 
 export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity | null => {
-  const status = useGlobalSessionStatusStore((state): SessionTurnActivity | null => {
+  const status = useGlobalSessionStatusStore((state): 'running' | 'subagent' | null => {
     if (state.activeSessionIds.has(sessionId)) return 'running';
     return hasActiveSubagent(sessionId, state.activeSessionIds) ? 'subagent' : null;
   });
+  const workflowRunning = useWorkflowActivityStore((state) => state.runningSessionIds.has(sessionId));
   const waitingOnShell = useBackgroundShellsStore((state) => state.sessionIds.has(sessionId));
-  return status ?? (waitingOnShell ? 'shell' : null);
+  return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell);
 };
 
 // The last background command of an idle session ending closes its turn,
@@ -241,12 +258,14 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
     // The turn timer keeps running through a background-subagent or background-command pause.
     if (!hasBackgroundWork(sessionId, currentActiveIds())) {
       timingMutations.push({ type: 'observe', sessionId, phase: 'settled' });
+    } else {
+      timingMutations.push({ type: 'hold', sessionId });
     }
   };
 
   for (const payload of payloads) {
     if (payload.type === 'session.status') {
-      const { sessionID, status } = payload.properties;
+      const { sessionID, status, turnStart } = payload.properties;
       if (!sessionID) continue;
       const type = normalizeStatusType(status.type);
       // A status event only records that the session is running again; the
@@ -262,7 +281,7 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
         if (!current) draftActiveIds().add(sessionID);
       }
       orderingMutations.push({ type: 'observe', sessionId: sessionID, phase: 'active' });
-      timingMutations.push({ type: 'observe', sessionId: sessionID, phase: 'active' });
+      timingMutations.push({ type: 'observe', sessionId: sessionID, phase: 'active', turnStart });
       continue;
     }
 
@@ -339,9 +358,15 @@ export const applyGlobalSessionStatusSnapshot = (
   // authoritatively covers the caller's session list plus every id it reports
   // itself, and only the handful of sessions actually being timed need an
   // answer. Reuses the sets already built above, so this allocates nothing.
+  const turnSessionIds = withBackgroundWork(activeSessionIds);
+  const heldSessionIds = new Set<string>();
+  for (const sessionId of turnSessionIds) {
+    if (!activeSessionIds.has(sessionId)) heldSessionIds.add(sessionId);
+  }
   reconcileSessionActivityTiming(
-    withBackgroundWork(activeSessionIds),
+    turnSessionIds,
     (sessionId) => known.has(sessionId) || sessionId in raw,
+    heldSessionIds,
   );
   useGlobalSessionStatusStore.setState((state) => {
     let changed = false;

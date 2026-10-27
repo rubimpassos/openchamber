@@ -41,7 +41,8 @@ import { z } from 'zod';
  *   notifications (`session-work`), so all of them follow.
  * - The notification center (`notifications/center.js`) stays on this
  *   machine and is unchanged.
- * - External tunnels are refused: their provider sees plain text (`tunnels`).
+ * - External tunnels are refused: Cloudflare and ngrok see plain text, and
+ *   Tailscale opens this machine to other devices (`tunnels`).
  * - The private relay runs only on a pinned self-hosted endpoint
  *   (`relay/service.js`).
  * - Speech and transcription go only to servers on this machine (`tts`,

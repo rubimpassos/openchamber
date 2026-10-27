@@ -1,5 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -62,7 +62,7 @@ import {
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
+import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
@@ -87,6 +87,7 @@ import {
   selectQuakeToggleAction,
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
+import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
 import { PRODUCTION_UPDATER_FEED, resolveUpdaterFeed } from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
@@ -2007,16 +2008,28 @@ const setTaskbarProgress = (value) => {
 const pendingDeepLinks = [];
 const PENDING_SESSION_LINK_FALLBACK_MS = 10_000;
 
+// A session link (`openchamber://session/<id>`) can also name the message to
+// show (`?message=<id>`) and the saved host that owns the session
+// (`?host=<id>`). The renderer validates the IDs and opens a session of
+// another host in that host's window, as for a notification click.
+const sessionDeepLinkTarget = (link) => {
+  const target = { sessionId: link.value };
+  const messageId = readDeepLinkQueryParam(link.raw, 'message');
+  if (messageId) target.messageId = messageId;
+  const runtimeKey = runtimeKeyForDeepLinkHost(readDeepLinkQueryParam(link.raw, 'host'));
+  if (runtimeKey) target.runtimeKey = runtimeKey;
+  return target;
+};
+
 // Hands the main window's renderer the session links that arrived before it
-// could listen, as { sessionId, messageId? }; the renderer validates both.
+// could listen, as { sessionId, messageId?, runtimeKey? }.
 const takePendingSessionDeepLinks = () => {
   const taken = [];
   for (let index = pendingDeepLinks.length - 1; index >= 0; index -= 1) {
     const link = pendingDeepLinks[index];
     if (link.type !== 'session' || !link.value) continue;
     pendingDeepLinks.splice(index, 1);
-    const messageId = readDeepLinkQueryParam(link.raw, 'message');
-    taken.unshift(messageId ? { sessionId: link.value, messageId } : { sessionId: link.value });
+    taken.unshift(sessionDeepLinkTarget(link));
   }
   return taken;
 };
@@ -2176,12 +2189,12 @@ const dispatchDeepLink = (link) => {
   }
 
   if (link.type === 'session' && link.value) {
-    // A message link (`openchamber://session/<id>?message=<id>`) also names
-    // the message to show; the renderer validates both IDs.
-    const messageId = readDeepLinkQueryParam(link.raw, 'message');
-    emitToPrimaryWindow('openchamber:open-session', messageId
-      ? { sessionId: link.value, messageId }
-      : { sessionId: link.value });
+    // The session opens in the main window, so raise it: on macOS the link
+    // brings the app forward with whichever window was used last. A session of
+    // another host then opens in that host's window, which comes up on top,
+    // as for a notification click.
+    focusForegroundWindow();
+    emitToPrimaryWindow('openchamber:open-session', sessionDeepLinkTarget(link));
     return;
   }
   if (link.type === 'host' && link.value) {
@@ -2753,15 +2766,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
         } catch {
         }
       }
-      const hosts = includeHosts ? readDesktopHostsConfig()?.hosts || [] : [];
-      for (const entry of hosts) {
-        if (typeof entry?.url !== 'string') continue;
-        try {
-          if (new URL(entry.url).origin === url.origin) return true;
-        } catch {
-        }
-      }
-      return false;
+      // Matches the host's `apiUrl` as well as its `url`: when the two differ,
+      // extension frames load from `apiUrl`.
+      return includeHosts && findConfiguredHostForUrl(raw) !== null;
     } catch {
       return false;
     }
@@ -3209,6 +3216,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome() ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
+    acceptFirstMouse: true,
     webPreferences: {
       additionalArguments: buildRendererAdditionalArguments({
         localOrigin: desktopLocalOrigin,
@@ -5513,6 +5521,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_open_host_session': {
       const runtimeKey = readTrimmedString(args.runtimeKey);
       const sessionId = readTrimmedString(args.sessionId);
+      const messageId = readTrimmedString(args.messageId);
       if (!runtimeKey || !sessionId) throw new Error('runtimeKey and sessionId are required');
       // The session belongs to another instance than the one the calling
       // window shows: open it in a window for that instance instead.
@@ -5525,7 +5534,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         log.warn('[electron] open-host-session: no host for runtime key', { runtimeKey });
         return { opened: false };
       }
-      await openHostWindow(host, parseSessionRoute(sessionId, null), { reuseOpenWindow: true });
+      await openHostWindow(host, parseSessionRoute(sessionId, messageId || null), { reuseOpenWindow: true });
       return { opened: true };
     }
 
@@ -5886,6 +5895,11 @@ const { labels: contextMenuLabels, apply: setContextMenuLocale } = createContext
 
 contextMenu({
   labels: contextMenuLabels,
+  prepend: createCopyLinkMenuHook({
+    clipboard,
+    ClipboardItem,
+    onError: () => log.warn('[context-menu] Failed to copy link to clipboard'),
+  }),
   showInspectElement: isDev,
   showSaveImageAs: true,
   showCopyImage: true,

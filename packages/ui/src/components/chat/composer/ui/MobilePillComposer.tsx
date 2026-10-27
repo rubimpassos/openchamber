@@ -25,7 +25,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
-import { ComposerAttachmentControls } from './ComposerAttachmentControls';
+import { ComposerAttachmentControls, type ComposerTrackerPicker } from './ComposerAttachmentControls';
 import { MobileComposerHandle } from './MobileComposerHandle';
 import { useMobileComposerFoldStore } from '../state/mobileComposerFold';
 
@@ -51,9 +51,8 @@ export interface MobilePillComposerProps {
     onPickLocalFiles: () => void;
     onOpenGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
-    repositoryProvider?: SourceControlProvider;
-    showLinearPicker?: boolean;
-    onOpenLinearPicker?: () => void;
+    repositoryProvider?: SourceControlProvider | null;
+    trackerPickers?: readonly ComposerTrackerPicker[];
     onOpenAttachSheet: () => void;
     onStartDictation: () => void;
     onAbort: () => void;
@@ -120,8 +119,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         onPickLocalFiles,
         onOpenGitHubPicker,
         repositoryProvider,
-        showLinearPicker,
-        onOpenLinearPicker,
+        trackerPickers,
         onOpenAttachSheet,
         onStartDictation,
         onAbort,
@@ -178,8 +176,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     handlePickLocalFiles={onPickLocalFiles}
                     openGitHubPicker={onOpenGitHubPicker}
                     repositoryProvider={repositoryProvider}
-                    showLinearPicker={showLinearPicker}
-                    openLinearPicker={onOpenLinearPicker}
+                    trackerPickers={trackerPickers}
                     onOpenMobileSheet={onOpenAttachSheet}
                 />
                 <button

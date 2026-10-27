@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
-import { removeWorktreeThenArchiveSessions } from '@/lib/worktrees/worktreeRemovalFlow';
+import { archiveSessionsThenRemoveWorktree } from '@/lib/worktrees/worktreeRemovalFlow';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { BoundGitNetworkOperationError, GitOperationResultError } from '@/lib/boundGitNetworkOperation';
 import { PendingGitOperationError } from '@/lib/source-control/git-operation-recovery';
@@ -51,6 +51,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
+  const unarchiveSessions = useSessionUIStore((state) => state.unarchiveSessions);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const { git, sourceControl } = useRuntimeAPIs();
 
@@ -115,8 +116,8 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     }
     return true;
   }, [currentDirectory, deleteLocalBranch, deleteRemoteBranch, git, hasBranch, project, remoteName, sourceControl, worktreePath]);
-  // The worktree goes first: archiving sessions ahead of a removal that then
-  // fails would leave archived sessions attached to a worktree still on disk.
+  // The sessions are archived while their folder still exists, and come back
+  // if the removal fails (`archiveSessionsThenRemoveWorktree`).
   const removeWorktreeInBackground = React.useCallback((target: WorktreeMetadata, sessionIds: string[]) => {
     const name = getWorktreeDisplayName(target);
     const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name }));
@@ -124,10 +125,11 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     markWorktreeRemoving(target.path);
     void (async () => {
       try {
-        const result = await removeWorktreeThenArchiveSessions({
+        const result = await archiveSessionsThenRemoveWorktree({
           sessionIds,
           removeWorktree: () => removeWorktree(target),
           archiveSessions,
+          restoreSessions: (ids) => unarchiveSessions(ids, { undo: true }),
         });
         if (!result.removed) {
           toast.dismiss(toastId);
@@ -144,13 +146,9 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           return;
         }
 
-        toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle', { name }), {
-          id: toastId,
-          description:
-            hasBranch && deleteRemoteBranch
-              ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
-              : t('sessions.sidebar.sessionDialogs.worktree.removed'),
-        });
+        toast.success(hasBranch && deleteRemoteBranch
+          ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
+          : t('sessions.sidebar.sessionDialogs.worktree.removed'), { id: toastId, description: name });
         onDeleted?.();
       } catch (error) {
         // The remote branch could not be deleted, so the worktree was kept: say
@@ -160,12 +158,12 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           : error instanceof PendingGitOperationError || (error instanceof BoundGitNetworkOperationError && !error.message.includes(' '))
             ? t('gitView.publish.remoteNotGranted')
             : error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain');
-        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle', { name }), { id: toastId, description });
+        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), { id: toastId, description });
       } finally {
         clearWorktreeRemoval(target.path);
       }
     })();
-  }, [archiveSessions, deleteRemoteBranch, hasBranch, onDeleted, removeWorktree, t]);
+  }, [archiveSessions, deleteRemoteBranch, hasBranch, onDeleted, removeWorktree, t, unarchiveSessions]);
 
   const handleConfirm = () => {
     if (!worktree || isProcessing) return;

@@ -115,15 +115,22 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 
-// Nothing typed here reaches a server; every request answers empty.
-spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+// Nothing typed here reaches a server; bootstrap reads use the pinned v2 wire shapes.
+const respond = async (input: RequestInfo | URL): Promise<Response> => {
   const path = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/').pathname;
+  if (path.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
   if (path.endsWith('/location')) {
     return Response.json({ directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } });
   }
-  if (path.endsWith('/session')) return Response.json({ data: [] });
+  if (path.endsWith('/config') || path.endsWith('/project')) return Response.json([]);
+  if (path.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
+  if (path.endsWith('/shell')) return Response.json({ location: { directory: '/workspace' }, data: [] });
+  if (path.endsWith('/session/active')) return Response.json({ data: {} });
+  if (path.endsWith('/session-warming')) return Response.json({ revision: 0, enabled: false, minutes: 15, sessions: [] });
+  if (path.endsWith('/session') || path.endsWith('/form') || path.endsWith('/permission/request')) return Response.json({ data: [] });
   return Response.json({});
-});
+};
+spyOn(globalThis, 'fetch').mockImplementation(respond);
 
 // Vite-only module forms the composer's import graph reaches.
 plugin({
@@ -159,17 +166,7 @@ const { OpenCode } = await import('@opencode/client');
 
 const sdk = OpenCode.make({
   baseUrl: 'https://sync.test',
-  fetch: async (request) => {
-    const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
-    if (path.endsWith('/event')) {
-      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
-    }
-    const body = path.endsWith('/location')
-      ? { directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } }
-      : path.endsWith('/session/active') ? {}
-      : { data: [] };
-    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
-  },
+  fetch: respond,
 });
 
 // SAFETY: Mounting and typing read only the runtime descriptor and the

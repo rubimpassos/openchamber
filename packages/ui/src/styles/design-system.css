@@ -166,12 +166,12 @@
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'Liberation Mono', Menlo, monospace) !important;
   }
 
-  .markdown-content details[data-md-details] {
+  .markdown-content details {
     margin-block: 0.75rem;
     min-width: 0;
   }
 
-  .markdown-content details[data-md-details] > summary {
+  .markdown-content details > summary {
     display: flex;
     align-items: baseline;
     gap: 0.375rem;
@@ -183,23 +183,35 @@
     border-radius: 0.25rem;
   }
 
-  .markdown-content details[data-md-details] > summary::-webkit-details-marker {
+  .markdown-content details > summary::-webkit-details-marker {
     display: none;
   }
 
-  .markdown-content [data-md-disclosure-icon] {
+  .markdown-content [data-oc-disclosure-icon] {
     display: inline-flex;
     flex-shrink: 0;
     align-self: flex-start;
     margin-top: 0.25em;
-    color: var(--surface-muted-foreground);
   }
 
-  .markdown-content details[data-md-details][open] > summary > [data-md-disclosure-icon] {
+  .markdown-content details[open] > summary > [data-oc-disclosure-icon] {
     transform: rotate(90deg);
   }
 
-  .markdown-content details[data-md-details] > summary:focus-visible {
+  .markdown-content details:dir(rtl)[open] > summary > [data-oc-disclosure-icon] {
+    transform: rotate(-90deg);
+  }
+
+  .markdown-content details > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) {
+    align-items: center;
+  }
+
+  .markdown-content details > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) > [data-oc-disclosure-icon] {
+    align-self: center;
+    margin-top: 0;
+  }
+
+  .markdown-content details > summary:focus-visible {
     outline: 2px solid var(--interactive-focus-ring);
     outline-offset: 2px;
   }
@@ -640,6 +652,13 @@
   background-color: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
 
+/* A row in the composer's top slot (goal, background commands, queue, hints).
+   mobile.css makes it taller on touch layouts, where its buttons grow to the
+   36px touch floor. */
+.oc-composer-row {
+  height: 2rem;
+}
+
 .oc-tile-inset {
   background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
 }
@@ -1041,3 +1060,34 @@ html[data-glass-redraw-guard] body::before {
   }
 }
 
+/* Toast countdown (components/ui/sonner.tsx): the ring around the close cross
+   is drawn only on a toast that closes by itself, full when it appears and
+   empty when it goes. It holds while the toasts are spread out under the
+   pointer, which is when sonner holds its timer. */
+.oc-toast-ring {
+  display: none;
+  opacity: 0.55;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+}
+
+[data-sonner-toast].oc-toast-timed .oc-toast-ring {
+  display: inline;
+  animation: oc-toast-countdown var(--oc-toast-duration, 4000ms) linear forwards;
+}
+
+[data-sonner-toast][data-expanded='true'].oc-toast-timed .oc-toast-ring {
+  animation-play-state: paused;
+}
+
+@keyframes oc-toast-countdown {
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast].oc-toast-timed .oc-toast-ring {
+    display: none;
+  }
+}

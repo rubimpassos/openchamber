@@ -2,7 +2,10 @@ import { z } from 'zod';
 import { createRequire } from 'node:module';
 
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+import { isWorkflowFeatureAvailable } from '../workflows/feature-flag.js';
+import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
+import { asNonEmptyString } from '../shared/guards.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
 import { normalizeConfig as normalizeFixLoopConfig } from '../pr-fix-loop/runtime.js';
@@ -96,7 +99,6 @@ export const createSettingsHelpers = (dependencies) => {
   // settings-helpers.test.js fails when the two lists drift apart.
   const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
-  const SIDEBAR_WORKTREE_SORT_ORDER_VALUES = new Set(['recent', 'manual', 'a-z']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -356,11 +358,14 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarListSessionGrouping)) {
       result.sidebarListSessionGrouping = candidate.sidebarListSessionGrouping;
     }
+    if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarGrouping)) {
+      result.sidebarGrouping = candidate.sidebarGrouping;
+    }
+    if (typeof candidate.sidebarKeepWorkInPlace === 'boolean') {
+      result.sidebarKeepWorkInPlace = candidate.sidebarKeepWorkInPlace;
+    }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
-    }
-    if (SIDEBAR_WORKTREE_SORT_ORDER_VALUES.has(candidate.sidebarWorktreeSortOrder)) {
-      result.sidebarWorktreeSortOrder = candidate.sidebarWorktreeSortOrder;
     }
     if (typeof candidate.sidebarShowChatsSection === 'boolean') {
       result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
@@ -486,9 +491,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.diffHideWhitespace === 'boolean') {
       result.diffHideWhitespace = candidate.diffHideWhitespace;
-    }
-    if (typeof candidate.persistChatDraft === 'boolean') {
-      result.persistChatDraft = candidate.persistChatDraft;
     }
     if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
       result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
@@ -623,6 +625,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
       result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
     }
+    if (candidate.worktreeArchiveOnDoneEnabled === true || candidate.worktreeArchiveOnDoneEnabled === false) {
+      result.worktreeArchiveOnDoneEnabled = candidate.worktreeArchiveOnDoneEnabled;
+    }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
@@ -639,6 +644,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.tunnelMode === 'string') {
       result.tunnelMode = normalizeTunnelMode(candidate.tunnelMode);
+    }
+    if (Number.isInteger(candidate.tunnelHttpsPort) && candidate.tunnelHttpsPort >= 1 && candidate.tunnelHttpsPort <= 65535) {
+      result.tunnelHttpsPort = candidate.tunnelHttpsPort;
     }
     if (candidate.managedLocalTunnelConfigPath === null) {
       result.managedLocalTunnelConfigPath = null;
@@ -691,9 +699,22 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.smallModelOverride.trim();
       result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (candidate.smallModelVariant !== undefined) {
+      result.smallModelVariant = asNonEmptyString(candidate.smallModelVariant) ?? undefined;
+    }
     if (typeof candidate.walkthroughModelOverride === 'string') {
       const trimmed = candidate.walkthroughModelOverride.trim();
       result.walkthroughModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (candidate.walkthroughModelVariant !== undefined) {
+      result.walkthroughModelVariant = asNonEmptyString(candidate.walkthroughModelVariant) ?? undefined;
+    }
+    for (const key of ['fallbackModel', 'fallbackVariant']) {
+      const value = z.string().trim().safeParse(candidate[key]);
+      if (value.success) result[key] = value.data.length > 0 ? value.data : undefined;
+    }
+    if (Array.isArray(candidate.accountSwitchProviders)) {
+      result.accountSwitchProviders = normalizeStringArray(candidate.accountSwitchProviders);
     }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
@@ -738,6 +759,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
       result.enterToSendConfigured = candidate.enterToSendConfigured;
     }
+    if (candidate.mobileReturnKeySends === true || candidate.mobileReturnKeySends === false) {
+      result.mobileReturnKeySends = candidate.mobileReturnKeySends;
+    }
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
       result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
     }
@@ -758,6 +782,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.agentKnowledgeToolEnabled === true || candidate.agentKnowledgeToolEnabled === false) {
       result.agentKnowledgeToolEnabled = candidate.agentKnowledgeToolEnabled;
+    }
+    if (candidate.agentWorkflowToolEnabled === true || candidate.agentWorkflowToolEnabled === false) {
+      result.agentWorkflowToolEnabled = candidate.agentWorkflowToolEnabled;
     }
     if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
       result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
@@ -1188,6 +1215,10 @@ export const createSettingsHelpers = (dependencies) => {
       // Tells the client whether agent memory exists in this build at all, so
       // its settings row and panel tab can be absent rather than merely off.
       agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      // The same for agent workflows (`OPENCHAMBER_WORKFLOWS_ENABLE`).
+      agentWorkflowFeatureAvailable: isWorkflowFeatureAvailable(),
+      // The overview page ships dark until `OPENCHAMBER_OVERVIEW_ENABLED` is set.
+      overviewFeatureAvailable: isOverviewFeatureAvailable(),
       // Jev routing needs the OpenChamber server, so it is present here and
       // absent wherever this payload does not come from one (VS Code).
       routingFeatureAvailable: true,

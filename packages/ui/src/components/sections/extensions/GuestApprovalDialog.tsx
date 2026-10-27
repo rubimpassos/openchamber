@@ -51,6 +51,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const serviceExec = guest?.service?.permissions?.exec ?? [];
   const serviceSockets = guest?.service?.permissions?.sockets ?? [];
   const providesBrowser = serviceProvides(guest?.service, 'browser');
+  const providesSourceControl = serviceProvides(guest?.service, 'source-control');
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
   const loopback = guest?.loopback;
   const planProviders = guest?.plans ?? [];
@@ -178,6 +179,13 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                   {capability === 'service' && providesBrowser ? (
                     <p className="typography-meta mt-0.5 text-foreground">
                       {t('settings.extensions.capability.service.providesBrowser')}
+                    </p>
+                  ) : null}
+                  {capability === 'service' && providesSourceControl ? (
+                    <p className="typography-meta mt-0.5 text-foreground">
+                      {t('settings.extensions.capability.service.providesSourceControl', {
+                        label: guest?.sourceControl?.label ?? guest?.name ?? '',
+                      })}
                     </p>
                   ) : null}
                 </div>

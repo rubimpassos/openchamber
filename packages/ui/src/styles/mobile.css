@@ -58,6 +58,17 @@
     min-width: 36px;
   }
 
+  /* Toast titles and icons line up with their buttons, which the rule above
+     makes at least 36px tall (sonner.tsx). */
+  :root.mobile-pointer:not(.desktop-runtime) [data-sonner-toast] {
+    --toast-row: max(1.5rem, 36px);
+  }
+
+  /* Composer top-slot rows keep room around their 36px buttons. */
+  :root.mobile-pointer:not(.desktop-runtime) .oc-composer-row {
+    height: 2.5rem;
+  }
+
   /* The Changes section and source pickers take their height from dropdownTriggerVariants,
      rather than the generic mobile button minimum. */
   :root.mobile-pointer:not(.desktop-runtime) button[data-mobile-comparison-trigger] {
@@ -134,7 +145,7 @@
   }
 
   /* Keep markdown code blocks horizontally scrollable on mobile. */
-  :root.mobile-pointer:not(.desktop-runtime) .markdown-content [data-markdown="code-block-body"] {
+  :root.mobile-pointer:not(.desktop-runtime) .markdown-content [data-streamdown="code-block-body"] {
     overflow-x: auto !important;
     overflow-y: hidden !important;
     -webkit-overflow-scrolling: touch;
@@ -630,6 +641,13 @@
      legs equal the keyboard height once settled, so the settle snap is
      geometry-neutral for the scroller. */
   padding-bottom: var(--oc-kb-scroll-inset, var(--oc-kb-layout, 0px));
+}
+
+/* The iPad sidebar stays where it is when the keyboard opens, as iPadOS apps
+   do: it extends behind the keyboard by exactly what the shell gives up (the
+   same leg as the scroller above), so only the chat column moves. */
+:root.oc-capacitor-app .oc-mobile-app-shell .oc-ipad-sidebar {
+  height: calc(100% + max(var(--oc-kb-layout, 0px) - var(--oc-app-bottom-safe, 0px), 0px));
 }
 
 /* The transcript's end fade band (index.css `.chat-scroll-fade--end`) is

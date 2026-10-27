@@ -3,6 +3,12 @@ import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { z } from 'zod';
 import { truncateNotificationText } from './message.js';
+import {
+  defaultNotificationTemplates,
+  notificationTexts,
+  renderNotificationText,
+  withTemplateDefaults,
+} from './template-locales.js';
 
 const nonEmptyText = z.string().trim().min(1);
 /** The trimmed text, or null for anything else. */
@@ -77,10 +83,9 @@ export const createNotificationTriggerRuntime = (deps) => {
   // (ready + question + permission are different tags), so counting sessionIds
   // both over- and under-counts the lock-screen stack; counting tags mirrors it.
   //
-  // We deliberately do NOT derive this from the live attention snapshot
-  // (needsAttention/isViewed): that machinery is for in-app indicators on
-  // connected clients — a backgrounded client stays "viewing", and needsAttention
-  // is set by a separate session.status event that races the push trigger. The
+  // We deliberately do NOT derive this from the in-app unread marks (OpenCode's
+  // `time.viewed`): a backgrounded client can still be on the session, and the
+  // mark changes on a separate event that races the push trigger. The
   // set is cleared when a UI client reports visible (`clearPendingPushBadge`),
   // the same moment the device zeroes its icon badge on becomeActive.
   const pendingPushTags = new Set();
@@ -580,17 +585,25 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
         lastReadyNotificationAt.set(sessionId, now);
 
-        let title = `${formatMode(info?.mode)} agent is ready`;
-        let body = `${formatModelId(info?.modelID)} completed the task`;
+        const texts = notificationTexts(settings.locale);
+        let title = renderNotificationText(texts.readyTitle, {
+          agent_name: formatMode(info?.mode),
+        });
+        let body = renderNotificationText(texts.readyMessage, {
+          model_name: formatModelId(info?.modelID),
+        });
         let sessionName = '';
         let reply = '';
 
         try {
           const templates = settings.notificationTemplates || {};
+          const defaults = defaultNotificationTemplates(settings.locale);
           const isSubtask = await fetchSessionParentId(sessionId, notificationDirectory, spaceId);
-          const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
-            ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
-            : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
+          const usesSubtaskTemplate = Boolean(isSubtask) && settings.notifyOnSubtasks !== false;
+          const completionTemplate = withTemplateDefaults(
+            usesSubtaskTemplate ? (templates.subtask ?? templates.completion) : templates.completion,
+            usesSubtaskTemplate ? defaults.subtask : defaults.completion,
+          );
 
           const variables = await buildTemplateVariables(payload, sessionId, source);
           sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
@@ -682,8 +695,9 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
 
-        let title = 'Tool error';
-        let body = 'An error occurred';
+        const texts = notificationTexts(settings.locale);
+        let title = texts.errorTitle;
+        let body = texts.errorBody;
         let sessionName = '';
         let errorText = '';
 
@@ -702,7 +716,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           });
           errorText = variables.last_message;
 
-          const errorTemplate = (settings.notificationTemplates || {}).error || { title: 'Tool error', message: '{last_message}' };
+          const errorTemplate = withTemplateDefaults(
+            (settings.notificationTemplates || {}).error,
+            defaultNotificationTemplates(settings.locale).error,
+          );
           const resolvedTitle = resolveNotificationTemplate(errorTemplate.title, variables);
           const resolvedBody = resolveNotificationTemplate(errorTemplate.message, variables);
           if (resolvedTitle) title = resolvedTitle;
@@ -788,12 +805,13 @@ export const createNotificationTriggerRuntime = (deps) => {
         // notification opens the app instead of a session that cannot load.
         const formSessionId = sessionId === LOCATION_SCOPED_FORM_SESSION_ID ? undefined : sessionId;
 
+        const texts = notificationTexts(settings.locale);
         let title = /plan\s*mode/i.test(header)
-          ? 'Switch to plan mode'
+          ? texts.planModeTitle
           : /build\s*agent/i.test(header)
-            ? 'Switch to build mode'
-            : header || 'Input needed';
-        let body = questionText || 'Agent is waiting for your response';
+            ? texts.buildModeTitle
+            : header || texts.questionTitle;
+        let body = questionText || texts.questionBody;
         let sessionName = '';
 
         try {
@@ -802,7 +820,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           variables.last_message = questionText || header || '';
 
           const templates = settings.notificationTemplates || {};
-          const questionTemplate = templates.question || { title: 'Input needed', message: '{last_message}' };
+          const questionTemplate = withTemplateDefaults(
+            templates.question,
+            defaultNotificationTemplates(settings.locale).question,
+          );
 
           const resolvedTitle = resolveNotificationTemplate(questionTemplate.title, variables);
           const resolvedBody = resolveNotificationTemplate(questionTemplate.message, variables);
@@ -934,12 +955,13 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         const sessionTitle = payload.properties?.sessionTitle;
         const permissionText = typeof permission === 'string' && permission.length > 0 ? permission : '';
+        const texts = notificationTexts(settings.locale);
         // What the agent wants to do decides the answer, so it comes before the session name.
         const fallbackMessage = permissionText
           || (typeof sessionTitle === 'string' && sessionTitle.trim().length > 0 ? sessionTitle.trim() : '')
-          || 'Agent is waiting for your approval';
+          || texts.permissionBody;
 
-        let title = 'Permission required';
+        let title = texts.permissionTitle;
         let body = fallbackMessage;
         let sessionName = '';
 
@@ -949,7 +971,13 @@ export const createNotificationTriggerRuntime = (deps) => {
           variables.last_message = fallbackMessage;
 
           const templates = settings.notificationTemplates || {};
-          const questionTemplate = templates.question || { title: 'Permission required', message: '{last_message}' };
+          // Permissions reuse the question template (as they always have), but
+          // an empty field falls back to the permission wording, not to "input".
+          const questionDefaults = defaultNotificationTemplates(settings.locale).question;
+          const questionTemplate = withTemplateDefaults(
+            templates.question,
+            { ...questionDefaults, title: texts.permissionTitle },
+          );
 
           const resolvedTitle = resolveNotificationTemplate(questionTemplate.title, variables);
           const resolvedBody = resolveNotificationTemplate(questionTemplate.message, variables);

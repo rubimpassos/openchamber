@@ -10,13 +10,13 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
  * agent and model from the start, a user abort announces nothing, and an
  * active goal (which lives in OpenChamber's own metadata) silences the push.
  */
-const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always' } = {}) => {
+const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always', settings = {} } = {}) => {
   const emitDesktopNotification = vi.fn(() => true);
   const recordNotification = vi.fn();
   const sendPushToAllUiSessions = vi.fn(async () => undefined);
   const awaitTurnVerdict = vi.fn(async () => verdict);
   const runtime = createNotificationTriggerRuntime({
-    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode, notifyOnCompletion: true }),
+    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode, notifyOnCompletion: true, ...settings }),
     prepareNotificationLastMessage: async ({ message }) => message,
     buildTemplateVariables: async () => ({}),
     extractLastMessageText: () => 'done',
@@ -65,8 +65,22 @@ describe('ready notification on v2 step events', () => {
     expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
     expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
       kind: 'ready',
-      title: 'Build agent is ready',
+      title: 'Build is ready',
       body: 'Claude Sonnet 5 completed the task',
+    });
+  });
+
+  it('announces in the interface language when the templates are left empty', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime({ settings: { locale: 'zh-CN' } });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
+      kind: 'ready',
+      title: 'Build 已完成',
+      body: 'Claude Sonnet 5 已完成任务',
     });
   });
 

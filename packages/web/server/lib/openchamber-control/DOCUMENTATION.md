@@ -41,7 +41,16 @@ other.
   and makes small edits, such as ticking a step, with its own file tools, and
   `save` creates or replaces one whole. `expected` guards a replacement only:
   a save that carries it without an `id` is a 400, never a silently ignored
-  conflict check. The actions answer `403` while
+  conflict check. Notes and todos carry `planId`, todos `dependsOn`, under
+  the storage rules of `../project-context/DOCUMENTATION.md`; an update may
+  send only those fields. `list` narrows notes, todos and plans to one `planId`; `ready: true`
+  keeps only unfinished todos whose dependencies all exist and are completed,
+  judged on the whole stored list before the plan filter. Readiness is never
+  stored. A plan save with `sessionId` sets or replaces (`null` clears) the
+  existing plan's session link; it carries no markdown, and a call with
+  both, or without an `id`, is refused before anything is written. That
+  input names the plan's session and never a note's origin. A field the
+  tool declares for another kind is a 400. The actions answer `403` while
   `agentKnowledgeToolEnabled` is `false`. `show` checks the plan exists and
   sends `openchamber:plan-open-request` to every connected window, like
   `file.open`; every layout opens the plan the way a click in the Project
@@ -64,9 +73,17 @@ other.
   `openchamber:page-waiting` / `openchamber:page-settled` to the clients, and
   sends the same "Input needed" notification a form gets.
   `renderPageImageSources` lists the local images a page names by absolute
-  path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP, at most 12). The
-  image grant route (`../markdown-image-grants/`) allows exactly those, and the
-  chat reads them with the same rule.
+  path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP), every one of them.
+  The image grant route (`../markdown-image-grants/`) allows exactly those, and
+  the chat reads them with the same rule. `fitRenderPageImages` checks the
+  files and takes them in page order while they add up to at most
+  `RENDER_PAGE_IMAGE_BUDGET_BYTES` (25 MB); the grant route serves a page by it.
+  The action checks the page the same way before answering, so the agent hears
+  what the user will see: when an image will not show, the result carries
+  `images` (`shown`, `notShown` with each path and its reason, and `weightMB`
+  against `budgetMB` when the budget cut it) and a note telling the agent to
+  split the page or use smaller images. A page whose images all show answers
+  as before.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -179,6 +196,30 @@ other.
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
+- `session.create`, `session.send` and `session.fork` called from a session
+  pass that session as `promptedBySessionId` (except a send to the caller
+  itself). The session service records it on the prompt's message as
+  `metadata.openchamber.promptedBy { sessionID, title }`, and the transcript
+  links back to the sender under that message. The title is read when the
+  prompt goes out; a failed read records the id alone. A slash-command
+  prompt goes through `session.command`, which takes no metadata, so it
+  carries no link.
+- `work.name` names the task the session (default: the calling one) works on
+  (`../openchamber-sessions/work-naming.js`, wired through the `workNaming`
+  dependency; without it the action answers 503). In a linked worktree it sets
+  the branch description (`setWorktreeTaskTitle` in `../git`); in the main
+  checkout it renames the task's root session, found through the same lineage
+  the sidebar nests by, and records `metadata.openchamber.workTitle`. A name
+  the user gave stays: the call changes nothing and answers `named: false`
+  with the current name. When to call it is in the session context, next to
+  the linking guidance (`WORK_NAME_GUIDANCE`). While the worktree's branch is
+  OpenChamber's unpushed placeholder (`readRenameableGeneratedBranch`), the
+  call also requires `branch` and renames it (`renameGeneratedWorktreeBranch`),
+  answering `branch` and `branchRenamed: true`; without `branch` it fails with
+  400, says how to call it, and names nothing. Any other branch, and the main
+  checkout, is not renamed: a `branch` passed there answers
+  `branchRenamed: false` with a note, so the agent does not take the call for
+  a rename.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of
@@ -186,12 +227,22 @@ other.
   (`../session-knowledge/DOCUMENTATION.md`): what the work is about, never one
   mentioned in passing. It sends one service-neutral record (`url`, `title`, `kind`
   `change` or `issue`, optional `identifier`) and nothing is looked up, so any
-  tracker works. The URL decides what is stored: a GitHub pull or issue
+  tracker works. The URL decides what is stored: a github.com pull or issue
   address becomes the GitHub entry (kind from the path, live state as for any
-  link), a Linear issue address the Linear entry, anything else an `external`
-  entry shown by identifier. A GitLab merge request or issue address (the
-  `/-/merge_requests/N` shape on any host) is keyed by the thread, so linking
-  it again from a tab like `/diffs` or with a query refreshes the one entry. It only adds or refreshes links, never removes
+  link), an item link a registered tracker's `matchUrl` claims a tracker
+  entry (`{ id: '<provider>:<IDENTIFIER>', kind, provider, identifier }`;
+  Linear's id stays `linear:ENG-12` and its kind stays `linear` while the
+  `/api/linear` alias exists, so older bundled UIs keep showing and keeping
+  it; other trackers are `kind: 'tracker'`, see
+  `../trackers/DOCUMENTATION.md`), anything else an `external` entry shown by identifier.
+  A github.com discussion is such an external entry, identified `#N` unless the
+  agent named it, under the id the UI writes when one is attached
+  (`link:<origin>/<owner>/<repo>/discussions/<N>`), and newer UIs read it as a
+  discussion by its address.
+  A change request or issue address that a source-control provider's
+  `urls.thread` names (GitLab's `/-/merge_requests/N` shape on any host) is
+  keyed by the thread, so linking it again from a tab like `/diffs` or with a
+  query refreshes the one entry. It only adds or refreshes links, never removes
   one: the user owns removal. A missing field or a non-http(s) URL is a 400 and
   nothing is written.
 - `file.open` shows a file in the user's viewer. `file-open.js` resolves a
@@ -223,3 +274,15 @@ other.
   Closing is panel state, so the client that owns the tab performs it through a
   registered closer, not the page view; the server only validates `tabId` and
   forwards the action like the rest.
+
+## Decisions
+
+### Why a dispatched session links back from its prompt and does not nest in the sidebar
+
+A dispatched session used to nest under the caller's work in the sidebar
+(`metadata.openchamber.originSessionID` on the session). These sessions are
+the user's own conversations, such as PRs a triage session splits off for a
+separate discussion: nesting hid them under one chevron, reshuffled them when
+the caller was archived, and made `work.name` in each of them rename the
+caller. They stay roots now, and the link sits on the prompt that started
+them, where it says who sent which message.

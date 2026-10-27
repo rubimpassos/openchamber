@@ -31,7 +31,7 @@ import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStor
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
 import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
-import { selectSkillsForDirectory, useSkillsStore } from "@/stores/useSkillsStore"
+import { selectAvailableSkillsForDirectory, useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { prepareUserMessageResume } from "./user-message-resume"
@@ -97,6 +97,7 @@ import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { setSessionOpener } from "./session-navigation"
 import { getRuntimeKey, isTransientRuntimeKey } from "@/lib/runtime-switch"
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from "./last-session-cache"
+import { createSessionDraftId, useSessionDraftsStore } from "@/stores/useSessionDraftsStore"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 import { createOptimisticDraftSession } from "./optimistic-session-creation"
@@ -256,7 +257,7 @@ export async function routeMessage(params: {
     // them as prompt attachments rather than commands.
     let matchedCommand = selectCommandsForDirectory(useCommandsStore.getState(), requestDirectory)
       .find((c) => c.name === cmdName)
-    let matchedSkill = selectSkillsForDirectory(useSkillsStore.getState(), requestDirectory)
+    let matchedSkill = selectAvailableSkillsForDirectory(useSkillsStore.getState(), requestDirectory)
       .find((s) => s.name === cmdName)
 
     // The command list is no longer pre-warmed at bootstrap (listing it
@@ -279,7 +280,7 @@ export async function routeMessage(params: {
         if (!skillsLoaded) {
           throw new Error(`Could not load skills to resolve /${cmdName}`)
         }
-        matchedSkill = selectSkillsForDirectory(useSkillsStore.getState(), requestDirectory)
+        matchedSkill = selectAvailableSkillsForDirectory(useSkillsStore.getState(), requestDirectory)
           .find((s) => s.name === cmdName)
       }
     }
@@ -459,6 +460,12 @@ export type NewSessionDraftState = {
   projectContextPins?: { notes: string[]; plans: string[] }
   target: NewSessionDraftTarget
   preparedChatDirectory?: string | null
+  /**
+   * The draft's id in the server's shared drafts, which the sidebar lists
+   * once the user leaves it. Set for every opened draft; a draft reopened
+   * from the sidebar carries the id it was saved under.
+   */
+  workDraftId?: string
 }
 
 export type SessionUIState = {
@@ -1591,6 +1598,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const nextDraft: NewSessionDraftState = {
       draftId: nextDraftId++,
+      workDraftId: options?.workDraftId ?? createSessionDraftId(),
       open: true,
       target,
       preparedChatDirectory: null,
@@ -1978,7 +1986,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           }, options?.draftSnapshot, { optimistic: inputMode !== "shell" && !content.startsWith("/"), submitted: submission.promise,
             onCreationFailure: options?.onCreationFailure })
           if (!createdDraftSession) throw new Error("Failed to create session")
-
           const draftParts = [...contextParts, ...(createdDraftSession.syntheticParts ?? []).map((part): RoutedContextPart => ({
             text: part.text,
             synthetic: part.synthetic,
@@ -1988,6 +1995,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           // Knowledge is written while the message is visible; only submission waits for it.
           let historyIdentity: ReturnType<typeof createInputHistoryIdentity> = null
           const confirmedDraft = (createdDraftSession.ready ?? Promise.resolve(createdDraftSession)).then((confirmed) => {
+            // Only confirmed creation removes the shared draft; optimistic creation may still fail.
+            if (draft.workDraftId) void useSessionDraftsStore.getState().discard(draft.workDraftId, { final: true }).catch(() => undefined)
             // FORK: prompt recall and restorable files belong to the server's canonical owner.
             historyIdentity = createInputHistoryIdentity(capturedRuntimeKey, confirmed.directory ?? '', confirmed.sessionId)
             options?.onSessionReady?.(confirmed)
@@ -2185,7 +2194,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // updateSessionTitle — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
   updateSessionTitle: async (sessionId, title) => {
-    await updateSessionTitleAction(sessionId, title)
+    await updateSessionTitleAction(sessionId, title, { byUser: true })
   },
 
   // ---------------------------------------------------------------------------

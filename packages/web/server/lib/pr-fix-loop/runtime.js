@@ -1211,7 +1211,11 @@ export function createFixLoopRuntime({
 }
 
 export function registerFixLoopRoutes(app, { runtime, createWithContext }) {
-  const send = (res, error) => res.status(error?.statusCode ?? 500).json({ error: error?.message ?? 'Fix loop request failed' });
+  const send = (res, error) => {
+    const response = error?.sourceControlResponse;
+    return res.status(response?.status ?? error?.statusCode ?? error?.status ?? 500)
+      .json(response?.body ?? { error: error?.message ?? 'Fix loop request failed' });
+  };
   const base = '/api/source-control/github/pr/fix-loops';
   app.get(base, async (_req, res) => {
     try { res.json({ loops: await runtime.list() }); } catch (error) { send(res, error); }

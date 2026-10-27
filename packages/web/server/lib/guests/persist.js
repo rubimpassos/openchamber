@@ -46,6 +46,11 @@ const capabilityScopeSchema = z.object({
   service: z.object({
     exec: z.array(z.string().min(1)),
     sockets: z.array(z.string().min(1)),
+    // The instances a Git host role reaches (`grant-scope.js`); absent for other services.
+    sourceControl: z.object({
+      defaultInstances: z.array(z.string().min(1)),
+      custom: z.boolean(),
+    }).optional(),
   }).optional(),
   // `guestPlanProvidersScope`: the canonical JSON of roots, patterns and actions.
   plans: z.string().min(1).optional(),

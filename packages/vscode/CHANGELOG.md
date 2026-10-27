@@ -1,3 +1,59 @@
+## [2.5.2] - 2026-10-26
+
+### New
+
+- **Folder trust:** before OpenCode runs a folder's plugins, MCP servers or other commands from its configuration, the extension shows what would run and asks you to trust it. It asks again when that configuration changes.
+- Chat: a `diff` code block in a reply shows as a proposed change in the diff preview (thanks to @cemarta7).
+- Chat: emoji autocomplete on `:` in the message box.
+
+### Improvements
+
+- Chat: the prompt navigator is a small indicator in the chat's top corner. Hover, click or the shortcut open a list of every prompt in the session.
+- Composer: autocomplete lists open next to the text you are typing.
+- Chat: a failed `!` command shows why it failed on its collapsed row (thanks to @kemaladlig, @yulia-ivashko).
+- Interface size: toasts and fixed-size text follow the interface size and font (thanks to @mossgowild, @yulia-ivashko).
+- Composer: with messages queued, ArrowUp in an empty message box takes the newest one out of the queue to edit.
+
+### Fixes
+
+- Skills: the Skills catalog opens without timing out, and no longer starts thousands of git processes (thanks to @yulia-ivashko).
+- Skills: on Windows, catalog copies a virus scanner kept in the temp folder get cleaned up, and one that can't be deleted is named in the OpenChamber output (thanks to @yulia-ivashko).
+- Composer: a message goes out with the agent the picker shows. Returning to a session could send it as Plan or another agent.
+- Sessions: the turn timer keeps its start after the view reloads (thanks to @Naputt1, @yulia-ivashko).
+- Chat: permission and form card buttons have their tinted fill again (thanks to @mossgowild).
+- Chat: the effort button is capitalized the same as its menu (thanks to @mossgowild).
+- Chat: the model picker opened with its shortcut stays open while you type to search (thanks to @ChangeHow).
+
+## [2.5.1] - 2026-10-23
+
+### New
+
+- Settings open in an editor tab, and the sidebar keeps the chat (thanks to @IbrahimKhan12).
+- Skills: a skill's Settings page can turn it off for agents or leave it for when you call it by name.
+- Magic Prompts: a project can override the global prompts with its own (thanks to @cemarta7).
+- Settings: the small model gets a thinking level (thanks to @nicholaicascio).
+- Chat: a queued message shows which agent it will be sent as when the composer has switched to another one (thanks to @yulia-ivashko).
+
+### Improvements
+
+- Sessions: the green mark on a session that finished while you looked elsewhere survives a restart, including turns that ended while VS Code was closed.
+- Sessions: archiving goes through OpenCode, so a session archived in the terminal or in the app shows as archived here too.
+- Performance: code in the chat is coloured on the first frame.
+
+### Fixes
+
+- Chat: the message box placeholder uses the editor's placeholder colour.
+- Chat: Write and Edit cards follow the code font and size from Settings (thanks to @mossgowild).
+- Chat: formulas with `_` or `*` inside `$...$` render as math (thanks to @Dawnfz-Lenfeng).
+- Chat: nested sections of a JSON summary open and close with the right arrow (thanks to @DeryFerd).
+- Chat: prompts made only of a quote have a label in the navigator and the timeline (thanks to @Hayston1001).
+- Chat: emails and version numbers are no longer treated as file names (thanks to @turboflexer).
+- Chat: the skill picker opens on the ¥ and ＄ that Chinese and Japanese keyboards type for $ (thanks to @MorningStar0709).
+- Chat: no divider after empty thinking, and a session that starts with a shell command has its top spacing (thanks to @ChangeHow, @rasyidrafi).
+- Plugins: a plugin installed from GitHub no longer shows "Package registry unreachable" (thanks to @DeryFerd).
+- Usage: the Claude card shows an expired login as expired (thanks to @DeryFerd).
+- Usage: an expired OpenCode Go key says so and where to sign in (thanks to @yulia-ivashko).
+
 ## [2.5.0] - 2026-10-19
 
 ### New

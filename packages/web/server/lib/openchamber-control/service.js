@@ -12,6 +12,7 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -234,6 +235,8 @@ export const createOpenChamberControlService = (dependencies) => {
     notifyUser = null,
     agentMemoryActions = null,
     sessionLinks = null,
+    // Git and metadata access for `work.name`; absent means the server cannot name tasks.
+    workNaming = null,
     projectContextRuntime = null,
     resolveProjectContextId = null,
     isKnowledgeToolEnabled = async () => true,
@@ -246,9 +249,14 @@ export const createOpenChamberControlService = (dependencies) => {
     // Delivers a dispatched session's result back to the session that asked
     // (`returnResult`); absent means the server cannot offer it.
     dispatchResults = null,
+    // Agent workflows (../workflows/runtime.js); absent where they are not
+    // available, which is every build without OPENCHAMBER_WORKFLOWS_ENABLE.
+    workflowRuntime = null,
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.
     archiveStore = null,
+    // Whether OpenCode may open a folder (../opencode-trust); absent opens every folder.
+    isOpenCodeDirectoryTrusted = null,
     createClient = OpenCode.make,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
@@ -276,6 +284,14 @@ export const createOpenChamberControlService = (dependencies) => {
   // Every v2 route lives under /api and the client appends it, so it only
   // wants the origin. Per-directory scoping is a request header.
   const getClient = async (directory = '') => {
+    // An agent can name any folder, a pull request checkout included. One whose
+    // OpenCode configuration runs code waits until the user trusts it in the app.
+    if (directory && isOpenCodeDirectoryTrusted && !(await isOpenCodeDirectoryTrusted(directory))) {
+      throw new OpenChamberControlError(
+        `OpenCode is paused for ${directory}: its configuration runs plugins or commands the user has not trusted. Ask the user to open the folder in OpenChamber and trust it.`,
+        403,
+      );
+    }
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
     return createClient({
       baseUrl: new URL(buildOpenCodeUrl('/api/info', '')).origin,
@@ -287,10 +303,28 @@ export const createOpenChamberControlService = (dependencies) => {
     });
   };
 
-  // The store answers asynchronously; its archive timestamp, or null.
-  const archivedAt = async (sessionID) => {
-    if (!archiveStore) return null;
-    return (await archiveStore.archivedAt(sessionID)) ?? null;
+  const workNamer = workNaming ? createWorkNamer({
+    ...workNaming,
+    getSession: async (sessionID) => {
+      const client = await getClient();
+      return client.session.get({ sessionID }).catch(() => null);
+    },
+    renameSession: async (sessionID, title, directory) => {
+      const client = await getClient(directory);
+      await client.session.update({ sessionID, title });
+    },
+    createError: (message, status) => new OpenChamberControlError(message, status),
+  }) : null;
+
+  // OpenCode holds archive state; the archive file holds it for sessions whose
+  // directory is gone, and its entry wins: a timestamp archives, null restores.
+  const withArchiveEntry = async (session) => {
+    if (!archiveStore || !session?.id) return session;
+    const entry = await archiveStore.entry(session.id);
+    if (entry === undefined) return session;
+    if (entry !== null) return { ...session, time: { ...session.time, archived: entry } };
+    const { archived: _archived, ...time } = session.time ?? {};
+    return { ...session, time };
   };
 
   const projects = async () => {
@@ -615,6 +649,12 @@ export const createOpenChamberControlService = (dependencies) => {
         if (asNonEmptyString(input.startRef)) payload.worktree.startRef = input.startRef.trim();
       }
     }
+    // The prompt's message names the session whose agent sent it, so the
+    // receiving transcript can link back. A session prompting itself has
+    // nothing to link to.
+    if (parentSessionID && !(action === 'session.send' && sessionID === parentSessionID)) {
+      payload.promptedBySessionId = parentSessionID;
+    }
     const startedAt = now();
     let result;
     if (action === 'session.create') {
@@ -753,6 +793,19 @@ export const createOpenChamberControlService = (dependencies) => {
       parameters.submit = input.submit === true;
     }
 
+    if (action === 'browser.select') {
+      const selector = asNonEmptyString(input.selector);
+      if (!selector) throw new OpenChamberControlError('selector is required for browser.select', 400);
+      const hasLabel = typeof input.label === 'string';
+      const hasValue = typeof input.value === 'string';
+      if (hasLabel === hasValue) {
+        throw new OpenChamberControlError('browser.select requires exactly one of label or value', 400);
+      }
+      parameters.selector = selector;
+      if (hasLabel) parameters.label = input.label;
+      else parameters.value = input.value;
+    }
+
     if (action === 'browser.scroll') {
       const selector = asNonEmptyString(input.selector);
       const direction = asNonEmptyString(input.direction);
@@ -888,6 +941,13 @@ export const createOpenChamberControlService = (dependencies) => {
         }
         return result.body;
       }
+      if (action.startsWith('workflow.')) {
+        if (!workflowRuntime) throw new OpenChamberControlError('Workflows are not available on this server', 503);
+        return await workflowRuntime.executeAction(action, input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          directory: asNonEmptyString(contextDirectory),
+        });
+      }
       if (action === 'render.page') {
         return await renderPage(input, {
           sessionId: asNonEmptyString(options.contextSessionId),
@@ -969,6 +1029,11 @@ export const createOpenChamberControlService = (dependencies) => {
         const link = input.link ?? { url: input.url, title: input.title, kind: input.kind, identifier: input.identifier };
         return sessionLinks.link({ sessionId: sessionID, directory, link });
       }
+      if (action === 'work.name') {
+        if (!workNamer) throw new OpenChamberControlError('Naming tasks is not available on this server', 503);
+        const sessionID = asNonEmptyString(input.sessionId) || asNonEmptyString(options.contextSessionId);
+        return workNamer.name({ sessionId: sessionID, title: input.title, branch: input.branch });
+      }
       if (action === 'session.moveToWorktree') {
         assertSingleScope(input);
         // The calling session by default: the agent moves its own work.
@@ -1011,12 +1076,7 @@ export const createOpenChamberControlService = (dependencies) => {
             if (directory) listInput.directory = directory;
             if (cursor) listInput.cursor = cursor;
             const response = await client.session.list(listInput);
-            // Archive is OpenChamber state; overlay it so callers keep reading
-            // it off the session the way OpenCode used to report it.
-            const page = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(async (session) => {
-              const archived = await archivedAt(session?.id);
-              return archived ? { ...session, time: { ...session.time, archived } } : session;
-            }));
+            const page = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(withArchiveEntry));
             for (const session of page) {
               const id = asNonEmptyString(session?.id);
               if (id) {
