@@ -141,7 +141,8 @@ export const createBrowserActions = (runtime) => async (action, parameters, sign
       ...data,
       viewport: viewportSummary(runtime.viewport),
       ...(problems.length > 0 ? { consoleProblems: problems } : {}),
-      tabs: runtime.tabs.map(({ id, title, url, active }) => ({ id, title, url, active })),
+      // `active` is the tab an action without tabId uses, as in the in-app browser.
+      tabs: runtime.tabs.map(({ id, title, url, active }) => ({ id, title, url, active: runtime.agentTabId ? id === runtime.agentTabId : active })),
       ...(downloads.length > 0 ? { downloads } : {}),
     };
   }

@@ -88,6 +88,26 @@ export const useServerBrowserConnection = (
   const [error, setError] = React.useState<string | null>(null);
   const generationRef = React.useRef(0);
   const stateRef = React.useRef<ServerBrowserState | null>(null);
+  // The service shows another chat's browser (an agent of that chat started
+  // it first, the service restarted, another window picked it): this chat's
+  // is opened again, so a chat never shows another's pages.
+  const [reopenRequest, setReopenRequest] = React.useState(0);
+  const selectedSessionId = findSelectedScope(state)?.sessionId;
+  const showsOtherChat = Boolean(sessionId && !signInProfileId && state && !loading
+    && selectedSessionId !== undefined && selectedSessionId !== sessionId
+    && !findSelectedScope(state)?.signIn);
+  const lastReopenRef = React.useRef(0);
+  React.useEffect(() => {
+    if (!showsOtherChat) return undefined;
+    // At most every 2 s, so two windows on two chats do not take the view
+    // from each other in a tight loop.
+    const wait = Math.max(0, lastReopenRef.current + 2_000 - Date.now());
+    const timer = setTimeout(() => {
+      lastReopenRef.current = Date.now();
+      setReopenRequest((value) => value + 1);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [showsOtherChat]);
 
   const applyState = React.useCallback((next: ServerBrowserState) => {
     // A held request that timed out returns the same state; nothing to render.
@@ -175,7 +195,7 @@ export const useServerBrowserConnection = (
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [applyState, directory, enabled, guestId, sessionId, signInProfileId, viewerId]);
+  }, [applyState, directory, enabled, guestId, reopenRequest, sessionId, signInProfileId, viewerId]);
 
   // Tells the service our pixel ratio once a viewer is attached, so a
   // high-DPI client gets crisp frames from the start.

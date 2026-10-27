@@ -3,6 +3,9 @@ export const browserServerPanelI18n = {
   en: {
     'contextPanel.browser.server.signingIn': 'Signing in · {profile}',
     'contextPanel.browser.server.closeScope': 'Close this chat\'s browser',
+    'contextPanel.browser.server.followAgentOff': 'Follow the agent',
+    'contextPanel.browser.server.followAgentOn': 'Stop following the agent',
+    'contextPanel.browser.server.agentTab': 'The agent works here · {title}',
     'contextPanel.browser.moreActions': 'More actions',
     'contextPanel.browser.server.control.bar': 'You are in control',
     'contextPanel.browser.server.control.agentWorking': 'Agent is working',
@@ -56,6 +59,9 @@ export const browserServerPanelI18n = {
   de: {
     'contextPanel.browser.server.signingIn': 'Anmeldung läuft · {profile}',
     'contextPanel.browser.server.closeScope': 'Browser dieses Chats schließen',
+    'contextPanel.browser.server.followAgentOff': 'Dem Agenten folgen',
+    'contextPanel.browser.server.followAgentOn': 'Dem Agenten nicht mehr folgen',
+    'contextPanel.browser.server.agentTab': 'Hier arbeitet der Agent · {title}',
     'contextPanel.browser.moreActions': 'Weitere Aktionen',
     'contextPanel.browser.server.control.bar': 'Du hast die Kontrolle',
     'contextPanel.browser.server.control.agentWorking': 'Agent arbeitet',
@@ -109,6 +115,9 @@ export const browserServerPanelI18n = {
   fr: {
     'contextPanel.browser.server.signingIn': 'Connexion en cours · {profile}',
     'contextPanel.browser.server.closeScope': 'Fermer le navigateur de ce chat',
+    'contextPanel.browser.server.followAgentOff': 'Suivre l\'agent',
+    'contextPanel.browser.server.followAgentOn': 'Ne plus suivre l\'agent',
+    'contextPanel.browser.server.agentTab': 'L\'agent travaille ici · {title}',
     'contextPanel.browser.moreActions': 'Plus d\'actions',
     'contextPanel.browser.server.control.bar': 'Vous avez le contrôle',
     'contextPanel.browser.server.control.agentWorking': 'L\'agent travaille',
@@ -162,6 +171,9 @@ export const browserServerPanelI18n = {
   es: {
     'contextPanel.browser.server.signingIn': 'Iniciando sesión · {profile}',
     'contextPanel.browser.server.closeScope': 'Cerrar el navegador de este chat',
+    'contextPanel.browser.server.followAgentOff': 'Seguir al agente',
+    'contextPanel.browser.server.followAgentOn': 'Dejar de seguir al agente',
+    'contextPanel.browser.server.agentTab': 'El agente trabaja aquí · {title}',
     'contextPanel.browser.moreActions': 'Más acciones',
     'contextPanel.browser.server.control.bar': 'Tienes el control',
     'contextPanel.browser.server.control.agentWorking': 'El agente está trabajando',
@@ -215,6 +227,9 @@ export const browserServerPanelI18n = {
   ja: {
     'contextPanel.browser.server.signingIn': 'サインイン中 · {profile}',
     'contextPanel.browser.server.closeScope': 'このチャットのブラウザを閉じる',
+    'contextPanel.browser.server.followAgentOff': 'エージェントに追従',
+    'contextPanel.browser.server.followAgentOn': 'エージェントへの追従をやめる',
+    'contextPanel.browser.server.agentTab': 'エージェントの作業タブ · {title}',
     'contextPanel.browser.moreActions': 'その他の操作',
     'contextPanel.browser.server.control.bar': 'あなたが操作中です',
     'contextPanel.browser.server.control.agentWorking': 'エージェントが作業中',
@@ -268,6 +283,9 @@ export const browserServerPanelI18n = {
   'pt-BR': {
     'contextPanel.browser.server.signingIn': 'Entrando · {profile}',
     'contextPanel.browser.server.closeScope': 'Fechar o navegador deste chat',
+    'contextPanel.browser.server.followAgentOff': 'Seguir o agente',
+    'contextPanel.browser.server.followAgentOn': 'Parar de seguir o agente',
+    'contextPanel.browser.server.agentTab': 'O agente trabalha aqui · {title}',
     'contextPanel.browser.moreActions': 'Mais ações',
     'contextPanel.browser.server.control.bar': 'Você está no controle',
     'contextPanel.browser.server.control.agentWorking': 'O agente está trabalhando',
@@ -321,6 +339,9 @@ export const browserServerPanelI18n = {
   uk: {
     'contextPanel.browser.server.signingIn': 'Вхід · {profile}',
     'contextPanel.browser.server.closeScope': 'Закрити браузер цього чату',
+    'contextPanel.browser.server.followAgentOff': 'Стежити за агентом',
+    'contextPanel.browser.server.followAgentOn': 'Перестати стежити за агентом',
+    'contextPanel.browser.server.agentTab': 'Тут працює агент · {title}',
     'contextPanel.browser.moreActions': 'Більше дій',
     'contextPanel.browser.server.control.bar': 'Керуєте ви',
     'contextPanel.browser.server.control.agentWorking': 'Агент працює',
@@ -374,6 +395,9 @@ export const browserServerPanelI18n = {
   ko: {
     'contextPanel.browser.server.signingIn': '로그인 중 · {profile}',
     'contextPanel.browser.server.closeScope': '이 채팅의 브라우저 닫기',
+    'contextPanel.browser.server.followAgentOff': '에이전트 따라가기',
+    'contextPanel.browser.server.followAgentOn': '에이전트 따라가기 중지',
+    'contextPanel.browser.server.agentTab': '에이전트가 작업 중인 탭 · {title}',
     'contextPanel.browser.moreActions': '추가 작업',
     'contextPanel.browser.server.control.bar': '내가 제어 중입니다',
     'contextPanel.browser.server.control.agentWorking': '에이전트가 작업 중',
@@ -427,6 +451,9 @@ export const browserServerPanelI18n = {
   pl: {
     'contextPanel.browser.server.signingIn': 'Logowanie · {profile}',
     'contextPanel.browser.server.closeScope': 'Zamknij przeglądarkę tego czatu',
+    'contextPanel.browser.server.followAgentOff': 'Podążaj za agentem',
+    'contextPanel.browser.server.followAgentOn': 'Przestań podążać za agentem',
+    'contextPanel.browser.server.agentTab': 'Tu pracuje agent · {title}',
     'contextPanel.browser.moreActions': 'Więcej działań',
     'contextPanel.browser.server.control.bar': 'Masz kontrolę',
     'contextPanel.browser.server.control.agentWorking': 'Agent pracuje',
@@ -480,6 +507,9 @@ export const browserServerPanelI18n = {
   'zh-CN': {
     'contextPanel.browser.server.signingIn': '登录中 · {profile}',
     'contextPanel.browser.server.closeScope': '关闭此聊天的浏览器',
+    'contextPanel.browser.server.followAgentOff': '跟随智能体',
+    'contextPanel.browser.server.followAgentOn': '停止跟随智能体',
+    'contextPanel.browser.server.agentTab': '智能体在此工作 · {title}',
     'contextPanel.browser.moreActions': '更多操作',
     'contextPanel.browser.server.control.bar': '由你控制',
     'contextPanel.browser.server.control.agentWorking': '智能体正在工作',
@@ -533,6 +563,9 @@ export const browserServerPanelI18n = {
   'zh-TW': {
     'contextPanel.browser.server.signingIn': '登入中 · {profile}',
     'contextPanel.browser.server.closeScope': '關閉此聊天的瀏覽器',
+    'contextPanel.browser.server.followAgentOff': '跟隨代理程式',
+    'contextPanel.browser.server.followAgentOn': '停止跟隨代理程式',
+    'contextPanel.browser.server.agentTab': '代理程式在此工作 · {title}',
     'contextPanel.browser.moreActions': '更多操作',
     'contextPanel.browser.server.control.bar': '由你控制',
     'contextPanel.browser.server.control.agentWorking': '代理程式正在工作',
@@ -586,6 +619,9 @@ export const browserServerPanelI18n = {
   tr: {
     'contextPanel.browser.server.signingIn': 'Oturum açılıyor · {profile}',
     'contextPanel.browser.server.closeScope': 'Bu sohbetin tarayıcısını kapat',
+    'contextPanel.browser.server.followAgentOff': 'Ajanı takip et',
+    'contextPanel.browser.server.followAgentOn': 'Ajanı takip etmeyi bırak',
+    'contextPanel.browser.server.agentTab': 'Ajan burada çalışıyor · {title}',
     'contextPanel.browser.moreActions': 'Diğer işlemler',
     'contextPanel.browser.server.control.bar': 'Kontrol sizde',
     'contextPanel.browser.server.control.agentWorking': 'Ajan çalışıyor',
@@ -640,6 +676,9 @@ export const browserServerPanelI18n = {
   nl: {
     'contextPanel.browser.server.signingIn': 'Signing in · {profile}',
     'contextPanel.browser.server.closeScope': 'Close this chat\'s browser',
+    'contextPanel.browser.server.followAgentOff': 'Agent volgen',
+    'contextPanel.browser.server.followAgentOn': 'Agent niet meer volgen',
+    'contextPanel.browser.server.agentTab': 'Hier werkt de agent · {title}',
     'contextPanel.browser.moreActions': 'More actions',
     'contextPanel.browser.server.control.bar': 'You are in control',
     'contextPanel.browser.server.control.agentWorking': 'Agent is working',
@@ -693,6 +732,9 @@ export const browserServerPanelI18n = {
   ar: {
     'contextPanel.browser.server.signingIn': 'جارٍ تسجيل الدخول · {profile}',
     'contextPanel.browser.server.closeScope': 'إغلاق متصفح هذه المحادثة',
+    'contextPanel.browser.server.followAgentOff': 'تتبّع الوكيل',
+    'contextPanel.browser.server.followAgentOn': 'إيقاف تتبّع الوكيل',
+    'contextPanel.browser.server.agentTab': 'الوكيل يعمل هنا · {title}',
     'contextPanel.browser.moreActions': 'المزيد من الإجراءات',
     'contextPanel.browser.server.control.bar': 'أنت المتحكم',
     'contextPanel.browser.server.control.agentWorking': 'الوكيل يعمل',
@@ -746,6 +788,9 @@ export const browserServerPanelI18n = {
   he: {
     'contextPanel.browser.server.signingIn': 'מתחבר · {profile}',
     'contextPanel.browser.server.closeScope': 'סגור את הדפדפן של הצ\'אט הזה',
+    'contextPanel.browser.server.followAgentOff': 'עקוב אחרי הסוכן',
+    'contextPanel.browser.server.followAgentOn': 'הפסק לעקוב אחרי הסוכן',
+    'contextPanel.browser.server.agentTab': 'הסוכן עובד כאן · {title}',
     'contextPanel.browser.moreActions': 'פעולות נוספות',
     'contextPanel.browser.server.control.bar': 'השליטה בידיים שלך',
     'contextPanel.browser.server.control.agentWorking': 'הסוכן עובד',

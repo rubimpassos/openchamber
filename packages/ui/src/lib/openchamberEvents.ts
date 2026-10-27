@@ -131,6 +131,18 @@ const browserProviderResetSchema = z.object({
 type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
 
 /**
+ * A chat's agent is about to use its browser in a provider extension (the
+ * Server Browser). A client showing that chat may open its Browser panel.
+ */
+const browserAgentActivitySchema = z.object({
+  guestId: z.string().min(1),
+  action: z.string().min(1),
+  directory: z.string().min(1).nullable(),
+  sessionId: z.string().min(1).nullable(),
+});
+type BrowserAgentActivityEvent = { type: 'browser-agent-activity' } & z.infer<typeof browserAgentActivitySchema>;
+
+/**
  * The set of source-control providers the server serves changed: an extension
  * that acts as a Git host was approved, enabled, updated, paused or removed.
  * Carries nothing; listeners re-read the provider list from the server, so the
@@ -262,6 +274,7 @@ type OpenChamberEvent =
   | FileOpenRequestEvent
   | PlanOpenRequestEvent
   | BrowserProviderResetEvent
+  | BrowserAgentActivityEvent
   | SourceControlProvidersChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
@@ -559,6 +572,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:file-open-request') {
     const parsed = fileOpenRequestSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'file-open-request', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:browser-agent-activity') {
+    const parsed = browserAgentActivitySchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'browser-agent-activity', ...parsed.data });
     return;
   }
 

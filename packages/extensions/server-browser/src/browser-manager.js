@@ -44,6 +44,9 @@ export const createBrowserManager = ({
   const scopes = new Map();
   let selectedScopeId = null;
   let controller = 'none';
+  // The scope the agent last worked in. The host holds the picture for the
+  // agent a while after each action; only that scope's page is the agent's.
+  let agentScopeId = null;
   // The viewer holding control, from the host's control notices and its input.
   let controllingViewer = null;
   let operationQueue = Promise.resolve();
@@ -345,8 +348,14 @@ export const createBrowserManager = ({
 
   // Dock commands run while nobody holds the picture, or for the viewer that
   // does, and never for a toolbar that acted on a picture of an earlier view.
-  const requireDockAccess = ({ viewer = null, frameSeq = null } = {}) => {
-    if (controller !== 'none' && !(controller === 'user' && viewer !== null && viewer === controllingViewer)) {
+  // While the agent holds it, the viewer still drives every chat's browser
+  // but the agent's own, and may always choose what it looks at (a chat, a
+  // tab), which changes the picture and not the page the agent works on, or
+  // close a chat's browser, which waits for the running action.
+  const requireDockAccess = ({ viewer = null, frameSeq = null } = {}, { agentMayHold = false } = {}) => {
+    const agentHolds = controller === 'agent' && !agentMayHold && selectedScopeId === agentScopeId;
+    const userHolds = controller === 'user' && !(viewer !== null && viewer === controllingViewer);
+    if (agentHolds || userHolds) {
       throw new Error('Dock controls are available only while the shared surface is idle or to the viewer in control');
     }
     if (shownEarlierView(frameSeq)) throw new Error('The browser view changed before the dock command ran');
@@ -364,6 +373,20 @@ export const createBrowserManager = ({
   const requireGeneration = (expectedGeneration) => {
     if (expectedGeneration !== viewGeneration) {
       throw new Error('The browser view changed before the dock command ran');
+    }
+  };
+
+  // Puts an open scope in front. The size follows on the queue: the page keeps
+  // its own viewport unless it fills the panel, so the first frames are right.
+  const showScope = (entry, expectedGeneration, access) => {
+    requireDockAccess({ ...access, frameSeq: null }, { agentMayHold: true });
+    requireGeneration(expectedGeneration);
+    touch(entry);
+    if (selectedScopeId === entry.id) return;
+    select(entry);
+    notice = null;
+    if (surfaceSize) {
+      void enqueue(() => (scopes.get(entry.id) === entry ? entry.runtime.surfaceResize(surfaceSize) : undefined)).catch(() => {});
     }
   };
 
@@ -402,6 +425,7 @@ export const createBrowserManager = ({
         }
         const entry = await ensureScope(context);
         touch(entry);
+        agentScopeId = entry.id;
         try {
           const data = await entry.runtime.perform(action, parameters, signal);
           return action === 'browser.snapshot' && entry.profile ? { ...data, profile: describeCopy(entry) } : data;
@@ -458,6 +482,8 @@ export const createBrowserManager = ({
         // Whether the viewer asking holds control, so its dock can act.
         viewerInControl: controller === 'user' && viewer !== null && viewer === controllingViewer,
         selectedScopeId,
+        // The chat the agent holds the picture for; other chats' pages are free.
+        agentScopeId: controller === 'agent' ? agentScopeId : null,
         generation: viewGeneration,
         notice: notice ? { ...notice } : null,
         help: help ? { ...help } : null,
@@ -480,6 +506,9 @@ export const createBrowserManager = ({
           nativeSelectCompatibility: entry.runtime.nativeSelectCompatibility === true,
           nativeSelectCompatibilityError: entry.runtime.nativeSelectCompatibilityError ?? '',
           tabs: entry.runtime.tabs ?? [],
+          // Where the agent works, and whether an action runs there now.
+          agentTabId: entry.runtime.agentTabId ?? null,
+          agentActive: entry.runtime.agentActive === true,
           downloads: entry.runtime.downloads ?? [],
           audioUnavailable: entry.runtime.audioUnavailable === true,
           viewport: entry.runtime.viewportState ?? null,
@@ -494,40 +523,40 @@ export const createBrowserManager = ({
     // Opening or picking a scope chooses the view rather than acting on the
     // picture, so the viewer's last frame (of a scope that may be gone, with
     // nothing on screen since) is no reason to refuse it.
-    openScope(context, expectedGeneration, access) {
-      return enqueue(async () => {
+    // A chat whose browser is already open is shown at once, outside the
+    // operation queue: an agent action running in another chat must not
+    // keep the viewer on that chat's browser. Only creating one waits.
+    async openScope(context, expectedGeneration, access) {
+      if (closed) throw new Error('Browser manager is closed');
+      const existing = knownScope(context) ? scopes.get(scopeId(context)) : null;
+      if (existing) {
+        showScope(existing, expectedGeneration, access);
+        return;
+      }
+      await enqueue(async () => {
         if (closed) throw new Error('Browser manager is closed');
-        requireDockAccess({ ...access, frameSeq: null });
+        requireDockAccess({ ...access, frameSeq: null }, { agentMayHold: true });
         requireGeneration(expectedGeneration);
         const entry = await ensureScope(context);
         touch(entry);
         if (selectedScopeId === entry.id) return;
         if (surfaceSize) await entry.runtime.surfaceResize(surfaceSize);
-        requireDockAccess({ ...access, frameSeq: null });
+        requireDockAccess({ ...access, frameSeq: null }, { agentMayHold: true });
         select(entry);
         notice = null;
       });
     },
-    selectScope(id, expectedGeneration, access) {
-      return enqueue(async () => {
-        requireDockAccess({ ...access, frameSeq: null });
-        requireGeneration(expectedGeneration);
-        const entry = scopes.get(id);
-        if (!entry) throw new Error('The selected browser scope no longer exists');
-        if (surfaceSize) await entry.runtime.surfaceResize(surfaceSize);
-        requireDockAccess({ ...access, frameSeq: null });
-        requireGeneration(expectedGeneration);
-        select(entry);
-        touch(entry);
-        notice = null;
-      });
+    async selectScope(id, expectedGeneration, access) {
+      const entry = scopes.get(id);
+      if (!entry) throw new Error('The selected browser scope no longer exists');
+      showScope(entry, expectedGeneration, access);
     },
     // Closes a chat's browser without saving, even one on a profile; a save
     // is only ever explicit (browser.saveProfile, the profile's own
     // sign-in Save), never implied by closing it from the dock.
     closeScope(id, expectedGeneration, access) {
       return enqueue(async () => {
-        requireDockAccess(access);
+        requireDockAccess(access, { agentMayHold: true });
         requireGeneration(expectedGeneration);
         const entry = scopes.get(id);
         if (!entry) throw new Error('The selected browser scope no longer exists');
@@ -597,8 +626,15 @@ export const createBrowserManager = ({
     newTab(expectedGeneration, access) {
       return dockCommand('tab-new', {}, expectedGeneration, access);
     },
-    selectTab(tabId, expectedGeneration, access) {
-      return dockCommand('tab-select', { tabId }, expectedGeneration, access);
+    // Outside the operation queue and allowed while the agent holds the
+    // picture: showing another tab changes what the viewer sees, and agent
+    // actions that name no tab keep to the tab the agent last used.
+    async selectTab(tabId, expectedGeneration, access) {
+      requireDockAccess(access, { agentMayHold: true });
+      requireGeneration(expectedGeneration);
+      const entry = requireSelected();
+      touch(entry);
+      await entry.runtime.command('tab-select', { tabId });
     },
     // Names its tab, so it means the same whatever is on screen: a tab switch
     // landing just before it (the panel showing the next tab) is no reason

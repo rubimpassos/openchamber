@@ -43,6 +43,14 @@ itself; it can only ask and wait.
   as "may or may not have run, read the page first", never as unchanged.
   `handleGuestDeactivated` does the same reset when the guest routes pause,
   remove, or withdraw approval from the selected extension.
+  Every provider action that runs, except `browser.close`, is announced to
+  the clients as `openchamber:browser-agent-activity` (`guestId`, `action`,
+  `directory`, `sessionId`) through the injected `announceAgentActivity`. A
+  client showing that chat with "Follow agent" on (the robot in the Browser
+  toolbar, per chat) opens its Browser panel, and the panel shows the agent's
+  tab from the service's `scopes[].agentTabId`. That is the one case where an
+  agent action moves the user's tab, and only while the person follows the
+  agent: picking a tab themselves turns following off for that chat.
   When the extension also shows a shared surface (`../guests/surface.js`),
   an action is refused with 409 while the user holds the surface, and every
   action that runs is reported as agent activity so the panel says "Agent is

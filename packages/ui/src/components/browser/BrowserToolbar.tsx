@@ -87,6 +87,9 @@ type BrowserToolbarProps = {
   onToggleDeviceBar?: () => void;
   isDeviceBarOpen?: boolean;
   /** The page's sound, for a browser that streams it; hidden without a handler. */
+  /** Server Browser: the robot that turns "Follow agent" on and off for this chat. */
+  onToggleFollowAgent?: () => void;
+  isFollowingAgent?: boolean;
   onToggleSound?: () => void;
   isSoundOn?: boolean;
   /** Sound is on but the page sends none. */
@@ -128,6 +131,8 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   menuItems,
   onToggleDeviceBar,
   isDeviceBarOpen,
+  onToggleFollowAgent,
+  isFollowingAgent,
   onToggleSound,
   isSoundOn,
   isSoundUnavailable,
@@ -262,6 +267,14 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       ) : null}
       {onClearCache ? (
         <ToolbarButton icon="database-2" label={t('contextPanel.browser.clearCache')} onClick={onClearCache} />
+      ) : null}
+      {onToggleFollowAgent ? (
+        <ToolbarButton
+          icon="robot-2"
+          label={isFollowingAgent ? t('contextPanel.browser.server.followAgentOn') : t('contextPanel.browser.server.followAgentOff')}
+          onClick={onToggleFollowAgent}
+          pressed={isFollowingAgent}
+        />
       ) : null}
       {onToggleSound ? (
         <ToolbarButton

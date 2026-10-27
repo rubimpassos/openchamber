@@ -2313,6 +2313,22 @@ const emitBrowserProviderResetEvent = ({ guestId, guestName }) => {
     }
   }
 };
+/**
+ * Tells every client a chat's agent is about to use its browser; a client
+ * showing that chat with "Follow agent" on opens the Browser panel.
+ */
+const announceBrowserAgentActivity = ({ guestId, action, context }) => {
+  for (const client of uiOpenChamberEventClients) {
+    try {
+      writeSseEvent(client, {
+        type: 'openchamber:browser-agent-activity',
+        properties: { guestId, action, directory: context?.directory ?? null, sessionId: context?.sessionId ?? null },
+      });
+    } catch {
+      uiOpenChamberEventClients.delete(client);
+    }
+  }
+};
 const BROWSER_HELP_NOTIFICATION_TITLE = 'The agent needs your help in the browser';
 const BROWSER_HELP_LOGIN_NOTIFICATION_TITLE = 'The agent needs you to sign in';
 const BROWSER_HELP_REASON_MAX = 500;
@@ -2392,6 +2408,7 @@ const browserControlRouter = createBrowserControlRouter({
     noteAgentActivity: (guestId) => guestSurfaceRuntime?.noteAgentActivity(guestId),
   },
   notifyBrowserHelp,
+  announceAgentActivity: announceBrowserAgentActivity,
 });
 
 // "Show this file" reaches every connected client; the ones showing that

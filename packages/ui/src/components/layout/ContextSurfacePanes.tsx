@@ -30,8 +30,9 @@ import {
   type ContextZone,
 } from '@/lib/workspace/zones';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { clampContextEditorTreeWidth, normalizeContextPanelDirectoryKey, useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
+import { clampContextEditorTreeWidth, isFollowingBrowserAgent, normalizeContextPanelDirectoryKey, useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
@@ -508,6 +509,35 @@ export const ContextSurfacePanes: React.FC = () => {
 
   const browserProvider = useUIStore((state) => state.browserProvider);
   const serverBrowserGuest = browserProvider && browserProvider !== BUILTIN_BROWSER_PROVIDER ? browserProvider : null;
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const showBrowserTabsOfSession = useUIStore((state) => state.showBrowserTabsOfSession);
+  // Every chat has its own Chrome on the server, so the Browser strip shows
+  // the tabs of the chat on screen and keeps the others' aside. The in-app
+  // browser keeps one strip for the project.
+  // With no chat on screen (a draft, or the app still loading its session)
+  // the strip stays as it was; the view shows no browser that is not the chat's.
+  React.useEffect(() => {
+    if (!serverBrowserGuest) {
+      showBrowserTabsOfSession(null, null);
+      return;
+    }
+    if (directoryKey && currentSessionId) showBrowserTabsOfSession(directoryKey, currentSessionId);
+  }, [currentSessionId, directoryKey, serverBrowserGuest, showBrowserTabsOfSession]);
+  // "Follow agent" (the robot in the Browser toolbar, per chat): the agent of
+  // the chat on screen using its browser opens the Browser panel. The view
+  // then shows the agent's tab (ServerBrowserView).
+  React.useEffect(() => {
+    if (!serverBrowserGuest) return undefined;
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'browser-agent-activity' || event.guestId !== serverBrowserGuest) return;
+      const ui = useUIStore.getState();
+      if (!event.sessionId || !event.directory || !isFollowingBrowserAgent(ui.browserFollowAgentOffSessions, event.sessionId)) return;
+      if (event.sessionId !== useSessionUIStore.getState().currentSessionId) return;
+      const directory = normalizeContextPanelDirectoryKey(event.directory);
+      if (directory !== directoryKey) return;
+      ui.revealSessionBrowser(directory, event.sessionId);
+    });
+  }, [directoryKey, serverBrowserGuest]);
   const visibleBrowserTabId = browserZone.isOpen && browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
   React.useEffect(() => {
     if (visibleBrowserTabId && directoryKey) wakeBrowserTab(directoryKey, visibleBrowserTabId);

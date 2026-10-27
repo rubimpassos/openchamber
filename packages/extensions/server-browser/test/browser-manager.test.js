@@ -403,7 +403,7 @@ test('holds an empty surface request until the first scope exists', async () => 
   assert.equal(await waiting, null);
 });
 
-test('applies the current viewer size before publishing a newly selected scope', async () => {
+test('shows a selected scope at once and applies the current viewer size to it next', async () => {
   // Given a resized viewer and a background scope with its own agent viewport.
   const { factory, runtimes } = createRuntimeFactory();
   const manager = createBrowserManager({ createRuntime: factory });
@@ -411,40 +411,12 @@ test('applies the current viewer size before publishing a newly selected scope',
   await manager.surfaceResize({ width: 700, height: 500 });
   await manager.perform('browser.resize', { viewport: 'desktop' }, undefined, context('/repo', 'ses_two'));
 
-  // When the user selects that scope, then the surface viewport is applied before it becomes visible.
+  // When the user selects that scope, then it is visible and gets the surface size right after.
   await manager.selectScope(manager.state().scopes[1].id, manager.state().generation);
-  const calls = runtimes.get('ses_two').calls;
-  assert.deepEqual(calls.at(-1), ['resize', { width: 700, height: 500, scale: 1 }]);
   assert.equal(manager.state().selectedScopeId, manager.state().scopes[1].id);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(runtimes.get('ses_two').calls.at(-1), ['resize', { width: 700, height: 500, scale: 1 }]);
 });
-
-test('keeps the old view when input arrives during scope resize', async () => {
-  // Given a scope switch waiting for the target runtime to resize.
-  const resizeStarted = Promise.withResolvers();
-  const finishResize = Promise.withResolvers();
-  const { factory, runtimes } = createRuntimeFactory();
-  const manager = createBrowserManager({ createRuntime: factory });
-  await manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_one'));
-  await manager.surfaceResize({ width: 700, height: 500 });
-  await manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_two'));
-  runtimes.get('ses_two').surfaceResize = async () => {
-    resizeStarted.resolve();
-    await finishResize.promise;
-  };
-  const originalScope = manager.state().selectedScopeId;
-  const switching = manager.selectScope(manager.state().scopes[1].id, manager.state().generation);
-  await resizeStarted.promise;
-
-  // When trusted input claims control, then the pending switch aborts and input stays on the old view.
-  const input = manager.surfaceInput([{ type: 'text', text: 'old-view' }]);
-  finishResize.resolve();
-  await assert.rejects(switching, /surface is idle/i);
-  await input;
-  assert.equal(manager.state().selectedScopeId, originalScope);
-  assert.equal(runtimes.get('ses_one').calls.some(([kind]) => kind === 'input'), true);
-  assert.equal(runtimes.get('ses_two').calls.some(([kind]) => kind === 'input'), false);
-});
-
 
 test('reload and stop preserve the selected scope and enforce idle and generation guards', async () => {
   const { factory, runtimes } = createRuntimeFactory();
@@ -1109,4 +1081,57 @@ test('closes a named tab even after the view moved on since the dock last looked
   // When the dock closes a tab by id with the old generation and an earlier frame, then it closes.
   await manager.closeTab('tab-x', stale, { viewer: 'v1', frameSeq: shown.sequence });
   assert.deepEqual(runtimes.get('ses_one').calls.at(-1), ['command', 'tab-close', { tabId: 'tab-x' }]);
+});
+
+test('lets the viewer pick tabs and chats while an agent holds the picture, and drive any chat but the agent\'s', async () => {
+  // Given two chats, the agent working in the first one, which is visible.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.open', { url: 'https://two.test' }, undefined, context('/repo', 'ses_two'));
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  await manager.openScope(context('/repo', 'ses_one'), manager.state().generation);
+  await manager.surfaceControl('agent');
+
+  // When the viewer switches tabs there, then the tab is shown, but the page itself stays the agent's.
+  await manager.selectTab('tab-2', manager.state().generation);
+  assert.deepEqual(runtimes.get('ses_one').calls.at(-1), ['command', 'tab-select', { tabId: 'tab-2' }]);
+  await assert.rejects(manager.navigate('https://blocked.test', manager.state().generation), /surface is idle/i);
+
+  // When the viewer opens the other chat, then it is shown and its own page can be driven.
+  await manager.openScope(context('/repo', 'ses_two'), manager.state().generation);
+  assert.equal(manager.state().scopes.find((scope) => scope.selected)?.sessionId, 'ses_two');
+  await manager.navigate('https://free.test', manager.state().generation);
+  assert.equal(runtimes.get('ses_two').url, 'https://free.test');
+});
+
+test('switches to an open chat\'s browser without waiting behind a running agent action', { timeout: 2_000 }, async () => {
+  // Given an agent action that never finishes in one chat, and another chat's browser already open.
+  const { factory } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: (scope, profile) => {
+    const runtime = factory(scope, profile);
+    if (scope.sessionId === 'ses_busy') runtime.perform = () => new Promise(() => {});
+    return runtime;
+  } });
+  await manager.openScope(context('/repo', 'ses_idle'), manager.state().generation);
+  await manager.openScope(context('/repo', 'ses_busy'), manager.state().generation);
+  void manager.perform('browser.open', { url: 'https://slow.test' }, undefined, context('/repo', 'ses_busy'));
+
+  // When the viewer goes back to the idle chat, then it is shown at once.
+  await manager.openScope(context('/repo', 'ses_idle'), manager.state().generation);
+  assert.equal(manager.state().scopes.find((scope) => scope.selected)?.sessionId, 'ses_idle');
+});
+
+test('reports each chat\'s agent tab and whether an action runs there', async () => {
+  // Given a chat whose agent works in its second tab.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_one'));
+  const runtime = runtimes.get('ses_one');
+  runtime.agentTabId = 'tab-2';
+
+  // Then the state names that tab, idle; while an action runs it is reported active.
+  assert.equal(manager.state().scopes[0].agentTabId, 'tab-2');
+  assert.equal(manager.state().scopes[0].agentActive, false);
+  runtime.agentActive = true;
+  assert.equal(manager.state().scopes[0].agentActive, true);
 });

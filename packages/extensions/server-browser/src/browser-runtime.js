@@ -94,6 +94,9 @@ export const createBrowserRuntime = ({
   let targetCreation = Promise.resolve();
   const tabListeners = new Set();
   let activeTargetId = null;
+  // The tab the agent last opened or worked in: an action that names no tab
+  // runs there, whichever tab the viewer has in front.
+  let agentTargetId = null;
   let activations = 0;
   let nativeSelectEnabled = false;
   let cdp = null;
@@ -109,9 +112,19 @@ export const createBrowserRuntime = ({
   let closed = false;
   let dead = null;
   const deathListeners = new Set();
-  // 'auto' follows the viewer's panel; 'fixed' keeps a chosen size. The source
-  // says who chose it, so an agent's size is not replaced by a panel resize.
-  let viewportConfig = { mode: 'auto', source: 'viewer', mobile: false, fixed: null, panel: null, scale: 1 };
+  // 'fixed' keeps a chosen size; 'auto' follows the viewer's panel, and only
+  // a viewer's Fill or an agent's 'fill' turns it on. A page starts at the
+  // desktop size, so opening the panel does not lay it out again at the
+  // panel's size. The source says who chose the size.
+  const DEFAULT_VIEWPORT = presetViewport('desktop');
+  let viewportConfig = {
+    mode: 'fixed',
+    source: 'default',
+    mobile: false,
+    fixed: { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height },
+    panel: null,
+    scale: 1,
+  };
 
   const effectiveViewport = () => {
     const size = viewportConfig.mode === 'fixed' ? viewportConfig.fixed : viewportConfig.panel ?? presetViewport('desktop');
@@ -163,6 +176,11 @@ export const createBrowserRuntime = ({
     },
     get canGoForward() {
       return activeTab()?.canGoForward === true;
+    },
+    // The tab the agent last opened or worked in; null before it used one.
+    // An action that names no tab runs there, else on the tab in front.
+    get agentTabId() {
+      return tabs.has(agentTargetId) ? agentTargetId : null;
     },
     get tabs() {
       return Array.from(tabs.values(), (current) => ({
@@ -283,6 +301,7 @@ export const createBrowserRuntime = ({
     const current = tabs.get(targetId);
     if (!current) return;
     tabs.delete(targetId);
+    if (agentTargetId === targetId) agentTargetId = null;
     sessions.delete(current.sessionId);
     clearTimeout(current.navigationTimer);
     contextMenu.forget(current.sessionId);
@@ -353,7 +372,10 @@ export const createBrowserRuntime = ({
       void attachTab(info.targetId, info.openerId ?? null)
         .then(async (current) => {
           await targetCreation;
-          return backgroundTargets.delete(current.targetId) ? current : activate(current);
+          if (backgroundTargets.delete(current.targetId)) return current;
+          // A page the agent's tab opened is where its work continues.
+          if (current.openerId && current.openerId === agentTargetId) agentTargetId = current.targetId;
+          return activate(current);
         })
         .catch(() => {});
     } else if (event.method === 'Target.targetInfoChanged' && info) {
@@ -552,11 +574,13 @@ export const createBrowserRuntime = ({
     return pageOf(await pagePromise);
   };
 
-  // Agent actions name a tab from browser.snapshot's tabs or act on the one the
-  // viewer sees. An id this browser did not issue is refused, never replaced by
-  // another tab.
+  // Agent actions name a tab from browser.snapshot's tabs or act on the one
+  // the agent last used, else the one the viewer sees. An id this browser did
+  // not issue is refused, never replaced by another tab.
   const agentTab = async (tabId) => {
     if (tabId === undefined) {
+      const last = tabs.get(agentTargetId);
+      if (last) return last;
       await runtime.ensurePage();
       return activeTab();
     }
@@ -569,6 +593,7 @@ export const createBrowserRuntime = ({
   const claimForAction = (current) => {
     if (current.dialog) throw new Error(dialogBlockedMessage(current.dialog));
     if (agentAction) agentAction.targetId = current.targetId;
+    agentTargetId = current.targetId;
     return pageOf(current);
   };
   runtime.agentPage = async (tabId) => claimForAction(await agentTab(tabId));

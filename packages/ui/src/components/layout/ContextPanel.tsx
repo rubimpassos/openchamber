@@ -28,6 +28,9 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { clampContextEditorTreeWidth, isTrackerBranchTab, useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { BUILTIN_BROWSER_PROVIDER } from '@/lib/guests/browser-providers';
+import { useServerBrowserAgentTab } from '@/lib/browser/serverBrowser/panelTabs';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
@@ -418,6 +421,16 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const placement = useUIStore((state) => state.contextSurfaceZones);
+  // Server Browser: picking a Browser tab yourself, or opening one, stops
+  // following the agent in the chat on screen; the robot in the Browser
+  // toolbar turns it back on.
+  const stopFollowingBrowserAgent = React.useCallback(() => {
+    const ui = useUIStore.getState();
+    const sessionId = useSessionUIStore.getState().currentSessionId;
+    if (!sessionId || !ui.browserProvider || ui.browserProvider === BUILTIN_BROWSER_PROVIDER) return;
+    ui.setBrowserFollowAgent(sessionId, false);
+  }, []);
+  const agentBrowserTab = useServerBrowserAgentTab((state) => state.agentTab);
   const closeContextZone = useUIStore((state) => state.closeContextZone);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
@@ -792,18 +805,23 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       const rawLabel = branchTab ? trackerBranch || t('contextPanel.tracker.branchTab') : getTabLabel(tab, sessionTitleById, tabT);
       const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
       const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
+      const title = tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel;
+      // The Server Browser tab the agent works in carries a robot, moving while it acts.
+      const agentTab = tab.mode === 'browser' && agentBrowserTab?.panelTabId === tab.id ? agentBrowserTab : null;
       return {
         id: tab.id,
         label,
         labelFolder: tab.mode === 'file' ? fileFolders.get(tabPathLabel) : undefined,
-        icon: getTabIcon(tab, faviconByOrigin),
-        title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
+        icon: agentTab
+          ? <Icon name="robot-2" className={cn('h-3.5 w-3.5 shrink-0 text-primary', agentTab.acting && 'animate-busy-pulse')} aria-hidden="true" />
+          : getTabIcon(tab, faviconByOrigin),
+        title: agentTab ? t('contextPanel.browser.server.agentTab', { title }) : title,
         closeLabel: t('contextPanel.tab.closeTabAria', { label }),
         closable: !branchTab,
         preview: tab.preview,
       };
     });
-  }, [activeModeTabs, effectiveDirectory, faviconByOrigin, sessionTitleById, t, tabT, trackerBranch]);
+  }, [activeModeTabs, agentBrowserTab, effectiveDirectory, faviconByOrigin, sessionTitleById, t, tabT, trackerBranch]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ContextPanelContent /></ContextPanelHeaderSlotProvider>
@@ -953,6 +971,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             if (!directoryKey) {
               return;
             }
+            if (tabID !== activeTab?.id && tabs.some((tab) => tab.id === tabID && tab.mode === 'browser')) stopFollowingBrowserAgent();
             setActiveContextPanelTab(directoryKey, tabID);
           }}
           onClose={(tabID) => {
@@ -995,6 +1014,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             size="sm"
             onClick={() => {
               if (!directoryKey) return;
+              stopFollowingBrowserAgent();
               openNewContextBrowserTab(directoryKey);
             }}
             className="h-7 w-7 p-0"

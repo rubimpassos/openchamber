@@ -96,6 +96,10 @@ export type ServerBrowserScope = {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly tabs: readonly ServerBrowserTab[];
+  /** The tab the agent last opened or worked in, null before it used one; older services do not report it. */
+  readonly agentTabId?: string | null;
+  /** An agent action runs in this browser now. */
+  readonly agentActive?: boolean;
   readonly viewport: ServerBrowserViewportState | null;
   readonly problems: { readonly errors: number; readonly warnings: number };
   /** Chrome zoom level, -5..+5 in the service's steps (factor 1.2^level). */
@@ -114,6 +118,8 @@ export type ServerBrowserState = {
   readonly controller: ServerBrowserController;
   readonly viewerInControl: boolean;
   readonly selectedScopeId: string | null;
+  /** The chat the agent holds the picture for; older services do not report it. */
+  readonly agentScopeId?: string | null;
   readonly generation: number;
   readonly help: ServerBrowserHelp | null;
   readonly chrome: ServerBrowserChromeStatus;

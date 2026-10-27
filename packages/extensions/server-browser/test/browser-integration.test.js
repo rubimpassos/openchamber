@@ -675,7 +675,7 @@ test.skipIf(noChrome)('follows pages the site opens as tabs and returns to the o
       { type: 'pointer', action: 'up', x, y, button: 0, buttons: 0, modifiers },
     ]);
 
-    // When the user follows the link, then the new page becomes the active tab and the agent works there.
+    // When the user follows a link on the agent's page, then the new page becomes the active tab and the agent works there.
     await click(30, 30);
     await waitFor(() => runtime.tabs.length === 2 && runtime.url === `${web.origin}/next`);
     expect((await runtime.perform('browser.snapshot', {})).title).toBe('Next');
@@ -688,7 +688,7 @@ test.skipIf(noChrome)('follows pages the site opens as tabs and returns to the o
     await click(30, 128);
     await waitFor(() => runtime.tabs.length === 2 && runtime.url === `${web.origin}/next`);
 
-    // When the dock opens a blank tab and then selects the opener, then the agent follows the selection.
+    // When the agent's tab is gone and the dock selects the opener, then the agent works on the tab in front.
     await runtime.command('tab-new');
     expect(runtime.tabs.length).toBe(3);
     expect(runtime.url).toBe('about:blank');
@@ -712,16 +712,22 @@ test.skipIf(noChrome)('lets the agent name tabs by id without moving the viewer 
     const before = await runtime.surfaceFrame({ after: 0, wait: 10_000 });
     expect(before).toBeTruthy();
 
-    // When the agent opens another page, then it gets a background tab and the viewer stays put.
+    // When the agent opens another page, then it gets a background tab, the viewer stays put, and actions naming no tab follow the agent there.
     const opened = await runtime.perform('browser.open', { url: `${web.origin}/` });
     expect(opened.tabId).not.toBe(shown);
     expect(opened.title).toBe('Fixture');
     const snapshot = await runtime.perform('browser.snapshot', {});
-    expect(snapshot.title).toBe('Next');
+    expect(snapshot.title).toBe('Fixture');
     expect(snapshot.tabs).toEqual([
-      { id: shown, title: 'Next', url: `${web.origin}/next`, active: true },
-      { id: opened.tabId, title: 'Fixture', url: `${web.origin}/`, active: false },
+      { id: shown, title: 'Next', url: `${web.origin}/next`, active: false },
+      { id: opened.tabId, title: 'Fixture', url: `${web.origin}/`, active: true },
     ]);
+    expect(runtime.tabs.find((tab) => tab.active).id).toBe(shown);
+
+    // When the viewer switches to another tab, then the agent stays on its own.
+    await runtime.command('tab-select', { tabId: opened.tabId });
+    await runtime.command('tab-select', { tabId: shown });
+    expect((await runtime.perform('browser.snapshot', {})).title).toBe('Fixture');
 
     // When actions name the background tab, then they run there, and it keeps painting so a capture cannot stall.
     const background = await runtime.agentPage(opened.tabId);
@@ -794,8 +800,9 @@ test.skipIf(noChrome)('sizes pages in CSS pixels for the viewer and keeps a chos
       returnByValue: true,
     })).result.value;
 
-    // Then the page lays out at the panel's CSS size.
-    expect(await innerSize()).toBe('[700,500]');
+    // Then the page keeps the desktop size: opening the panel does not lay it out again.
+    expect(await innerSize()).toBe('[1440,900]');
+    expect(manager.state().scopes[0].viewport).toEqual({ mode: 'fixed', source: 'default', width: 1440, height: 900, mobile: false });
 
     // When the dock fixes a size, then a later panel resize keeps it.
     await manager.setViewport({ mode: 'fixed', width: 500, height: 400, mobile: false }, manager.state().generation);
@@ -803,7 +810,7 @@ test.skipIf(noChrome)('sizes pages in CSS pixels for the viewer and keeps a chos
     expect(await innerSize()).toBe('[500,400]');
     expect(manager.state().scopes[0].viewport).toEqual({ mode: 'fixed', source: 'viewer', width: 500, height: 400, mobile: false });
 
-    // When the dock returns to Auto, then the page follows the latest panel size again.
+    // When the dock picks Fill, then the page follows the latest panel size.
     await manager.setViewport({ mode: 'auto', mobile: false }, manager.state().generation);
     expect(await innerSize()).toBe('[600,400]');
   } finally {
@@ -1001,6 +1008,8 @@ test.skipIf(noChrome)('holds a page\'s dialogs for the dock and the agent instea
 
     // When the panel changes size meanwhile, then the resize does not wait on the paused page.
     const resizing = Date.now();
+    // The page follows the panel only in Fill.
+    await runtime.configureViewport({ mode: 'auto', source: 'viewer', mobile: false });
     await runtime.surfaceResize({ width: 700, height: 500 });
     expect(Date.now() - resizing).toBeLessThan(2_000);
     await expect(runtime.setZoomLevel(1)).rejects.toThrow(/Answer the dialog/);
@@ -1041,6 +1050,8 @@ test.skipIf(noChrome)('brings a page that opens with an alert to the front at on
   try {
     const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
     cleanups.push(() => runtime.close());
+    // The page follows the panel only in Fill.
+    await runtime.configureViewport({ mode: 'auto', source: 'viewer', mobile: false });
     await runtime.surfaceResize({ width: 700, height: 500 });
     await runtime.perform('browser.open', { url: `${web.origin}/opens-alert` });
 
@@ -1202,6 +1213,8 @@ test.skipIf(noChrome)('streams the sound of the tab in front only while asked, a
     await runtime.perform('browser.open', { url: `${web.origin}/tone` });
     await click(runtime, 30, 30);
 
+    // The page follows the panel only in Fill.
+    await runtime.configureViewport({ mode: 'auto', source: 'viewer', mobile: false });
     await runtime.surfaceResize({ width: 640, height: 480 });
     // The picture shown before the resize; what comes after it is what counts.
     const shown = await runtime.surfaceFrame({ after: 0, wait: 0 });

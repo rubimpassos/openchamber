@@ -64,6 +64,37 @@ person reach the Browser pane instead:
   waited for, not closed. Pages on insecure origins (plain `http` outside
   `localhost`) cannot be captured, so they send no sound.
 
+## Who acts where
+
+- **One Chrome per chat.** A scope is a project and a chat; nothing is
+  shared between two chats' scopes, closing one closes only its Chrome.
+  The Browser pane shows the scope of the chat on screen and keeps only that
+  chat's tabs in its strip (`parkedBrowserTabs` in `useUIStore`).
+- **The page keeps its size.** A new scope lays pages out at the desktop
+  preset (1440x900, `source: 'default'`); opening or resizing the panel only
+  scales the picture. The page follows the panel only in Fill
+  (`mode: 'auto'`), set by the viewer's device bar or the agent's
+  `viewport: 'fill'`.
+- **The agent keeps its tab.** An action without `tabId` runs on the tab the
+  agent last opened or used (`agentTabId`), else the one in front, so the
+  person switching tabs never moves the agent. A page the agent's tab opens
+  becomes its tab. `browser.snapshot` marks that tab `active`. The dock state
+  reports it as `scopes[].agentTabId` (null before the agent used a tab) with
+  `agentActive` while an action runs, so the pane can mark and follow it.
+- **The viewer chooses the view while the agent works.** For a while after
+  each action the host holds the picture for the agent. Picking a chat,
+  picking a tab, and closing a chat's browser stay allowed then, and run
+  outside the operation queue except the close; driving the agent's own page
+  (navigate, reload, zoom) waits until the agent lets go. Other chats' pages
+  are not held.
+
+### Why the page does not follow the panel by default
+
+It used to: opening the panel made every page lay out again at the panel's
+CSS size, so a site the agent was reading at desktop width switched to its
+tablet or phone layout the moment someone looked. A fixed size keeps what the
+person sees equal to what the agent saw.
+
 ## Configuration
 
 There is no user-editable package directory for a built-in, so configuration

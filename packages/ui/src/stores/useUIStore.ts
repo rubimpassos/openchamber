@@ -19,6 +19,7 @@ import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
+import { splitBrowserTabsForSession } from '@/lib/browser/serverBrowser/sessionTabs';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import {
@@ -136,6 +137,12 @@ type ContextPanelDirectoryState = {
   activeTabId: string | null;
   /** The left and bottom zones. Every zone shows tabs of the surfaces placed in it. */
   zones: MovedZoneViews;
+  /**
+   * Server Browser only: Browser tabs of chats not on screen, each keeping its
+   * Chrome tab, back in `tabs` when their chat is (`lib/browser/serverBrowser/sessionTabs.ts`).
+   * Absent in state saved before it existed.
+   */
+  parkedBrowserTabs?: ContextPanelTab[];
   touchedAt: number;
 };
 
@@ -528,6 +535,23 @@ const touchContextPanelState = (
   };
 };
 
+const BROWSER_FOLLOW_OFF_MAX = 200;
+
+/** Whether the Browser panel follows `sessionId`'s agent (Server Browser). */
+export const isFollowingBrowserAgent = (offSessions: readonly string[], sessionId: string | null): boolean => (
+  sessionId !== null && !offSessions.includes(sessionId)
+);
+
+const withParkedBrowserTabs = (
+  panel: ContextPanelDirectoryState,
+  parked: ContextPanelTab[],
+): ContextPanelDirectoryState => {
+  const next = { ...panel };
+  if (parked.length > 0) next.parkedBrowserTabs = parked;
+  else delete next.parkedBrowserTabs;
+  return next;
+};
+
 /**
  * Someone asked for this address now, so its load may wait for a dev server
  * that is still starting. A new tab is marked before it mounts; a tab that
@@ -783,6 +807,7 @@ const sanitizeContextPanelByDirectory = (
       expanded?: unknown;
       zones?: unknown;
       tabs?: unknown;
+      parkedBrowserTabs?: unknown;
       activeTabId?: unknown;
       touchedAt?: unknown;
       mode?: unknown;
@@ -836,14 +861,16 @@ const sanitizeContextPanelByDirectory = (
       legacySizes.push({ sizes, touchedAt });
     }
 
-    next[directory] = {
+    const parkedBrowserTabs = sanitizeContextPanelTabs(candidate.parkedBrowserTabs)
+      .filter((tab) => tab.mode === 'browser' && tab.ownerSessionId !== null);
+    next[directory] = withParkedBrowserTabs({
       isOpen: candidate.isOpen === true,
       expanded: candidate.expanded === true,
       tabs: clampedTabs,
       activeTabId: resolvedTabId,
       zones,
       touchedAt,
-    };
+    }, parkedBrowserTabs);
   }
 
   return next;
@@ -1047,6 +1074,12 @@ interface UIStore {
   openLinksInBrowserPanel: boolean;
   /** How many of the user's browser tabs keep their page loaded, across projects (desktop only). */
   liveBrowserTabLimit: number;
+  /**
+   * Server Browser: chats where "Follow agent" is off. Following is on by
+   * default; with it, the agent of the chat on screen using its browser opens
+   * the Browser panel on the agent's tab. Newest last, bounded.
+   */
+  browserFollowAgentOffSessions: string[];
   /** Plain clicks on issue, PR and tracker item links in chat open them on the issues and PRs board. */
   openTrackerLinksOnBoard: boolean;
   autoDeleteAfterDays: number;
@@ -1244,6 +1277,17 @@ interface UIStore {
   openNewContextBrowserTab: (directory: string) => void;
   /** A new background browser tab for an agent at `url`; returns its tab id, or null where there is no browser. */
   openAgentBrowserTab: (directory: string, url: string, ownerSessionId: string | null) => string | null;
+  /**
+   * Server Browser: shows only the Browser tabs of `sessionId` and parks the
+   * other chats' ones; unowned tabs in `currentDirectory` become the
+   * session's. `null` (the in-app browser) puts every parked tab back.
+   */
+  showBrowserTabsOfSession: (currentDirectory: string | null, sessionId: string | null) => void;
+  /**
+   * Opens the Browser panel for `sessionId` without picking another of its
+   * tabs: the one its zone last showed, else its newest, else a new one.
+   */
+  revealSessionBrowser: (directory: string, sessionId: string) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   /**
    * Points file tabs and the editor's open files at or under `fromPath` at `toPath` after a move or
@@ -1355,6 +1399,7 @@ interface UIStore {
   setLayoutAnimations: (value: boolean) => void;
   setOpenLinksInBrowserPanel: (value: boolean) => void;
   setLiveBrowserTabLimit: (value: number) => void;
+  setBrowserFollowAgent: (sessionId: string, value: boolean) => void;
   setOpenTrackerLinksOnBoard: (value: boolean) => void;
   setFileTreeSide: (side: 'left' | 'right') => void;
   setAutoDeleteAfterDays: (days: number) => void;
@@ -1608,6 +1653,7 @@ export const useUIStore = create<UIStore>()(
         layoutAnimations: true,
         openLinksInBrowserPanel: false,
         liveBrowserTabLimit: LIVE_BROWSER_TABS_DEFAULT,
+        browserFollowAgentOffSessions: [],
         openTrackerLinksOnBoard: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
@@ -2021,6 +2067,68 @@ export const useUIStore = create<UIStore>()(
             ownerSessionId,
           }, { reveal: false });
           return buildContextPanelTabID('browser', dedupeKey);
+        },
+        showBrowserTabsOfSession: (currentDirectory, sessionId) => {
+          const current = currentDirectory ? normalizeDirectoryPath(currentDirectory.trim()) : null;
+          set((state) => {
+            let byDirectory: Record<string, ContextPanelDirectoryState> | null = null;
+            for (const [directory, panel] of Object.entries(state.contextPanelByDirectory)) {
+              const parked = panel.parkedBrowserTabs ?? [];
+              let next: ContextPanelDirectoryState;
+              if (current === null) {
+                // Back to one browser for every chat: nothing stays parked.
+                if (parked.length === 0) continue;
+                next = withParkedBrowserTabs({ ...panel, tabs: [...panel.tabs, ...parked] }, []);
+              } else {
+                const split = splitBrowserTabsForSession(panel.tabs, parked, sessionId, directory === current);
+                if (!split) continue;
+                const shownIds = new Set(split.tabs.map((tab) => tab.id));
+                // A zone that showed a tab of the chat it left shows this
+                // chat's newest Browser tab, if it has one.
+                const newest = split.tabs
+                  .filter((tab) => tab.mode === 'browser')
+                  .reduce<ContextPanelTab | null>((best, tab) => (!best || tab.touchedAt > best.touchedAt ? tab : best), null);
+                let moved = withParkedBrowserTabs({ ...panel, tabs: split.tabs }, split.parked);
+                for (const zone of CONTEXT_ZONES) {
+                  const view = getZoneView(moved, zone);
+                  if (!view.activeTabId || shownIds.has(view.activeTabId)) continue;
+                  if (!split.parked.some((tab) => tab.id === view.activeTabId)) continue;
+                  moved = withZoneView(moved, zone, { activeTabId: newest && zoneOfMode(state.contextSurfaceZones, 'browser') === zone ? newest.id : null });
+                }
+                next = settleZones({ ...moved, zones: keepZoneViewsOnTabs(moved.zones, shownIds) }, state.contextSurfaceZones);
+              }
+              byDirectory ??= { ...state.contextPanelByDirectory };
+              byDirectory[directory] = next;
+            }
+            return byDirectory ? { contextPanelByDirectory: byDirectory } : state;
+          });
+        },
+        revealSessionBrowser: (directory, sessionId) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory || isVSCodeRuntime()) return;
+          const state = get();
+          const panel = state.contextPanelByDirectory[normalizedDirectory];
+          const zone = zoneOfMode(state.contextSurfaceZones, 'browser');
+          const view = panel ? getZoneView(panel, zone) : null;
+          const browserTabs = (panel?.tabs ?? []).filter((tab) => tab.mode === 'browser'
+            && (tab.ownerSessionId === sessionId || tab.ownerSessionId === null));
+          const shownId = panel ? resolveZoneActiveTabId(panel.tabs, state.contextSurfaceZones, zone, view?.activeTabId ?? null) : null;
+          if (view?.isOpen && browserTabs.some((tab) => tab.id === shownId)) return;
+          const pick = browserTabs.find((tab) => tab.id === view?.activeTabId)
+            ?? browserTabs.reduce<ContextPanelTab | null>((best, tab) => (!best || tab.touchedAt > best.touchedAt ? tab : best), null);
+          if (pick) {
+            state.setActiveContextPanelTab(normalizedDirectory, pick.id);
+            return;
+          }
+          // The Browser view pairs a new tab with the Chrome tab the agent is in.
+          browserTabSequence += 1;
+          state.openContextPanelTab(normalizedDirectory, {
+            mode: 'browser',
+            targetPath: '',
+            dedupeKey: `browser:agent:${Date.now()}-${browserTabSequence}`,
+            label: null,
+            ownerSessionId: sessionId,
+          });
         },
         // Always a new tab, never the existing one: the whole point of asking
         // for one is to keep what is already open.
@@ -2762,6 +2870,15 @@ export const useUIStore = create<UIStore>()(
 
         setLiveBrowserTabLimit: (value) => {
           set({ liveBrowserTabLimit: clampLiveBrowserTabs(value) });
+        },
+
+        setBrowserFollowAgent: (sessionId, value) => {
+          set((state) => {
+            const off = state.browserFollowAgentOffSessions.includes(sessionId);
+            if (off !== value) return state;
+            const rest = state.browserFollowAgentOffSessions.filter((id) => id !== sessionId);
+            return { browserFollowAgentOffSessions: value ? rest : [...rest, sessionId].slice(-BROWSER_FOLLOW_OFF_MAX) };
+          });
         },
 
         setOpenTrackerLinksOnBoard: (value) => {
@@ -3811,6 +3928,7 @@ export const useUIStore = create<UIStore>()(
           layoutAnimations: state.layoutAnimations,
           openLinksInBrowserPanel: state.openLinksInBrowserPanel,
           liveBrowserTabLimit: state.liveBrowserTabLimit,
+          browserFollowAgentOffSessions: state.browserFollowAgentOffSessions,
           openTrackerLinksOnBoard: state.openTrackerLinksOnBoard,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
