@@ -3,17 +3,8 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
+import { ACTIVITY_ICON, ACTIVITY_TITLE_KEY } from './sessionSidebarActivityLabels';
 
-// The list by time holds every project's sessions, so it is titled Projects;
-// its clock icon says how it is ordered.
-const ACTIVITY_ICON = { priority: 'flag', pinned: 'pushpin', work: 'eye', chats: 'chat-4', timeline: 'history' } as const;
-const ACTIVITY_TITLE_KEY = {
-  priority: 'sessions.sidebar.activity.priorityTitle',
-  pinned: 'sessions.sidebar.activity.pinnedTitle',
-  work: 'sessions.sidebar.work.title',
-  chats: 'sessions.sidebar.activity.chatsTitle',
-  timeline: 'sessions.sidebar.activity.projectsTitle',
-} as const;
 
 export const SessionSidebarActivityHeader: React.FC<{
   activityKey: SessionSidebarActivityKey;
@@ -25,7 +16,7 @@ export const SessionSidebarActivityHeader: React.FC<{
 }> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
-  // One header in both views, so zones line up with the project headers.
+  // One header for every zone, so zones line up with the project headers.
   return <div className="relative group/chats -ms-2.5 -me-2">
     <button
       type="button"
@@ -35,14 +26,14 @@ export const SessionSidebarActivityHeader: React.FC<{
       aria-expanded={!collapsed}
     >
       <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
-        <Icon name={ACTIVITY_ICON[activityKey]} className={cn('h-3.5 w-3.5 text-muted-foreground/80', !forceExpanded && 'group-hover:hidden')} />
+        <Icon name={activityKey === 'priority' ? 'flag' : ACTIVITY_ICON[activityKey]} className={cn('h-3.5 w-3.5 text-muted-foreground/80', !forceExpanded && 'group-hover:hidden')} />
         {!forceExpanded ? <span className="hidden h-3.5 w-3.5 items-center justify-center text-muted-foreground group-hover:inline-flex">
           <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5" />
         </span> : null}
       </span>
       {/* The size of project headers: zones and projects are sections of equal weight. */}
       <span className="typography-ui-header font-semibold text-foreground">
-        {t(ACTIVITY_TITLE_KEY[activityKey])}
+        {t(activityKey === 'priority' ? 'sessions.sidebar.activity.priorityTitle' : ACTIVITY_TITLE_KEY[activityKey])}
       </span>
     </button>
     {chats ? <button

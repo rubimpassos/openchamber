@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FileSharePlugin.class);
         registerPlugin(ImagePastePlugin.class);
         registerPlugin(PushKeyPlugin.class);
+        registerPlugin(WindowLayoutPlugin.class);
         super.onCreate(savedInstanceState);
         // The WebView scales all text by the system font size by default, which
         // inflated every screen on phones with a larger system font. Text size is

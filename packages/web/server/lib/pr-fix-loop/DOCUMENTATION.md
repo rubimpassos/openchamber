@@ -13,6 +13,10 @@ The server watches one PR for one host session. Auto mode sends feedback through
 - `../spaces/` owns the permanent restriction profile and quarantine/code-out checks. This module never interprets an in-space HTTP response as host authentication, a command, a grant or publication authority.
 
 `server/index.js` builds the adapters without starting Spaces, and starts persisted loops after Spaces and Git services initialize. Host event subscribers continue to exclude space events. Worker progress uses authoritative space-specific polling.
+The feedback adapter loads GitHub clients directly from `../github/octokit.js`.
+A captured account resolves only through `getOctokitForAccountId(accountId)` and
+never falls back to the active credential. Legacy auto loops without an account
+use `getOctokitOrNull('github.com')`, explicitly scoped to the supported instance.
 
 ## Approval setup
 
@@ -106,6 +110,10 @@ Feedback cadence, CI completeness and other notifications retain their existing 
 ## HTTP API
 
 All routes are under `/api/source-control/github/pr/fix-loops` and precede the generic proxy.
+The source-control provider shell registers them with the supplied host runtime.
+Activation and preparation use GitHub's bound resource reader; host review jobs
+use the shell's canonical mutation service. A missing replay record remains an
+unknown outcome and cannot post a replacement reply.
 
 | Route | Request and response |
 |---|---|

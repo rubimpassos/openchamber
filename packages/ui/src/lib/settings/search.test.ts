@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { I18nKey } from '@/lib/i18n/store';
+import type { I18nKey, I18nParams } from '@/lib/i18n/store';
+import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
+import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
 import { buildSettingsSearchResults } from './search';
 
-const t = (key: I18nKey): string => key;
+const trackers = [linearLikeTrackerDescriptor()];
+const sourceControlProviders = [githubLikeDescriptor(), gitlabLikeDescriptor()];
+
+const t = (key: I18nKey, params?: I18nParams): string => (params ? `${key} ${JSON.stringify(params)}` : key);
 
 const runtimeCtx = {
   isVSCode: false,
@@ -19,6 +24,24 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('indexes GitHub automation only where the served card exposes its controls', () => {
+    // Given
+    const cases = [
+      { providers: sourceControlProviders, context: runtimeCtx, available: true },
+      { providers: sourceControlProviders, context: { ...runtimeCtx, isMobile: true }, available: true },
+      { providers: [gitlabLikeDescriptor()], context: runtimeCtx, available: false },
+      { providers: sourceControlProviders, context: { ...runtimeCtx, isVSCode: true }, available: false },
+    ];
+    for (const scenario of cases) {
+      // When
+      const results = buildSettingsSearchResults({ query: 'restack', runtimeCtx: scenario.context,
+        sourceControlProviders: scenario.providers, t, getPageTitle: (page) => page });
+
+      // Then
+      expect(results.some((result) => result.id === 'integrations.pr-stack-conflict')).toBe(scenario.available);
+    }
+  });
+
   test('finds double-paste on every shared Settings surface', () => {
     for (const query of ['double paste', 'ctrl v', 'cmd v']) {
       for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
@@ -69,17 +92,43 @@ describe('settings search', () => {
       expect(results.find((result) => result.id === 'appearance.scrollbars')?.page).toBe('appearance');
     }
   });
-  test('finds Linear connect on the integrations page', () => {
+  test('finds Linear connect on the integrations page when the server serves Linear', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',
       runtimeCtx,
       t,
       getPageTitle: (page) => page,
+      trackers,
     });
 
     expect(results.some((result) => result.id === 'integrations.linear')).toBe(true);
     expect(results.some((result) => result.id === 'integrations.linear.add-workspace')).toBe(true);
     expect(results.some((result) => result.id === 'integrations.linear.mapping')).toBe(true);
+
+    const withoutLinear = buildSettingsSearchResults({ query: 'linear', runtimeCtx, t, getPageTitle: (page) => page, trackers: [] });
+    expect(withoutLinear.some((result) => result.id.startsWith('integrations.linear'))).toBe(false);
+  });
+
+  test('offers only what a tracker\'s capabilities have, and nothing for a tracker without words of its own', () => {
+    const single = linearLikeTrackerDescriptor({
+      capabilities: { ...linearLikeTrackerDescriptor().capabilities, multipleAccounts: false, projectMapping: false },
+    });
+    const results = buildSettingsSearchResults({ query: 'linear', runtimeCtx, t, getPageTitle: (page) => page, trackers: [single, acmeTrackerDescriptor()] });
+    expect(results.filter((result) => result.id.startsWith('integrations.linear')).map((result) => result.id)).toEqual(['integrations.linear']);
+    const acme = buildSettingsSearchResults({ query: 'acme', runtimeCtx, t, getPageTitle: (page) => page, trackers: [acmeTrackerDescriptor()] });
+    expect(acme.some((result) => result.id.startsWith('integrations.acme'))).toBe(false);
+  });
+
+  test('finds the small model effort setting by thinking and reasoning keywords', () => {
+    for (const query of ['small model effort', 'small model thinking', 'small model variant']) {
+      const results = buildSettingsSearchResults({
+        query,
+        runtimeCtx,
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(results.some((result) => result.id === 'sessions.small-model')).toBe(true);
+    }
   });
 
   test('finds the chat input history scope setting', () => {
@@ -110,6 +159,7 @@ describe('settings search', () => {
       runtimeCtx: { ...runtimeCtx, isVSCode: true },
       t,
       getPageTitle: (page) => page,
+      trackers,
     });
 
     expect(results.some((result) => result.id === 'integrations.linear')).toBe(false);
@@ -133,9 +183,34 @@ describe('settings search', () => {
       runtimeCtx,
       t,
       getPageTitle: (page) => page,
+      sourceControlProviders,
     });
-    expect(connectResults.some((result) => result.id === 'git.github-connect')).toBe(true);
-    expect(connectResults.some((result) => result.id === 'git.gitlab-connect')).toBe(true);
+    expect(connectResults.some((result) => result.id === 'integrations.source-control.github.connect')).toBe(true);
+    expect(connectResults.some((result) => result.id === 'integrations.source-control.gitlab.connect')).toBe(true);
+  });
+
+  test('builds a card and a connect entry for every served source-control provider, named by its label', () => {
+    const results = buildSettingsSearchResults({
+      query: 'acme',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+      sourceControlProviders: [...sourceControlProviders, acmeDescriptor()],
+    });
+    expect(results.map((result) => result.id)).toEqual([
+      'integrations.source-control.acme',
+      'integrations.source-control.acme.connect',
+    ]);
+    expect(results[0]?.title).toBe('Acme Forge');
+    expect(results[0]?.description).toContain('"provider":"Acme Forge"');
+    expect(results[1]?.title).toContain('"provider":"Acme Forge"');
+
+    const byNoun = buildSettingsSearchResults({ query: 'merge request', runtimeCtx, t, getPageTitle: (page) => page, sourceControlProviders });
+    expect(byNoun.some((result) => result.id === 'integrations.source-control.gitlab')).toBe(true);
+    expect(byNoun.some((result) => result.id === 'integrations.source-control.github')).toBe(false);
+
+    const unserved = buildSettingsSearchResults({ query: 'gitlab', runtimeCtx, t, getPageTitle: (page) => page });
+    expect(unserved.some((result) => result.id.startsWith('integrations.source-control.'))).toBe(false);
   });
 
   test('keeps repository transport and provider controls out of VS Code Settings search', () => {
@@ -151,11 +226,11 @@ describe('settings search', () => {
       runtimeCtx: vscodeCtx,
       t,
       getPageTitle: (page) => page,
+      sourceControlProviders,
     });
 
     expect(transportResults.some((result) => result.id === 'git.repository-transport')).toBe(false);
-    expect(accountResults.some((result) => result.id === 'git.github-account')).toBe(false);
-    expect(accountResults.some((result) => result.id === 'git.gitlab-account')).toBe(false);
+    expect(accountResults.some((result) => result.id.startsWith('integrations.source-control.'))).toBe(false);
   });
 
   test('finds guest extension panels on the integrations page', () => {

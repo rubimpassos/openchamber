@@ -7,18 +7,18 @@
  * the OpenChamber server to archive the whole batch next to OpenCode, so the
  * browser spends one request and reconciles once.
  *
- * OpenCode 2.x has no HTTP route that sets `time.archived` or rewrites a
- * session's metadata after creation, so OpenChamber keeps both itself, next to
- * OpenCode, per data directory. These routes are an OpenChamber capability, not
- * an OpenCode one. Runtimes that do not serve them (the VS Code webview has no
- * server process) answer with a stable unsupported status, and callers fall
- * back to a per-session path or report failure.
+ * The server sets archive state on OpenCode's record and keeps it in its own
+ * archive file for sessions OpenCode cannot change (their directory is gone);
+ * metadata is merge-patched onto OpenCode's record. The batch, the fallback and
+ * the merge are OpenChamber's, so these are OpenChamber routes. Runtimes that do
+ * not serve them answer with a stable unsupported status, and callers fall back
+ * to a per-session path or report failure.
  */
 
 import type { JsonValue, Metadata } from "@/lib/opencode/model"
 import { z } from 'zod';
 
-import type { LinkedIssue } from '@/lib/linkedIssues';
+import { toStoredLinkedIssue, type LinkedIssue } from '@/lib/linkedIssues';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { waitForSessionCreation } from './pending-session-creation';
 
@@ -143,8 +143,20 @@ const metadataResponseSchema = z.object({
   metadata: z.record(z.string(), jsonValueSchema),
 });
 
+/**
+ * The session's folder no longer exists, so OpenCode refuses the write.
+ * Mirrors `SESSION_DIRECTORY_MISSING_CODE` in
+ * packages/web/server/lib/openchamber-sessions/routes.js and the VS Code bridge.
+ */
+const SESSION_DIRECTORY_MISSING_CODE = 'SESSION_DIRECTORY_MISSING';
+
+const directoryMissingResponseSchema = z.object({
+  code: z.literal(SESSION_DIRECTORY_MISSING_CODE),
+});
+
 export type SessionMetadataUpdateResult =
   | { outcome: 'updated'; metadata: Metadata }
+  | { outcome: 'directory-missing'; reason: string }
   | { outcome: 'unavailable'; reason: string };
 
 /**
@@ -174,7 +186,11 @@ export async function requestSessionMetadataUpdate(
   }
 
   if (!response.ok) {
-    return { outcome: 'unavailable', reason: `metadata request failed with ${response.status}` };
+    const reason = `metadata request failed with ${response.status}`;
+    const errorBody: unknown = await response.json().catch(() => null);
+    return directoryMissingResponseSchema.safeParse(errorBody).success
+      ? { outcome: 'directory-missing', reason }
+      : { outcome: 'unavailable', reason };
   }
 
   let body: unknown;
@@ -208,9 +224,10 @@ export type SessionLinksUpdateResult =
  * JSON drops undefined fields, and the server keeps a followed stack on a
  * re-link without the field, so the unfollow goes out as `null`.
  */
-const toWireLinkEntry = (entry: LinkedIssue): LinkedIssue | (Omit<LinkedIssue, 'followStack'> & { followStack: null }) => (
-  'followStack' in entry && entry.followStack === undefined ? { ...entry, followStack: null } : entry
-)
+const toWireLinkEntry = (entry: LinkedIssue) => {
+  const stored = toStoredLinkedIssue(entry);
+  return 'followStack' in entry && entry.followStack === undefined ? { ...stored, followStack: null } : stored;
+};
 
 export async function requestSessionLinksUpdate(
   sessionID: string,

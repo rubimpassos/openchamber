@@ -40,9 +40,9 @@ import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
-import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
+import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
-import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
 import { useFileViewVirtualizer, type FileViewVirtualizer } from './useFileViewVirtualizer';
@@ -61,10 +61,10 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
+import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
+import { formatFileSize } from '@/lib/fileSize';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { isFilePathMoveInFlight, rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { DiagramEditor } from '@/components/diagram';
@@ -80,6 +80,10 @@ import { highlightSelectionMatches } from '@codemirror/search';
 import { codeFolding } from '@/lib/codemirror/codeFolding';
 import { bracketAids, multipleCursors } from '@/lib/codemirror/editingAids';
 import { gitChangeGutter, setGitChangeBaseline } from '@/lib/codemirror/gitChangeGutter';
+import { importLinks, resolveRelativeImport } from '@/lib/codemirror/importLinks';
+import { indentGuides } from '@/lib/codemirror/indentGuides';
+import { isLintedJsonPath, jsonSyntaxLint } from '@/lib/codemirror/jsonSyntaxLint';
+import { stickyScope } from '@/lib/codemirror/stickyScope';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -96,10 +100,11 @@ import { MediaArtifact } from './files/previews/MediaArtifact';
 import { TableArtifact } from './files/previews/TableArtifact';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
+import { useRawAssetUrl } from './files/useRawAssetUrl';
 import { useHtmlPreviewAnnotation } from './files/useHtmlPreviewAnnotation';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
-import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController } from '@/components/comments';
+import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
@@ -123,6 +128,7 @@ import {
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
+import { DIFFS_HIGHLIGHTER, toDiffsLanguage } from '@/lib/shiki/diffsHighlighter';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { registerCloseTabTarget } from '@/lib/closeTabTarget';
@@ -197,7 +203,7 @@ const OpenInAppListIcon = ({ label, iconDataUrl }: { label: string; iconDataUrl?
     <span
       className={cn(
         'size-4 rounded-sm flex items-center justify-center',
-        'oc-tile-inset text-[9px] font-medium text-muted-foreground'
+        'oc-tile-inset text-[0.5625rem] font-medium text-muted-foreground'
       )}
     >
       {initial}
@@ -729,9 +735,6 @@ type FileEditorPosition = {
 const fileEditorPositions = new Map<string, FileEditorPosition>();
 const MAX_FILE_EDITOR_POSITIONS = 100;
 
-type LineNumbersConfig = React.ComponentProps<typeof CodeMirrorEditor>['lineNumbersConfig'];
-type LineNumberHandlers = NonNullable<NonNullable<LineNumbersConfig>['domEventHandlers']>;
-
 const FilePositionEditor = ({
   positionKey,
   onViewReady,
@@ -772,62 +775,6 @@ const FilePositionEditor = ({
       }}
     />
   );
-};
-
-/**
- * Keeps a token-bearing asset preview (image/HTML/PDF) authenticated. While
- * `assetKey` is set this registers an active url-token consumer (so runtime-auth
- * proactively refreshes the shared token before it expires) and subscribes to
- * token replacements, bumping `nonce` so the iframe/img remounts with the fresh
- * token — but only when the token actually changed, not on every interval.
- */
-const useAssetAuthRefresh = (
-  assetKey: string,
-  setFileError: React.Dispatch<React.SetStateAction<string | null>>,
-  errorFallback: string,
-): { readyKey: string; nonce: number } => {
-  const [readyKey, setReadyKey] = React.useState('');
-  const [nonce, setNonce] = React.useState(0);
-
-  React.useEffect(() => {
-    if (!assetKey) {
-      setReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setReadyKey('');
-    const apiBaseUrl = getRuntimeApiBaseUrl();
-    const release = acquireRuntimeUrlAuthToken(apiBaseUrl);
-
-    void refreshRuntimeUrlAuthToken(apiBaseUrl)
-      .then((token) => {
-        if (cancelled || !token) return;
-        setReadyKey(assetKey);
-        setFileError(null);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setFileError(error instanceof Error ? error.message : errorFallback);
-        setReadyKey(assetKey);
-      });
-
-    const unsubscribe = subscribeRuntimeUrlAuthToken(() => {
-      if (cancelled) return;
-      // Token was refreshed underneath us — remount the asset with the fresh URL.
-      setReadyKey(assetKey);
-      setNonce((n) => n + 1);
-      setFileError(null);
-    });
-
-    return () => {
-      cancelled = true;
-      release();
-      unsubscribe();
-    };
-  }, [assetKey, setFileError, errorFallback]);
-
-  return { readyKey, nonce };
 };
 
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = true, onCloseFile }) => {
@@ -1269,9 +1216,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   // Line selection state for commenting
   const [lineSelection, setLineSelection] = React.useState<SelectedLineRange | null>(null);
-  const isSelectingRef = React.useRef(false);
-  const selectionStartRef = React.useRef<number | null>(null);
-  const [isDragging, setIsDragging] = React.useState(false);
 
   // Session/config for sending comments
   const pendingFileNavigation = useUIStore((state) => state.pendingFileNavigation);
@@ -1287,17 +1231,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [fileEditorKeymap, fileEditorVimMappings]);
   const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
   const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
-
-  // Global mouseup to end drag selection
-  React.useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      isSelectingRef.current = false;
-      selectionStartRef.current = null;
-      setIsDragging(false);
-    };
-    document.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, []);
 
   React.useEffect(() => {
     return () => {
@@ -1343,6 +1276,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     deleteDraft,
   } = fileCommentController;
 
+  const { isDragging, lineNumbersConfig, isDragReleaseClick } = useLineNumberDragSelection({
+    lineSelection,
+    setLineSelection,
+    onClear: cancel,
+    isMobile,
+  });
+
   React.useEffect(() => {
     // A moved file is the same document under a new path: it keeps its draft.
     if (pendingPathMoveRef.current?.to === selectedFile?.path) return;
@@ -1360,6 +1300,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (!lineSelection && !editingDraftId) return;
 
     const handleClickOutside = (e: MouseEvent) => {
+      if (isDragReleaseClick()) return;
       const target = e.target as HTMLElement;
 
       if (target.closest('[data-comment-input="true"]') || target.closest('[data-comment-card="true"]')) return;
@@ -1380,7 +1321,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       clearTimeout(timeoutId);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [cancel, commentText, editingDraftId, lineSelection]);
+  }, [cancel, commentText, editingDraftId, isDragReleaseClick, lineSelection]);
 
   // Touch devices: while the comment bar is open, the line range is shown by
   // the highlightLines decoration. Any native text selection left in the
@@ -2201,6 +2142,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
+    // A file past the size limit shows as a failed read instead of being
+    // pulled in whole; a file whose size is unknown is read as before.
+    const sizeStat = await readFileStat(node.path).catch(() => null);
+    if (!isCurrentLoad()) {
+      return;
+    }
+    if (sizeStat && sizeStat.size > MAX_OPEN_FILE_BYTES) {
+      setFileContent('');
+      setDraftContent('');
+      setFileError(t('contextFileOpen.failure.tooLargeSize', { size: formatFileSize(MAX_OPEN_FILE_BYTES) }));
+      setFailedFilePath(node.path);
+      lastLoadedFileStatRef.current = null;
+      setFileLoading(false);
+      return;
+    }
+
     await readFile(node.path)
       .then((content) => {
         if (!isCurrentLoad()) {
@@ -2518,7 +2475,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
           lastLoadedFileStatRef.current = latestStat;
           // Reset loadedFilePath so the effect above triggers a single reload.
+          // A PDF, media or font preview holds its URL per revision, so the
+          // revision is what makes it load the new bytes.
           setLoadedFilePath(null);
+          setFileContentRevision((revision) => revision + 1);
         })
         .catch((error) => {
           if (cancelled || getRuntimeKey() !== requestRuntime || fileScopeRef.current !== requestScope) return;
@@ -3669,103 +3629,39 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (edited) pinPreviewOnEditRef.current();
   }), []);
 
-  // Line-number gutter handlers read the latest render's state through a ref,
-  // so the config handed to CodeMirror keeps its identity: a new one would
-  // rebuild the gutter on every FilesView render.
-  const lineNumberHandlers: LineNumberHandlers = {
-    mousedown: (view, line, event) => {
-      if (!(event instanceof MouseEvent)) {
-        return false;
+  // Cmd/Ctrl+click on a relative import opens the file it names. The handler
+  // reads the latest render through a ref, so the extension keeps its identity.
+  const openRelativeImportRef = React.useRef<(specifier: string) => void>(() => {});
+  openRelativeImportRef.current = (specifier) => {
+    const fromFile = selectedFile?.path;
+    if (!fromFile || !panelRoot) return;
+    void resolveRelativeImport(fromFile, specifier, async (directory) => {
+      try {
+        const listing = await files.listDirectory(directory);
+        return new Map(listing.entries.map((entry) => [entry.name, entry.isDirectory]));
+      } catch {
+        return null;
       }
-      if (event.button !== 0) {
-        return false;
+    }).then((resolution) => {
+      if (resolution.status === 'found') {
+        useUIStore.getState().openContextFile(panelRoot, resolution.path);
+        return;
       }
-      event.preventDefault();
-
-      const lineNumber = view.state.doc.lineAt(line.from).number;
-
-      if (
-        lineSelection &&
-        !event.shiftKey &&
-        Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
-        Math.max(lineSelection.start, lineSelection.end) === lineNumber
-      ) {
-        setLineSelection(null);
-        cancel();
-        isSelectingRef.current = false;
-        selectionStartRef.current = null;
-        setIsDragging(false);
-        return true;
-      }
-
-      // Mobile: tap-to-extend selection
-      if (isMobile && lineSelection && !event.shiftKey) {
-        const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);
-        const end = Math.max(lineSelection.start, lineSelection.end, lineNumber);
-        setLineSelection({ start, end });
-        isSelectingRef.current = false;
-        selectionStartRef.current = null;
-        setIsDragging(false);
-        return true;
-      }
-
-      isSelectingRef.current = true;
-      selectionStartRef.current = lineNumber;
-      setIsDragging(true);
-
-      if (lineSelection && event.shiftKey) {
-        const start = Math.min(lineSelection.start, lineNumber);
-        const end = Math.max(lineSelection.end, lineNumber);
-        setLineSelection({ start, end });
-      } else {
-        setLineSelection({ start: lineNumber, end: lineNumber });
-      }
-
-      return true;
-    },
-    mouseover: (view, line, event) => {
-      if (!(event instanceof MouseEvent)) {
-        return false;
-      }
-      if (event.buttons !== 1) {
-        return false;
-      }
-      if (!isSelectingRef.current || selectionStartRef.current === null) {
-        return false;
-      }
-
-      const lineNumber = view.state.doc.lineAt(line.from).number;
-      const start = Math.min(selectionStartRef.current, lineNumber);
-      const end = Math.max(selectionStartRef.current, lineNumber);
-      setLineSelection({ start, end });
-      setIsDragging(true);
-      return false;
-    },
-    mouseup: () => {
-      isSelectingRef.current = false;
-      selectionStartRef.current = null;
-      setIsDragging(false);
-      return false;
-    },
+      toast.error(resolution.status === 'missing'
+        ? t('filesView.editor.importNotFound', { path: specifier })
+        : t('filesView.editor.importLookupFailed', { path: specifier }));
+    });
   };
-  const lineNumberHandlersRef = React.useRef(lineNumberHandlers);
-  lineNumberHandlersRef.current = lineNumberHandlers;
-  const lineNumbersConfig = React.useMemo<LineNumbersConfig>(() => ({
-    domEventHandlers: {
-      mousedown: (view, line, event) => lineNumberHandlersRef.current.mousedown?.(view, line, event) ?? false,
-      mouseover: (view, line, event) => lineNumberHandlersRef.current.mouseover?.(view, line, event) ?? false,
-      mouseup: (view, line, event) => lineNumberHandlersRef.current.mouseup?.(view, line, event) ?? false,
-    },
-  }), []);
+  const importLinksExtension = React.useMemo(() => importLinks((specifier) => openRelativeImportRef.current(specifier)), []);
 
   const editorExtensions = React.useMemo(() => {
     if (!selectedFile?.path) {
       return [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
     }
 
-    // Shiki token colors (worker-backed) match the Shiki file view exactly.
+    // Token colors from the file view's highlighter (see codeHighlight.ts).
     // Same language resolver as the view, so both agree on the language. When
-    // Shiki is the color source, drop the lezer token colors to avoid a
+    // it is the color source, drop the lezer token colors to avoid a
     // competing highlighter (Keep the lezer language for indentation/folding).
     const shikiLanguage = getLanguageFromExtension(selectedFile.path);
     const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
@@ -3774,10 +3670,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       extensions.push(language);
     }
     if (shikiLanguage) {
-      extensions.push(shikiHighlightExtension({
+      extensions.push(codeHighlightExtension({
         language: shikiLanguage,
         themeName: currentTheme.metadata.id,
-        theme: getResolvedShikiTheme(currentTheme),
+        theme: getCodeTokenTheme(currentTheme),
       }));
     }
     if (wrapLines) {
@@ -3789,13 +3685,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         added: diffColors?.diffAdded ?? currentTheme.colors.status.success,
         modified: diffColors?.diffModified ?? currentTheme.colors.status.info,
         removed: diffColors?.diffRemoved ?? currentTheme.colors.status.error,
+      }, {
+        revert: t('filesView.editor.gitHunk.revert'),
+        close: t('filesView.editor.gitHunk.close'),
       }),
       highlightSelectionMatches({ highlightWordAroundCursor: true, minSelectionLength: 2 }),
       pinPreviewOnEditExtension,
       bracketAids(),
+      indentGuides(),
+      importLinksExtension,
     );
+    if (isLintedJsonPath(selectedFile.path)) {
+      extensions.push(jsonSyntaxLint(t('filesView.editor.jsonSyntaxError'), {
+        error: currentTheme.colors.status.error,
+        tooltipBackground: currentTheme.colors.surface.elevated,
+        tooltipForeground: currentTheme.colors.surface.elevatedForeground,
+        border: currentTheme.colors.interactive.border,
+      }));
+    }
     if (!isMobile) {
-      extensions.push(codeFolding(), multipleCursors({ vimMode: fileEditorKeymap === 'vim' }));
+      extensions.push(codeFolding(), multipleCursors({ vimMode: fileEditorKeymap === 'vim' }), stickyScope());
     }
     if (isMobile) {
       extensions.push(EditorView.updateListener.of((update) => {
@@ -3812,7 +3721,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
@@ -3822,10 +3731,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // PDFs, audio, video and fonts are handed to the browser as a URL it owns
   // (iframe, media element, FontFace), so they need the scoped URL token.
   const usesRawAssetUrl = isSelectedPdf || isSelectedMedia || isSelectedFont;
-  const pdfAssetAuthKey = selectedFile?.path
-    && usesRawAssetUrl
-    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${fileContentRevision}`
-    : '';
+  const rawAssetRequest = React.useMemo(
+    () => (selectedFile?.path && usesRawAssetUrl
+      ? {
+        runtime: runtimeKey,
+        path: selectedFile.path,
+        directory: root || '',
+        revision: String(fileContentRevision),
+        outsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace,
+      }
+      : null),
+    [runtimeKey, selectedFile?.path, usesRawAssetUrl, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
+  );
 
   const htmlPreviewRequest = React.useMemo(
     () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
@@ -3853,9 +3770,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (htmlPreview.status === 'error') setFileError(htmlPreview.message);
     else if (htmlPreview.status === 'ready') setFileError(null);
   }, [htmlPreview, setFileError]);
-  const { readyKey: pdfAssetAuthReadyKey, nonce: pdfPreviewNonce } =
-    useAssetAuthRefresh(pdfAssetAuthKey, setFileError, assetAuthErrorFallback);
-  const isPdfAssetAuthLoading = Boolean(pdfAssetAuthKey && pdfAssetAuthReadyKey !== pdfAssetAuthKey);
+  const rawAsset = useRawAssetUrl(rawAssetRequest, setFileError, assetAuthErrorFallback);
+  const isPdfAssetAuthLoading = rawAsset.loading;
 
   const imageSrc = selectedFile?.path && isSelectedImage
     ? (isSelectedSvg
@@ -3863,24 +3779,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       : desktopImageSrc)
     : '';
 
-  const pdfSrc = selectedFile?.path && usesRawAssetUrl && pdfAssetAuthKey && pdfAssetAuthReadyKey === pdfAssetAuthKey
-    ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
-      path: selectedFile.path,
-      allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
-      directory: root || undefined,
-    })
-    : '';
+  const pdfSrc = rawAsset.src;
 
   const renderPdfPreview = React.useCallback((file: FileNode) => (
     <div className="h-full overflow-hidden bg-[var(--surface-background)]">
       <iframe
-        key={pdfPreviewNonce}
         src={pdfSrc}
         className="h-full w-full border-0"
         title={file.name}
       />
     </div>
-  ), [pdfSrc, pdfPreviewNonce]);
+  ), [pdfSrc]);
 
   const downloadButton = selectedFile && files.downloadFile ? (
     <Button
@@ -3911,9 +3820,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (isSelectedMedia) {
       return (
         <MediaArtifact
-          key={pdfPreviewNonce}
           kind={isSelectedVideo ? 'video' : 'audio'}
           src={pdfSrc}
+          renewSrc={rawAsset.renew}
           name={file.name}
           sizeBytes={artifactSize}
           download={downloadButton}
@@ -3921,7 +3830,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       );
     }
     if (isSelectedFont) {
-      return <FontArtifact key={pdfPreviewNonce} src={pdfSrc} name={file.name} sizeBytes={artifactSize} />;
+      return <FontArtifact src={pdfSrc} name={file.name} sizeBytes={artifactSize} />;
     }
     if (isUnsupportedBinary) {
       return <BinaryArtifact name={file.name} path={file.path} sizeBytes={artifactSize} download={downloadButton} />;
@@ -4081,17 +3990,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     connectFullscreenVirtualizer(node);
     setFullscreenCodeScroller(node);
   }, [connectFullscreenVirtualizer, setFullscreenCodeScroller]);
-  const [mdPreviewNode, setMdPreviewNode] = React.useState<HTMLDivElement | null>(null);
-  const [mdFullscreenPreviewNode, setMdFullscreenPreviewNode] = React.useState<HTMLDivElement | null>(null);
   const setMainMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
     markdownPreviewRef.current = node;
     mdPreviewContainerRef.current = node;
-    setMdPreviewNode(node);
     setMainMarkdownScroll(node);
   }, [setMainMarkdownScroll]);
   const setFullscreenMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
     mdFullscreenPreviewContainerRef.current = node;
-    setMdFullscreenPreviewNode(node);
     setFullscreenMarkdownScroll(node);
   }, [setFullscreenMarkdownScroll]);
   // A relative link in a rendered Markdown file opens that file here; on
@@ -4103,16 +4008,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [panelRoot]);
   const markdownLocalAssetsActive = isMarkdown && mdViewMode === 'preview' && !fileLoading;
   const markdownColorScheme = currentTheme.metadata.variant === 'light' ? 'light' : 'dark';
-  useMarkdownLocalAssets({
-    container: mdPreviewNode,
-    filePath: selectedFile?.path ?? null,
-    workspaceRoot: root || null,
-    onOpenFile: openLinkedFile,
-    enabled: markdownLocalAssetsActive,
-    colorScheme: markdownColorScheme,
-  });
-  useMarkdownLocalAssets({
-    container: mdFullscreenPreviewNode,
+  const markdownDocumentAssets = useMarkdownLocalAssets({
     filePath: selectedFile?.path ?? null,
     workspaceRoot: root || null,
     onOpenFile: openLinkedFile,
@@ -4121,7 +4017,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   });
   const shikiWorkerPool = useWorkerPool('unified');
   // Large code previews use the full draft with viewport virtualization and
-  // the shared Shiki worker pool. The threshold does not disable editing.
+  // the shared diff worker pool. The threshold does not disable editing.
   const isLargeFile = draftContent.length > LARGE_FILE_CHAR_THRESHOLD;
   const largeFileCacheKey = React.useMemo(
     () => (isLargeFile && codePreviewActive ? makeFileContentCacheKey(draftContent) : undefined),
@@ -4132,7 +4028,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     const fileContents = {
       name: file.name,
       contents: content,
-      lang: getLanguageFromExtension(file.path) || undefined,
+      lang: toDiffsLanguage(getLanguageFromExtension(file.path)),
     };
     const pierreFile = (key: string) => (
       <PierreFile
@@ -4143,6 +4039,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           overflow: wrapLines ? 'wrap' : 'scroll',
           theme: pierreTheme,
           themeType: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
+          preferredHighlighter: DIFFS_HIGHLIGHTER,
           onPostRender: restoreScroll,
         }}
         className={isLargeFile ? 'block w-full' : 'block h-full w-full'}
@@ -4155,7 +4052,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     // Large files render through pierre's Virtualizer (viewport-only DOM) and
-    // the shared Shiki worker pool. The pool is created lazily: until it is
+    // the shared diff worker pool. The pool is created lazily: until it is
     // ready the key carries a 'pending' suffix so the file remounts with the
     // worker-backed highlighter instead of silently staying on the main thread.
     return (
@@ -4557,7 +4454,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
         {!isSelectedNonText && textViewMode === 'edit' && (
           <>
-            {withTooltip(t('filesView.editor.findInFile'),
+            {/* The Markdown preview has its own find button; this one drives the
+                editor, which the preview replaces. */}
+            {!(isMarkdown && getMdViewMode() === 'preview') && withTooltip(t('filesView.editor.findInFile'),
               <Button
                 variant="ghost"
                 size="sm"
@@ -4967,7 +4866,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               variant="outline"
               onClick={() => void saveAndContinue()}
               disabled={isSaving}
-              className="border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)] hover:bg-[rgb(var(--status-success)/0.2)]"
+              className="border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)] hover:bg-[var(--status-success)]/20"
             >
               {t('filesView.unsaved.saveChanges')}
             </Button>
@@ -5194,8 +5093,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             >
               <div className="h-full overflow-auto">
                 <JsonTreeView
+                  className="h-full"
                   jsonString={fileContent}
-                  format={selectedFile.path.toLowerCase().endsWith('.jsonc') ? 'jsonc' : 'json'}
+                  // Config files under a .json name (tsconfig, opencode.json) carry
+                  // comments and trailing commas; the editor's check accepts them too.
+                  format="jsonc"
                   maxHeight="100%"
                   initiallyExpandedDepth={2}
                 />
@@ -5235,6 +5137,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                   <div style={previewFontStyle}>
                     <SimpleMarkdownRenderer
                       content={fileContent}
+                      documentAssets={markdownDocumentAssets}
                       className="typography-markdown-body"
                       frontmatter="properties"
                       enableFileReferences={false}
@@ -5551,6 +5454,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 <div style={previewFontStyle}>
                   <SimpleMarkdownRenderer
                     content={fileContent}
+                    documentAssets={markdownDocumentAssets}
                     className="typography-markdown-body"
                     frontmatter="properties"
                     enableFileReferences={false}

@@ -69,7 +69,7 @@ other sources still sync.
 |---|---|
 | `openchamber.pinned` | pinned notes and plan bodies |
 | `openchamber.memory` | the memory index and when to save |
-| `openchamber.guidance` | when to link, when to draw a page, how to describe a table for speech |
+| `openchamber.guidance` | when to link, draw a page or offer a workflow, where the tools are called, how to describe a table for speech |
 | `openchamber.checkout` | the directory and branch the session works on |
 | `openchamber.pull-stacks` | complete snapshots for followed pull request stacks |
 
@@ -141,6 +141,24 @@ session's own `location.directory` through `client.session.get` before syncing;
 an unavailable location skips sync and preserves its entries. Without the tool
 the checkout entry is removed.
 
+While that branch still has the placeholder name OpenChamber generated (Quick
+worktree's `agile-chipmunk`) and was never pushed (`readPlaceholderBranch`,
+which is `readRenameableGeneratedBranch` in `../git`), the entry adds an
+instruction: name the task with `work.name` and pass `branch`, the branch
+named after the task in the repository's own naming or else
+`<type>/<short-kebab-case>`, with no tool prefix; `work.name` renames it.
+An issue's placeholder (`issue-180-merry-salamander`) keeps its `issue-180-`,
+which `../git` puts back in front of the agent's name, and the instruction
+says so, so the agent does not fight it.
+Said only in the `work.name` answer, the first agent to hear it read it and
+went on; told to run `git branch -m` beside `work.name`, weaker models named
+the task and dropped the rename, so `work.name` now refuses a placeholder
+worktree without `branch` (`../openchamber-sessions/work-naming.js`). A
+rename changes the entry, so OpenCode tells the agent about the new branch
+and the instruction leaves with it. A failed placeholder check tells only the
+branch. The agent picks the name, since it fits the repository where a slug
+of the task title would not.
+
 What the agent can do about a busy checkout, moving into a worktree, is
 introduced in the tool's own description (`../agent-tool/DOCUMENTATION.md`),
 never stated here as a rule. Whether a busy checkout calls for a worktree
@@ -172,6 +190,26 @@ link definition is the hidden form because assistant markdown shows raw HTML,
 comments included, as visible text. It must follow a blank line, since after a
 paragraph line marked draws it as text. Copying a reply as markdown keeps the
 line.
+
+## When to offer a workflow
+
+A session whose agent has the `openchamber_workflow` tool (a build with
+workflows, the setting on, and OpenChamber launched OpenCode, read through
+`isWorkflowAvailable`) is told when a task is big enough for one
+(`WORKFLOW_GUIDANCE`). A run costs many agents, so the agent starts one only
+when the user asks; when it sees a task with many similar independent pieces
+it says so and offers one. Small tasks never get one.
+
+## Where the tools are called
+
+While the managed tools are direct tools (the default; `agentToolsCodeMode`
+puts them in Code Mode's catalog), a session that has any of them is told
+they are called directly, never from inside a Code Mode `execute` script
+(`DIRECT_TOOLS_GUIDANCE`). OpenCode's Code Mode teaches the model that tools
+live in `execute`'s catalog: a model that called `tools.openchamber(...)` from
+a script was answered "Unknown tool", concluded the tool did not exist, and
+never named its task. With Code Mode on for our tools the sentence would be
+wrong, so it is left out.
 
 ## Entries that read as instructions
 

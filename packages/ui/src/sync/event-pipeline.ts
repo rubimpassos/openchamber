@@ -17,7 +17,7 @@
 import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client"
 import { z } from "zod"
 import { opencodeClient } from "@/lib/opencode/client"
-import { GLOBAL_EVENT_DIRECTORY, routeWireEvent, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
+import { GLOBAL_EVENT_DIRECTORY, hostTurnStart, routeWireEvent, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
 import type { Metadata } from "@/lib/opencode/model"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
@@ -26,6 +26,7 @@ import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
+import { workflowRunSchema } from "@/lib/workflows/model"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
@@ -122,10 +123,14 @@ const openchamberStatusSchema = z.object({
     sessionId: z.string().min(1).optional(),
     status: z.enum(["idle", "busy", "retry"]),
     metadata: z.object({ attempt: z.number(), message: z.string(), next: z.number() }).partial().optional(),
+    // The host's clock when it sent the event, and when the running turn began on it.
+    timestamp: z.number().optional(),
+    turnStartedAt: z.number().optional(),
   }),
 })
 
-// OpenChamber owns archive state; its server announces changes on the stream.
+// Archive changes the server's archive file made (a session leaving it, or one
+// with no folder to move to); OpenCode announces its own record's changes.
 const openchamberArchivedSchema = z.object({
   type: z.literal("openchamber:session-archived"),
   properties: z.object({ sessionID: z.string().min(1), archivedAt: z.number().nullable() }),
@@ -185,6 +190,18 @@ const openchamberSessionAssistSchema = z.object({
     directory: z.string().min(1).nullable().catch(null),
     pending: z.boolean(),
   }),
+})
+
+// A workflow run the server runs for a session changed (`lib/workflows` on the server).
+const openchamberWorkflowRunSchema = z.object({
+  type: z.literal("openchamber:workflow-run"),
+  properties: z.object({ run: workflowRunSchema }),
+})
+
+// The user deleted a finished workflow run.
+const openchamberWorkflowRunRemovedSchema = z.object({
+  type: z.literal("openchamber:workflow-run-removed"),
+  properties: z.object({ runId: z.string().min(1), parentSessionId: z.string().min(1) }),
 })
 
 // The host's announcement of an isolated space's event connection. It is not an event of any
@@ -264,17 +281,20 @@ const OPENCHAMBER_TYPE_PREFIX = "openchamber:"
 function translateOpenchamberStatus(payload: unknown): SyncEvent | null {
   const parsed = openchamberStatusSchema.safeParse(payload)
   if (!parsed.success) return null
-  const { sessionID, sessionId, status, metadata } = parsed.data.properties
+  const { sessionID, sessionId, status, metadata, timestamp, turnStartedAt } = parsed.data.properties
   const id = sessionID ?? sessionId
   if (!id) return null
+  const turnStart = status !== "idle" && timestamp !== undefined && turnStartedAt !== undefined
+    ? { turnStart: hostTurnStart(turnStartedAt, timestamp) }
+    : {}
   if (status === "retry") {
     if (metadata?.attempt === undefined || metadata.message === undefined || metadata.next === undefined) return null
     return {
       type: "session.status",
-      properties: { sessionID: id, status: { type: "retry", attempt: metadata.attempt, message: metadata.message, next: metadata.next } },
+      properties: { sessionID: id, status: { type: "retry", attempt: metadata.attempt, message: metadata.message, next: metadata.next }, ...turnStart },
     }
   }
-  return { type: "session.status", properties: { sessionID: id, status: { type: status } } }
+  return { type: "session.status", properties: { sessionID: id, status: { type: status }, ...turnStart } }
 }
 
 /** Translates an `openchamber:*` bridge payload into a sync event, or null when it is not a valid one. */
@@ -319,6 +339,14 @@ function translateOpenchamberEvent(type: string, payload: unknown): SyncEvent | 
     case "openchamber:permission-auto-accept.left-for-user": {
       const parsed = openchamberLeftForUserSchema.safeParse(payload)
       return parsed.success ? { type: "openchamber.permission-left-for-user", properties: parsed.data.properties } : null
+    }
+    case "openchamber:workflow-run": {
+      const parsed = openchamberWorkflowRunSchema.safeParse(payload)
+      return parsed.success ? { type: "openchamber.workflow-run", properties: parsed.data.properties } : null
+    }
+    case "openchamber:workflow-run-removed": {
+      const parsed = openchamberWorkflowRunRemovedSchema.safeParse(payload)
+      return parsed.success ? { type: "openchamber.workflow-run-removed", properties: parsed.data.properties } : null
     }
     default:
       return null
@@ -443,6 +471,14 @@ function coalesceKey(event: SyncEvent): string | undefined {
 
 /** Merges a later event into the queued one it coalesces with. */
 function mergeCoalesced(previous: SyncEvent, next: SyncEvent): SyncEvent {
+  // A later step of the same turn knows nothing of its start; the turn that
+  // began in this flush keeps it until something reports the turn over.
+  if (previous.type === "session.status" && next.type === "session.status") {
+    const turnStart = next.properties.turnStart ?? previous.properties.turnStart
+    return turnStart && next.properties.status.type !== "idle"
+      ? { ...next, properties: { ...next.properties, turnStart } }
+      : next
+  }
   if (previous.type === "message.part.delta" && next.type === "message.part.delta") {
     return { ...next, properties: { ...next.properties, delta: previous.properties.delta + next.properties.delta } }
   }

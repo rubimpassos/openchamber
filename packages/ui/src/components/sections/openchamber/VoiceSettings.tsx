@@ -214,7 +214,7 @@ const LocalModelPicker = ({
                                     {tUnsafe(entry.labelKey)}
                                 </div>
                                 {entry.badgeKey ? (
-                                    <span className="inline-block rounded-full bg-[var(--status-success)]/15 px-2 py-px text-[10px] font-medium text-[var(--status-success)]">
+                                    <span className="inline-block rounded-full bg-[var(--status-success)]/15 px-2 py-px text-[0.625rem] font-medium text-[var(--status-success)]">
                                         {tUnsafe(entry.badgeKey)}
                                     </span>
                                 ) : null}
@@ -682,6 +682,7 @@ export const VoiceSettings: React.FC = () => {
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
     const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
     const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
@@ -698,6 +699,10 @@ export const VoiceSettings: React.FC = () => {
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
+    const setAutoReadAloudEnabled = useConfigStore((state) => state.setAutoReadAloudEnabled);
+    // Voice pickers and previews follow either entry point: the message button
+    // or automatic reading.
+    const voicePlaybackEnabled = showMessageTTSButtons || autoReadAloudEnabled;
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const setDictationEnabled = useConfigStore((state) => state.setDictationEnabled);
 
@@ -795,7 +800,7 @@ export const VoiceSettings: React.FC = () => {
     }, [refreshVoiceApiKeys]);
 
     useEffect(() => {
-        if (!showMessageTTSButtons || (voiceProvider !== 'openai' && voiceProvider !== 'openai-compatible')) {
+        if (!voicePlaybackEnabled || (voiceProvider !== 'openai' && voiceProvider !== 'openai-compatible')) {
             setIsOpenAIAvailable(hasOpenaiApiKey);
             return;
         }
@@ -815,10 +820,10 @@ export const VoiceSettings: React.FC = () => {
         };
 
         checkOpenAIAvailability();
-    }, [hasOpenaiApiKey, showMessageTTSButtons, voiceProvider]);
+    }, [hasOpenaiApiKey, voicePlaybackEnabled, voiceProvider]);
 
     useEffect(() => {
-        if (!showMessageTTSButtons) {
+        if (!voicePlaybackEnabled) {
             setIsSayAvailable(false);
             setSayVoices([]);
             return;
@@ -840,7 +845,7 @@ export const VoiceSettings: React.FC = () => {
             .catch(() => {
                 setIsSayAvailable(false);
             });
-    }, [showMessageTTSButtons]);
+    }, [voicePlaybackEnabled]);
 
     const previewVoice = useCallback(async () => {
         if (previewAudio) {
@@ -1035,7 +1040,16 @@ export const VoiceSettings: React.FC = () => {
                     ariaLabel={t('settings.voice.page.field.messageReadAloudButtonAria')}
                 />
 
-                {showMessageTTSButtons && (
+                <SettingsCheckboxRow
+                    checked={autoReadAloudEnabled}
+                    onChange={setAutoReadAloudEnabled}
+                    label={t('settings.voice.page.field.autoReadAloud')}
+                    ariaLabel={t('settings.voice.page.field.autoReadAloudAria')}
+                    info={t('settings.voice.page.tooltip.autoReadAloud')}
+                    settingsItem="voice.auto-read-aloud"
+                />
+
+                {voicePlaybackEnabled && (
                     <>
                         <SettingsFieldRow
                             label={t('settings.voice.page.field.provider')}

@@ -12,6 +12,8 @@ import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
 import { notificationCenterChangeSchema, type NotificationCenterChange } from './notificationCenter';
 import { prFixLoopUpdatedEventSchema, type PrFixLoopUpdatedEvent } from './prFixLoop';
+import type { SyncEvent } from './opencode/events';
+import { classifyStreamPayload } from '@/sync/event-pipeline';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -113,6 +115,10 @@ type SuggestedTasksChangedEvent = { type: 'suggested-tasks-changed' } & z.infer<
 const sessionFoldersChangedSchema = z.object({ updatedAt: z.number().finite() });
 type SessionFoldersChangedEvent = { type: 'session-folders-changed' } & z.infer<typeof sessionFoldersChangedSchema>;
 
+/** A client saved, sent or discarded a session draft; every client reads the drafts again. */
+const sessionDraftsChangedSchema = z.object({ updatedAt: z.number().finite() });
+type SessionDraftsChangedEvent = { type: 'session-drafts-changed' } & z.infer<typeof sessionDraftsChangedSchema>;
+
 /**
  * The extension chosen as browser provider can no longer serve (paused,
  * removed, or approval withdrawn), so the server put the in-app browser back.
@@ -123,6 +129,37 @@ const browserProviderResetSchema = z.object({
   guestName: z.string().min(1),
 });
 type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
+
+/**
+ * The set of source-control providers the server serves changed: an extension
+ * that acts as a Git host was approved, enabled, updated, paused or removed.
+ * Carries nothing; listeners re-read the provider list from the server, so the
+ * event cannot go stale between being sent and being handled.
+ */
+type SourceControlProvidersChangedEvent = { type: 'source-control-providers-changed' };
+
+/**
+ * A usage limit stopped a session and the server moved on: the provider to
+ * its next account (for every session), or this session to the fallback model.
+ */
+const limitFailoverSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('account'),
+    sessionId: z.string().min(1),
+    providerId: z.string().min(1),
+    fromAccount: z.string().nullable(),
+    toAccount: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal('model'),
+    sessionId: z.string().min(1),
+    providerId: z.string().min(1),
+    modelId: z.string().min(1),
+    toProviderId: z.string().min(1),
+    toModelId: z.string().min(1),
+  }),
+]);
+type LimitFailoverEvent = { type: 'limit-failover'; failover: z.infer<typeof limitFailoverSchema> };
 
 /** Jev routing events; each carries what the routing store needs and nothing the UI must re-derive. */
 const routingUpdatedSchema = z.object({
@@ -168,12 +205,21 @@ type RoutingDecisionEvent = { type: 'routing-decision'; decision: z.infer<typeof
 type RoutingPermissionHeldEvent = { type: 'routing-permission-held' } & z.infer<typeof routingPermissionHeldSchema>;
 type RoutingSafetySkippedEvent = { type: 'routing-safety-skipped' } & z.infer<typeof routingSafetySkippedSchema>;
 
+/**
+ * A permission mode change, or a request the server's auto-answer left for the
+ * user. The main event stream carries both as well; a window whose main stream
+ * runs over SSE hears them only here.
+ */
+export type PermissionPolicySyncEvent = Extract<SyncEvent, { type: 'openchamber.permission-auto-accept' | 'openchamber.permission-left-for-user' }>;
+type PermissionPolicyEvent = { type: 'permission-policy'; event: PermissionPolicySyncEvent };
+
 /** Followed pull requests, merge requests or issues whose state the server saw move. */
 type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infer<typeof trackedItemRecordsSchema> };
 
 const eventStreamReadySchema = z.object({ connectionId: z.string().min(1).optional() });
 const sourceControlActivitySchema = z.object({ directory: z.string().min(1) });
-const spaceQueueStreamSchema = z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), status: z.literal('connected') });
+// The host follows one isolated space's queue or permission modes again.
+const spaceStreamConnectedSchema = z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), status: z.literal('connected') });
 
 const notificationPropertiesSchema = z.object({
   title: z.string().optional(),
@@ -202,10 +248,13 @@ type OpenChamberEvent =
   | MessageQueueUpdatedEvent
   | RestackEvent
   | PrFixLoopUpdatedEvent
+  | PermissionPolicyEvent
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
   /** The host follows this space's queue again; what changed in a gap is read from the space. */
   | { type: 'space-queue-stream'; spaceId: string }
+  /** The host follows this space's permission modes again; what changed in a gap is read from the space. */
+  | { type: 'space-permission-stream'; spaceId: string }
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
@@ -213,9 +262,12 @@ type OpenChamberEvent =
   | FileOpenRequestEvent
   | PlanOpenRequestEvent
   | BrowserProviderResetEvent
+  | SourceControlProvidersChangedEvent
+  | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
   | SuggestedTasksChangedEvent
+  | SessionDraftsChangedEvent
   | AgentMemoryChangedEvent
   | GuestFilesChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
@@ -442,6 +494,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:permission-auto-accept.updated' || envelope.type === 'openchamber:permission-auto-accept.left-for-user') {
+    const classified = classifyStreamPayload(envelope, undefined);
+    if (classified.kind !== 'events') return;
+    for (const { event } of classified.events) {
+      if (event.type !== 'openchamber.permission-auto-accept' && event.type !== 'openchamber.permission-left-for-user') continue;
+      for (const listener of listeners) listener({ type: 'permission-policy', event });
+    }
+    return;
+  }
+
   if (envelope.type === 'openchamber:session-warming') {
     const parsed = sessionWarmingSnapshotSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'session-warming', snapshot: parsed.data });
@@ -449,8 +511,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 
   if (envelope.type === 'openchamber:space-queue-stream') {
-    const parsed = spaceQueueStreamSchema.safeParse(envelope.properties);
+    const parsed = spaceStreamConnectedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'space-queue-stream', spaceId: parsed.data.spaceId });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:space-permission-stream') {
+    const parsed = spaceStreamConnectedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'space-permission-stream', spaceId: parsed.data.spaceId });
     return;
   }
 
@@ -500,6 +568,17 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:source-control-providers-changed') {
+    for (const listener of listeners) listener({ type: 'source-control-providers-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:limit-failover') {
+    const parsed = limitFailoverSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'limit-failover', failover: parsed.data });
+    return;
+  }
+
   if (envelope.type === 'openchamber:project-context-changed') {
     const parsed = projectContextChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'project-context-changed', ...parsed.data });
@@ -509,6 +588,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:suggested-tasks-changed') {
     const parsed = suggestedTasksChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'suggested-tasks-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:session-drafts-changed') {
+    const parsed = sessionDraftsChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'session-drafts-changed', ...parsed.data });
     return;
   }
 

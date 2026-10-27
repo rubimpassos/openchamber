@@ -1526,6 +1526,7 @@ interface ConfigStore {
     sttLocalModel: string;
     sttLanguage: string;
     showMessageTTSButtons: boolean;
+    autoReadAloudEnabled: boolean;
     ttsInputMode: 'sanitized' | 'raw' | 'summarized';
     ttsChunkedMode: boolean;
     // Summarization settings
@@ -1559,6 +1560,7 @@ interface ConfigStore {
     setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
+    setAutoReadAloudEnabled: (enabled: boolean) => void;
     setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => void;
     setTtsChunkedMode: (enabled: boolean) => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
@@ -1962,6 +1964,11 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved === 'true') return true;
                     }
                     return false;
+                })(),
+                // Read the final reply automatically when a turn ends - disabled by default
+                autoReadAloudEnabled: (() => {
+                    const saved = globalThis.window?.localStorage?.getItem('autoReadAloudEnabled');
+                    return saved === 'true';
                 })(),
                 ttsInputMode: (() => {
                     if (typeof window !== 'undefined') {
@@ -4046,6 +4053,11 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     // The server tells agents to describe tables only while read aloud is on.
                     updateDesktopSettings({ showMessageTTSButtons: show }).catch(() => {});
+                },
+
+                setAutoReadAloudEnabled: (enabled: boolean) => {
+                    set({ autoReadAloudEnabled: enabled });
+                    globalThis.window?.localStorage?.setItem('autoReadAloudEnabled', String(enabled));
                 },
 
                 setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => {

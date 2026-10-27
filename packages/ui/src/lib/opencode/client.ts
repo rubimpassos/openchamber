@@ -30,6 +30,7 @@ import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-err
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { forgetOpenCodeTrustDeclines, isDeliberateOpenCodeRequest, openCodeTrustRefusalDirectory, requestOpenCodeTrust } from "@/lib/opencodeTrust"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { isSpaceDirectory, spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { getSpaceMark, spaceMarkSchema, type SpaceMark } from "@/lib/spaces/spaces-store"
@@ -340,13 +341,88 @@ const serverCapabilitiesSchema = z.object({ compatibility: z.object({ capabiliti
 
 const toOpencodeClientRoot = (baseUrl: string): string => baseUrl.replace(/\/api\/*$/, "") || "/"
 
+const requestUrlOf = (input: string | URL | Request): URL => (
+  input instanceof URL ? input : new URL(input instanceof Request ? input.url : input)
+)
+
+const requestMethodOf = (input: string | URL | Request, init?: RequestInit): string => (
+  String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
+)
+
 export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig): OpenCodeClient => {
   const requestTimeoutMs = config.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS
+  const send = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = requestUrlOf(input)
+    if (isEventStreamUrl(url) || requestMethodOf(input, init) === "POST") {
+      return validateRuntimeResponse(await runtimeFetch(input, init))
+    }
+    const timeout = createTimeoutSignal(requestTimeoutMs)
+    const callerSignal = init?.signal !== undefined
+      ? init.signal
+      : input instanceof Request ? input.signal : undefined
+    const supportsAny = typeof AbortSignal !== "undefined" && typeof (AbortSignal as { any?: unknown }).any === "function"
+    let signal: AbortSignal
+    let detachFallback: (() => void) | null = null
+    if (callerSignal && supportsAny) {
+      signal = (AbortSignal as typeof AbortSignal & { any: (signals: AbortSignal[]) => AbortSignal }).any([
+        callerSignal,
+        timeout.signal,
+      ])
+    } else if (callerSignal) {
+      // No AbortSignal.any: compose manually. Silently dropping the timeout
+      // here would disable the fix on exactly the bootstrap reads it
+      // targets, since those carry a cancellation signal.
+      const controller = new AbortController()
+      const abortFromCaller = () => controller.abort(callerSignal.reason)
+      const abortFromTimeout = () => controller.abort(timeout.signal.reason)
+      if (callerSignal.aborted) {
+        abortFromCaller()
+      } else if (timeout.signal.aborted) {
+        abortFromTimeout()
+      } else {
+        callerSignal.addEventListener("abort", abortFromCaller, { once: true })
+        timeout.signal.addEventListener("abort", abortFromTimeout, { once: true })
+        detachFallback = () => {
+          callerSignal.removeEventListener("abort", abortFromCaller)
+          timeout.signal.removeEventListener("abort", abortFromTimeout)
+        }
+      }
+      signal = controller.signal
+    } else {
+      signal = timeout.signal
+    }
+    const cleanup = () => {
+      detachFallback?.()
+      timeout.cleanup()
+    }
+    let responseHasBody = false
+    try {
+      const response = await runtimeFetch(input, { ...init, signal })
+      validateRuntimeResponse(response)
+      responseHasBody = response.body !== null
+      return response
+    } catch (error) {
+      if (timeout.signal.aborted && !callerSignal?.aborted) {
+        throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`)
+      }
+      throw error
+    } finally {
+      // The SDK consumes JSON after fetch resolves. Keep cancellation and the
+      // deadline alive through body delivery, including on older WebViews
+      // using the manual signal composition. Retention is bounded by the
+      // request deadline, just like native AbortSignal.timeout.
+      if (!responseHasBody || signal.aborted) cleanup()
+      else signal.addEventListener("abort", cleanup, { once: true })
+    }
+  }
   return OpenCode.make({
     baseUrl: toOpencodeClientRoot(config.baseUrl),
     headers: config.directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(config.directory) } : undefined,
+    // A folder whose configuration runs code is refused until the user trusts
+    // it (lib/opencodeTrust.ts). The request waits for the answer and goes out
+    // again once trust is saved; a declined one returns the refusal.
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
-      const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url)
+      const url = requestUrlOf(input)
       const sessionId = url.pathname.match(/\/api\/session\/([^/]+)/)?.[1]
       const creation = sessionId ? waitForSessionCreation(decodeURIComponent(sessionId)) : undefined
       let requestInit = init
@@ -357,68 +433,15 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
         headers.set(OPENCODE_DIRECTORY_HEADER, encodeURIComponent(confirmed.directory))
         requestInit = { ...init, headers }
       }
-      const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
-      if (isEventStreamUrl(url) || method === "POST") {
-        return validateRuntimeResponse(await runtimeFetch(input, requestInit))
-      }
-      const timeout = createTimeoutSignal(requestTimeoutMs)
-      const callerSignal = init?.signal !== undefined
-        ? init.signal
-        : input instanceof Request ? input.signal : undefined
-      const supportsAny = typeof AbortSignal !== "undefined" && typeof (AbortSignal as { any?: unknown }).any === "function"
-      let signal: AbortSignal
-      let detachFallback: (() => void) | null = null
-      if (callerSignal && supportsAny) {
-        signal = (AbortSignal as typeof AbortSignal & { any: (signals: AbortSignal[]) => AbortSignal }).any([
-          callerSignal,
-          timeout.signal,
-        ])
-      } else if (callerSignal) {
-        // No AbortSignal.any: compose manually. Silently dropping the timeout
-        // here would disable the fix on exactly the bootstrap reads it
-        // targets, since those carry a cancellation signal.
-        const controller = new AbortController()
-        const abortFromCaller = () => controller.abort(callerSignal.reason)
-        const abortFromTimeout = () => controller.abort(timeout.signal.reason)
-        if (callerSignal.aborted) {
-          abortFromCaller()
-        } else if (timeout.signal.aborted) {
-          abortFromTimeout()
-        } else {
-          callerSignal.addEventListener("abort", abortFromCaller, { once: true })
-          timeout.signal.addEventListener("abort", abortFromTimeout, { once: true })
-          detachFallback = () => {
-            callerSignal.removeEventListener("abort", abortFromCaller)
-            timeout.signal.removeEventListener("abort", abortFromTimeout)
-          }
-        }
-        signal = controller.signal
-      } else {
-        signal = timeout.signal
-      }
-      const cleanup = () => {
-        detachFallback?.()
-        timeout.cleanup()
-      }
-      let responseHasBody = false
-      try {
-        const response = await runtimeFetch(input, { ...requestInit, signal })
-        validateRuntimeResponse(response)
-        responseHasBody = response.body !== null
-        return response
-      } catch (error) {
-        if (timeout.signal.aborted && !callerSignal?.aborted) {
-          throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`)
-        }
-        throw error
-      } finally {
-        // The SDK consumes JSON after fetch resolves. Keep cancellation and the
-        // deadline alive through body delivery, including on older WebViews
-        // using the manual signal composition. Retention is bounded by the
-        // request deadline, just like native AbortSignal.timeout.
-        if (!responseHasBody || signal.aborted) cleanup()
-        else signal.addEventListener("abort", cleanup, { once: true })
-      }
+      const retryInput = input instanceof Request ? input.clone() : input
+      const response = await send(input, requestInit)
+      const directory = await openCodeTrustRefusalDirectory(response)
+      if (!directory) return response
+      const deliberate = isDeliberateOpenCodeRequest(requestMethodOf(input, requestInit), url.pathname)
+      const trusted = await requestOpenCodeTrust(directory, { deliberate })
+      if (!trusted) return response
+      void response.body?.cancel().catch(() => undefined)
+      return send(retryInput, requestInit)
     },
   })
 }
@@ -620,6 +643,11 @@ const getDesktopFilesApi = (): FilesAPI | null => {
   return null
 }
 
+// Callers key the answer by the runtime key read at call time, so the route
+// resolves at call time too. `this.baseUrl` follows a switch only once the
+// client is rebound, which the desktop's boot-time host restore does last.
+const FS_HOME_ROUTE = "/api/fs/home"
+
 // /api/fs/home parsing boundary. Older servers answer without chatsRoot;
 // only a valid home response may use the legacy chats-root fallback.
 const fsAbsolutePathSchema = z.string().trim().regex(/^(?:\/|[A-Za-z]:[\\/]|\\\\)/)
@@ -804,6 +832,8 @@ class OpencodeService {
         previous: this.currentDirectory ?? null,
         next: normalized ?? null,
       })
+      // Opening a folder is the user asking for it again.
+      forgetOpenCodeTrustDeclines()
     }
     this.currentDirectory = normalized
   }
@@ -858,6 +888,17 @@ class OpencodeService {
     const normalized = this.normalizeCandidatePath(directory)
     if (!normalized) throw new Error("releaseLocation needs a directory")
     await call("debug.location.evict", () => this.getScopedSdkClient(normalized).debug.location.evict())
+  }
+
+  /**
+   * Writes a heap snapshot of the OpenCode server process into OpenCode's log
+   * directory and returns its path on the OpenCode machine (OpenCode 2.1.4;
+   * older servers answer 404). OpenCode pauses while the heap serializes. The
+   * route takes no location, so it starts no MCP servers.
+   */
+  async writeHeapSnapshot(): Promise<{ path: string }> {
+    const result = await call("debug.heapDump", () => this.client.debug.heapDump())
+    return { path: result.path }
   }
 
   /**
@@ -1038,6 +1079,14 @@ class OpencodeService {
    */
   async renameSession(id: string, title: string, directory?: string | null): Promise<void> {
     await call("session.update", () => this.clientFor(directory).session.update({ sessionID: id, title }))
+  }
+
+  /**
+   * Records that the turn which ended at `idle` was seen. OpenCode keeps the
+   * watermark monotone and leaves a turn that ended later unread.
+   */
+  async viewSession(id: string, idle: number, directory?: string | null): Promise<void> {
+    await call("session.view", () => this.clientFor(directory).session.view({ sessionID: id, idle }))
   }
 
   async moveSession(id: string, toDirectory: string, options?: { delivery?: SessionInboxDelivery }): Promise<void> {
@@ -2395,7 +2444,7 @@ class OpencodeService {
     }
 
     try {
-      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+      const response = await runtimeFetch(FS_HOME_ROUTE, {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -2423,7 +2472,7 @@ class OpencodeService {
   // Both roots must describe the same server response, including on desktop.
   // Failure is distinct from an older server omitting chatsRoot.
   async getFilesystemHomeInfo(): Promise<z.infer<typeof fsHomeResponseSchema>> {
-    const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+    const response = await runtimeFetch(FS_HOME_ROUTE, {
       method: "GET",
       headers: {
         Accept: "application/json",

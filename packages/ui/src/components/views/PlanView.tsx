@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController } from '@/components/comments';
+import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection } from '@/components/comments';
 
 import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -41,7 +41,8 @@ import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator'
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { toast } from '@/components/ui';
+import { loadMagicPrompts, type MagicPromptSnapshot } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
@@ -225,18 +226,15 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
   const editorViewRef = React.useRef<EditorView | null>(null);
   const editorWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
-  const [previewNode, setPreviewNode] = React.useState<HTMLDivElement | null>(null);
   const setPreviewContainer = React.useCallback((node: HTMLDivElement | null) => {
     previewRef.current = node;
-    setPreviewNode(node);
   }, []);
 
   const openLinkedFile = React.useCallback((absolutePath: string) => {
     if (!savedPlanProjectRef?.path) return;
     useUIStore.getState().openContextFile(savedPlanProjectRef.path, absolutePath);
   }, [savedPlanProjectRef]);
-  useMarkdownLocalAssets({
-    container: previewNode,
+  const markdownDocumentAssets = useMarkdownLocalAssets({
     filePath: loadedProjectPlanPath,
     workspaceRoot: savedPlanProjectRef?.path ?? null,
     onOpenFile: openLinkedFile,
@@ -267,20 +265,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       // ignore
     }
   }, []);
-  const isSelectingRef = React.useRef(false);
-  const selectionStartRef = React.useRef<number | null>(null);
-  const [isDragging, setIsDragging] = React.useState(false);
-
-  React.useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      isSelectingRef.current = false;
-      selectionStartRef.current = null;
-      setIsDragging(false);
-    };
-    document.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, []);
-
   const extractSelectedCode = React.useCallback((text: string, range: SelectedLineRange): string => {
     const lines = text.split('\n');
     const startLine = Math.max(1, range.start);
@@ -310,6 +294,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     startEdit,
     deleteDraft,
   } = commentController;
+
+  const { isDragging, lineNumbersConfig, isDragReleaseClick } = useLineNumberDragSelection({
+    lineSelection,
+    setLineSelection,
+    onClear: cancel,
+    isMobile,
+  });
 
   React.useEffect(() => {
     setLineSelection(null);
@@ -341,6 +332,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     }
 
     const handleClickOutside = (e: MouseEvent) => {
+      if (isDragReleaseClick()) return;
       const target = e.target as HTMLElement;
       if (
         target.closest('[data-comment-card="true"]') ||
@@ -367,7 +359,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       window.clearTimeout(timeoutId);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
+  }, [cancel, commentText, editingDraftId, isDragReleaseClick, isMobile, lineSelection]);
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
@@ -613,37 +605,47 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
         return;
       }
 
-      const visiblePrompt = await renderMagicPrompt(
-        pendingPlanSend.action === 'improve' ? 'plan.improve.visible' : 'plan.implement.visible',
-        {
-          plan_title: sendPromptTitle,
-        },
-      );
       // A saved plan is a markdown file too, so the agent reads it and ticks
       // its steps there like any other plan file.
       const planFilePath = loadedProjectPlanPath;
-      const instructionsText = await renderMagicPrompt(
-        pendingPlanSend.action === 'improve' ? 'plan.improve.instructions' : 'plan.implement.instructions',
-        {
-          plan_title: sendPromptTitle,
-          plan_path: planFilePath ?? '',
-        },
-      );
-      // A server that answered without the plan's path leaves the agent no
-      // file to read, so the plan substance rides along in the message.
-      const planSubstance = planFilePath
-        ? instructionsText
-        : [
-            instructionsText,
-            '',
-            'The plan is not stored as a file in the repository and has no file path. Its full current contents follow below this note and are the source of truth for the plan. Where the instructions above refer to the plan file, treat the plan as stored in OpenChamber project knowledge (it is edited through the OpenChamber UI): propose plan revisions as plan text in the chat rather than editing a file.',
-            '',
-            content,
-          ].join('\n');
-      const syntheticParts = [{ synthetic: true as const, text: planSubstance }];
       setIsPlanSendSubmitting(true);
 
       try {
+        let prompts: MagicPromptSnapshot;
+        try {
+          // The plan's project owns the prompts, also when the session lands in a new worktree.
+          prompts = await loadMagicPrompts(sendTargetProject.path);
+        } catch (error) {
+          // Nothing was created yet; the send dialog stays open with its choices.
+          toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
+          return;
+        }
+        const visiblePrompt = prompts.render(
+          pendingPlanSend.action === 'improve' ? 'plan.improve.visible' : 'plan.implement.visible',
+          {
+            plan_title: sendPromptTitle,
+          },
+        );
+        const instructionsText = prompts.render(
+          pendingPlanSend.action === 'improve' ? 'plan.improve.instructions' : 'plan.implement.instructions',
+          {
+            plan_title: sendPromptTitle,
+            plan_path: planFilePath ?? '',
+          },
+        );
+        // A server that answered without the plan's path leaves the agent no
+        // file to read, so the plan substance rides along in the message.
+        const planSubstance = planFilePath
+          ? instructionsText
+          : [
+              instructionsText,
+              '',
+              'The plan is not stored as a file in the repository and has no file path. Its full current contents follow below this note and are the source of truth for the plan. Where the instructions above refer to the plan file, treat the plan as stored in OpenChamber project knowledge (it is edited through the OpenChamber UI): propose plan revisions as plan text in the chat rather than editing a file.',
+              '',
+              content,
+            ].join('\n');
+        const syntheticParts = [{ synthetic: true as const, text: planSubstance }];
+
         routeToChat();
 
         let sessionId: string | null = null;
@@ -709,7 +711,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
         // Oversized objectives (huge plans) are distilled into audit
         // criteria inside setSessionGoal — the shared path for every goal
         // source. Here we only compose header + full content.
-        const goalObjective = execution.runAsGoal === true
+        // Improve stops before implementation, so only Implement runs as a goal.
+        const runAsGoal = pendingPlanSend.action === 'implement' && execution.runAsGoal === true;
+        const goalObjective = runAsGoal
           ? [
               `Implement the plan "${sendPromptTitle}" end-to-end${planFilePath ? ` (plan file: ${planFilePath})` : ' (the full plan follows)'}.`,
               planFilePath
@@ -719,7 +723,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
               content,
             ].join('\n')
           : null;
-        useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
+        useSessionGoalArmStore.getState().setArmed(runAsGoal, goalObjective);
         await sendMessage(
           visiblePrompt,
           execution.providerID,
@@ -736,7 +740,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
         setIsPlanSendSubmitting(false);
       }
     },
-    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, isManagedChatPlan, loadedProjectPlanPath, pendingPlanSend, routeToChat, savedPlanId, savedPlanProjectRef, sendMessage, sendPromptTitle, setCurrentSession]
+    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, isManagedChatPlan, loadedProjectPlanPath, pendingPlanSend, routeToChat, savedPlanId, savedPlanProjectRef, sendMessage, sendPromptTitle, setCurrentSession, t]
   );
 
   const blockWidgets = React.useMemo(() => {
@@ -914,7 +918,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
         target={pendingPlanSend?.target ?? 'session'}
         projectDirectory={savedPlanProjectRef?.path ?? currentProjectRef?.path ?? null}
         submitting={isPlanSendSubmitting}
-        allowRunAsGoal
+        allowRunAsGoal={pendingPlanSend?.action === 'implement'}
         onConfirm={handleConfirmPlanSend}
       />
 
@@ -943,7 +947,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                         </div>
                       }
                     >
-                      <SimpleMarkdownRenderer content={content} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} />
+                      <SimpleMarkdownRenderer content={content} documentAssets={markdownDocumentAssets} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} />
                     </ErrorBoundary>
                   </div>
                 ) : (
@@ -963,71 +967,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                           end: Math.max(lineSelection.start, lineSelection.end),
                         }
                         : undefined}
-                      lineNumbersConfig={{
-                        domEventHandlers: {
-                          mousedown: (view, line, event) => {
-                            if (!(event instanceof MouseEvent)) return false;
-                            if (event.button !== 0) return false;
-                            event.preventDefault();
-                            const lineNumber = view.state.doc.lineAt(line.from).number;
-
-                            if (
-                              lineSelection &&
-                              !event.shiftKey &&
-                              Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
-                              Math.max(lineSelection.start, lineSelection.end) === lineNumber
-                            ) {
-                              setLineSelection(null);
-                              cancel();
-                              isSelectingRef.current = false;
-                              selectionStartRef.current = null;
-                              setIsDragging(false);
-                              return true;
-                            }
-
-                            if (isMobile && lineSelection && !event.shiftKey) {
-                              const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);
-                              const end = Math.max(lineSelection.start, lineSelection.end, lineNumber);
-                              setLineSelection({ start, end });
-                              isSelectingRef.current = false;
-                              selectionStartRef.current = null;
-                              setIsDragging(false);
-                              return true;
-                            }
-
-                            isSelectingRef.current = true;
-                            selectionStartRef.current = lineNumber;
-                            setIsDragging(true);
-
-                            if (lineSelection && event.shiftKey) {
-                              const start = Math.min(lineSelection.start, lineNumber);
-                              const end = Math.max(lineSelection.end, lineNumber);
-                              setLineSelection({ start, end });
-                            } else {
-                              setLineSelection({ start: lineNumber, end: lineNumber });
-                            }
-
-                            return true;
-                          },
-                          mouseover: (view, line, event) => {
-                            if (!(event instanceof MouseEvent)) return false;
-                            if (event.buttons !== 1) return false;
-                            if (!isSelectingRef.current || selectionStartRef.current === null) return false;
-                            const lineNumber = view.state.doc.lineAt(line.from).number;
-                            const start = Math.min(selectionStartRef.current, lineNumber);
-                            const end = Math.max(selectionStartRef.current, lineNumber);
-                            setLineSelection({ start, end });
-                            setIsDragging(true);
-                            return false;
-                          },
-                          mouseup: () => {
-                            isSelectingRef.current = false;
-                            selectionStartRef.current = null;
-                            setIsDragging(false);
-                            return false;
-                          },
-                        },
-                    }}
+                      lineNumbersConfig={lineNumbersConfig}
                   />
                 </div>
                 )}

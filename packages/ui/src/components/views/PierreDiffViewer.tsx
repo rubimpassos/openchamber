@@ -22,6 +22,7 @@ import {
   buildPierreLineAnnotations,
   type PierreAnnotationData,
   PierreDiffCommentOverlays,
+  isWholeFileComment,
   toPierreAnnotationId,
   useInlineCommentController,
 } from '@/components/comments';
@@ -30,6 +31,7 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
 import { ensurePierreThemeRegistered, getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
+import { DIFFS_HIGHLIGHTER } from '@/lib/shiki/diffsHighlighter';
 import { getDefaultTheme } from '@/lib/theme/themes';
 
 import { useDeviceInfo } from '@/lib/device';
@@ -42,6 +44,7 @@ import { findWordAtOffset } from '@/lib/diff/findWord';
 import type { DiffFindSide } from '@/lib/diff/diffFind';
 import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
 import { DiffStickyScrollbar } from './DiffStickyScrollbar';
+import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 
 /**
  * A click on a collapsed-context expander of a partial (patch-only) diff.
@@ -87,6 +90,8 @@ interface PierreDiffViewerProps {
   fileDiff?: FileDiffMetadata;
   language: string;
   fileName?: string;
+  /** The diff this is, for comments; absent for uncommitted changes. */
+  commentOrigin?: DiffCommentOrigin;
   renderSideBySide: boolean;
   wrapLines?: boolean;
   layout?: 'fill' | 'inline';
@@ -1010,6 +1015,7 @@ const PierreDiffViewerBody: React.FC<
   fileDiff: incomingFileDiff,
   language,
   fileName,
+  commentOrigin,
   renderSideBySide,
   wrapLines,
   layout = 'fill',
@@ -1041,6 +1047,7 @@ const PierreDiffViewerBody: React.FC<
   const diffCommentController = useInlineCommentController<SelectedLineRange>({
     source: 'diff',
     fileLabel: fileName || 'unknown',
+    origin: commentOrigin,
     language,
     getCodeForRange: (range) => extractSelectedCode(original, modified, incomingFileDiff, range),
     toStoreRange: (range) => ({
@@ -1056,7 +1063,7 @@ const PierreDiffViewerBody: React.FC<
   });
 
   const {
-    drafts: fileDrafts,
+    drafts: diffDrafts,
     selection,
     setSelection,
     commentText,
@@ -1067,6 +1074,8 @@ const PierreDiffViewerBody: React.FC<
     startEdit,
     deleteDraft,
   } = diffCommentController;
+  // Whole-file comments have no lines to sit under; the file header shows them.
+  const fileDrafts = useMemo(() => diffDrafts.filter((draft) => !isWholeFileComment(draft)), [diffDrafts]);
 
   const selectionRef = useRef<SelectedLineRange | null>(null);
   const editingDraftIdRef = useRef<string | null>(null);
@@ -1676,6 +1685,7 @@ const PierreDiffViewerBody: React.FC<
       light: lightTheme.metadata.id,
     },
     themeType: isDark ? 'dark' : 'light',
+    preferredHighlighter: DIFFS_HIGHLIGHTER,
     diffStyle: renderSideBySide ? 'split' : 'unified',
     diffIndicators: 'none',
     hunkSeparators: 'line-info-basic',

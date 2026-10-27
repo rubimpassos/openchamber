@@ -14,6 +14,44 @@ import { recordStartupPerformance } from './startup-performance.js';
 import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
+import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
+import { OPENCODE_TRUST_ROUTE } from '../opencode-trust/index.js';
+import { createSessionDirectoryResolver } from '../opencode-trust/session-directory.js';
+
+/**
+ * The abort signal for one upstream read.
+ *
+ * It ends when the read takes longer than `timeoutMs`, and when the client
+ * that asked for it goes away. The second half matters: a read nobody waits
+ * for any more must not keep the upstream request running.
+ *
+ * `res` emits 'close' for a finished response too, so the abort only goes out
+ * when the response never ended - that is the client hanging up.
+ *
+ * Build the signal before any await that runs ahead of the read. The path
+ * canonicalization in front of it can wait on a realpath, and a client that
+ * hangs up during that wait would otherwise be missed and still get its
+ * upstream read.
+ */
+export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const client = new AbortController();
+  const abort = () => {
+    // A finished response closes too, and its read is already done. Only a
+    // response that never ended means the client hung up.
+    if (res?.writableEnded) return;
+    client.abort();
+  };
+  if (res?.destroyed) {
+    // The client was already gone when the request reached us.
+    abort();
+  } else {
+    res?.once?.('close', abort);
+  }
+  const signal = AbortSignal.any([timeout, client.signal]);
+  signal.addEventListener('abort', () => res?.off?.('close', abort), { once: true });
+  return signal;
+};
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
@@ -349,23 +387,31 @@ export const registerOpenCodeProxy = (app, deps) => {
     ensureOpenCodeApiPrefix,
     SSE_HEARTBEAT_INTERVAL_MS = DEFAULT_SSE_HEARTBEAT_INTERVAL_MS,
     SSE_UPSTREAM_STALL_TIMEOUT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
+    SESSION_UPSTREAM_TIMEOUT_MS: sessionUpstreamTimeoutOverrideMs,
     getSseUpstreamStallTimeoutMs = () => SSE_UPSTREAM_STALL_TIMEOUT_MS,
     readWorktreeBootstrapStatus = getWorktreeBootstrapStatus,
     WORKTREE_READY_TIMEOUT_MS = 5 * 60 * 1000,
     waitForWorktreeRemovalToSettle = waitForWorktreeRemoval,
     WORKTREE_REMOVAL_HOLD_MS = 60 * 1000,
-    // OpenCode 2.x has no archive route, so archive state is OpenChamber's own
-    // and the proxy folds it onto the sessions it serves (`time.archived`).
-    // Session metadata lives on OpenCode's record; the proxy lays over only
+    // OpenCode holds archive state since 2.1; the archive file keeps it for
+    // sessions OpenCode cannot archive (deleted directories) and for entries not
+    // migrated yet, and the proxy folds those onto the sessions it serves
+    // (`time.archived`). Session metadata lives on OpenCode's record; the proxy lays over only
     // the entries an older OpenChamber left in the legacy file until they are
     // migrated.
     getArchivedSessions = null,
     getStoredSessionMetadata = null,
+    // OpenCode's unread state predates OpenChamber reading it; turns that ended
+    // before the baseline are served as seen (`unread-baseline.js`).
+    getUnreadBaseline = null,
     // Isolated spaces, when the feature's switch is on: the merged session list, and the hub
     // whose space events the global SSE stream carries beside the host's. Both absent means
     // the host's own answers go out exactly as before spaces.
     mergeSpaceSessionList = null,
     spaceEventHub = null,
+    // The folder trust check (`../opencode-trust`): requests for a folder
+    // whose configuration runs code wait for the user's trust.
+    openCodeTrust = null,
   } = deps;
 
   /**
@@ -401,9 +447,21 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
+  /** The unread baseline in epoch ms, or `null` when unknown; unknown serves the records as they are. */
+  const readUnreadBaseline = async () => {
+    if (!getUnreadBaseline) return null;
+    try {
+      const since = await getUnreadBaseline();
+      return Number.isSafeInteger(since) ? since : null;
+    } catch (error) {
+      console.warn('[proxy] unread baseline unavailable:', error?.message ?? error);
+      return null;
+    }
+  };
+
   // A number archives, `null` is an explicit unarchive (drops the stamp OpenCode
-  // still carries for a session migrated from v1), and a session the file does
-  // not mention keeps whatever OpenCode says.
+  // carries), and a session the file does not mention keeps whatever OpenCode
+  // says.
   const withArchivedAt = (session, archived) => {
     if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
     if (!Object.prototype.hasOwnProperty.call(archived, session.id)) return session;
@@ -428,19 +486,31 @@ export const registerOpenCodeProxy = (app, deps) => {
     return { ...session, metadata: ours };
   };
 
-  const overlaySession = (session, archived, stored) => {
+  const overlaySession = (session, { archived, stored, unreadSince }) => {
     let result = session;
     if (archived) result = withArchivedAt(result, archived);
     if (stored) result = withStoredMetadata(result, stored);
+    if (unreadSince !== null) result = withUnreadBaseline(result, unreadSince);
     return result;
   };
+
+  const readOwnedState = async () => {
+    const [archived, stored, unreadSince] = await Promise.all([
+      readArchivedSessions(),
+      readStoredSessionMetadata(),
+      readUnreadBaseline(),
+    ]);
+    return { archived, stored, unreadSince };
+  };
+
+  const hasOwnedState = ({ archived, stored, unreadSince }) => Boolean(archived || stored || unreadSince !== null);
 
   const overlayOwnedStateOnList = async (payload) => {
     const records = sessionListRecords(payload);
     if (!records) return payload;
-    const [archived, stored] = await Promise.all([readArchivedSessions(), readStoredSessionMetadata()]);
-    if (!archived && !stored) return payload;
-    const overlaid = records.map((session) => overlaySession(session, archived, stored));
+    const owned = await readOwnedState();
+    if (!hasOwnedState(owned)) return payload;
+    const overlaid = records.map((session) => overlaySession(session, owned));
     return Array.isArray(payload) ? overlaid : { ...payload, data: overlaid };
   };
 
@@ -456,7 +526,30 @@ export const registerOpenCodeProxy = (app, deps) => {
   }
   app.set('opencodeProxyConfigured', true);
 
+  // Registered ahead of the readiness hold: the trust answer is OpenChamber's
+  // own and needs no running OpenCode.
+  if (openCodeTrust) {
+    app.all(OPENCODE_TRUST_ROUTE, async (req, res) => {
+      try {
+        const result = await openCodeTrust.handleRoute({ method: req.method, query: req.query, body: req.body });
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(result.status).json(result.body);
+      } catch (error) {
+        console.error('[proxy] OpenCode trust check failed:', error?.message ?? error);
+        res.status(500).json({ error: 'Failed to check the folder configuration' });
+      }
+    });
+  }
+
   const isAbortError = (error) => error?.name === 'AbortError';
+  // What a session route answers when its upstream read fails: 504 when the
+  // read ran out of time, the same answer the generic proxy gives, and 503
+  // when it failed for another reason. A client that hung up gets nothing -
+  // there is nobody left to answer.
+  const sessionRouteErrorStatus = (error) => {
+    if (isAbortError(error)) return null;
+    return isProxyTimeoutError(error) ? 504 : 503;
+  };
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
     realpath: fs?.promises?.realpath?.bind(fs.promises),
@@ -574,6 +667,10 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const PROXY_REQUEST_TIMEOUT_MS = normalizeProxyTimeout(LONG_REQUEST_TIMEOUT_MS);
+  // The session routes read OpenCode themselves, so they take the generic
+  // proxy's deadline explicitly. The UI waits 30s and retries; a shorter cut
+  // here turned a slow but working session open into a 504 retry loop.
+  const SESSION_UPSTREAM_TIMEOUT_MS = sessionUpstreamTimeoutOverrideMs ?? PROXY_REQUEST_TIMEOUT_MS;
   const PROXY_TIMEOUT_MARKER = Symbol('openchamberProxyTimedOut');
 
   // OpenCode 2.x runs provider connection through `/api/integration/*`, whose
@@ -797,7 +894,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
-  const fetchSessionListPayload = async (upstreamPath, { req = null, timeoutMs = null } = {}) => {
+  const fetchSessionListPayload = async (upstreamPath, { req = null, signal = null, timeoutMs = SESSION_UPSTREAM_TIMEOUT_MS } = {}) => {
     const headers = req
       ? {
           ...normalizeForwardedDirectoryHeaders(collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())),
@@ -812,7 +909,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
       method: 'GET',
       headers,
-      ...(typeof timeoutMs === 'number' ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      signal: signal ?? createUpstreamReadSignal({ timeoutMs }),
     });
     const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
     const bodyText = await upstream.text();
@@ -841,8 +938,12 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const forwardSanitizedSessionListRequest = async (req, res, next) => {
     try {
+      // The signal is built before the path canonicalization: that waits on a
+      // realpath, and a client that hangs up during the wait must still cancel
+      // the upstream read.
+      const signal = createUpstreamReadSignal({ res, timeoutMs: SESSION_UPSTREAM_TIMEOUT_MS });
       const upstreamPath = await getRequestUpstreamPath(req);
-      const result = await fetchSessionListPayload(upstreamPath, { req });
+      const result = await fetchSessionListPayload(upstreamPath, { req, signal });
 
       res.status(result.upstream.status);
       applyForwardProxyResponseHeaders(result.upstream.headers, res);
@@ -868,12 +969,13 @@ export const registerOpenCodeProxy = (app, deps) => {
       const wantsSpaces = typeof mergeSpaceSessionList === 'function' && !listQuery.get('cursor') && !scopedToDirectory;
       res.json(wantsSpaces ? await mergeSpaceSessionList(hostList) : hostList);
     } catch (error) {
-      if (isAbortError(error)) {
+      const status = sessionRouteErrorStatus(error);
+      if (status === null) {
         return;
       }
-      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSanitizedSessionListRequest', error)}`);
+      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSanitizedSessionListRequest', error, status === 504)}`);
       if (!res.headersSent) {
-        res.status(503).json({ error: 'OpenCode service unavailable' });
+        res.status(status).json({ error: status === 504 ? 'OpenCode upstream timed out' : 'OpenCode service unavailable' });
         return;
       }
       next(error);
@@ -1017,6 +1119,29 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   });
 
+  // OpenCode loads a folder's plugins and starts its MCP servers on the first
+  // request that names the folder. A folder whose configuration runs code
+  // stays closed to OpenCode until the user trusts that configuration.
+  if (openCodeTrust) {
+    // Routes that run in a session's own location are checked against the
+    // session's folder, whatever folder the request names.
+    const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders });
+    app.use('/api', async (req, res, next) => {
+      try {
+        const refusal = await openCodeTrust.refusalFor({
+          method: req.method,
+          path: req.originalUrl || req.url,
+          headers: req.headers,
+          resolveSessionDirectory,
+        });
+        if (!refusal) return next();
+        if (!res.headersSent) res.status(refusal.status).json(refusal.body);
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
+
   // V2 lists sessions across directories on every platform and owns pagination.
   app.get('/api/session', (req, res, next) => {
     return forwardSanitizedSessionListRequest(req, res, next);
@@ -1025,10 +1150,18 @@ export const registerOpenCodeProxy = (app, deps) => {
   // One session: the same overlay, so a detail read agrees with the list it
   // came from. Everything else about the record is forwarded untouched.
   app.get('/api/session/:sessionID', async function forwardSessionGetRequest(req, res, next) {
-    if (typeof getArchivedSessions !== 'function' && typeof getStoredSessionMetadata !== 'function') return next();
+    if (
+      typeof getArchivedSessions !== 'function'
+      && typeof getStoredSessionMetadata !== 'function'
+      && !getUnreadBaseline
+    ) return next();
     try {
+      // The signal is built before the path canonicalization: that waits on a
+      // realpath, and a client that hangs up during the wait must still cancel
+      // the upstream read.
+      const signal = createUpstreamReadSignal({ res, timeoutMs: SESSION_UPSTREAM_TIMEOUT_MS });
       const upstreamPath = await getRequestUpstreamPath(req);
-      const result = await fetchSessionListPayload(upstreamPath, { req });
+      const result = await fetchSessionListPayload(upstreamPath, { req, signal });
 
       res.status(result.upstream.status);
       applyForwardProxyResponseHeaders(result.upstream.headers, res);
@@ -1043,19 +1176,20 @@ export const registerOpenCodeProxy = (app, deps) => {
         return;
       }
 
-      const [archived, stored] = await Promise.all([readArchivedSessions(), readStoredSessionMetadata()]);
-      if (!archived && !stored) {
+      const owned = await readOwnedState();
+      if (!hasOwnedState(owned)) {
         res.end(result.bodyText);
         return;
       }
 
-      const overlaid = overlaySession(session, archived, stored);
+      const overlaid = overlaySession(session, owned);
       res.json(record.data && typeof record.data === 'object' ? { ...record, data: overlaid } : overlaid);
     } catch (error) {
-      if (isAbortError(error)) return;
-      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSessionGetRequest', error)}`);
+      const status = sessionRouteErrorStatus(error);
+      if (status === null) return;
+      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSessionGetRequest', error, status === 504)}`);
       if (!res.headersSent) {
-        res.status(503).json({ error: 'OpenCode service unavailable' });
+        res.status(status).json({ error: status === 504 ? 'OpenCode upstream timed out' : 'OpenCode service unavailable' });
         return;
       }
       next(error);
@@ -1068,8 +1202,12 @@ export const registerOpenCodeProxy = (app, deps) => {
     const keepWhole = parsePartShellsHeader(req.get(PART_SHELLS_HEADER));
     if (!keepWhole) return next();
     try {
+      // The signal is built before the path canonicalization: that waits on a
+      // realpath, and a client that hangs up during the wait must still cancel
+      // the upstream read.
+      const signal = createUpstreamReadSignal({ res, timeoutMs: SESSION_UPSTREAM_TIMEOUT_MS });
       const upstreamPath = await getRequestUpstreamPath(req);
-      const result = await fetchSessionListPayload(upstreamPath, { req });
+      const result = await fetchSessionListPayload(upstreamPath, { req, signal });
       res.status(result.upstream.status);
       applyForwardProxyResponseHeaders(result.upstream.headers, res);
       res.setHeader('content-type', result.contentType);
@@ -1079,10 +1217,11 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
       res.json(shellMessagePage(result.payload, keepWhole));
     } catch (error) {
-      if (isAbortError(error)) return;
-      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardMessageListRequest', error)}`);
+      const status = sessionRouteErrorStatus(error);
+      if (status === null) return;
+      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardMessageListRequest', error, status === 504)}`);
       if (!res.headersSent) {
-        res.status(503).json({ error: 'OpenCode service unavailable' });
+        res.status(status).json({ error: status === 504 ? 'OpenCode upstream timed out' : 'OpenCode service unavailable' });
         return;
       }
       next(error);

@@ -13,7 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -152,6 +152,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const toggleSelectionMode = useSessionMultiSelectStore((state) => state.toggleMode);
 
   const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
+  const isOverviewOpen = useUIStore((state) => state.isOverviewOpen);
+  const overviewAvailable = useUIStore((state) => state.overviewFeatureAvailable);
   const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isSuggestedOpen = useUIStore((state) => state.isSuggestedTasksPageOpen);
   const openSuggestions = useOpenSuggestionCount();
@@ -173,19 +175,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
-  const worktreeSortOrder = useSessionDisplayStore((state) => state.worktreeSortOrder);
-  const setWorktreeSortOrder = useSessionDisplayStore((state) => state.setWorktreeSortOrder);
-  const sidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
-  const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
-  const listSessionGrouping = useSessionDisplayStore((state) => state.listSessionGrouping);
-  const setListSessionGrouping = useSessionDisplayStore((state) => state.setListSessionGrouping);
+  const sidebarGrouping = useSessionDisplayStore(resolveSidebarGrouping);
+  const setSidebarGrouping = useSessionDisplayStore((state) => state.setSidebarGrouping);
+  const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
+  const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
-  // VS Code has no mode switch and always renders the projects view.
-  const timelineView = showProjectDisplayControls && sidebarViewMode === 'timeline';
-  // The timeline always lists every project, so the grouped view's
-  // single-project choice does not apply there.
-  const isSingleProjectMode = showProjectDisplayControls && !timelineView && projectDisplayMode === 'single';
+  // VS Code always groups under its workspace.
+  const timeGrouping = showProjectDisplayControls && sidebarGrouping === 'time';
+  const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
 
   // One choice per line, rarely touched orders behind submenus that name the
   // current choice, so the menu stays short: selection first, then the view,
@@ -229,67 +227,36 @@ export function SidebarHeader(props: Props): React.ReactNode {
         : t('sessions.sidebar.header.actions.selectSessions')}</span>
     </DropdownMenuItem>,
   ];
+  // One view: works under their projects, or every project's works in one
+  // list by time, which has no project headers to sort.
   if (showProjectDisplayControls) {
-    displayMenuSections.push(<>
-      <DropdownMenuLabel>{t('sessions.sidebar.header.viewMode.label')}</DropdownMenuLabel>
-      {([
-        ['projects', 'sessions.sidebar.header.viewMode.projects'],
-        ['timeline', 'sessions.sidebar.header.viewMode.timeline'],
-      ] as const).map(([mode, labelKey]) => (
-        <DropdownMenuItem
-          key={mode}
-          onClick={() => {
-            setSidebarViewMode(mode);
-            void updateDesktopSettings({ sidebarViewMode: mode });
-          }}
-          className="flex items-center justify-between"
-        >
-          <span>{t(labelKey)}</span>
-          {sidebarViewMode === mode ? checkMark : null}
-        </DropdownMenuItem>
-      ))}
-    </>);
-  }
-  // The list view keeps projects in the manual order and has no worktree
-  // groups, so it offers its own layout instead; VS Code groups by workspace
-  // only, so it sorts projects alone.
-  if (timelineView) {
     displayMenuSections.push(choiceSubmenu('sessions.sidebar.header.listGrouping.label', [
       ['project', 'sessions.sidebar.header.listGrouping.project'],
       ['time', 'sessions.sidebar.header.listGrouping.time'],
-    ] as const, listSessionGrouping, (grouping) => {
-      setListSessionGrouping(grouping);
-      void updateDesktopSettings({ sidebarListSessionGrouping: grouping });
+    ] as const, sidebarGrouping, (grouping) => {
+      setSidebarGrouping(grouping);
+      void updateDesktopSettings({ sidebarGrouping: grouping });
     }));
-  } else {
-    displayMenuSections.push(<>
-      {choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
-        ['manual', 'sessions.sidebar.header.projectSort.manual'],
-        ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
-        ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
-        ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
-        ['recent', 'sessions.sidebar.header.projectSort.recent'],
-      ] as const, projectSortOrder, (order) => {
-        setProjectSortOrder(order);
-        void updateDesktopSettings({ sidebarProjectSortOrder: order });
-      })}
-      {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.actions.sortWorktrees', [
-        ['recent', 'sessions.sidebar.header.worktreeSort.recent'],
-        ['manual', 'sessions.sidebar.header.projectSort.manual'],
-        ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
-      ] as const, worktreeSortOrder, (order) => {
-        setWorktreeSortOrder(order);
-        void updateDesktopSettings({ sidebarWorktreeSortOrder: order });
-      }) : null}
-      {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
-        ['all', 'sessions.sidebar.header.projectDisplay.all'],
-        ['single', 'sessions.sidebar.header.projectDisplay.single'],
-      ] as const, projectDisplayMode, (mode) => {
-        setProjectDisplayMode(mode);
-        void updateDesktopSettings({ sidebarProjectDisplayMode: mode });
-      }) : null}
-    </>);
   }
+  displayMenuSections.push(<>
+    {!timeGrouping ? choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
+      ['manual', 'sessions.sidebar.header.projectSort.manual'],
+      ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
+      ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
+      ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
+      ['recent', 'sessions.sidebar.header.projectSort.recent'],
+    ] as const, projectSortOrder, (order) => {
+      setProjectSortOrder(order);
+      void updateDesktopSettings({ sidebarProjectSortOrder: order });
+    }) : null}
+    {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
+      ['all', 'sessions.sidebar.header.projectDisplay.all'],
+      ['single', 'sessions.sidebar.header.projectDisplay.single'],
+    ] as const, projectDisplayMode, (mode) => {
+      setProjectDisplayMode(mode);
+      void updateDesktopSettings({ sidebarProjectDisplayMode: mode });
+    }) : null}
+  </>);
   if (showSectionControls) {
     displayMenuSections.push(<>
       {toggleItem('sessions.sidebar.header.displayMode.showChats', showChatsSection, () => {
@@ -304,11 +271,16 @@ export function SidebarHeader(props: Props): React.ReactNode {
         setShowWorkSection(!showWorkSection);
         void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });
       }) : null}
-      {/* List rows always carry two lines; Tree keeps Pinned and In work on one unless asked. */}
-      {!timelineView ? toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
+      {/* A work in In work leaves its project unless asked; VS Code always keeps it there. */}
+      {sessionWorkEnabled && showWorkSection && showProjectDisplayControls ? toggleItem('sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, () => {
+        setKeepWorkInPlace(!keepWorkInPlace);
+        void updateDesktopSettings({ sidebarKeepWorkInPlace: !keepWorkInPlace });
+      }) : null}
+      {/* Rows that mix projects keep one line unless asked. */}
+      {toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
-      }) : null}
+      })}
     </>);
   }
   if (!isSingleProjectMode) {
@@ -363,6 +335,17 @@ export function SidebarHeader(props: Props): React.ReactNode {
               titlebar controls. */}
           <div className="ms-[3px] flex min-w-0 items-center gap-1.5">
             <div ref={builtinPagesRef} className="flex items-center gap-1.5">
+              {showSourceBoard && overviewAvailable ? (
+                <SidebarPageButton
+                  label={t('overview.title')}
+                  pressed={isOverviewOpen}
+                  onClick={() => useUIStore.getState().setOverviewOpen(!isOverviewOpen)}
+                  className={headerActionButtonClass}
+                >
+                  <Icon name="compass-3" className={headerActionIconClass} />
+                </SidebarPageButton>
+              ) : null}
+
               {showSourceBoard ? (
                 <SidebarPageButton
                   label={t('sourceBoard.title')}

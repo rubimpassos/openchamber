@@ -29,7 +29,27 @@ costs Chrome a 200 to 300 ms frame whenever an accessibility client is on,
 on every panel close and every switch away from the file surface; both must
 happen in one commit, so the editor is never hidden while attached.
 `CodeMirrorEditor` reconfigures only the compartments whose input changed,
-so `FilesView` keeps its line-number config's identity across renders.
+so `FilesView` and `PlanView` keep their line-number config's identity across
+renders.
+
+## Selecting lines for a comment
+
+In `FilesView` and `PlanView` a press on a line number starts a line range for
+a comment, Shift+press extends it, and a press on the only selected line
+clears it. `comments/useLineNumberDragSelection.ts` owns this for both, with
+the gutter config they pass to the editor. After the press the drag is
+followed on the window: the range ends at the line at the pointer's height
+wherever the pointer is, and while it is held at the editor's top or bottom
+edge, or past it, the editor scrolls and the range follows. The click that
+ends a drag lands on whatever the pointer ended over, so each view's
+click-outside handler skips it (`isDragReleaseClick`) and the range stays.
+
+### Why the window follows the drag and not the gutter
+
+The gutter only sees the pointer while it is over the line-number column,
+about 40 px wide. Extending on gutter `mouseover` froze the range as soon as a
+hand drifted into the code, never scrolled, and the click after a release that
+was not over the pressed line number often cleared the range (#5556).
 
 File tree ownership and request rules are in `files/DOCUMENTATION.md`.
 `DiffView` gates repository discovery, comparisons, per-file reads, viewport
@@ -50,7 +70,21 @@ one it was created from, or the default branch; never the branch itself), so a
 repository without a remote gets it from the reflog and the default branch
 does not get it at all. The default follows the branch until the person picks a scope,
 which is persisted on the tab; coercing a default Branch view back to the
-working tree is not persisted either. Entry points that name what they show keep
+working tree is not persisted either. Such a tab starts on Branch and shows
+the base being resolved until the base is known; it moves to the working tree
+only once the branch is known to have no base, so the view never switches
+under the person a moment after opening (it used to open on the working tree
+and jump to Branch when the base arrived). The Git view and the pull request
+view take the same base for a new pull request and for updates
+(`useBranchPullRequestBase`): a base chosen for the branch, its open pull
+request's target, or the parent it was made on (a lower layer of a stack),
+and the worktree's own guess only when none of those answers. The Git view,
+Changes, mobile Changes and Walkthrough each ask for the branch's pull request
+themselves (`hooks/useBranchPullRequestRequest.ts`) while shown: the base
+prefers its target, and the Git header's pull request chip reads the same
+status. Without asking, a stacked branch checked out in the same worktree
+compared against the default branch, and a project's own checkout (which has no
+sidebar worktree row) showed no chip, until some other surface happened to ask. Entry points that name what they show keep
 their scope: the work-status Changes row counts working-tree changes and opens
 `working`, and a file opened from the Git panel or a tool card opens its own
 working or staged diff.
@@ -61,6 +95,56 @@ re-reads its patch only when its own `revision` from that listing moved
 command costs no patch reads, and an edit costs one for the edited file. A
 listing without revisions falls back to the status revision for every file.
 Desktop Changes and mobile Changes share this.
+
+The target repository follows `git/pullRequestTarget.ts`: a repository that is
+not a fork targets itself; a fork targets the person's last explicit choice
+for that repository (`localStorage` `openchamber:pr-create-target:v1`, at most
+50 entries), else itself with positive push evidence
+(`viewerCanPush === true` from the upstream read), else its parent. The base list holds
+only the selected target's branches: the bound remote's refs for the fork, the
+provider's branch list for the parent, read only while the parent is selected.
+Until that list arrives the base select is disabled and the status line says
+so; a failed read offers retry instead of an empty or foreign list.
+
+### Why missing push evidence chooses the parent for a fork
+
+`loadDetectedUpstreamRepo` converts missing evidence to false only for this
+default-selection policy. A non-fork still chooses itself, and a remembered
+fork target still wins. This is not a permission denial or an authorization
+check; mutation guards remain server-owned.
+
+### Native stack creation and explicit registration
+
+The form keeps upstream's branch-parent base plus the fork's ancestry lookup
+and explicit stack shortcut. A user-chosen base wins over later detection.
+The existing status line shows the parent, ambiguous detection or retry without
+growing the form. A branch with an existing open PR cannot create another through
+the shortcut.
+
+A native create's `stacked` result is authoritative, including refusal. Only
+a create that omits that result takes `registerCreatedStack`: it re-reads the
+created PR and checks its project, number, head and base before sending its
+current SHA and a create-derived registration key. A runtime or mutation-scope
+change stops registration. Registration failure retains the created PR and
+reports that stack registration still needs attention.
+
+## Pushing for review
+
+Where the repository's host creates changes by pushing for review
+(`features.createByPush`), the Git panel's change section replaces the pull
+request form: the tip commit's subject read only (the commit message is the
+description), topic, hashtags, work in progress (sharing the draft choice's
+remembered value) and private, and one action, Push for review. It shows on
+the target branch itself too, the usual way to work on such a host. Before it
+is enabled the commits between the target and HEAD are read
+(`git/changeIdPreflight.ts`): none to send, or an older commit without a
+Change-Id, holds it back; the checked-out commit alone without one offers Add
+Change-Id, which amends it after a confirmation (`GitAPI.addChangeIdToHead`).
+With an open change, a strip above it offers Upload patchset while the
+status's `localRevision.uploadedAs` is null. The push is a tracked network
+operation through `useBranchPush().pushForReview`, never Publish. The Git
+header's change chip shows its place in the status's chain
+(`stacks.preview.position`).
 
 ## Nested repositories
 
@@ -138,6 +222,10 @@ walkthrough behaves the same on every surface. The panel header never wraps:
 then the step arrows and Generate, then the scope label), with the CSS in
 `index.css`.
 
+The walkthrough's stream column has a zero minimum width so long diff lines
+cannot widen it beyond the panel. Explanations wrap within that column; code
+uses the shared diff wrap preference and scrolls horizontally when wrap is off.
+
 The Git panel header (`git/GitHeader.tsx`) collapses the same way. The
 repository picker truncates down to its icon and chevron first, then the
 branch picker; their names sit in a grid track with no minimum, so neither
@@ -176,37 +264,8 @@ under the OpenChamber data directory and repository plans in a custom folder.
 accepts comments and trailing commas for preview without changing the source
 text. `JsonTreeView` defaults to strict JSON parsing for other callers.
 
-## Stacked pull request creation
+`FilesView` gives `JsonTreeView` the pane's full height. Its toolbar does not shrink, and its flex body has `min-height: 0`, so `JsonTreeViewer` gets the remaining height as its scroll viewport. Above 200 rows, the virtualizer mounts only the visible range and overscan. Chat callers keep their absolute `400px` and `70vh` height caps.
 
-`git/PullRequestSection.tsx` identifies a stacked create base with one GitHub
-lookup for the selected head branch, restricted to the destination repository.
-It shows the parent PR and registers a successfully created stacked PR through
-the stack registration route. A refused or unavailable native registration
-leaves the created PR valid and reports a quiet inferred-stack note.
-
-Without a stack shortcut, `git/useStackParentBase.ts` asks
-`githubPullStackParent` which open PR in the target the branch sits on, and the
-form preselects that PR's head as the base unless the person already picked
-one (`baseTouched` in the draft snapshot). The reserved status line under the
-base shows the check, "Stacked on #N" with a "Use <default>" switch back,
-ambiguity (no preselection) or a failed check with retry. A failed check never
-counts as "not stacked" and never changes the base.
-
-The target repository follows `git/pullRequestTarget.ts`: a repository that is
-not a fork targets itself; a fork targets the person's last explicit choice
-for that repository (`localStorage` `openchamber:pr-create-target:v1`, at most
-50 entries), else itself when the bound account can push to it
-(`viewerCanPush` from the upstream read), else its parent. The base list holds
-only the selected target's branches: the bound remote's refs for the fork, the
-provider's branch list for the parent, read only while the parent is selected.
-Until that list arrives the base select is disabled and the status line says
-so; a failed read offers retry instead of an empty or foreign list.
-
-`git/StackedPullCreateDialog.tsx` reuses that form with the top open stack head
-prefilled. An existing PR on the checked-out branch disables creation and points
-to Git's branch controls. Web, Electron and both mobile shells share the form;
-VS Code exposes no stack creation entry point. The branch PR preview shares
-the live stack section documented in `../references/DOCUMENTATION.md`.
 `JsonTreeViewer` (Files, chat tool output) draws its rows with the file
 tree's parts, `fileTreeRowPaddingLeft` and `FileTreeIndentGuides`, plus a
 copy of `FileTreeChevron`'s look, so nesting reads the same in both trees.
@@ -223,15 +282,31 @@ and showed `"</head>"` as `"<head/>"`. That is why the chevron is a copy:
 `FileTreeChevron`'s `rtl:-rotate-90` follows `<html dir>` and would point the
 unmirrored arrow up inside the LTR block.
 
+### Why a bounded flex body and not percentage max-height alone
+
+A percentage max-height inside auto-height wrappers let the inner viewport grow to the entire virtual list. The Files pane then scrolled outside the virtualizer, which mounted every row and froze the renderer on large JSON. The flex layout keeps the virtualizer's viewport bounded without changing file limits, preview preferences or saved tabs.
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`
 and the selection owned by `usePullRequestComparison`. PR mode reads the
-published patch of a GitHub pull request or a GitLab merge request through
-`/api/walkthrough/pr-diff`, always through the checkout's bound read context;
-without one, PR mode is not offered and reads nothing. On GitLab projects the
-mode, picker and messages use merge-request wording and `!` numbers through
-`changeRequestCopy`. It includes no local edits
+published patch of a change request through `/api/walkthrough/pr-diff`, always
+through the checkout's bound read context, and only for a provider the server
+serves (`useSourceControlProviderServing`); for a provider the server does
+not serve, PR mode is not offered and reads nothing. While the provider list
+is unknown (first visit, the first read out or failed and being retried) PR
+mode stays offered and the picker shows loading: an unknown list is never read
+as "not served" or "not connected". A served provider whose descriptor has
+`features.changeRequestPatch` off lists and opens its change requests but does
+not serve their diff (`usePullRequestComparison().diffUnavailable`): Changes
+and mobile Changes keep the PR mode and picker, read no diff and say so with
+`ChangeRequestDiffUnavailable` (no retry, since nothing failed); the Walkthrough
+does not offer the PR scope, and a PR handed to it shows that note in place of
+generation and loads nothing; the board's Changes and Walkthrough links are
+left out. The scope picker shows a count only once it is known, so an unread
+PR never reads as one with 0 files. The mode, picker and messages use the provider's
+term (`changeRequestCopy(key, term)`: merge-request wording on GitLab) and
+its reference prefix (`!` on GitLab). It includes no local edits
 or unpushed commits. `lib/diff/pullRequestDiff.ts` splits the response once;
 `useGitComparison` serves file patches from that same snapshot. Snapshot revisions
 invalidate the view's patch cache atomically, including edits with unchanged
@@ -258,9 +333,27 @@ on panel switches; opening the picker or changing search still refreshes it.
 Working-tree mutations are unavailable for PR snapshots, and "Load full files"
 does not apply to them. Expanding collapsed context on one file works: the
 expander asks `useGitComparison.fetchFullFile`, which reads both sides of that
-file from GitHub through `/api/walkthrough/pr-file` (merge base and PR head),
+file from the provider through `/api/walkthrough/pr-file` (merge base and PR head),
 never from disk, so local edits and unfetched fork commits cannot leak in or
 block it. Existing inline comment controls still attach selected code to chat.
+
+A comment on a comparison (a pull request, a commit, a branch against its
+base) carries the diff it was written on (`lib/diffCommentOrigin.ts`): Changes,
+mobile Changes and walkthrough each derive it from the source they show. The
+model reads where the lines come from ("in GitHub pull request #5543 at commit
+…"), because a pull request that is not checked out has other lines on disk,
+and the chip names it beside the file. Drafts show only on the diff they were
+written on, so a comment on a pull request's `app.ts` does not appear on the
+working tree's. A comment on uncommitted changes has no origin: its lines are
+the files on disk.
+
+A file's header in Changes, mobile Changes and the walkthrough also takes a
+comment on the whole file (`components/comments/useWholeFileComment.tsx`): a
+diff draft with lines 0-0, the same origin, and no code. Its editor and saved
+cards render under the header, never inside the diff, so the viewer filters
+those drafts out of its line annotations. The trigger is always visible, like
+the header's other actions, and toggles the editor: a second click closes it
+unsaved, so an empty editor never stays stuck open.
 Changes hands its PR source to walkthrough; walkthrough's Changes action opens
 PR mode with the shared selection. Picking a PR never generates a walkthrough.
 
@@ -277,7 +370,7 @@ return to the panel's project (`lib/surfaces/DOCUMENTATION.md`, Tracker).
 
 Mobile Changes uses the same expansion for branch, commit and PR files: the
 patch opens with 3 lines of context, and expanding reads that file in full once
-(git with whole-file context, or both PR sides from GitHub), then replays the
+(git with whole-file context, or both PR sides from the provider), then replays the
 expansion. A failed read toasts and keeps the patch. Working-tree files there
 already load both full sides, so they expand without a read.
 
@@ -333,3 +426,28 @@ archive. Restore brings it back on its own, under that parent. One rule,
 `isRestorableOnItsOwn` in `sync/session-restore-rule.ts`, decides what the page
 lists, when the chat header's session menu offers Restore, and what the restore
 action accepts, so the three never disagree.
+
+On desktop the panel on the left groups by project, not by folder: a session
+belongs to its project the way the sidebar decides it (by folder, then by
+OpenCode's project, which still places a session whose worktree is gone).
+The chats of a deleted isolated space keep their own groups, and everything
+outside a project is one Other group. A project's archived worktrees
+(`lib/worktrees/worktreeArchive.ts`, read from the repository each time the
+page opens) head its list, each a tile with Restore and Delete for good and
+its own sessions inside; the project's other sessions follow. The archive records
+which sessions it holds, so a folder name that repeats across repositories or
+over time never mixes them up. Restoring one session of an archived worktree
+restores the whole worktree (`lib/worktrees/relocateRestoredSession.ts`), since
+in the project root it would miss the changes it worked on; a session whose
+folder is gone without an archive still moves to the project root. Restores of one archive are
+joined, not repeated: a session's subsessions come back one by one, and each
+would start it. Deleting an archive for good deletes only its sessions still in
+the archive that no other archive of the project holds.
+
+The phone shows the same page in one column: the groups are a row of chips
+that scrolls sideways (hidden while searching, since a search spans them
+all), and a selected project's archived worktrees are tiles above its other
+sessions, as on the desktop. Restore and a worktree's Delete are always shown,
+as nothing hovers; rows name their group only in the lists that mix groups.
+Deleting a session stays on the desktop, whose confirmation dialog the mobile
+shell does not mount.
