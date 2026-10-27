@@ -1,0 +1,55 @@
+name: Validate upstream candidate
+
+on:
+  push:
+    branches:
+      - validation/upstream-2.5.5
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.4'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Build web
+        run: bun run --cwd packages/web build
+      - name: Build VS Code extension
+        run: bun run --cwd packages/vscode build
+      - name: Prepare mobile web assets
+        run: bun run --cwd packages/mobile build:assets
+      - name: Preserve exact production assets
+        run: |
+          mkdir -p validation
+          node --input-type=module -e 'import { writeFileSync } from "node:fs"; writeFileSync("validation/candidate.json", JSON.stringify({ commit: process.env.GITHUB_SHA, branch: process.env.GITHUB_REF_NAME, node: process.version }, null, 2) + "\n")'
+          bun --version > validation/bun-version.txt
+          tar -czf validation/production-assets.tgz \
+            packages/web/dist \
+            packages/web/server/built-in-extensions \
+            packages/sdk/dist \
+            packages/vscode/dist \
+            packages/mobile/dist
+          sha256sum validation/production-assets.tgz > validation/SHA256SUMS
+      - name: Upload validation assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-${{ github.sha }}
+          path: validation/
+          if-no-files-found: error
+          retention-days: 7
