@@ -320,7 +320,21 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
       }
       return;
     }
-    if (myChromeTab) release(scope.id, tabID);
+    if (myChromeTab) {
+      release(scope.id, tabID);
+      // The Chrome tab this panel tab showed closed (the agent's browser.close,
+      // a popup that finished) while other panel tabs still show live ones:
+      // this panel tab closes with it, as the effect below does for tabs out
+      // of sight. After a browser restart every claim is stale, so the panel
+      // tab claims one of the reopened tabs below.
+      const liveIds = new Set(scope.tabs.map((tab) => tab.id));
+      const othersLive = [...panelTabsByChromeTab(claims, scope.id)]
+        .some(([chromeTabId, panelTabId]) => panelTabId !== tabID && liveIds.has(chromeTabId));
+      if (othersLive) {
+        closeContextPanelTabs(directory, [tabID]);
+        return;
+      }
+    }
     const free = unclaimedChromeTabs(claims, scope);
     const activeFree = scope.tabs.find((tab) => tab.active && free.includes(tab.id))?.id;
     const pick = activeFree ?? free[0];
@@ -547,7 +561,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const shownTab = showingMine ? scope?.tabs.find((tab) => tab.active) ?? null : null;
   const help = state?.help ?? null;
   // A request for help names the page it is about; other tabs of the chat do not show it.
-  const helpTargetsThisScope = Boolean(help && scope && (help.forScopeId ?? help.scopeId) === scope.id
+  // A login request shows on the sign-in browser the person signs in on, never
+  // on the chat's own browser it returns to once the sign-in is saved.
+  const helpTargetsThisScope = Boolean(help && scope && help.scopeId === scope.id
     && (help.tabId === null || shownTab?.id === help.tabId));
   // A new request brings its tab in front once; the person may then look elsewhere.
   const helpPanelTabId = help?.tabId && scope && help.scopeId === scope.id
@@ -688,8 +704,6 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         onHandBack={() => canvasHandleRef.current?.release()}
         help={help}
         helpTargetsThisScope={helpTargetsThisScope}
-        onSaveSignIn={handleSaveSignIn}
-        savingSignIn={savingSignIn}
         onAnswerProfileRequest={answerProfileRequest}
         chrome={state?.chrome ?? null}
       />

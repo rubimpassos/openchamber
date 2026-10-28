@@ -143,6 +143,8 @@ type ContextPanelDirectoryState = {
    * Absent in state saved before it existed.
    */
   parkedBrowserTabs?: ContextPanelTab[];
+  /** Parked tabs that were in front of an open zone when their chat left; the zone opens on them when it comes back. */
+  parkedActiveTabIds?: string[];
   touchedAt: number;
 };
 
@@ -545,10 +547,15 @@ export const isFollowingBrowserAgent = (offSessions: readonly string[], sessionI
 const withParkedBrowserTabs = (
   panel: ContextPanelDirectoryState,
   parked: ContextPanelTab[],
+  activeIds: readonly string[] = panel.parkedActiveTabIds ?? [],
 ): ContextPanelDirectoryState => {
   const next = { ...panel };
   if (parked.length > 0) next.parkedBrowserTabs = parked;
   else delete next.parkedBrowserTabs;
+  const parkedIds = new Set(parked.map((tab) => tab.id));
+  const parkedActive = [...new Set(activeIds)].filter((id) => parkedIds.has(id));
+  if (parkedActive.length > 0) next.parkedActiveTabIds = parkedActive;
+  else delete next.parkedActiveTabIds;
   return next;
 };
 
@@ -808,6 +815,7 @@ const sanitizeContextPanelByDirectory = (
       zones?: unknown;
       tabs?: unknown;
       parkedBrowserTabs?: unknown;
+      parkedActiveTabIds?: unknown;
       activeTabId?: unknown;
       touchedAt?: unknown;
       mode?: unknown;
@@ -870,7 +878,9 @@ const sanitizeContextPanelByDirectory = (
       activeTabId: resolvedTabId,
       zones,
       touchedAt,
-    }, parkedBrowserTabs);
+    }, parkedBrowserTabs, Array.isArray(candidate.parkedActiveTabIds)
+      ? candidate.parkedActiveTabIds.filter((id): id is string => typeof id === 'string')
+      : []);
   }
 
   return next;
@@ -2083,17 +2093,35 @@ export const useUIStore = create<UIStore>()(
                 const split = splitBrowserTabsForSession(panel.tabs, parked, sessionId, directory === current);
                 if (!split) continue;
                 const shownIds = new Set(split.tabs.map((tab) => tab.id));
+                const parkedIds = new Set(split.parked.map((tab) => tab.id));
+                // Each open zone in front of a tab of the chat it left remembers
+                // that tab, so the zone opens on it again when that chat comes
+                // back, even after the zone closed for lack of tabs.
+                const leavingActive = CONTEXT_ZONES
+                  .map((zone) => getZoneView(panel, zone))
+                  .filter((view) => view.isOpen)
+                  .map((view) => view.activeTabId)
+                  .filter((id): id is string => id !== null && parkedIds.has(id));
+                const parkedActive = [...(panel.parkedActiveTabIds ?? []), ...leavingActive];
+                const returning = new Set(parkedActive.filter((id) => shownIds.has(id)));
                 // A zone that showed a tab of the chat it left shows this
-                // chat's newest Browser tab, if it has one.
+                // chat's tab that was in front when it left, else its newest
+                // Browser tab, if it has one.
                 const newest = split.tabs
                   .filter((tab) => tab.mode === 'browser')
                   .reduce<ContextPanelTab | null>((best, tab) => (!best || tab.touchedAt > best.touchedAt ? tab : best), null);
-                let moved = withParkedBrowserTabs({ ...panel, tabs: split.tabs }, split.parked);
+                const returningBrowser = split.tabs.find((tab) => returning.has(tab.id) && tab.mode === 'browser') ?? null;
+                let moved = withParkedBrowserTabs({ ...panel, tabs: split.tabs }, split.parked, parkedActive);
+                const browserZone = zoneOfMode(state.contextSurfaceZones, 'browser');
                 for (const zone of CONTEXT_ZONES) {
                   const view = getZoneView(moved, zone);
-                  if (!view.activeTabId || shownIds.has(view.activeTabId)) continue;
-                  if (!split.parked.some((tab) => tab.id === view.activeTabId)) continue;
-                  moved = withZoneView(moved, zone, { activeTabId: newest && zoneOfMode(state.contextSurfaceZones, 'browser') === zone ? newest.id : null });
+                  const leftChat = Boolean(view.activeTabId && parkedIds.has(view.activeTabId));
+                  if (zone === browserZone && returningBrowser) {
+                    moved = withZoneView(moved, zone, { activeTabId: returningBrowser.id, isOpen: true });
+                    continue;
+                  }
+                  if (!leftChat) continue;
+                  moved = withZoneView(moved, zone, { activeTabId: newest && browserZone === zone ? newest.id : null });
                 }
                 next = settleZones({ ...moved, zones: keepZoneViewsOnTabs(moved.zones, shownIds) }, state.contextSurfaceZones);
               }

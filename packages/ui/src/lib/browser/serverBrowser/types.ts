@@ -70,8 +70,6 @@ export type ServerBrowserHelpKind = 'login' | 'page' | 'profile';
 
 export type ServerBrowserHelp = {
   readonly scopeId: string;
-  /** Present when the request should surface in a specific scope's panel only. */
-  readonly forScopeId?: string | null;
   readonly kind?: ServerBrowserHelpKind;
   readonly reason: string;
   readonly tabId: string | null;

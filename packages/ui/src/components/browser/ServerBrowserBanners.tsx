@@ -102,29 +102,15 @@ const ProfileRequestBanner: React.FC<{
   );
 };
 
-const HelpBanner: React.FC<{
-  help: ServerBrowserHelp;
-  onSaveSignIn: () => void;
-  saving: boolean;
-}> = ({ help, onSaveSignIn, saving }) => {
+// A login request shows on the sign-in browser, whose bar above already offers Save sign-in.
+const HelpBanner: React.FC<{ help: ServerBrowserHelp }> = ({ help }) => {
   const { t } = useI18n();
   return (
-    <div className="flex flex-col gap-1.5 border-b border-border bg-[color-mix(in_srgb,var(--status-warning)_12%,var(--surface-elevated))] px-3 py-2">
-      <div className="flex items-center gap-2">
-        <Icon name="user" className="size-3.5 shrink-0 text-[var(--status-warning)]" aria-hidden="true" />
-        <span className="typography-meta min-w-0 flex-1 text-foreground">
-          {t('contextPanel.browser.server.help.banner', { reason: help.reason })}
-        </span>
-      </div>
-      {help.kind === 'login' ? (
-        <div className="flex items-center justify-between gap-2 ps-5.5">
-          <span className="typography-micro text-muted-foreground">{t('contextPanel.browser.server.help.loginHint')}</span>
-          <Button size="xs" variant="outline" disabled={saving} onClick={onSaveSignIn}>
-            <Icon name="save-3" className="size-3.5" aria-hidden="true" />
-            {t('contextPanel.browser.server.help.saveSignIn')}
-          </Button>
-        </div>
-      ) : null}
+    <div className="flex items-center gap-2 border-b border-border bg-[color-mix(in_srgb,var(--status-warning)_12%,var(--surface-elevated))] px-3 py-2">
+      <Icon name="user" className="size-3.5 shrink-0 text-[var(--status-warning)]" aria-hidden="true" />
+      <span className="typography-meta min-w-0 flex-1 text-foreground">
+        {t('contextPanel.browser.server.help.banner', { reason: help.reason })}
+      </span>
     </div>
   );
 };
@@ -179,18 +165,16 @@ export const ServerBrowserBanners: React.FC<{
   onHandBack: () => void;
   help: ServerBrowserHelp | null;
   helpTargetsThisScope: boolean;
-  onSaveSignIn: () => void;
-  savingSignIn: boolean;
   onAnswerProfileRequest: (approve: boolean) => Promise<void>;
   chrome: ServerBrowserChromeStatus | null;
-}> = ({ control, connection, focused, onHandBack, help, helpTargetsThisScope, onSaveSignIn, savingSignIn, onAnswerProfileRequest, chrome }) => (
+}> = ({ control, connection, focused, onHandBack, help, helpTargetsThisScope, onAnswerProfileRequest, chrome }) => (
   <>
     {chrome ? <ChromeStatusBanner chrome={chrome} /> : null}
     {help && helpTargetsThisScope ? (
       <>
         {help.kind === 'profile' && help.profile
           ? <ProfileRequestBanner help={help} profile={help.profile} onAnswer={onAnswerProfileRequest} />
-          : <HelpBanner help={help} onSaveSignIn={onSaveSignIn} saving={savingSignIn} />}
+          : <HelpBanner help={help} />}
         {/* Handing back is how the user answers the request, so the bar with
             that button has to stay while they hold control. */}
         {control.controller === 'user' && control.mine ? (

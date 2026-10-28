@@ -29,12 +29,12 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, dis
     <TooltipTrigger asChild>
       <Button
         type="button"
-        variant={pressed ? 'secondary' : 'ghost'}
+        variant="ghost"
         size="xs"
         className={cn(
           'w-6 shrink-0 rounded-full px-0 text-muted-foreground',
           'hover:text-foreground',
-          pressed && 'text-foreground',
+          pressed && 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground',
         )}
         onClick={onClick}
         disabled={disabled}
@@ -139,6 +139,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
 }) => {
   const { t } = useI18n();
   const soundIconName: IconName = isSoundOn ? 'volume-up' : 'volume-mute';
+  const followAgentIconName: IconName = isFollowingAgent ? 'robot-2-fill' : 'robot-2';
   const [isAddressFocused, setIsAddressFocused] = React.useState(false);
   const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const visibleSuggestions = isAddressFocused ? suggestions : [];
@@ -270,7 +271,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       ) : null}
       {onToggleFollowAgent ? (
         <ToolbarButton
-          icon="robot-2"
+          icon={followAgentIconName}
           label={isFollowingAgent ? t('contextPanel.browser.server.followAgentOn') : t('contextPanel.browser.server.followAgentOff')}
           onClick={onToggleFollowAgent}
           pressed={isFollowingAgent}

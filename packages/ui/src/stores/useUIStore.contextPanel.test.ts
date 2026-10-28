@@ -594,6 +594,70 @@ describe('useUIStore browser tabs opened with an address', () => {
   });
 });
 
+describe('useUIStore Browser tabs per chat', () => {
+  const activeTab = () => {
+    const panel = useUIStore.getState().contextPanelByDirectory['/repo'];
+    return panel?.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
+  };
+
+  test('a chat whose Browser tab was in front gets it in front again when it comes back', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    store.openContextSurface('/repo', 'context');
+    const browserTabID = store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    store.setActiveContextPanelTab('/repo', browserTabID ?? '');
+    expect(activeTab()?.mode).toBe('browser');
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    expect(activeTab()?.mode).toBe('context');
+
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    expect(activeTab()?.id).toBe(browserTabID);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].parkedActiveTabIds).toBeUndefined();
+  });
+
+  test('a panel that closed because the chat\'s Browser was its only tab opens on it again', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    const browserTabID = store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    store.setActiveContextPanelTab('/repo', browserTabID ?? '');
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].isOpen).toBe(true);
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].isOpen).toBe(false);
+
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    const panel = useUIStore.getState().contextPanelByDirectory['/repo'];
+    expect(panel.isOpen).toBe(true);
+    expect(panel.activeTabId).toBe(browserTabID);
+  });
+
+  test('a chat that left with its panel closed does not get it opened', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    const browserTabID = store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    store.setActiveContextPanelTab('/repo', browserTabID ?? '');
+    store.closeContextZone('/repo', 'right');
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].isOpen).toBe(false);
+  });
+
+  test('a chat that left with another surface in front comes back to it', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    store.openContextSurface('/repo', 'context');
+    store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    const contextTabID = getContextPanelTabs('/repo').find((tab) => tab.mode === 'context')?.id ?? '';
+    store.setActiveContextPanelTab('/repo', contextTabID);
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    expect(activeTab()?.id).toBe(contextTabID);
+  });
+});
+
 describe('useUIStore openContextSurface', () => {
   const directory = '/repo';
 
