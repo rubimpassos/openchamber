@@ -9,6 +9,28 @@ import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerH
 import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
 
 describe('core-routes', () => {
+  it('allows the protected MCP callback without a UI session but refuses connection reads and agent tokens', async () => {
+    // Given an owner password and the real UI authentication controller.
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-5-auth-'));
+    const previous = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_DATA_DIR = directory;
+    const { createUiAuth } = await import('../ui-auth/ui-auth.js');
+    const auth = createUiAuth({ password: 'synthetic-task-5-password' });
+    try {
+      const app = express();
+      registerAuthAndAccessRoutes(app, { express, uiAuthController: auth, tunnelAuthController: { classifyRequestScope: () => 'local' } });
+      app.get('/api/protected-mcp/oauth/callback', (_req, res) => res.status(400).type('html').send('callback reached'));
+      app.get('/api/protected-mcp/connections/x', (_req, res) => res.json({ reached: true }));
+      // When the callback carries no session, only its single-use state can authorize it.
+      await request(app).get('/api/protected-mcp/oauth/callback').expect(400, 'callback reached');
+      // Then connection administration remains behind UI auth, including agent-shaped bearers.
+      await request(app).get('/api/protected-mcp/connections/x').set('Accept', 'application/json').expect(401);
+      await request(app).get('/api/protected-mcp/connections/x').set('Accept', 'application/json').set('Authorization', `Bearer ${Buffer.alloc(32, 5).toString('base64url')}`).expect(401);
+    } finally {
+      auth.dispose(); fs.rmSync(directory, { recursive: true, force: true });
+      if (previous === undefined) delete process.env.OPENCHAMBER_DATA_DIR; else process.env.OPENCHAMBER_DATA_DIR = previous;
+    }
+  });
   it('DELETE /auth/session signs out the caller while another session stays valid', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2-core-auth-'));
     const previous = process.env.OPENCHAMBER_DATA_DIR;

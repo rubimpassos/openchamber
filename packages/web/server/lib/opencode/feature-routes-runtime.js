@@ -62,6 +62,7 @@ import { getProviderSources, removeProviderConfig, upsertProviderConfig } from '
 import { getAgentSources, getAgentConfig, getAgentPermissions, createAgent, updateAgent, deleteAgent, listDisabledAgents } from './agents.js';
 import { getCommandSources, getCommandConfig, createCommand, updateCommand, deleteCommand } from './commands.js';
 import { createMcpConfigRuntime } from './mcp-config-runtime.js';
+import { registerProtectedMcpRoutes } from '../protected-mcp/routes.js';
 import { listSnippets, getSnippet, createSnippet, updateSnippet, deleteSnippet, expandSnippets, previewSnippet } from './snippets.js';
 import {
   listPluginEntries,
@@ -391,6 +392,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const mcpConfigRuntime = createMcpConfigRuntime({
       dataDir: openchamberDataDir,
       isLocalScopeSupported: isLocalMcpScopeSupported,
+    });
+    registerProtectedMcpRoutes(app, {
+      dataDir: openchamberDataDir,
+      resolveOptionalProjectDirectory,
+      // Selections need the managed plugin, exactly like personal entries.
+      isSupported: isLocalMcpScopeSupported,
+      listOrdinaryMcpNames: (directory) => mcpConfigRuntime.listMcpConfigs(directory).map((entry) => entry.name),
     });
     registerConfigEntityRoutes(app, {
       resolveProjectDirectory,

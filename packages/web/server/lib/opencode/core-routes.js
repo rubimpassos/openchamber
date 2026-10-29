@@ -682,6 +682,9 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     && /^\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/.test(req.path || '')
   );
 
+  // The broker's single-use OAuth state is the capability for this callback.
+  const isProtectedMcpOauthCallback = (req) => req.method === 'GET' && req.path === '/protected-mcp/oauth/callback';
+
   // An HTML preview runs in an opaque-origin sandbox and carries no session.
   // The grant in its path is the capability; the fs route checks it.
   const isFilePreviewRead = (req) => (
@@ -699,7 +702,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const requireApiAuth = async (req, res, next) => {
     const pathname = (req.originalUrl || '').split('?')[0];
     if (selfAuthenticatedApiPaths.has(pathname)) return next();
-    if (isGuestOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
+    if (isGuestOauthCallback(req) || isProtectedMcpOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
       return next();
     }
     const requestScope = tunnelAuthController.classifyRequestScope(req);
@@ -1202,9 +1205,11 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
   // request the isolated-spaces dispatcher streams into a space, where a parsed body would
   // otherwise be consumed here and lost.
   const { express, verboseRequestLogs = false, skipBodyParsing = () => false } = dependencies;
+  // These routes sanitize their own JSON failures; match Express's case-insensitive routing.
+  const parsesOwnBody = (req) => /^\/api\/protected-mcp(?:\/|$)/i.test(req.path);
 
   app.use((req, res, next) => {
-    if (skipBodyParsing(req)) {
+    if (skipBodyParsing(req) || parsesOwnBody(req)) {
       next();
     } else if (req.path === '/api/config/themes' || req.path.startsWith('/api/config/themes/')) {
       express.json({ limit: '1mb' })(req, res, next);
@@ -1264,7 +1269,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
 
   const urlencoded = express.urlencoded({ extended: true, limit: '50mb' });
   app.use((req, res, next) => {
-    if (skipBodyParsing(req)) {
+    if (skipBodyParsing(req) || parsesOwnBody(req)) {
       next();
       return;
     }
