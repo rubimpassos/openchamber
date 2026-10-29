@@ -38,10 +38,6 @@ const ABORT_HOLD_MS = 2_000;
 const SUBAGENT_RECHECK_MS = 5_000;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
-// A hold is asserted by a UI-driven process (auto-review) that dies with the
-// UI; it expires unless the UI keeps re-asserting it.
-const HOLD_DEFAULT_TTL_MS = 5 * 60 * 1000;
-const HOLD_MAX_TTL_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_TAIL_LIMIT = 2;
 
@@ -300,6 +296,12 @@ export function createMessageQueueRuntime({
   resolveAutoSelection = null,
   // Saves the goal record of a message queued as a goal (the session metadata store).
   persistSessionGoal = null,
+  // True while something else drives the session (an auto-review run), which
+  // calls `release` when it is done. `deliveryHoldReady` resolves once that
+  // owner knows which sessions it holds; the first dispatch waits for it.
+  isDeliveryHeld = () => false,
+  deliveryHoldReady = Promise.resolve(),
+  automation = null,
   dataDir,
   fetchImpl = fetch,
   now = Date.now,
@@ -328,7 +330,6 @@ export function createMessageQueueRuntime({
   const timers = new Map(); // sessionId → timeout
   const failures = new Map(); // sessionId → { itemId, failures, nextAttemptAt }
   const abortedAt = new Map(); // sessionId → timestamp
-  const holds = new Map(); // sessionId → expiresAt
   // sessionId → directory, kept after the queue empties: the UI keys its
   // projection by directory, so the broadcast that removes the last item must
   // still name it or the client cannot tell which queue just finished.
@@ -564,10 +565,18 @@ export function createMessageQueueRuntime({
   };
 
   const sendItem = async (sessionId, directory, item) => {
-    if (item.origin?.kind === 'pr-fix-loop') {
-      if (!assertFixLoopHostDispatch) throw httpError('Fix-loop host dispatch authority is unavailable', 409);
-      await assertFixLoopHostDispatch(sessionId, directory, item.origin);
-    }
+    const assertAdmission = async () => {
+      if (item.origin?.kind === 'pr-fix-loop') {
+        if (!assertFixLoopHostDispatch) throw httpError('Fix-loop host dispatch authority is unavailable', 409);
+        await assertFixLoopHostDispatch(sessionId, directory, item.origin);
+      }
+      if (stopped || isDeliveryHeld(sessionId)) throw httpError('Queued delivery is held', 409);
+    };
+    const write = async (fetchPath, options) => {
+      await assertAdmission();
+      return openCodeFetch(fetchPath, options);
+    };
+    await assertAdmission();
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
@@ -590,13 +599,13 @@ export function createMessageQueueRuntime({
 
     // v2 selects model and agent on the session, not per prompt: the choice is
     // switched once and then persists.
-    if ((!item.scheduledTask && !item.origin) || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+    if ((!item.scheduledTask && !item.origin) || (providerID && modelID)) await write(`/api/session/${encodeURIComponent(sessionId)}/model`, {
       directory,
       method: 'POST',
       body: { model },
     });
     if (agent) {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/agent`, {
+      await write(`/api/session/${encodeURIComponent(sessionId)}/agent`, {
         directory,
         method: 'POST',
         body: { agent },
@@ -609,12 +618,14 @@ export function createMessageQueueRuntime({
 
     // Standing project context is written into the session first, exactly as
     // a UI send does it; a failed write sends without it rather than not at all.
+    await assertAdmission();
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
 
     // A message queued as a goal starts it now, as a direct send would. The
     // goal is saved before anything is admitted, so a failed save leaves
     // nothing in the session for the retry to duplicate.
     if (item.goal) {
+      await assertAdmission();
       await createSessionGoal({
         persistSessionGoal,
         sessionID: sessionId,
@@ -633,7 +644,7 @@ export function createMessageQueueRuntime({
     // sending "/name args" as a prompt instead would skip the template
     // OpenCode 2.x expands only on the command route.
     for (const synthetic of contextMessages) {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
+      await write(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
         body: synthetic,
@@ -642,7 +653,7 @@ export function createMessageQueueRuntime({
 
     // The goal briefing goes last, right before the message the goal is about.
     if (item.goal) {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
+      await write(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
         body: { text: buildGoalIntroText(item.goal.tokenBudget), resume: false },
@@ -652,6 +663,7 @@ export function createMessageQueueRuntime({
       // OpenChamber writes this message, so it arrives as a synthetic one whose
       // metadata the transcript renders as a fix-loop row; the agent reads the
       // full text and `resume` starts its turn.
+      await assertAdmission();
       try {
         await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
           directory,
@@ -670,7 +682,7 @@ export function createMessageQueueRuntime({
         if (error?.status !== 409) throw error;
       }
     } else if (command) {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/command`, {
+      await write(`/api/session/${encodeURIComponent(sessionId)}/command`, {
         directory,
         method: 'POST',
         body: {
@@ -681,7 +693,7 @@ export function createMessageQueueRuntime({
         },
       });
     } else {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
+      await write(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
         directory,
         method: 'POST',
         body: {
@@ -716,18 +728,10 @@ export function createMessageQueueRuntime({
     timers.set(sessionId, timer);
   };
 
-  const isHeld = (sessionId) => {
-    const expiresAt = holds.get(sessionId);
-    if (expiresAt === undefined) return false;
-    if (expiresAt > now()) return true;
-    holds.delete(sessionId);
-    return false;
-  };
-
   async function tick(sessionId) {
     if (stopped) return;
     const queue = queues.get(sessionId);
-    if (!queue || queue.items.length === 0 || sending.has(sessionId) || isHeld(sessionId)) return;
+    if (!queue || queue.items.length === 0 || sending.has(sessionId) || isDeliveryHeld(sessionId)) return;
 
     const abortHoldUntil = (abortedAt.get(sessionId) ?? 0) + abortHoldMs;
     if (abortHoldUntil > now()) {
@@ -777,7 +781,15 @@ export function createMessageQueueRuntime({
     // Re-read after the awaits — the user may have edited the queue meanwhile.
     const current = queues.get(sessionId);
     const item = current?.items[0];
-    if (!item || item.id !== head.id || sending.has(sessionId)) return;
+    if (!item || item.id !== head.id || sending.has(sessionId) || isDeliveryHeld(sessionId) || stopped) return;
+
+    let releaseSend;
+    if (automation) {
+      await automation.ready();
+      if (stopped || isDeliveryHeld(sessionId) || queues.get(sessionId)?.items[0] !== item || sending.has(sessionId)) return;
+      releaseSend = automation.trySend(item.origin?.kind === 'pr-fix-loop' ? `fixloop:${item.origin.id}` : null, [`session:${sessionId}`]);
+      if (!releaseSend) { armDispatch(sessionId, SUBAGENT_RECHECK_MS); return; }
+    }
 
     sending.set(sessionId, item.id);
     broadcast(sessionId);
@@ -816,6 +828,8 @@ export function createMessageQueueRuntime({
       console.warn(`[message-queue] send to ${sessionId} failed (attempt ${count}):`, error?.message ?? error);
       broadcast(sessionId);
       armDispatch(sessionId, nextAttemptAt - now());
+    } finally {
+      releaseSend?.();
     }
   }
 
@@ -943,18 +957,9 @@ export function createMessageQueueRuntime({
     return commit(sessionId);
   };
 
-  const setHold = (sessionIdInput, held, ttlMs = HOLD_DEFAULT_TTL_MS) => {
-    const sessionId = requireSessionId(sessionIdInput);
-    if (held !== true && held !== false) throw new TypeError('held must be a boolean');
-    if (held) {
-      const ttl = Math.min(asCount(ttlMs) || HOLD_DEFAULT_TTL_MS, HOLD_MAX_TTL_MS);
-      holds.set(sessionId, now() + ttl);
-      clearTimer(sessionId);
-      return { held: true, expiresAt: holds.get(sessionId) };
-    }
-    holds.delete(sessionId);
+  /** What held the session's delivery let go: deliver whatever waited. */
+  const release = (sessionId) => {
     armDispatch(sessionId);
-    return { held: false, expiresAt: null };
   };
 
   // --- events --------------------------------------------------------------
@@ -1007,8 +1012,11 @@ export function createMessageQueueRuntime({
       if (status?.type === 'connect') reconcileAll();
     });
     void load()
-      .then(() => {
+      .then(async () => {
         if (queues.size > 0) console.log(`[message-queue] restored queues for ${queues.size} session(s)`);
+        // A tick that ran before this saw every session held and armed nothing.
+        await deliveryHoldReady;
+        await automation?.ready();
         reconcileAll();
       })
       .catch((error) => {
@@ -1048,7 +1056,7 @@ export function createMessageQueueRuntime({
     takeAll,
     reorder,
     clear,
-    setHold,
+    release,
     processPayload,
     start,
     stop,
@@ -1095,15 +1103,6 @@ export function registerMessageQueueRoutes(app, runtime) {
       res.json(await runtime.reorder(req.params.sessionId, req.body?.itemIds));
     } catch (error) {
       respondError(res, error, 'Failed to reorder queue');
-    }
-  });
-
-  app.put('/api/message-queue/sessions/:sessionId/hold', async (req, res) => {
-    try {
-      await runtime.load();
-      res.json(runtime.setHold(req.params.sessionId, req.body?.held, req.body?.ttlMs));
-    } catch (error) {
-      respondError(res, error, 'Failed to update queue hold');
     }
   });
 

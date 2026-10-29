@@ -10,7 +10,7 @@ import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
-import { assignInjectedEnv } from '../../server/lib/injected-env.js';
+import { assignInjectedEnv, injectedEnvKeys, withoutInjectedEnv } from '../../server/lib/injected-env.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -162,6 +162,8 @@ async function serveCommand(options) {
       // Propagate resolved values into env before importing the server module.
       // The binary path is left unmarked: a startup service enabled from this
       // server's terminal wants the same OpenCode.
+      // A server started from an app shell owns its runtime and assets.
+      for (const key of injectedEnvKeys(process.env)) delete process.env[key];
       if (opencodeBinary) {
         process.env.OPENCODE_BINARY = opencodeBinary;
       }
@@ -290,7 +292,7 @@ async function serveCommand(options) {
 
     // Exactly one UI credential reaches the server: the hash (never alongside
     // the plaintext) or the resolved plaintext password.
-    const inheritedEnv = { ...process.env };
+    const inheritedEnv = withoutInjectedEnv(process.env);
     delete inheritedEnv.OPENCHAMBER_UI_PASSWORD;
     delete inheritedEnv.OPENCHAMBER_UI_PASSWORD_HASH;
     const child = spawn(runtimeBin, serverArgs, {

@@ -43,6 +43,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     // `(spaceId) => fetch` for a session of an isolated space, whose record and messages only
     // the OpenCode inside that space has; null while the feature is off.
     spaceFetchFor = () => null,
+    // `(sessionId, turnEndedAt)`: whether that turn was a step of an
+    // auto-review loop; the loop's end notifies once (`notifyAutoReviewEnded`).
+    isInAutoReview = () => false,
   } = deps;
   let getIsSessionAutoAccepting = deps.getIsSessionAutoAccepting;
   // Where a session is read: the host's OpenCode for its own sessions, the OpenCode inside the
@@ -111,6 +114,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     goal_blocked: 'Goal blocked',
     goal_budget: 'Goal reached its token budget',
     'browser-help': 'Agent needs you in the browser',
+    review: 'Review finished',
   };
 
   const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
@@ -525,6 +529,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
 
     if ((payload.type === 'session.idle' || payload.type === 'session.error') && sessionId) {
+      // Taken before any wait: an auto-review may settle meanwhile, and its
+      // last step is told apart from a later turn by this time.
+      const turnEndedAt = Date.now();
       if (payload.type === 'session.idle' && await isPausedForSubagents(sessionId, spaceId)) {
         return;
       }
@@ -539,6 +546,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           ...payload.properties,
           // Only a turn end announces readiness; a step's `stop` does not.
           turnEnded: true,
+          turnEndedAt,
           info: {
             id: lastAssistantStepBySession.get(sessionId),
             sessionID: sessionId,
@@ -573,6 +581,12 @@ export const createNotificationTriggerRuntime = (deps) => {
         // noise produced by the goal loop itself — the goal's own settle
         // notification (complete/blocked/budget) is the final word instead.
         if (await hasActiveSessionGoal(sessionId, spaceId)) {
+          return;
+        }
+
+        // The same for an auto-review: each step ends a turn of one of its
+        // two sessions. A space's run lives in the space, so its steps notify.
+        if (!spaceId && isInAutoReview(sessionId, payload.properties?.turnEndedAt ?? Date.now())) {
           return;
         }
 
@@ -1042,10 +1056,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
   };
 
-  // Goal settle push: same fanout as the trigger paths (web-push with the
-  // full text; APNs with the generic per-type title and the session name as
-  // body, so the relay never sees content).
-  const sendGoalSettlePush = async ({ sessionId, directory, status, title, body }) => {
+  // Goal and review settle push: same fanout as the trigger paths (web-push
+  // with the full text; APNs with the generic per-type title and the session
+  // name as body, so the relay never sees content).
+  const sendSettlePush = async ({ sessionId, directory, type, tag, title, body }) => {
     let sessionName = '';
     try {
       const base = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
@@ -1062,13 +1076,12 @@ export const createNotificationTriggerRuntime = (deps) => {
     } catch {
       // Session name is presentation sugar for the mobile push — never block on it.
     }
-    const type = status === 'complete' ? 'goal_complete' : (status === 'budgetLimited' ? 'goal_budget' : 'goal_blocked');
     await fanoutPush(
       {
         title,
         body,
         phoneBody: phoneBodyOf(title, body) || title,
-        tag: `goal-${sessionId}`,
+        tag,
         data: {
           url: buildSessionDeepLinkUrl(sessionId),
           sessionId,
@@ -1100,6 +1113,45 @@ export const createNotificationTriggerRuntime = (deps) => {
     );
   };
 
+  const sendGoalSettlePush = ({ sessionId, directory, status, title, body }) => sendSettlePush({
+    sessionId,
+    directory,
+    type: status === 'complete' ? 'goal_complete' : (status === 'budgetLimited' ? 'goal_budget' : 'goal_blocked'),
+    tag: `goal-${sessionId}`,
+    title,
+    body,
+  });
+
+  /**
+   * One notification when an auto-review ends on its own, for the reviewed
+   * session: its steps notified nothing. It obeys the completion toggle, as
+   * the "ready" notifications it replaces do. A stop by the user (the row's
+   * Stop, an aborted turn) announces nothing: the user was there.
+   */
+  const notifyAutoReviewEnded = async ({ sessionId, directory, status, error }) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) return;
+    const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
+    const texts = notificationTexts(settings.locale);
+    const { title, body } = {
+      clean: { title: texts.reviewCleanTitle, body: texts.reviewCleanBody },
+      disputed: { title: texts.reviewDisputedTitle, body: texts.reviewDisputedBody },
+      limit: { title: texts.reviewLimitTitle, body: texts.reviewLimitBody },
+      failed: { title: texts.reviewFailedTitle, body: truncateNotificationText(error ?? '', 240) },
+    }[status] ?? {};
+    if (!title) return;
+    const tag = `review-${sessionId}`;
+    recordNotification({ kind: 'ready', priority: 'normal', delivery: focused ? 'focused' : 'delivered',
+      title, body, sessionId, directory });
+    if (focused) return;
+    if (settings.nativeNotificationsEnabled) {
+      const payload = { title, body, tag, kind: 'review', sessionId, directory, requireHidden: settings.notificationMode !== 'always' };
+      const desktopNotificationDelivered = emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered });
+    }
+    await sendSettlePush({ sessionId, directory, type: 'review', tag, title, body });
+  };
+
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
@@ -1109,5 +1161,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     sendGoalSettlePush,
     sendBrowserHelpPush,
     isSubagentSession,
+    notifyAutoReviewEnded,
   };
 };

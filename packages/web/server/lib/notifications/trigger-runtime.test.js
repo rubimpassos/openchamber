@@ -10,7 +10,7 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
  * agent and model from the start, a user abort announces nothing, and an
  * active goal (which lives in OpenChamber's own metadata) silences the push.
  */
-const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always', settings = {} } = {}) => {
+const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always', settings = {}, isInAutoReview } = {}) => {
   const emitDesktopNotification = vi.fn(() => true);
   const recordNotification = vi.fn();
   const sendPushToAllUiSessions = vi.fn(async () => undefined);
@@ -33,6 +33,7 @@ const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always
     readSessionMetadata: async () => metadata,
     recordNotification,
     awaitTurnVerdict,
+    isInAutoReview,
   });
   return { runtime, emitDesktopNotification, recordNotification, sendPushToAllUiSessions, awaitTurnVerdict };
 };
@@ -106,6 +107,37 @@ describe('ready notification on v2 step events', () => {
 
     expect(emitDesktopNotification).not.toHaveBeenCalled();
   });
+
+  it('stays quiet for a step of an auto-review and announces the review once when it ends', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { locale: 'uk' },
+      isInAutoReview: (sessionId) => sessionId === 'ses_reviewed',
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_reviewed', 'msg_4'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_reviewed'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'disputed' });
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'failed', error: 'The reviewer session is gone.' });
+    expect(emitDesktopNotification.mock.calls.map(([payload]) => payload)).toMatchObject([
+      { kind: 'review', sessionId: 'ses_reviewed', title: 'Ревʼю чекає твого рішення', body: 'Щодо деяких зауважень досі суперечка' },
+      { kind: 'review', title: 'Ревʼю не вдалося', body: 'The reviewer session is gone.' },
+    ]);
+  });
+
+  it('announces no review end where a ready notification would not show', async () => {
+    for (const settings of [{ notifyOnCompletion: false }, { nativeNotificationsEnabled: false }]) {
+      const { runtime, emitDesktopNotification } = makeRuntime({ settings });
+      await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+      expect(emitDesktopNotification).not.toHaveBeenCalled();
+    }
+    const focused = makeRuntime({ settings: { notificationMode: 'hidden-only' } });
+    focused.runtime.setGetIsWindowFocused(() => true);
+    await focused.runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+    expect(focused.emitDesktopNotification).not.toHaveBeenCalled();
+  });
 });
 
 describe('notification center and Jev ranking of a finished turn', () => {
@@ -163,6 +195,15 @@ describe('notification center and Jev ranking of a finished turn', () => {
 
     expect(emitDesktopNotification).not.toHaveBeenCalled();
     expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', priority: 'high', delivery: 'focused' }));
+  });
+
+  it('keeps the Auto Review settlement in the center while focus suppresses its alert', async () => {
+    const { runtime, recordNotification, emitDesktopNotification, awaitTurnVerdict } = makeRuntime({ notificationMode: 'hidden-only' });
+    runtime.setGetIsWindowFocused(() => true);
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ready', sessionId: 'ses_reviewed', delivery: 'focused' }));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(awaitTurnVerdict).not.toHaveBeenCalled();
   });
 });
 

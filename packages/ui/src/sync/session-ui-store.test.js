@@ -1082,6 +1082,28 @@ describe('createSession draft lifecycle', () => {
     expect(createSessionCalls).toEqual(['/private/deleted-worktree']);
   });
 
+  test('never moves a draft in an isolated space to the project, pinned or not', async () => {
+    const createSessionCalls = [];
+    const spaceDirectory = '/spaces/0123456789ab/main';
+    useProjectsStore.setState({
+      projects: [{ id: 'project-main', path: '/projects/main', label: 'Main' }],
+      activeProjectId: 'project-main',
+    });
+    // The host's probe cannot see inside a space and calls its directory missing.
+    opencodeClient.getDirectoryAvailability = async () => 'missing';
+    opencodeClient.createSession = async (_params, directory) => {
+      createSessionCalls.push(directory);
+      return { id: 'session-space', directory, time: { created: 1, updated: 1 } };
+    };
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: 'project-main', directoryOverride: spaceDirectory });
+    expect(useSessionUIStore.getState().newSessionDraft.preserveDirectoryOverride).toBe(true);
+    useSessionUIStore.getState().setDraftPreserveDirectoryOverride(false);
+
+    await useSessionUIStore.getState().createSession('Draft title', spaceDirectory);
+
+    expect(createSessionCalls).toEqual([spaceDirectory]);
+  });
+
   test('keeps a ChatInput-style current-directory draft recoverable when that path is missing', async () => {
     const createSessionCalls = [];
     useProjectsStore.setState({
@@ -1212,7 +1234,8 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     opencodeClient.createSession = async (params, directory) => {
       createSessionCalls.push(directory);
       createdSessionIds.push(params.id);
-      return { id: params.id, directory: directory ?? '/projects/alpha', time: { created: 1, updated: 1 } };
+      // A draft's first send mints the id and OpenCode creates the session under it.
+      return { id: params?.id ?? 'session-materialized', directory: directory ?? '/projects/alpha', time: { created: 1, updated: 1 } };
     };
   });
 

@@ -166,6 +166,11 @@ as it is then:
 - **A failed send** (OpenCode not answering within 15 s) becomes `manual`
   with `send-failed`; it is not retried.
 
+The server's send adapter also leases `../session-automation` admission after
+restoring both automation owners. A held session returns through the same
+failed-send/manual-notice path. The lease spans the SDK call, so a new automation
+cannot start while that resume is being admitted. Continue uses the same adapter.
+
 The message is a synthetic message with `resume: true`, so the session's own
 agent and model answer it, and its metadata
 (`{ source: 'openchamber-notice', kind: 'restart-resume', trigger, at, cause, tool }`)

@@ -5,9 +5,13 @@ import type { Session } from '@/lib/opencode/model';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { usePendingQuestionsStore } from '@/sync/pending-questions';
+import { usePrWatchStore, type PrWatch } from '@/sync/pr-watch';
 import { useCollapsedSessionActivityState } from './collapsedActivityState';
 import type { SessionNode } from '../types';
 import { installHookTestDom } from '../test-utils/testDom';
+
+type ActivityCapture = { state: ReturnType<typeof useCollapsedSessionActivityState> };
 
 // SAFETY: the fixture supplies the minimal SDK identity used by the selector.
 const node = (id: string): SessionNode => ({ session: { id } as Session, children: [], worktree: null });
@@ -23,6 +27,46 @@ const record = (id: string, idle?: number): Session => {
 };
 
 describe('collapsed activity scalar selector', () => {
+  for (const scenario of [
+    { question: false, permission: false, enabled: true, expected: 'active' },
+    { question: true, permission: false, enabled: true, expected: 'form' },
+    { question: true, permission: true, enabled: true, expected: 'permission' },
+    { question: true, permission: true, enabled: false, expected: null },
+  ] as const) {
+    test(`a PR watch with question=${scenario.question}, permission=${scenario.permission}, enabled=${scenario.enabled} shows ${scenario.expected}`, async () => {
+      // Given
+      const dom = installHookTestDom();
+      const root = createRoot(dom.container);
+      const questions = usePendingQuestionsStore.getState();
+      const watches = usePrWatchStore.getState();
+      replaceGlobalSessionStatusById(new Map());
+      const watch: PrWatch = { sessionID: 'watched', directory: '/workspace', url: 'https://github.com/org/repo/pull/1', number: 1, title: 'Review', status: 'pending', startedAt: 1 };
+      usePrWatchStore.setState({ bySession: new Map([['watched', watch]]) });
+      usePendingQuestionsStore.setState({ bySession: scenario.question
+        ? new Map([['watched', { directory: '/workspace', title: 'Pick', callID: 'question' }]]) : new Map() });
+      if (scenario.permission) applyGlobalBlockingRequestEvents('/workspace', [{
+        type: 'permission.asked', properties: { id: 'approval', sessionID: 'watched', action: 'bash', resources: [] },
+      }]);
+      const capture: ActivityCapture = { state: null };
+      const Harness = () => {
+        capture.state = useCollapsedSessionActivityState({ nodes: [node('watched')], enabled: scenario.enabled });
+        return null;
+      };
+      try {
+        // When
+        await act(async () => root.render(React.createElement(Harness)));
+        // Then
+        expect(capture.state).toBe(scenario.expected);
+      } finally {
+        await act(async () => root.unmount());
+        usePendingQuestionsStore.setState(questions);
+        usePrWatchStore.setState(watches);
+        resetGlobalBlockingRequests();
+        dom.restore();
+      }
+    });
+  }
+
   test('does not rerender for unrelated updates and rerenders for relevant scalar changes', async () => {
     const dom = installHookTestDom();
     const root = createRoot(dom.container);

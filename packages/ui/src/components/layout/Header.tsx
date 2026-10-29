@@ -39,8 +39,6 @@ import {
 
 import {
 } from '@/components/ui/collapsible';
-import { SpaceAccessButton } from '@/components/session/spaces/SpaceAccessButton';
-import { SpaceApplyButton } from '@/components/session/spaces/SpaceApplyButton';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
@@ -934,13 +932,6 @@ export const Header: React.FC = () => {
     },
   });
 
-  const desktopSidebarActions = (
-    <>
-      <SpaceApplyButton directory={openDirectory} className={cn(DESKTOP_HEADER_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')} iconClassName="h-4 w-4" />
-      <SpaceAccessButton directory={openDirectory} className={cn(DESKTOP_HEADER_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')} iconClassName="h-4 w-4" />
-    </>
-  );
-
 
   const renderSessionTabMenu = React.useCallback(({ session, open, isActive, select, closeOtherTabs, components }: SessionTabMenuArgs) => {
     const { Item, Separator } = components;
@@ -1083,7 +1074,7 @@ export const Header: React.FC = () => {
               {activeSurfaceHeader.title}
             </span>
             {activeSurfaceHeader.subtitle ? (
-              <span className="truncate typography-micro text-[0.65625rem] font-normal leading-tight text-muted-foreground/75 max-w-full">
+              <span className="truncate typography-micro text-[0.65625rem] font-normal leading-tight text-muted-foreground max-w-full">
                 {activeSurfaceHeader.subtitle}
               </span>
             ) : null}
@@ -1152,19 +1143,19 @@ export const Header: React.FC = () => {
                   'flex min-w-0 max-w-full items-center gap-1.5 truncate font-normal leading-tight',
                   isNewSessionDraftOpen
                     ? 'typography-ui-label text-[0.875rem] text-foreground'
-                    : 'typography-micro text-[0.65625rem] text-muted-foreground/75',
+                    : 'typography-micro text-[0.65625rem] text-muted-foreground',
                 )}>
                   {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
-                      <Icon name="git-branch" className={cn('flex-shrink-0 text-muted-foreground/70', isNewSessionDraftOpen ? 'h-3.5 w-3.5' : 'h-3 w-3')} />
+                      <Icon name="git-branch" className={cn('flex-shrink-0 text-muted-foreground', isNewSessionDraftOpen ? 'h-3.5 w-3.5' : 'h-3 w-3')} />
                       <span className={cn('truncate', isNewSessionDraftOpen && 'text-muted-foreground')}>{currentBranchLabel}</span>
                     </span>
                   ) : null}
                   {!isNewSessionDraftOpen && worktreeBadgeKind ? (
                     <span className={cn(
                       "inline-flex min-w-0 items-center gap-0.5",
-                      worktreeBadgeKind === 'attention' || worktreeBadgeKind === 'invalid' || worktreeBadgeKind === 'missing' ? 'text-status-warning' : 'text-muted-foreground/60'
+                      worktreeBadgeKind === 'attention' || worktreeBadgeKind === 'invalid' || worktreeBadgeKind === 'missing' ? 'text-status-warning' : 'text-muted-foreground'
                     )}>
                       <Icon name="alert" className="h-3 w-3 flex-shrink-0" />
                       <span className="truncate">{worktreeBadge}</span>
@@ -1224,6 +1215,22 @@ export const Header: React.FC = () => {
                           >
                             <Icon name="folder-shared" className="me-1 size-4" />
                             {t('sessions.sidebar.session.menu.moveToWorktree')}
+                          </DropdownMenuItem>
+                        </span>
+                      </SessionMenuItemHint>
+                    ) : null}
+                    {!isVSCode && isChatContext && currentSession && !currentSession.parentId && hasProjects ? (
+                      <SessionMenuItemHint hint={isCurrentSessionActive
+                        ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                        : t('sessions.moveChatToProject.hint')}>
+                        <span className="block">
+                          <DropdownMenuItem
+                            disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                            onClick={() => setMoveChatDialogOpen(true)}
+                            className="w-full"
+                          >
+                            <Icon name="folder-shared" className="me-1 size-4" />
+                            {t('sessions.moveChatToProject.menu')}
                           </DropdownMenuItem>
                         </span>
                       </SessionMenuItemHint>
@@ -1354,7 +1361,6 @@ export const Header: React.FC = () => {
           ) : null}
           <NotificationCenterButton buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
 
-          {desktopSidebarActions}
           <WindowsWindowControls visible={endEdgeOwnedByInWindowControls} position={windowControlsSide} />
         </div>
       </div>

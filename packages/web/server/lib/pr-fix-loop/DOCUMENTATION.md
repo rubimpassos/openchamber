@@ -81,7 +81,27 @@ Before any automatic iteration, the server awaits loading the persisted message 
 
 ## Watching a ready PR
 
-`config.watch` (default `true`; records saved before it load as `false`) turns "ready" into a wait. When CI is green, no thread is unresolved and no change request is pending, a watching loop stays `status: 'watching'` with `statusReason: 'pr-ready'`, reads every 3 minutes and reacts to any new CI failure, review, review comment or comment under the same admission rules. It ends only when the PR is merged or closed, the user stops it, the session is deleted, or a limit or error settles it. No new status value exists: clients validate the enum, so an older client reads the loop as watching. Without `watch`, `ready` stays terminal as before. A loop saved as `ready` stays finished; dismissing and starting it again is the way to watch it.
+The server attaches the shared `../tracked-items` service as the `pr-fix-loop`
+interest with the loop's captured reading account. Watching has no independent
+PR timer. Its server-only refresh subscription receives successful unchanged
+reads and explicit unavailable outcomes. A moved summary asks for detailed
+feedback; an unchanged one does so at most every 3 minutes to refresh author
+trust and feedback the summary does not represent. Detailed-read failures retain
+their baseline and backoff. Working turns, protected-worker progress and pending
+review writes keep their existing lifecycle timers. A finished host turn asks
+the shared service for a fresh observation before another feedback read.
+Failed detail reads also arm one bounded retry through the shared service. This
+keeps recovery live after a merged summary has stopped ordinary observation.
+
+`../session-automation` owns cross-automation admission. An active loop reserves
+its host session and canonical PR across accounts and sessions. Retained receipts
+and review jobs keep the reservation while stopped. Operation leases cover
+in-flight steps and publication. A stop during worker resume cancels activation
+and stops the worker again after the outstanding resume returns.
+Every durable save releases a terminal loop's reservation once its final receipt
+and review job are cleared, including publication that completed after Stop.
+
+`config.watch` (default `true`; records saved before it load as `false`) turns "ready" into a wait. When CI is green, no thread is unresolved and no change request is pending, a watching loop stays `status: 'watching'` with `statusReason: 'pr-ready'` and reacts to new CI failure or feedback under the same admission rules. It ends when the PR closes, the user stops it, the session is deleted, or a limit or error settles it. Without `watch`, `ready` stays terminal. A saved `ready` loop stays finished.
 
 A round runs from the PR leaving ready until it is ready again. `iterations` counts the round and resets to 0 on entering `pr-ready`; `totalIterations` keeps the lifetime count (records without it start from their `iterations`). `maxIterations` limits one round. The token budget keeps counting from `createdAt` across rounds. `limitReached` and `budgetReached` remain terminal. Restart needs nothing new: `pr-ready` is `watching`, so `start()` schedules it again in 5 seconds and `seen` keeps handled feedback from going out twice.
 

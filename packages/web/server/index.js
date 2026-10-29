@@ -130,7 +130,10 @@ import { createTokenSnapshotReader } from './lib/pr-fix-loop/token-usage.js';
 import { createRestackRuntime } from './lib/pr-stacks/restack.js';
 import { isGitHubRateLimited, noteIfGitHubRateLimit, noteGitHubRateLimit } from './lib/github/rate-limit.js';
 import { isGraphqlRateLimitError } from './lib/github/pr-summaries.js';
+import { createAutoReviewRuntime } from './lib/auto-review/runtime.js';
+import { createAutomationAdmission, sessionKey } from './lib/session-automation/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
+import { createPrWatchRuntime } from './lib/pr-watch/runtime.js';
 import { isWorkflowFeatureAvailable } from './lib/workflows/feature-flag.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
 import { createWorkflowRuntime } from './lib/workflows/runtime.js';
@@ -215,10 +218,12 @@ import { createFileOpenRequester } from './lib/openchamber-control/file-open.js'
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
 import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applyForkReleaseSource } from './lib/fork-identity.js';
+import { applySystemCertificates } from './lib/system-ca.js';
 import { readOpenCodeLoad } from './lib/diagnostics/opencode-load.js';
 
 // Background CLI launches enter here in a fresh process, without CLI defaults.
 applyConnectAttemptTimeout();
+applySystemCertificates();
 applyOutboundProxyFromEnv();
 applyForkReleaseSource();
 
@@ -1102,6 +1107,8 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   awaitTurnVerdict: (sessionId) => sessionWorkRuntime.awaitTurnVerdict(sessionId),
   // Read at call time: the isolated-spaces switch turns the host on and off live.
   spaceFetchFor: (spaceId) => spacesHost?.openCodeFetchFor(spaceId) ?? null,
+  // Declared further down; only ever called after startup.
+  isInAutoReview: (sessionId, turnEndedAt) => autoReviewRuntime.speaksFor(sessionId, turnEndedAt),
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
@@ -1345,17 +1352,33 @@ const sessionInterruptionRuntime = createSessionInterruptionRuntime({
 
 // Priority sessions a managed OpenCode restart cut off get one message that
 // resumes them; see lib/session-interruption/DOCUMENTATION.md.
+const automationAdmission = createAutomationAdmission({
+  restore: async () => {
+    await Promise.all([autoReviewRuntime.load(), prFixLoopRuntime.load()]);
+    return [...autoReviewRuntime.ownershipClaims(), ...prFixLoopRuntime.ownershipClaims()];
+  },
+  onRelease: (keys) => {
+    for (const key of keys) if (key.startsWith('session:')) messageQueueRuntime.release(key.slice('session:'.length));
+    prWatchRuntime.release(keys);
+  },
+});
+
 const autoResumeRuntime = createAutoResumeRuntime({
   updateMetadata: updateSessionMetadataWith,
   readMemory: () => readCgroupMemory(),
-  sendPrompt: ({ sessionId, directory, text, description, metadata }) => {
+  sendPrompt: async ({ sessionId, directory, text, description, metadata }) => {
+    await automationAdmission.ready();
+    const release = automationAdmission.trySend(null, [sessionKey(sessionId)]);
+    if (!release) throw new Error('The session is owned by an automation. Its restart notice remains available.');
+    try {
     const headers = { ...getOpenCodeAuthHeaders() };
     if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
-    return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers })
+    return await OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers })
       .session.synthetic(
         { sessionID: sessionId, text, description, metadata, delivery: 'steer', resume: true },
         { signal: AbortSignal.timeout(15_000) },
       );
+    } finally { release(); }
   },
 });
 
@@ -1381,9 +1404,29 @@ notificationTriggerRuntime.setGetIsSessionAutoAccepting(
   (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
 );
 
+// Auto-review runs its loop here, so a closed tab or a locked phone does not
+// stop it; while a run goes, the reviewed session's queue waits for it.
+const autoReviewRuntime = createAutoReviewRuntime({
+  automation: automationAdmission,
+  globalEventHub: globalMessageStreamHub,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  sessionKnowledgeRuntime,
+  broadcastUiEvent: broadcastOpenChamberUiEvent,
+  // Declared right below; only called once a run ends.
+  onRunSettled: (sessionId) => messageQueueRuntime.release(sessionId),
+  onRunEnded: (ended) => notificationTriggerRuntime.notifyAutoReviewEnded(ended),
+  routeSend: ({ sessionId, directory, text }) => (
+    routingRuntime.isAutoSession(sessionId) ? routingRuntime.routeSend({ sessionId, directory, body: { text } }) : null
+  ),
+  dataDir: OPENCHAMBER_DATA_DIR,
+});
+autoReviewRuntime.start();
+
 // Queued follow-up messages are delivered by the server so a closed tab or a
 // dropped connection no longer strands them (VS Code keeps its UI-side queue).
 const messageQueueRuntime = createMessageQueueRuntime({
+  automation: automationAdmission,
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -1394,6 +1437,8 @@ const messageQueueRuntime = createMessageQueueRuntime({
   resolveAutoSelection: (send) => routingRuntime.resolveAutoSelection(send),
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
+  isDeliveryHeld: (sessionId) => autoReviewRuntime.holdsDelivery(sessionId),
+  deliveryHoldReady: autoReviewRuntime.startupLoad,
   beforeScheduledTaskSend: (...args) => scheduledTasksRuntime.beforeScheduledTaskSend(...args),
   validateScheduledTaskTarget: (...args) => scheduledTasksRuntime.validateTarget(...args),
   assertFixLoopHostDispatch: (...args) => prFixLoopRuntime.assertHostDispatch(...args),
@@ -1454,6 +1499,7 @@ const approvalWorker = createSpaceWorker({
   },
 });
 const prFixLoopRuntime = createFixLoopRuntime({
+  automation: automationAdmission,
   dataDir: OPENCHAMBER_DATA_DIR,
   getOctokit: async (accountId) => {
     const github = await import('./lib/github/octokit.js');
@@ -1558,6 +1604,21 @@ const dispatchResultsRuntime = createDispatchResultsRuntime({
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
 });
 dispatchResultsRuntime.start();
+
+// An agent waiting on its pull request: followed through the tracked-items
+// service (attached when the routes create it), woken with one message.
+const prWatchRuntime = createPrWatchRuntime({
+  automation: automationAdmission,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  broadcastUiEvent: broadcastOpenChamberUiEvent,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  readCleanupOnMerge: async () => (await readSettingsFromDiskMigrated())?.mergedWorktreeCleanupEnabled === true,
+  // Declared further down; only ever called after startup.
+  isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
+  insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
+});
+prWatchRuntime.start(globalMessageStreamHub);
 
 // Agent workflows: scripts that fan a task out to many agents, run here while
 // the agent that asked stays free. Absent entirely unless the build flag is set.
@@ -2257,7 +2318,6 @@ const openChamberSessionService = createOpenChamberSessionService({
   createChangeRequestWorktree: featureRoutesRuntime.createChangeRequestWorktree,
   // Holds the archive file (`session-archive.js`) beside the instance it describes.
   dataDir: OPENCHAMBER_DATA_DIR,
-  getDefaultOpenCodeDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
   sessionMetadataStore,
   persistSessionMetadata: persistSessionMetadataPatch,
   updateSessionMetadata: updateSessionMetadataWith,
@@ -2558,6 +2618,7 @@ const openChamberControlService = createOpenChamberControlService({
     updateMetadata: updateSessionMetadataWith,
   },
   dispatchResults: dispatchResultsRuntime,
+  prWatch: prWatchRuntime,
   workflowRuntime,
   archiveStore: openChamberSessionService.archiveStore,
 });
@@ -2591,8 +2652,8 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
   void waitForOpenCodeReady()
     .then(() => sessionMetadataStore.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session metadata migration failed:', error?.message ?? error));
-  // Archive state written before OpenCode 2.1 held it moves to OpenCode in one
-  // pass that unloads the projects it had to start (`session-archive.js`).
+  // Archive state OpenChamber kept before OpenCode held it moves to OpenCode in
+  // one pass (`session-archive.js`).
   void waitForOpenCodeReady()
     .then(() => openChamberSessionService.sessionArchive.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session archive migration failed:', error?.message ?? error));
@@ -2617,6 +2678,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   sessionWarmingRuntime,
+  autoReviewRuntime,
+  prWatchRuntime,
   messageQueueRuntime,
   prFixLoopRuntime,
   dispatchResultsRuntime,
@@ -3291,10 +3354,18 @@ async function main(options = {}) {
       await refreshOpenCodeAfterConfigChange('OpenCode v2 installation');
       await waitForOpenCodeReady();
     },
-    upgradeOpenCodeCli: () => runOpenCodeCliUpgrade(
-      resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary),
-      { env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() }, cwd: os.homedir() },
-    ),
+    upgradeOpenCodeCli: () => {
+      const launch = resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary);
+      const upgrade = () => runOpenCodeCliUpgrade(launch, {
+        env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() },
+        cwd: os.homedir(),
+      });
+      // Windows cannot replace an executable that is running. npm then leaves
+      // the package without opencode.exe, and the next start fails. The server
+      // stops for the install and comes back on the new version.
+      if (process.platform !== 'win32') return upgrade();
+      return restartOpenCode('opencode-upgrade', { whileStopped: upgrade });
+    },
     formatSettingsResponse,
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,
@@ -3337,6 +3408,8 @@ async function main(options = {}) {
     messageQueueRuntime,
     prStackRestackRuntime,
     prFixLoopRuntime,
+    autoReviewRuntime,
+    prWatchRuntime,
     routingRuntime,
     workflowRuntime,
   });

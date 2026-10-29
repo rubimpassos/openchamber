@@ -7,6 +7,8 @@ import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { restackEventSchema, type RestackEvent } from './api/pull-stacks';
+import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
+import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
@@ -260,6 +262,8 @@ type OpenChamberEvent =
   | MessageQueueUpdatedEvent
   | RestackEvent
   | PrFixLoopUpdatedEvent
+  | AutoReviewUpdatedEvent
+  | PrWatchUpdatedEvent
   | PermissionPolicyEvent
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
@@ -504,6 +508,22 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:pr-fix-loop.updated') {
     const parsed = prFixLoopUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) for (const listener of listeners) listener(parsed.data);
+    return;
+  }
+
+  if (envelope.type === 'openchamber:pr-watch.updated') {
+    const parsed = prWatchUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:auto-review.updated') {
+    const parsed = autoReviewUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
     return;
   }
 

@@ -55,6 +55,25 @@ describe('tracked items service', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it('server refresh subscribers hear unchanged success and unknown failure without extra provider reads or browser events', async () => {
+    let unavailable = false;
+    const { service, sent, calls } = setup({ readers: { github: async (input) => unavailable
+      ? { status: 'unavailable' }
+      : { status: 'ok', pulls: input.pulls.map((ref) => pullSummary(ref)), issues: [], discussions: [] } } });
+    const heard = [];
+    service.subscribeRefresh((states) => heard.push(...states));
+    service.setServerInterest('fix-loop', itemsOf(githubPull(7)));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(heard.map((entry) => entry.status)).toEqual(['ok', 'ok']);
+    expect(calls.github).toHaveLength(2);
+    unavailable = true;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(heard.at(-1)).toMatchObject({ status: 'unavailable', state: { state: 'open' } });
+    expect(sent).toEqual([]);
+    service.dispose();
+  });
+
   it('asks each provider once per batch for a visible client and pushes only to the clients that show the item', async () => {
     const { service, sent, calls } = setup();
     service.setInterest('c1', itemsOf(githubPull(1), githubIssue(2), githubDiscussion(4), gitlabPull(3), linearIssue('ope-7')));
@@ -104,6 +123,28 @@ describe('tracked items service', () => {
     service.setPresence('c1', true);
     await vi.advanceTimersByTimeAsync(0);
     expect(calls.github).toHaveLength(3);
+  });
+
+  it('refreshes what a server module follows with no window open, and tells it what moved', async () => {
+    let checks = { state: 'pending', total: 1, success: 0, failure: 0, pending: 1 };
+    const { service, sent, calls } = setup({
+      readers: { github: async (input) => ({ status: 'ok', pulls: input.pulls.map((ref) => pullSummary(ref, 'open', { checks })), issues: [], discussions: [] }) },
+    });
+    const heard = [];
+    service.subscribe((states) => heard.push(...states.map((state) => state.state.checks.state)));
+    service.setServerInterest('pr-watch', itemsOf(githubPull(5)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.github).toHaveLength(1);
+    expect(heard).toEqual(['pending']);
+
+    checks = { state: 'success', total: 1, success: 1, failure: 0, pending: 0 };
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(heard).toEqual(['pending', 'success']);
+    expect(sent).toEqual([]);
+
+    service.setServerInterest('pr-watch', new Map());
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(calls.github).toHaveLength(2);
   });
 
   it('keeps the last known state through a failed read and backs off before asking again', async () => {

@@ -130,23 +130,30 @@ request and never drops the newest session first (session ids descend with
 time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
-the surface stays one shape. Top to bottom: worktree setup and a message
-waiting for its space (`ComposerStatusStrip`), the notice that an OpenCode
+the surface stays one shape. Top to bottom: worktree setup, session creation
+after a draft's first message, and a message waiting for its space
+(`ComposerStatusStrip`; the creating line yields to the worktree line and
+appears only after 300 ms through `useShownAfter`), the notice that an OpenCode
 restart cut off the last turn (`SessionRestartInterruptionRow`; its Continue
 has the server send the agent the resume message and clears the notice;
 while the cut-off tool is a question answerable in the form dock the notice
 and its chip stay hidden and the card names the cause, and VS Code never
 offers Continue), the goal
-(`SessionGoalRow`), review and PR fix loops (`AutoReviewStrip`), background
-commands, a staged revert
+(`SessionGoalRow`), review and PR fix loops (`AutoReviewStrip`), the pull
+request the agent waits on with Stop watching (`PullRequestWatchStrip`),
+background commands, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),
 the "looks done" hint or the review offer, the suggestion
 (`SessionSuggestionChip`). BTW hides all of them. A pending form, a nonempty
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
 
-`AutoReviewStrip` retains the foreground review loop's Open and Stop actions and
-adds the current column session's server-owned PR fix loops in the same strip.
+`AutoReviewStrip` reads the current column's server-owned review through
+`selectAutoReviewRun`, scoped by the session's directory owner. A running
+review offers Open and Stop. A settled review keeps its result until dismissed;
+a dispute expands in place. Stop and Dismiss use the store's `removeRun`, which
+restores the row after a failed request. The strip also lists the current
+column session's server-owned PR fix loops.
 Each PR row names the PR, status, iteration count, CI state, unresolved thread
 count, and read error. A failed GitHub or projection read displays unknown CI,
 even when the last successful sample was green. Active loops offer Stop and a
@@ -155,8 +162,18 @@ Open PR uses the existing board navigation on desktop and mobile. Approval-mode
 Push uses the loop's directory and branch through bound Git publication, with
 its existing operation recovery and no force push. Mobile actions wrap and use
 touch-size buttons; multiple rows scroll within the strip. The shared mobile
-status chip continues to use the existing `autoReview` slot. VS Code keeps the
-foreground review loop and hides all server-owned fix loops.
+status chip uses the existing `autoReview` slot for running reviews, settled
+results, PR fix loops, and projection failures. VS Code has neither
+server-owned review runs nor PR fix loops.
+
+While a session's first send is pending (`pendingDraftSends` in
+`session-ui-store`, from Enter in the draft until the request that starts the
+turn has left), the composer keeps what is typed and sends nothing: Send is
+disabled, Stop is not offered, Enter and the pill's arrow do nothing, and
+nothing is queued. A first send that fails restores its text under the
+identity `DraftSendError` names: the created session's composer, or the
+reopened draft's, with the text typed meanwhile kept above the sent text
+(*A draft's first send* in `sync/DOCUMENTATION.md`).
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
@@ -444,7 +461,12 @@ copy.
   holds commands only. Emoji open on a typed `:` plus two letters of a name
   after whitespace (`matchEmojiTrigger` in `lib/emoji/shortcodes.ts`), never on
   a paste, so `12:30`, `http://` and `:)` stay text; choosing one writes the
-  emoji itself, so the agent gets the character, not a shortcode. Only typing and pasting open a picker: text the app sets
+  emoji itself, so the agent gets the character, not a shortcode. A space
+  ends an `@` query, because paths and agent names hold none, except while
+  the whole query still matches a session title (`mentionContinuesPastSpace`,
+  `hasSessionMention`); the picker then lists sessions alone and closes on the
+  first word no title holds, so `@release notes are done` turns back into
+  prose. Only typing and pasting open a picker: text the app sets
   through the editor's `value` prop (a restored draft, a git conflict prompt)
   arrives with `ComposerChange.fromValueProp` and closes any open picker.
 - `tokenize.ts` — one pass producing every highlight range. Adding a construct
@@ -479,6 +501,15 @@ and one Backspace removes it. File and agent mentions, skills and snippets
 chip the same way; a token whose last character was just typed stays text
 until typing moves on, so a name is never chipped halfway. Commands keep
 their color only.
+
+The `#` snippet picker (`chat/SnippetAutocomplete.tsx`) also creates
+snippets. A typed name no snippet answers to offers "Create #name" and, in the
+main composer, "Save draft as #name" with the draft minus the token being
+typed; once saved, that token leaves the draft. Every create row opens the
+quick dialog (`components/snippets/SnippetQuickCreateDialog.tsx`, mounted once
+per app shell) and never writes on its own, so Enter on `fix #42` cannot make
+a snippet. The same dialog backs "Save as snippet" on a user message and on a
+text selection.
 
 Desktop comment fields in ordinary page DOM (chat quote comments, editing a
 pending comment above the composer) are `components/comments/CommentTextEditor`:
@@ -709,7 +740,13 @@ and the send path reading the same grammar.
   in the project or worktree picker always applies and clears it, because a
   project without git never lists a branch and its pin never clears by itself.
   Re-picking what a pinned draft already shows changes nothing, so one click
-  cannot drop an unlisted space or worktree directory. Only a worktree still being created (`pendingWorktreeRequestId`,
+  cannot drop an unlisted space or worktree directory. The project's isolated
+  spaces are listed in a section of their own by name (`spaceBranchOptions`),
+  and a space's directory keeps its pin: picked from the list it is pinned at
+  once, and being listed never clears it, because it exists inside the space
+  only and the host's directory probe at send would call it missing and start
+  the chat in the project. The session store backs this up: a draft opened in
+  a space's directory starts pinned, and the probe never runs for one. Only a worktree still being created (`pendingWorktreeRequestId`,
   `bootstrapPendingDirectory`) keeps both pickers inert. The hook also owns the
   advisory dirty state for the selected directory, clearing it as soon as the
   target changes so a warning never names a previous branch. It re-reads the

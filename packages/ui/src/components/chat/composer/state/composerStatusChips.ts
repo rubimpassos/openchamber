@@ -9,6 +9,7 @@ import type { IconName } from '@/components/icon/icons';
  */
 export const COMPOSER_STATUS_ROW_ORDER = [
     'worktree',
+    'creating',
     'space',
     'interrupted',
     'goal',

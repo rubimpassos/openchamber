@@ -311,7 +311,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
             ? severalQuestions ? t('chat.questionCard.orphanedNoticeInactivityPlural') : t('chat.questionCard.orphanedNoticeInactivity')
             : t('chat.questionCard.orphanedNotice');
     const stepLabel = (field: FormField, index: number) => field.title?.trim() || t('chat.questionCard.questionFallback', { index: String(index + 1) });
-    const iconButtonClass = 'rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground';
+    const iconButtonClass = 'rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground';
 
     return (
         <ComposerFloatingPanel

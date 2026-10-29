@@ -3,11 +3,12 @@ import type { SessionNode } from '../types';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { usePendingQuestion } from '@/sync/pending-questions';
-
-const NO_IDS: readonly string[] = [];
 import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { usePrWatchStore } from '@/sync/pr-watch';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { isSessionUnread } from '@/sync/session-unread';
+
+const NO_IDS: readonly string[] = [];
 
 // Ordered by how much the user is needed: a blocked turn outranks a running
 // one, which outranks something merely unread.
@@ -106,6 +107,14 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
+  // So is one waiting on its pull request: the server wakes it.
+  const waitingOnPullRequest = usePrWatchStore(React.useCallback((state): CollapsedActivityState => {
+    if (!enabled) return null;
+    for (const sessionId of ids.active) {
+      if (state.bySession.has(sessionId)) return 'active';
+    }
+    return null;
+  }, [enabled, ids.active]));
   const unread = useGlobalSessionsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.unread) {
@@ -131,5 +140,5 @@ export const useCollapsedSessionActivityState = ({
   }, [enabled, blockingIds]));
   // A question a restart or the inactivity eviction cut off waits like a form.
   const pendingQuestion = usePendingQuestion(enabled ? blockingIds : NO_IDS) ? 'form' : null;
-  return blocked === 'permission' ? blocked : blocked ?? pendingQuestion ?? active ?? waitingOnShell ?? unread;
+  return blocked ?? pendingQuestion ?? active ?? waitingOnShell ?? waitingOnPullRequest ?? unread;
 };

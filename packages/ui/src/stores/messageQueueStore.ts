@@ -324,8 +324,7 @@ type ServerQueueItemInput = {
 
 type ServerQueueRequestBody =
     | { directory: string; item: ServerQueueItemInput }
-    | { itemIds: string[] }
-    | { held: boolean };
+    | { itemIds: string[] };
 
 const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInput => {
     const input: ServerQueueAttachmentInput = {
@@ -464,8 +463,6 @@ interface MessageQueueActions {
      * owner, the host ('') or a space; a session the owner may not speak for is ignored.
      */
     applyServerSession: (session: ServerQueueSession, revision: number, expectedRuntimeKey: string, owner?: string) => void;
-    /** Server-owned queue: tell the server that owns the session's queue to hold or release its delivery. */
-    setServerHold: (sessionId: string, directory: string, held: boolean) => Promise<void>;
     resetForRuntimeSwitch: (previousRuntimeKey: string | null | undefined) => void;
 }
 
@@ -939,14 +936,6 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     },
 
                     applyServerSession,
-
-                    setServerHold: async (sessionId, directory, held) => {
-                        if (!isServerOwnedMessageQueue()) return;
-                        const creation = waitForSessionCreation(sessionId);
-                        const confirmed = creation ? await creation : undefined;
-                        const response = await runtimeFetch(`${sessionPath(sessionId)}/hold`, { ...jsonInit('PUT', { held }), directory: confirmed?.directory ?? directory });
-                        if (!response.ok) throw new Error(`Message queue hold request failed (${response.status})`);
-                    },
 
                     resetForRuntimeSwitch: (previousRuntimeKey) => {
                         hydrationGeneration += 1;
