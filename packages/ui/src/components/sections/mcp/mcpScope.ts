@@ -3,17 +3,22 @@ import type { I18nKey } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { mcpCapabilitiesSchema, type McpScope } from '@/stores/mcpConfigResponse';
 
+/** The protected service owns its definitions outside the OpenCode scope grammar. */
+export type McpScopeChoice = McpScope | 'protected';
+
 export const MCP_SCOPE_LABEL_KEYS = {
   user: 'settings.mcp.grid.scope.user',
   project: 'settings.mcp.grid.scope.project',
   local: 'settings.mcp.grid.scope.local',
-} as const satisfies Record<McpScope, I18nKey>;
+  protected: 'settings.mcp.page.scope.protected',
+} as const satisfies Record<McpScopeChoice, I18nKey>;
 
 export const MCP_SCOPE_INFO_KEYS = {
   user: 'settings.mcp.page.scope.userInfo',
   project: 'settings.mcp.page.scope.projectInfo',
   local: 'settings.mcp.page.scope.localInfo',
-} as const satisfies Record<McpScope, I18nKey>;
+  protected: 'settings.mcp.page.scope.protectedInfo',
+} as const satisfies Record<McpScopeChoice, I18nKey>;
 
 export const getLocalMcpUnavailableReason = (
   projectLocal: boolean | null,

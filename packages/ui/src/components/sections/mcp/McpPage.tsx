@@ -29,8 +29,10 @@ import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { McpGrid } from './McpGrid';
+import { ProtectedMcpPage } from './ProtectedMcpPage';
+import { protectedScopeAvailability, useProtectedMcp } from './protectedMcp';
 import { McpScopeSelect } from './McpScopeSelect';
-import { getLocalMcpUnavailableReason, MCP_SCOPE_INFO_KEYS, MCP_SCOPE_LABEL_KEYS, useMcpProjectLocalCapability } from './mcpScope';
+import { getLocalMcpUnavailableReason, MCP_SCOPE_INFO_KEYS, MCP_SCOPE_LABEL_KEYS, useMcpProjectLocalCapability, type McpScopeChoice } from './mcpScope';
 import { SettingsLegacyFormatNote } from '@/components/sections/shared/SettingsLegacyFormatNote';
 import {
   useAutosave,
@@ -554,6 +556,7 @@ export const McpPage: React.FC = () => {
   );
   const {
     selectedMcpName,
+    selectedProtectedId,
     mcpDraft,
     setMcpDraft,
     setSelectedMcp,
@@ -563,6 +566,7 @@ export const McpPage: React.FC = () => {
     deleteMcp,
   } = useMcpConfigStore(useShallow((s) => ({
     selectedMcpName: s.selectedMcpName,
+    selectedProtectedId: s.selectedProtectedId,
     mcpDraft: s.mcpDraft,
     setMcpDraft: s.setMcpDraft,
     setSelectedMcp: s.setSelectedMcp,
@@ -575,6 +579,11 @@ export const McpPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const currentDirectory = useSettingsDirectory();
+  const protectedMcp = useProtectedMcp(currentDirectory);
+  const protectedAvailability = protectedScopeAvailability(protectedMcp.state);
+  const sharedAdministration = protectedMcp.state.kind === 'ready'
+    && protectedMcp.state.status.service.state === 'available'
+    && protectedMcp.state.status.service.status.administration === 'shared';
   const projectLocal = useMcpProjectLocalCapability();
   const localScopeUnavailable = getLocalMcpUnavailableReason(projectLocal, currentDirectory);
   const isBlocked = useIntegrationPolicyBlock(currentDirectory);
@@ -585,6 +594,7 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => () => {
     const store = useMcpConfigStore.getState();
     store.setSelectedMcp(null);
+    store.setSelectedProtected(null);
     store.setMcpDraft(null);
   }, []);
 
@@ -601,8 +611,9 @@ export const McpPage: React.FC = () => {
 
   // ── form state ──
   const [draftName, setDraftName] = React.useState('');
-  const [draftScope, setDraftScope] = React.useState<McpScope>('user');
-  const effectiveScope = isNewServer ? draftScope : selectedServer?.scope ?? 'user';
+  const [draftScope, setDraftScope] = React.useState<McpScopeChoice>('user');
+  const ordinaryDraftScope = draftScope === 'protected' ? 'user' : draftScope;
+  const effectiveScope: McpScope = isNewServer ? ordinaryDraftScope : selectedServer?.scope ?? 'user';
   const plainTextWarning = t(effectiveScope === 'local'
     ? 'settings.mcp.page.env.localPlainTextWarning'
     : 'settings.mcp.page.env.plainTextWarning');
@@ -688,7 +699,7 @@ export const McpPage: React.FC = () => {
 
     const partial = {
       name: draftName,
-      scope: draftScope,
+      scope: ordinaryDraftScope,
       type: mcpType,
       command,
       url,
@@ -728,7 +739,7 @@ export const McpPage: React.FC = () => {
   }, [
     importJsonText,
     draftName,
-    draftScope,
+    ordinaryDraftScope,
     mcpType,
     command,
     url,
@@ -906,7 +917,7 @@ export const McpPage: React.FC = () => {
   // rebuilds the whole `oauth` block from the draft on every save.
   const buildDraft = (name: string): McpDraft => ({
     name,
-    scope: draftScope,
+    scope: ordinaryDraftScope,
     type: mcpType,
     command,
     url,
@@ -1004,6 +1015,7 @@ export const McpPage: React.FC = () => {
   };
 
   const handleCancelCreate = () => {
+    setDraftScope('user');
     setMcpDraft(null);
     setSelectedMcp(null);
   };
@@ -1132,8 +1144,23 @@ export const McpPage: React.FC = () => {
   }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
 
   // ── Browse ──
+  if (selectedProtectedId) {
+    return <ProtectedMcpPage key={`${selectedProtectedId}:${currentDirectory}`} mode={{ kind: 'edit', id: selectedProtectedId }} directory={currentDirectory} protectedMcp={protectedMcp} />;
+  }
+  if (isNewServer && draftScope === 'protected') {
+    return <ProtectedMcpPage key={`protected-create:${currentDirectory}`} directory={currentDirectory} protectedMcp={protectedMcp} mode={{
+      kind: 'create', name: draftName, transport: mcpType === 'local' ? 'stdio' : 'http',
+      onScopeChange: (scope, name, transport) => {
+        setDraftName(name);
+        setMcpType(transport === 'stdio' ? 'local' : 'remote');
+        setDraftScope(scope);
+      },
+      onCancel: handleCancelCreate,
+      onCreated: () => setDraftScope('user'),
+    }} />;
+  }
   if (!selectedMcpName) {
-    return <McpGrid />;
+    return <McpGrid protectedMcp={protectedMcp} />;
   }
 
   const runtimeStatus = mcpStatus[selectedMcpName];
@@ -1301,7 +1328,7 @@ export const McpPage: React.FC = () => {
                     className="h-7 w-48 min-w-0 max-w-full shrink font-mono px-2"
                     autoFocus
                   />
-                  <McpScopeSelect value={draftScope} onChange={setDraftScope} projectLocal={projectLocal} directory={currentDirectory} />
+                  <McpScopeSelect value={draftScope} onChange={setDraftScope} projectLocal={projectLocal} directory={currentDirectory} protectedAvailability={protectedAvailability} sharedAdministration={sharedAdministration} />
               </SettingsFieldRow>
             )}
 
