@@ -1,5 +1,19 @@
 # Shared Guards Documentation
 
+## OAuth callback presentation
+
+`oauth-callback.js` owns request-origin resolution and the English HTML callback
+page shared by guest and protected MCP sign-in. `requestOrigin` retains the
+forwarded-protocol and forwarded-host behavior of guest sign-in.
+`renderOauthCallbackPage` escapes both title and message. Callers own callback
+authorization, HTTP status, cache policy and outcome text; query values never
+belong in a callback message.
+
+### Why one callback renderer
+
+Both sign-in flows need the same escaped, standalone page. Sharing the existing
+guest implementation preserves its behavior and keeps escaping in one place.
+
 ## Purpose
 
 `packages/web/server/lib/shared/guards.js` holds the small value predicates and
