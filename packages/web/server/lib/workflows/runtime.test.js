@@ -261,6 +261,32 @@ describe('workflow runtime', () => {
     expect(await store.get(runId)).toBeNull();
   });
 
+  it('deletes a completed run while its ending-save continuation is still pending', async () => {
+    const { runtime, act, store } = await setup(fakeAgentSessions());
+    const persisted = Promise.withResolvers();
+    const continuation = Promise.withResolvers();
+    const save = store.save;
+    store.save = async (run) => {
+      await save(run);
+      if (run.state === 'completed') {
+        persisted.resolve();
+        await continuation.promise;
+      }
+    };
+    const { runId } = await act('workflow.run', { script: script("return agent('x')") });
+    await runtime.approve({ runId });
+    await persisted.promise;
+    try {
+      expect((await act('workflow.status', { runId })).state).toBe('completed');
+      await runtime.remove({ runId });
+      expect(await store.get(runId)).toBeNull();
+    } finally {
+      continuation.resolve();
+    }
+    await store.flush();
+    expect(await store.get(runId)).toBeNull();
+  });
+
   it('takes an answer accepted during a correction even when that turn ends in an error', async () => {
     let runtimeRef = null;
     const agents = fakeAgentSessions({ answer: () => 'not json' });

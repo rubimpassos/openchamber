@@ -691,7 +691,8 @@ export const createWorkflowRuntime = ({
    */
   const remove = async ({ runId }) => {
     const run = await requireRun(runId);
-    if (active.has(run.id) || run.state === 'running' || run.state === 'awaiting-approval') {
+    // Terminal state is set after agents settle; its save may still be unwinding in active.
+    if (run.state === 'running' || run.state === 'awaiting-approval') {
       throw new OpenChamberControlError('Stop or decline the run before deleting it', 409);
     }
     removedRuns.add(run.id);
