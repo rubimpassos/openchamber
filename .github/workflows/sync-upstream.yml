@@ -17,9 +17,9 @@
 #
 # When the merge stops on a conflict, text conflicts with both sides present
 # go to Copilot CLI; a modify/delete conflict resolves to upstream's structure,
-# and the fork's delta on that file is re-landed on top in a follow-up commit
-# (it stays recoverable from main's first parent). A resolved merge must pass
-# type-check and the web build before it is pushed. If Copilot cannot resolve
+# and a modify/delete conflict stops publication for deliberate porting of the
+# fork's behavior. Every merged candidate must pass the changed-code gate,
+# tests and the web build before it is pushed. If Copilot cannot resolve
 # it, or the checks fail, the run fails and leaves `main` untouched; the run
 # summary lists the files to resolve by hand.
 #
@@ -188,12 +188,8 @@ jobs:
             fi
           done
 
-          deleted_note=""
           if [ "${#ported[@]}" -gt 0 ]; then
-            deleted_note="Upstream deleted some of the conflicted files; they are already resolved as upstream structured them: $(printf -- '%s, ' "${ported[@]}" | sed 's/, $//').
-          When a fork change you are reapplying depended on such a deleted file, follow upstream's new structure — the module, route or component that replaced it — instead of reintroducing the old file.
-
-          "
+            give_up "Upstream changed the ownership of locally modified files. Port their behavior before releasing: $(printf -- '%s, ' "${ported[@]}")"
           fi
 
           if [ "${#sources[@]}" -gt 0 ]; then
@@ -219,7 +215,7 @@ jobs:
 
           Resolve every conflict in those files. Keep upstream's code and reapply the fork's change on top of it, so both survive. Where upstream already makes the fork's change, keep upstream's version. Remove every conflict marker.
           A conflict on the \"version\" field of a package.json can take either value; a later step rewrites it.
-          ${deleted_note}Edit only the files listed above. Do not edit, create or delete any other file, including documentation, changelogs or tests, even when repository instructions such as AGENTS.md ask for it. Do not run git commands that change the index, the history or the working tree."
+          Edit only the files listed above. Do not edit, create or delete any other file, including documentation, changelogs or tests, even when repository instructions such as AGENTS.md ask for it. Do not run git commands that change the index, the history or the working tree."
 
               copilot -p "$prompt" -s --no-ask-user \
                 --allow-tool=write \
@@ -299,25 +295,18 @@ jobs:
           fi
 
           git commit --no-edit -m "$message" \
-            -m "Resolved to upstream's structure — re-land the fork delta on top:
-          $(printf -- '- %s\n' "${ported[@]}")" \
             -m "Generated files taken from upstream — regenerate fork-side builds on top:
           $(printf -- '- %s\n' "${generated[@]}")" \
             -m "Copilot resolved conflicts in:
           $(printf -- '- %s\n' "${sources[@]}")"
 
           echo "status=merged" >> "$GITHUB_OUTPUT"
-          if [ "${#ported[@]}" -gt 0 ] || [ "${#generated[@]}" -gt 0 ] || [ "${#sources[@]}" -gt 0 ]; then
+          if [ "${#generated[@]}" -gt 0 ] || [ "${#sources[@]}" -gt 0 ]; then
             echo "resolved=true" >> "$GITHUB_OUTPUT"
           fi
           {
             echo "### Upstream sync conflicts resolved"
             echo
-            if [ "${#ported[@]}" -gt 0 ]; then
-              echo "Resolved to upstream's structure. Re-land the fork delta on top in a follow-up commit; it stays recoverable from \`main\`'s first parent:"
-              printf -- '- `%s`\n' "${ported[@]}"
-              echo
-            fi
             if [ "${#generated[@]}" -gt 0 ]; then
               echo "Generated files taken from upstream; regenerate fork-side builds on top (packages/sdk: \`bun scripts/bundle-guest.ts\`):"
               printf -- '- `%s`\n' "${generated[@]}"
@@ -330,18 +319,22 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node.js
-        if: steps.merge.outputs.resolved == 'true'
+        if: steps.merge.outputs.status == 'merged'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24'
 
-      # Resolved work (Copilot or structure resolutions) is checked here; a
-      # clean merge releases as before.
-      - name: Check the resolved code
-        if: steps.merge.outputs.resolved == 'true'
+      # A clean textual merge can still break a local contract. These suites
+      # cover the shared UI/SDK and the fork's server contracts without requiring
+      # the private Hermes companion checkout used by the full developer suite.
+      - name: Check the integrated code
+        if: steps.merge.outputs.status == 'merged'
         run: |
           set -uo pipefail
-          if ! { bun install --frozen-lockfile && bun run type-check && bun run build:web; }; then
+          if ! { bun install --frozen-lockfile && bun run check:changed -- --base HEAD^1 &&
+            bun run --cwd packages/sdk test && bun run --cwd packages/ui test &&
+            bun run --cwd packages/web test -- bin server/lib/auto-review server/lib/pr-watch server/lib/pr-fix-loop server/lib/session-automation server/lib/message-queue server/lib/tracked-items server/lib/notifications server/lib/session-interruption server/lib/opencode server/lib/pr-stacks server/lib/guests &&
+            bun run build:web; }; then
             {
               echo
               echo "### The resolved code failed the checks"
