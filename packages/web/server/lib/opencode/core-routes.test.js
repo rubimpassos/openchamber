@@ -1,11 +1,54 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createTunnelAuth } from './tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes } from './core-routes.js';
 import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
 
 describe('core-routes', () => {
+  it('DELETE /auth/session signs out the caller while another session stays valid', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2-core-auth-'));
+    const previous = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_DATA_DIR = directory;
+    const { createUiAuth } = await import('../ui-auth/ui-auth.js');
+    const auth = createUiAuth({ password: 'synthetic-task-2-password' });
+    try {
+      const app = express();
+      app.use(express.json());
+      registerAuthAndAccessRoutes(app, { express, uiAuthController: auth, tunnelAuthController: { classifyRequestScope: () => 'local' } });
+      const signIn = async () => {
+        const response = await request(app).post('/auth/session').set('Host', 'localhost').send({ password: 'synthetic-task-2-password' }).expect(200);
+        return response.headers['set-cookie'][0].split(';')[0];
+      };
+      const a = await signIn();
+      const b = await signIn();
+      await request(app).delete('/auth/session').set('Host', 'localhost').set('Cookie', a).expect(200, { signedOut: true });
+      await request(app).get('/auth/session').set('Host', 'localhost').set('Cookie', a).expect(401);
+      await request(app).get('/auth/session').set('Host', 'localhost').set('Cookie', b).expect(200, { authenticated: true });
+      await request(app).delete('/auth/session').set('Accept', 'application/json').expect(401);
+    } finally {
+      auth.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+      if (previous === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+      else process.env.OPENCHAMBER_DATA_DIR = previous;
+    }
+  });
+
+  it.each(['tunnel', 'unknown-public'])('DELETE /auth/session refuses %s scope before the UI controller', async (scope) => {
+    const app = express();
+    const handleSessionDelete = vi.fn();
+    registerAuthAndAccessRoutes(app, {
+      express,
+      uiAuthController: { handleSessionDelete },
+      tunnelAuthController: { classifyRequestScope: () => scope },
+    });
+    await request(app).delete('/auth/session').expect(403, { error: 'Sign-out is disabled for tunnel scope', tunnelLocked: true });
+    expect(handleSessionDelete).not.toHaveBeenCalled();
+  });
+
   it('captures the final response status, including missing routes and parser errors, without request data', async () => {
     const journal = createServerDiagnosticJournal();
     const app = express();

@@ -735,6 +735,14 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     return uiAuthController.handleSessionCreate(req, res);
   });
 
+  app.delete('/auth/session', (req, res) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Sign-out is disabled for tunnel scope', tunnelLocked: true });
+    }
+    return uiAuthController.handleSessionDelete(req, res);
+  });
+
   app.post('/auth/url-token', async (req, res, next) => {
     try {
       await uiAuthController.handleUrlAuthToken(req, res);
