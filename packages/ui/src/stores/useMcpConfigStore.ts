@@ -133,10 +133,18 @@ interface McpConfigStore {
   /** Every directory loaded so far, including the ambient one. */
   serversByDirectory: Record<string, McpServerWithScope[]>;
   selectedMcpName: string | null;
+  /**
+   * The protected connection open in Settings, by id. Only one of this and
+   * `selectedMcpName` is set. Persisted, so it can outlive its connection: the
+   * protected server page clears it when the connection read answers 404.
+   * Never holds a secret value.
+   */
+  selectedProtectedId: string | null;
   isLoading: boolean;
   mcpDraft: McpDraft | null;
 
   setSelectedMcp: (name: string | null) => void;
+  setSelectedProtected: (id: string | null) => void;
   setMcpDraft: (draft: McpDraft | null) => void;
   loadMcpConfigs: (options?: { force?: boolean; directory?: string | null }) => Promise<boolean>;
   createMcp: (config: McpDraft, directory?: string | null) => Promise<McpMutationResult>;
@@ -171,10 +179,14 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         mcpServers: [],
         serversByDirectory: {},
         selectedMcpName: null,
+        selectedProtectedId: null,
         isLoading: false,
         mcpDraft: null,
 
-        setSelectedMcp: (name) => set({ selectedMcpName: name }),
+        // Selecting one kind of server clears the other; clearing one leaves the other.
+        setSelectedMcp: (name) => set(name === null ? { selectedMcpName: null } : { selectedMcpName: name, selectedProtectedId: null }),
+
+        setSelectedProtected: (id) => set(id === null ? { selectedProtectedId: null } : { selectedProtectedId: id, selectedMcpName: null }),
 
         setMcpDraft: (draft) => set({ mcpDraft: draft }),
 
@@ -420,7 +432,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
       {
         name: 'mcp-config-store',
         storage: createDeferredSafeJSONStorage(),
-        partialize: (state) => ({ selectedMcpName: state.selectedMcpName }),
+        partialize: (state) => ({ selectedMcpName: state.selectedMcpName, selectedProtectedId: state.selectedProtectedId }),
       },
     ),
     { name: 'mcp-config-store' },

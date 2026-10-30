@@ -40,6 +40,8 @@ import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
+import { protectedMcpI18n } from './protected-mcp.i18n';
+import { protectedMcpPageI18n } from './protected-mcp-page.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
@@ -206,6 +208,8 @@ export const dict = {
   ...environmentI18n.en,
   ...providersI18n.en,
   ...mcpGridI18n.en,
+  ...protectedMcpI18n.en,
+  ...protectedMcpPageI18n.en,
   ...pluginsGridI18n.en,
   ...integrationsCatalogI18n['en'],
   ...diffFindI18n['en'],

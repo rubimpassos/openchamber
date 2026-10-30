@@ -29,6 +29,8 @@ import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { McpGrid } from './McpGrid';
+import { ProtectedMcpPage } from './ProtectedMcpPage';
+import { protectedScopeAvailability, useProtectedMcp } from './protectedMcp';
 import { McpScopeSelect } from './McpScopeSelect';
 import { getLocalMcpUnavailableReason, MCP_SCOPE_INFO_KEYS, MCP_SCOPE_LABEL_KEYS, useMcpProjectLocalCapability } from './mcpScope';
 import { SettingsLegacyFormatNote } from '@/components/sections/shared/SettingsLegacyFormatNote';
@@ -554,6 +556,7 @@ export const McpPage: React.FC = () => {
   );
   const {
     selectedMcpName,
+    selectedProtectedId,
     mcpDraft,
     setMcpDraft,
     setSelectedMcp,
@@ -563,6 +566,7 @@ export const McpPage: React.FC = () => {
     deleteMcp,
   } = useMcpConfigStore(useShallow((s) => ({
     selectedMcpName: s.selectedMcpName,
+    selectedProtectedId: s.selectedProtectedId,
     mcpDraft: s.mcpDraft,
     setMcpDraft: s.setMcpDraft,
     setSelectedMcp: s.setSelectedMcp,
@@ -575,6 +579,8 @@ export const McpPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const currentDirectory = useSettingsDirectory();
+  const protectedMcp = useProtectedMcp(currentDirectory);
+  const protectedAvailability = protectedScopeAvailability(protectedMcp.state);
   const projectLocal = useMcpProjectLocalCapability();
   const localScopeUnavailable = getLocalMcpUnavailableReason(projectLocal, currentDirectory);
   const isBlocked = useIntegrationPolicyBlock(currentDirectory);
@@ -585,6 +591,7 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => () => {
     const store = useMcpConfigStore.getState();
     store.setSelectedMcp(null);
+    store.setSelectedProtected(null);
     store.setMcpDraft(null);
   }, []);
 
@@ -602,7 +609,19 @@ export const McpPage: React.FC = () => {
   // ── form state ──
   const [draftName, setDraftName] = React.useState('');
   const [draftScope, setDraftScope] = React.useState<McpScope>('user');
-  const effectiveScope = isNewServer ? draftScope : selectedServer?.scope ?? 'user';
+  // Protection belongs to the draft and Settings directory it was turned on
+  // for, so a new draft or another project opens the ordinary form at once.
+  const [protectedFor, setProtectedFor] = React.useState<{ readonly draft: McpDraft; readonly directory: string | null } | null>(null);
+  const draftProtected = isNewServer && protectedFor !== null && protectedFor.draft === mcpDraft && protectedFor.directory === currentDirectory;
+  // Toggling protection swaps the whole form; the checkbox in the new form
+  // takes focus, as if it had toggled in place.
+  const [protectToggled, setProtectToggled] = React.useState(false);
+  React.useEffect(() => {
+    if (!protectToggled) return;
+    setProtectToggled(false);
+    document.querySelector<HTMLElement>('[data-settings-item="mcp.protect"]')?.focus();
+  }, [protectToggled]);
+  const effectiveScope: McpScope = isNewServer ? draftScope : selectedServer?.scope ?? 'user';
   const plainTextWarning = t(effectiveScope === 'local'
     ? 'settings.mcp.page.env.localPlainTextWarning'
     : 'settings.mcp.page.env.plainTextWarning');
@@ -749,6 +768,9 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => {
     if (isNewServer && mcpDraft) {
       hydratedSelectionRef.current = null;
+      // Already off for this render; clearing it keeps the old draft from
+      // coming back protected when its project is chosen again.
+      setProtectedFor(null);
       setDraftName(mcpDraft.name);
       setDraftScope(mcpDraft.scope);
       setMcpType(mcpDraft.type);
@@ -1004,8 +1026,19 @@ export const McpPage: React.FC = () => {
   };
 
   const handleCancelCreate = () => {
+    setDraftScope('user');
+    setProtectedFor(null);
     setMcpDraft(null);
     setSelectedMcp(null);
+  };
+
+  // Protected selections never go into repository config: Shared project
+  // becomes the project's host-only scope, or Global without one.
+  const protectDraft = () => {
+    if (!mcpDraft) return;
+    if (draftScope === 'project') setDraftScope(localScopeUnavailable ? 'user' : 'local');
+    setProtectedFor({ draft: mcpDraft, directory: currentDirectory });
+    setProtectToggled(true);
   };
 
   const handleDelete = async () => {
@@ -1132,8 +1165,28 @@ export const McpPage: React.FC = () => {
   }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
 
   // ── Browse ──
+  if (selectedProtectedId) {
+    return <ProtectedMcpPage key={`${selectedProtectedId}:${currentDirectory}`} mode={{ kind: 'edit', id: selectedProtectedId }} directory={currentDirectory} protectedMcp={protectedMcp} />;
+  }
+  if (isNewServer && draftProtected) {
+    return <ProtectedMcpPage key={`protected-create:${currentDirectory}`} directory={currentDirectory} protectedMcp={protectedMcp} mode={{
+      kind: 'create', name: draftName, transport: mcpType === 'local' ? 'stdio' : 'http', scope: draftScope, projectLocal,
+      onScopeChange: setDraftScope,
+      onUnprotect: (name, transport) => {
+        setDraftName(name);
+        setMcpType(transport === 'stdio' ? 'local' : 'remote');
+        setProtectedFor(null);
+        setProtectToggled(true);
+      },
+      onCancel: handleCancelCreate,
+      onCreated: () => {
+        setDraftScope('user');
+        setProtectedFor(null);
+      },
+    }} />;
+  }
   if (!selectedMcpName) {
-    return <McpGrid />;
+    return <McpGrid protectedMcp={protectedMcp} />;
   }
 
   const runtimeStatus = mcpStatus[selectedMcpName];
@@ -1299,10 +1352,24 @@ export const McpPage: React.FC = () => {
                     onChange={(e) => setDraftName(normalizeMcpServerName(e.target.value))}
                     placeholder={t('settings.mcp.page.server.namePlaceholder')}
                     className="h-7 w-48 min-w-0 max-w-full shrink font-mono px-2"
-                    autoFocus
+                    dir="ltr"
+                    autoFocus={!protectToggled}
                   />
                   <McpScopeSelect value={draftScope} onChange={setDraftScope} projectLocal={projectLocal} directory={currentDirectory} />
               </SettingsFieldRow>
+            )}
+
+            {isNewServer && protectedAvailability.visible && (
+              <SettingsCheckboxRow
+                checked={false}
+                onChange={protectDraft}
+                disabled={protectedAvailability.disabledReason !== null || isCreating}
+                settingsItem="mcp.protect"
+                label={t('settings.mcp.page.server.protect')}
+                ariaLabel={t('settings.mcp.page.server.protect')}
+                info={t('settings.mcp.page.scope.protectedInfo')}
+                description={protectedAvailability.disabledReason ? t(protectedAvailability.disabledReason) : undefined}
+              />
             )}
 
             {!isNewServer && (

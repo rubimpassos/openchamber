@@ -434,6 +434,9 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
       aria-disabled={disabled || undefined}
       onClick={toggle}
       onKeyDown={(event) => {
+        // Keys pressed on a control inside the row, such as the info button,
+        // belong to that control.
+        if (event.target !== event.currentTarget) return;
         if (event.key === ' ' || event.key === 'Enter') {
           event.preventDefault();
           toggle();

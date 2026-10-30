@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # OpenChamber Install Script
 # Usage: curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
+#
+# Protected MCP service (Linux, as root):
+#   curl -fsSL .../install.sh | sudo bash -s -- --protected-mcp --engine-user <account>
+#   curl -fsSL .../install.sh | sudo bash -s -- --protected-mcp-uninstall [--purge-state --engine-user <account>]
 
 set -euo pipefail
 
@@ -176,7 +180,150 @@ suggest_pm_install() {
   exit 1
 }
 
+# The protected MCP service runs as its own account from root-owned files, so
+# its code comes from the registry tarball, checked against the integrity npm
+# publishes, and never from the engine-writable global install.
+
+# One file or directory: owned by one of the owners, with no group or other
+# write bit. That also covers ACLs: a named entry writes only through the ACL
+# mask, and the group bits show the mask. A symbolic link is judged by its
+# owner; its target is checked as a hop of its own.
+protected_mcp_trusted_entry() {
+  local entry="$1" owners="$2" owner mode
+  owner=$(stat -c %u -- "$entry" 2>/dev/null) || return 1
+  case " $owners " in *" $owner "*) ;; *) return 1 ;; esac
+  [ -L "$entry" ] && return 0
+  mode=$(stat -c %a -- "$entry" 2>/dev/null) || return 1
+  (( (8#$mode & 8#022) == 0 ))
+}
+
+# True when only the owners (root, unless others are named) can change what
+# the path runs. The path is walked the way the kernel resolves it: from /, one
+# component at a time, following a link wherever it appears, in a directory
+# component as much as in the last one. Every directory and link on that way
+# must pass. Root executes the result, so anything that cannot be checked fails.
+protected_mcp_trusted_path() {
+  local target="$1"
+  shift
+  local owners="${*:-0}" current=/ next name link hops=0
+  local -a pending=() parts=()
+  case "$target" in /*) ;; *) return 1 ;; esac
+  [ -e "$target" ] || return 1
+  protected_mcp_trusted_entry / "$owners" || return 1
+  IFS=/ read -r -a pending <<< "$target"
+  while [ "${#pending[@]}" -gt 0 ]; do
+    name="${pending[0]}"
+    pending=("${pending[@]:1}")
+    case "$name" in
+      '' | .) continue ;;
+      ..) current=$(dirname -- "$current"); continue ;;
+    esac
+    next="${current%/}/$name"
+    protected_mcp_trusted_entry "$next" "$owners" || return 1
+    if [ -L "$next" ]; then
+      hops=$((hops + 1))
+      [ "$hops" -le 40 ] || return 1
+      link=$(readlink -- "$next") || return 1
+      case "$link" in /*) current=/ ;; esac
+      IFS=/ read -r -a parts <<< "$link"
+      # The `+` form keeps bash before 4.4 from calling an empty array unbound.
+      pending=("${parts[@]}" ${pending[@]+"${pending[@]}"})
+    else
+      current="$next"
+    fi
+  done
+}
+
+# Removes a directory when the script exits, however it exits. The trap holds
+# the path itself: the caller's local variable is gone by then, and `set -u`
+# would stop the trap on it.
+protected_mcp_remove_on_exit() {
+  trap "rm -rf -- $(printf '%q' "$1")" EXIT
+}
+
+protected_mcp_node() {
+  local candidate
+  for candidate in /usr/bin/node /usr/local/bin/node; do
+    if [ -x "$candidate" ] && protected_mcp_trusted_path "$candidate" 0; then
+      echo "$candidate"
+      return
+    fi
+  done
+  echo ""
+}
+
+protected_mcp_install() {
+  if [ "$(uname -s)" != "Linux" ]; then
+    error "The protected MCP service is for Linux hosts."
+    exit 1
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    error "Run this with sudo: the protected MCP service needs its own system account."
+    exit 1
+  fi
+  local node version metadata tarball integrity workdir package_version
+  node=$(protected_mcp_node)
+  if [ -z "$node" ]; then
+    error "Install Node.js $MIN_NODE_VERSION+ system-wide at /usr/bin/node or /usr/local/bin/node, owned by root and writable only by root along its whole path, without ACLs (your distribution or NodeSource does this), then run this again."
+    exit 1
+  fi
+  if ! protected_mcp_trusted_path /var/cache 0; then
+    error "/var/cache must be owned and writable only by root: the package is unpacked there."
+    exit 1
+  fi
+  version="${OPENCHAMBER_VERSION:-latest}"
+  info "Reading $PACKAGE_NAME@$version from the npm registry..."
+  metadata=$(curl -fsSL "https://registry.npmjs.org/@openchamber%2fweb/$version")
+  tarball=$(printf '%s' "$metadata" | "$node" -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s).dist.tarball))')
+  integrity=$(printf '%s' "$metadata" | "$node" -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s).dist.integrity))')
+  workdir=$(mktemp -d /var/cache/openchamber-protected-mcp.XXXXXX)
+  protected_mcp_remove_on_exit "$workdir"
+  curl -fsSL "$tarball" -o "$workdir/package.tgz"
+  if ! "$node" -e 'const c=require("crypto"),f=require("fs");const [a,h]=process.argv[2].split("-");process.exit(c.createHash(a).update(f.readFileSync(process.argv[1])).digest("base64")===h?0:1)' "$workdir/package.tgz" "$integrity"; then
+    error "The downloaded package does not match the integrity the registry publishes."
+    exit 1
+  fi
+  tar -xzf "$workdir/package.tgz" -C "$workdir" --no-same-owner --no-same-permissions
+  chown -R root:root "$workdir"
+  chmod -R go-w "$workdir"
+  package_version=$("$node" -e 'process.stdout.write(require(process.argv[1]).version)' "$workdir/package/package.json")
+  success "Verified $PACKAGE_NAME $package_version"
+  "$node" "$workdir/package/server/lib/protected-mcp/service/install.js" install \
+    --source "$workdir/package/server" --version "$package_version" --node "$node" "$@"
+}
+
+protected_mcp_uninstall() {
+  if [ "$(id -u)" -ne 0 ]; then
+    error "Run this with sudo."
+    exit 1
+  fi
+  local installer=/usr/lib/openchamber-protected-mcp/current/lib/protected-mcp/service/install.js node
+  if [ ! -f "$installer" ]; then
+    error "The protected MCP service is not installed."
+    exit 1
+  fi
+  node=$(protected_mcp_node)
+  if [ -z "$node" ] || ! protected_mcp_trusted_path "$installer" 0; then
+    error "Node.js or the installed service is not owned and writable only by root, so it is not run as root."
+    exit 1
+  fi
+  "$node" "$installer" uninstall "$@"
+}
+
 main() {
+  case "${1:-}" in
+    --protected-mcp)
+      shift
+      protected_mcp_install "$@"
+      return
+      ;;
+    --protected-mcp-uninstall)
+      shift
+      protected_mcp_uninstall "$@"
+      return
+      ;;
+  esac
+
   echo ""
   echo "  ╭───────────────────────────────────╮"
   echo "  │                                   │"
@@ -304,4 +451,8 @@ EOF
   fi
 }
 
-main "$@"
+# Tests load the functions alone with OPENCHAMBER_INSTALL_FUNCTIONS_ONLY=1;
+# `curl ... | bash` and `sudo bash` never carry it.
+if [ -z "${OPENCHAMBER_INSTALL_FUNCTIONS_ONLY:-}" ]; then
+  main "$@"
+fi

@@ -74,7 +74,7 @@ writes when the dialog closes, while a new file is only created on confirm.
 
 ### MCP configuration scopes
 
-MCP creation offers Global (`user`), Shared project (`project`), and Local project
+Ordinary MCP creation offers Global (`user`), Shared project (`project`), and Local project
 (`local`). Scope is fixed after creation. Global applies to every project;
 Shared project writes repository config that may be committed. Local project
 stays on the server host outside the repository and applies to the project and
@@ -97,6 +97,142 @@ Web, Electron, hosted mobile, and Capacitor use the connected server's
 capability. VS Code requires its own explicit capability response; until then
 local creation remains unavailable. These controls reuse the existing Settings
 primitives, and existing-server edits keep the normal autosave flow.
+
+### Protected MCP connections
+
+`mcp/McpGrid.tsx` lists protected connections after ordinary servers in the same
+card grid. Cards open `ProtectedMcpPage` by connection id. The service,
+selections and their contracts belong to
+`packages/web/server/lib/protected-mcp/DOCUMENTATION.md`. Web, Electron, hosted
+mobile and Capacitor use the connected Linux host. VS Code, external OpenCode
+and unsupported hosts hide protected controls.
+
+`McpPage` owns one `useProtectedMcp` instance for the Settings directory and
+passes it to both the grid and the protected editor. Selection actions, deletes
+and Refresh reload that shared status, so opening a card uses the selections
+the grid just changed.
+
+A selection may give a connection another name, as migrated selections do:
+`github` for the connection `precocerto-github`. `mcp/protectedMcpCards.ts`
+builds one card per connection and selection name. The title is the name the
+agent sees, the subtitle adds the connection's own name when the two differ,
+and every selection action changes only entries of that name that point at that
+connection. Unselected connections appear under their own names. The footer
+shows a lock and Global, Local project, Off in this project or Not in use.
+Unused, off-here and busy cards are muted. Badge priority is Disabled, Missing
+credential, Needs sign-in, then the live OpenCode status when this name is
+effective for this connection; otherwise it is Ready.
+
+A name whose global or project entry, turned off or not, points at
+a connection the service no longer has shows as an unavailable card. Its
+actions remove only those stale entries; an entry of the same name for a live
+connection stays on that connection's card. These orphan cards are display-only
+and keep their cleanup menus when the service is unavailable or uninstalled.
+Search covers ordinary servers, protected names, targets and orphan names.
+
+A helper-text notice above the grid reports failed reads, service problems and
+unreadable selections. An uninstalled service stays quiet when no selection
+remains. Unverified and unprotected checks show their lead sentence and every
+finding, with its subject in monospace; unknown codes get a localized fallback.
+Shared administration alone leaves a passing protection check unchanged.
+
+Creation offers Protect credentials under the name and scope when the host
+supports it; installed services that cannot be reached show it disabled with
+the reason. Checking it opens `ProtectedMcpPage` with the name, transport and
+scope kept, and with the name row and checkbox in the same place, so the
+checkbox stays under the pointer; unchecking hands the name and transport back.
+Either way the checkbox of the new form takes focus, and it is disabled while a
+create request runs. Protection belongs to the draft and Settings directory it
+was turned on for: a new draft or another project opens the ordinary form.
+Global selects the connection for all projects and Local project for this
+project, with the identity personal entries use. Shared project is disabled
+with a reason, and checking the box while it is chosen moves the scope to Local
+project, or to Global when Local project is unavailable. While administration
+is shared, the stage 1 warning sits under the checked box. Protection does not
+change the stored format of OpenCode's scopes.
+
+`ProtectedMcpPage` edits the broker's full connection definition, including
+secret files, private paths, package commands and tool policy. Secrets are
+write-only: inputs live in component state, clear after save or cancel, and
+stored values show only Stored or Missing. Destination changes wait for an
+explicit Save that names every credential to type again; Discard restores the
+latest saved destination after in-flight writes finish, preserving the current
+enabled and policy choices. Enabled autosaves through its dedicated endpoint.
+Allowed or hidden tools and default arguments autosave against the broker's
+exact `rawEditable`, replacing only policy and sending `secrets: {}`.
+Tools autosave also works after Forget stored credentials. Configured slots
+remain present, their values stay missing and the credential status stays
+Missing. Revision conflicts keep the edit for reload.
+Slot errors appear on their environment, header or OAuth field; errors with no
+rendered field appear at the top. Only Create and Save failures move focus.
+OpenCode-only options stay hidden.
+
+OAuth sign-in attempts to open the authorization address and keeps it in a
+read-only field with Open and Copy while waiting. Open runs from its own click
+so a blocked automatic tab does not end the flow. Polling continues after a
+failed read until the attempt expires. The paste-the-final-address fallback
+also reads the attempt when the callback has already consumed that address.
+Every final outcome reloads the redacted connection, including a failed sign-in.
+Clients with a fixed redirect address use the same fallback.
+
+An enabled connection reconnects every effective name in the Settings directory
+after a saved destination change, typed credentials, enabling, credential
+revocation or an authorized OAuth sign-in. Each name disconnects before
+connecting again; failures stay in the runtime status pill and do not undo the
+broker write or block other names. Tools-only writes do not reconnect. Other
+projects show the server as failed until it is reconnected there, for example
+from the chat's MCP menu.
+
+Credential revocation and server deletion require confirmation.
+Deletion uses the displayed revision, forgets stored credentials and removes
+selections in every project. Partial selection cleanup shows a warning; the
+remaining stale entries can be removed through orphan cards. A failed delete
+in the grid closes confirmation and reloads protected status before a new
+attempt. A revision conflict in the editor closes confirmation to expose Reload.
+
+Stage 1 shares the OpenChamber and agent account. While the service reports
+`administration: 'shared'`, the protected page explains that an agent acting on
+purpose could change these servers or capture a secret while it is typed.
+
+#### Why protected connections use the main grid
+
+The lock and use chip keep protected connections identifiable within the MCP
+list. A separate list would split browsing and selection from the edit flow.
+Service-wide failures appear once above the grid, while orphan cards retain
+the selection cleanup that remains valid without the service.
+
+#### Why protection is a checkbox and not a scope
+
+Protection decides where the credential lives; scope decides which projects get
+the server. As a fourth scope, Protected needed its own Use in choice that
+repeated Global and Local project in other words. As a checkbox, the scope
+select keeps one meaning for every server, and the cards reuse the scope words
+for the two selections that reach the same projects.
+
+#### Why the grid and editor share protected status
+
+Selections belong to the Settings page visit and directory. Independent reads
+kept the editor on an older selection after a successful grid action.
+
+#### Why OAuth retains Open and Copy
+
+Browser popup permission belongs to a click. The automatic open follows the
+start request, so the retained address provides a new user-initiated open and
+a way to continue in another browser.
+
+#### Why tools autosave preserves the raw destination
+
+The broker binds credentials to the exact destination, including optional-field
+presence. Keeping that destination unchanged lets policy edits succeed after
+credentials are forgotten; rebuilding it from normalized controls could require
+credentials again.
+
+#### Why reconnection stays in the Settings directory
+
+The broker ends live sessions after destination or credential changes. OpenCode
+needs a new connection for each effective alias to use the new state. Reconnecting
+unopened projects would start their MCP servers, so those projects reconnect
+when used there.
 
 ## GitHub automation defaults
 

@@ -800,6 +800,15 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  // Protected MCP connections live on a Linux host's protected service; the
+  // extension host runs its own local OpenCode and offers none.
+  if (pathname === '/api/protected-mcp' || pathname.startsWith('/api/protected-mcp/')) {
+    return new Response(JSON.stringify({ code: 'unsupported_runtime', error: 'Protected MCP connections are not available in VS Code' }), {
+      status: 501,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   if (pathname === '/api/config/mcp-capabilities' && method === 'GET') {
     try {
       const data = await sendBridgeMessage('api:config/mcp-capabilities');
