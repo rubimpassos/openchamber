@@ -1,6 +1,5 @@
 import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { McpDraft, McpScope } from '@/stores/useMcpConfigStore';
-import type { McpScopeChoice } from './mcpScope';
 import type { ProtectedMcpStatus } from './protectedMcp';
 import { dict } from '@/lib/i18n/messages/en';
 import { Window } from 'happy-dom';
@@ -115,7 +114,7 @@ for (const { support, directory, disabled } of [
 ]) {
   test(`local selection respects capability ${support} and directory ${directory}`, async () => {
     // Given
-    const selections: McpScopeChoice[] = [];
+    const selections: McpScope[] = [];
     await act(async () => {
       root.render(<I18nProvider><McpScopeSelect value="user" onChange={(scope) => selections.push(scope)} projectLocal={support} directory={directory} /></I18nProvider>);
     });
@@ -321,7 +320,7 @@ test('using a protected grid card here is immediately reflected in its edit page
   await act(async () => { card.click(); });
   // Then the edit page shows the current usage and offers current selection actions.
   expect(container.textContent).toContain(dict['settings.mcp.protectedPage.usedAs']);
-  expect(container.textContent).toContain(dict['settings.mcp.protected.use.project']);
+  expect(container.textContent).toContain(dict['settings.mcp.grid.scope.local']);
   const rowActions = menu();
   if (!rowActions) throw new Error('Missing Used as actions');
   await act(async () => { rowActions.click(); });

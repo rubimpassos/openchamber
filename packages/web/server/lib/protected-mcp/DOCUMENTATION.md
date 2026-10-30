@@ -556,7 +556,7 @@ connection. A file it cannot read or write is reported and left as it was.
 | Electron desktop on Linux | Same backend as web. The sign-in opens in the system browser, and the callback reaches the address the app uses: the local server, or the SSH forward to a remote host |
 | Phone, hosted mobile and Capacitor | Use the connected host's backend. The callback reaches OpenChamber through a tunnel or the LAN address; where it cannot, the owner pastes the final address |
 | Electron, web server on macOS or Windows | Status says `unsupported_platform`; selections and administration are refused with 501 |
-| VS Code | No protected connections, because the extension host runs its own local OpenCode. The webview answers `/api/protected-mcp/*` with 501 `unsupported_runtime`, so the MCP list shows no protected cards and the scope select hides the protected scope |
+| VS Code | No protected connections, because the extension host runs its own local OpenCode. The webview answers `/api/protected-mcp/*` with 501 `unsupported_runtime`, so the MCP list shows no protected cards and the create form hides Protect credentials |
 | External OpenCode | No selections, like personal MCP entries: OpenChamber cannot inject its plugin. Administration answers 501 `external_opencode` |
 
 ## Tests

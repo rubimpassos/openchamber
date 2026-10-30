@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, jest, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { ProtectedDefinition, ProtectedMcpStatus, getProtectedOAuthAttempt } from './protectedMcp';
+import type { McpScope } from '@/stores/mcpConfigResponse';
 import { dict } from '@/lib/i18n/messages/en';
 
 const browser = new Window({ url: 'http://localhost/' });
@@ -88,6 +89,8 @@ let writeError: { code: string; error: string; status: number } | null;
 let pollResult: Awaited<ReturnType<typeof getProtectedOAuthAttempt>>;
 let getCount: number;
 let cancelCount: number;
+let createScope: McpScope;
+const unprotected: Array<{ name: string; transport: string }> = [];
 let selections: ProtectedMcpStatus['selections'];
 let pollFailures: number;
 let completeOutcome: string;
@@ -158,6 +161,8 @@ beforeEach(() => {
   pollResult = { status: 'pending' };
   getCount = 0;
   cancelCount = 0;
+  createScope = 'local';
+  unprotected.length = 0;
   selections = { global: {}, project: {}, effective: {} };
   pollFailures = 0;
   completeOutcome = 'authorized';
@@ -185,7 +190,8 @@ afterAll(() => {
 function Harness({ create = false }: { readonly create?: boolean }) {
   const protectedMcp = useProtectedMcp('/project');
   return <ProtectedMcpPage protectedMcp={protectedMcp} directory="/project" mode={create
-    ? { kind: 'create', name: 'qa-new', transport: 'stdio', onScopeChange: () => {}, onCancel: () => { cancelCount += 1; }, onCreated: () => {} }
+    ? { kind: 'create', name: 'qa-new', transport: 'stdio', scope: createScope, projectLocal: true, onScopeChange: () => {},
+      onUnprotect: (name, transport) => { unprotected.push({ name, transport }); }, onCancel: () => { cancelCount += 1; }, onCreated: () => {} }
     : { kind: 'edit', id }} />;
 }
 const mount = async (create = false) => { await act(async () => { root.render(<I18nProvider><Harness create={create} /></I18nProvider>); }); };
@@ -233,6 +239,72 @@ test('creating posts a raw stdio definition with the typed secret and project us
   expect(JSON.stringify(useMcpConfigStore.getState())).not.toContain(sentinel);
   expect(JSON.stringify(browser.localStorage)).not.toContain(sentinel);
   expect([...container.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea')].some((entry) => entry.value === sentinel)).toBe(false);
+});
+
+test('creating with the Global scope selects the connection for all projects', async () => {
+  // Given a new protected form whose scope is Global.
+  createScope = 'user';
+  await mount(true);
+  await edit(field(dict['settings.mcp.protectedPage.executable']), '/opt/mcp/bin/server');
+  // When the person confirms creation.
+  await click(button(dict['settings.common.actions.create']));
+  // Then the route receives a selection for all projects.
+  const request = changedRequests()[0];
+  if (!request) throw new Error('Missing create request');
+  expect(await request.json()).toMatchObject({ use: { scope: 'global' } });
+});
+
+test('a Shared project scope cannot create a protected server', async () => {
+  // Given a complete protected form whose scope would be repository config.
+  createScope = 'project';
+  await mount(true);
+  await edit(field(dict['settings.mcp.protectedPage.executable']), '/opt/mcp/bin/server');
+  // When the person tries to create it.
+  const create = button(dict['settings.common.actions.create']);
+  await click(create);
+  // Then Create stays disabled and nothing reaches the service.
+  expect(create.disabled).toBe(true);
+  expect(changedRequests()).toEqual([]);
+});
+
+test('Protect credentials stays disabled while the create request runs', async () => {
+  // Given a create request the service has not answered yet.
+  await mount(true);
+  await edit(field(dict['settings.mcp.protectedPage.executable']), '/opt/mcp/bin/server');
+  let answerCreate = () => {};
+  const answered = new Promise<void>((resolve) => { answerCreate = resolve; });
+  fetchSpy.mockImplementation(async (input, init) => {
+    const request = new Request(input instanceof Request ? input : new URL(String(input), browser.location.href), init);
+    if (request.method === 'POST' && new URL(request.url).pathname === '/api/protected-mcp/connections') await answered;
+    return handleRequest(request);
+  });
+  await click(button(dict['settings.common.actions.create']));
+  const row = [...container.querySelectorAll<HTMLElement>('[role="button"]')]
+    .find((entry) => entry.textContent?.includes(dict['settings.mcp.page.server.protect']));
+  if (!row) throw new Error('Missing Protect credentials');
+  // When the person tries to uncheck it before the answer.
+  await click(row);
+  // Then the form stays, and the answer still selects the new connection.
+  expect(row.getAttribute('aria-disabled')).toBe('true');
+  expect(unprotected).toEqual([]);
+  await act(async () => { answerCreate(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(useMcpConfigStore.getState().selectedProtectedId).toBe(id);
+});
+
+test('unchecking Protect credentials hands the typed name and transport back without writing', async () => {
+  // Given a new protected form with an edited name and the Link type.
+  await mount(true);
+  await edit(field(dict['settings.mcp.page.server.name']), 'renamed-server');
+  await click(button(dict['settings.mcp.page.connection.kindLink']));
+  const row = [...container.querySelectorAll<HTMLElement>('[role="button"]')]
+    .find((entry) => entry.textContent?.includes(dict['settings.mcp.page.server.protect']));
+  if (!row) throw new Error('Missing Protect credentials');
+  expect(row.getAttribute('aria-pressed')).toBe('true');
+  // When the person unchecks protection.
+  await click(row);
+  // Then the ordinary form gets the current name and transport, and nothing reached the service.
+  expect(unprotected).toEqual([{ name: 'renamed-server', transport: 'http' }]);
+  expect(changedRequests()).toEqual([]);
 });
 
 test('a broker field refusal appears under its environment row and focuses its input', async () => {

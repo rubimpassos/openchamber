@@ -11,17 +11,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from '@/components/ui';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsBackButton, SettingsCardChip, SettingsCardPill } from '@/components/sections/shared/SettingsCards';
-import { SettingsSection, SettingsFieldRow, SettingsStackedField, SettingsChipGroup, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsFieldRow, SettingsStackedField, SettingsChipGroup, SettingsCheckboxRow, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { AUTOSAVE_SAVED, AUTOSAVE_UNCHANGED, autosaveFailed, useAutosave } from '@/components/sections/shared/SettingsAutosave';
 import { BusyDots } from '@/components/ui/busy-dots';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import type { McpScope } from '@/stores/mcpConfigResponse';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { normalizeMcpServerName } from './mcpDraft';
 import { McpScopeSelect } from './McpScopeSelect';
-import { useMcpProjectLocalCapability, type McpScopeChoice } from './mcpScope';
 import {
   ProtectedMcpRequestError, createProtectedConnection, getProtectedConnection, updateProtectedConnection,
   setProtectedConnectionEnabled, revokeProtectedCredentials, deleteProtectedConnection,
@@ -34,7 +34,9 @@ import { PROTECTED_USE_LABEL_KEYS, protectedCards, selectionActions } from './pr
 type Mode =
   | { readonly kind: 'edit'; readonly id: string }
   | { readonly kind: 'create'; readonly name: string; readonly transport: ProtectedForm['transport'];
-      readonly onScopeChange: (scope: McpScopeChoice, name: string, transport: ProtectedForm['transport']) => void;
+      /** Global uses the connection in all projects, Local project in this one; the select keeps Shared project off. */
+      readonly scope: McpScope; readonly onScopeChange: (scope: McpScope) => void; readonly projectLocal: boolean | null;
+      readonly onUnprotect: (name: string, transport: ProtectedForm['transport']) => void;
       readonly onCancel: () => void; readonly onCreated: () => void };
 type PageProps = { readonly mode: Mode; readonly directory: string | null; readonly protectedMcp: ReturnType<typeof useProtectedMcp> };
 type FieldFailure = { readonly field: string | null; readonly message: string; readonly focus?: boolean };
@@ -55,6 +57,8 @@ const ERROR_KEYS = new Map<string, I18nKey>([
     'selection_not_saved', 'selections_unreadable', 'invalid_response', 'service_unavailable', 'service_permission_denied',
     'service_timeout', 'body_too_large', 'unsupported_host'] as const).map((code) => [code, `settings.mcp.protectedPage.error.${code}`] satisfies [string, I18nKey]),
 ]);
+
+const USE_BY_SCOPE = { user: 'global', local: 'project', project: null } as const satisfies Record<McpScope, 'global' | 'project' | null>;
 
 const KIND_KEYS = {
   text: 'settings.mcp.protectedPage.kind.text', secret: 'settings.mcp.protectedPage.kind.secret',
@@ -117,12 +121,10 @@ function StringRows({ label, path, values, onChange, onCommit, failure }: {
 /** Protected definitions are component-local. Only redacted views and selection ids enter shared state. */
 export function ProtectedMcpPage({ mode, directory, protectedMcp }: PageProps) {
   const { t, locale } = useI18n();
-  const projectLocal = useMcpProjectLocalCapability();
   const id = mode.kind === 'edit' ? mode.id : null;
   const [saved, setSaved] = React.useState<ProtectedConnectionView | null>(null);
   const savedRef = React.useRef<ProtectedConnectionView | null>(null);
   const [form, setForm] = React.useState(() => emptyProtectedForm(mode.kind === 'create' ? mode.name : '', mode.kind === 'create' ? mode.transport : 'stdio'));
-  const [use, setUse] = React.useState<'global' | 'project'>(directory ? 'project' : 'global');
   const [failure, setFailure] = React.useState<FieldFailure | null>(null);
   const [conflict, setConflict] = React.useState(false);
   const conflictRef = React.useRef(false);
@@ -284,7 +286,8 @@ export function ProtectedMcpPage({ mode, directory, protectedMcp }: PageProps) {
   const required = form.name.trim() && (form.transport === 'http' ? form.url.trim() && form.headers.every((row) => row.name.trim())
     : (form.command.kind === 'path' ? form.command.path.trim() : form.command.package.trim() && form.command.version.trim() && form.command.bin.trim()) && form.env.every((row) => row.key.trim()));
   const controlsDisabled = busy || flow.kind !== 'idle';
-  const canSave = Boolean(required) && missing.length === 0 && !controlsDisabled && !conflict;
+  const createUse = mode.kind === 'create' ? USE_BY_SCOPE[mode.scope] : null;
+  const canSave = Boolean(required) && missing.length === 0 && !controlsDisabled && !conflict && (mode.kind === 'edit' || createUse !== null);
   const configurationDirty = saved !== null && changeKind(saved, form) !== 'none';
   const retypeLabels = renewals.map((label) => {
     const slot = form.env.find((row) => row.key === label)?.slot ?? form.headers.find((row) => row.name === label)?.slot;
@@ -304,7 +307,8 @@ export function ProtectedMcpPage({ mode, directory, protectedMcp }: PageProps) {
     setFailure(null);
     try {
       if (mode.kind === 'create') {
-        const view = await createProtectedConnection({ ...submitted, use: { scope: use } }, directory);
+        if (!createUse) return;
+        const view = await createProtectedConnection({ ...submitted, use: { scope: createUse } }, directory);
         if (!alive.current) return;
         setForm(formFromConnection(view));
         mode.onCreated();
@@ -498,19 +502,31 @@ export function ProtectedMcpPage({ mode, directory, protectedMcp }: PageProps) {
     description={`${t('settings.mcp.page.scope.protected')} · ${t(form.transport === 'stdio' ? 'settings.mcp.page.connection.kindCommand' : 'settings.mcp.page.connection.kindLink')}`}
     onBlurCapture={autosave.onBlurCapture}>
     <div ref={rootRef}>
-      {service?.administration === 'shared' ? <p className={`${SETTINGS_HELPER_CLASS} pb-6`}>{t('settings.mcp.page.scope.sharedAdministration')}</p> : null}
+      {mode.kind === 'edit' && service?.administration === 'shared' ? <p className={`${SETTINGS_HELPER_CLASS} pb-6`}>{t('settings.mcp.page.scope.sharedAdministration')}</p> : null}
       {failure && !failure.field ? <p role="alert" className="typography-meta text-[var(--status-error-text)] pb-4">{failure.message}</p> : null}
       {conflict || (id && !saved && failure) ? <Button variant="outline" size="sm" onClick={() => void load()} disabled={busy}>{t('settings.mcp.protectedPage.actions.reload')}</Button> : null}
       {id && !saved ? <p className={SETTINGS_HELPER_CLASS}>{failure ? '' : t('settings.mcp.protectedPage.loading')}</p> : <>
         <fieldset disabled={controlsDisabled} className="min-w-0">
-          <SettingsSection title={t('settings.mcp.page.server.title')} divider={false} contentClassName="space-y-4">
-            {mode.kind === 'create' ? <>
-              {textField('name', 'settings.mcp.page.server.name', form.name, (name) => setForm({ ...form, name: normalizeMcpServerName(name) }))}
-              <SettingsFieldRow label={t('settings.mcp.page.scope.label')}><McpScopeSelect value="protected" projectLocal={projectLocal} directory={directory} protectedAvailability={availability} sharedAdministration={service?.administration === 'shared'} onChange={(scope) => { if (scope !== 'protected') mode.onScopeChange(scope, form.name, form.transport); }} /></SettingsFieldRow>
-              <SettingsFieldRow label={t('settings.mcp.protectedPage.useIn')}><SettingsChipGroup value={use} onChange={setUse} options={[
-                { value: 'project', label: t(PROTECTED_USE_LABEL_KEYS.project), disabled: !directory }, { value: 'global', label: t(PROTECTED_USE_LABEL_KEYS.global) },
-              ]} /></SettingsFieldRow>
-            </> : <>
+          <SettingsSection title={t('settings.mcp.page.server.title')} divider={false} contentClassName="space-y-4"
+            // The ordinary form's Import button sets its header height; reserving it keeps Protect credentials under the pointer.
+            titleAccessory={mode.kind === 'create' ? <span aria-hidden className="h-6" /> : null}>
+            {mode.kind === 'create' ? <div>
+              {/* Same name, scope and checkbox rows as the ordinary create form, so toggling protection moves nothing above them. */}
+              <div data-protected-field="name">
+                <SettingsFieldRow label={t('settings.mcp.page.server.name')} controlClassName="flex-wrap @xl:w-auto @xl:flex-1">
+                  <Input value={form.name} onChange={(event) => setForm({ ...form, name: normalizeMcpServerName(event.target.value) })}
+                    placeholder={t('settings.mcp.page.server.namePlaceholder')} aria-label={t('settings.mcp.page.server.name')}
+                    aria-invalid={matchesField(failure, 'name') || undefined} dir="ltr" className="h-7 w-48 min-w-0 max-w-full shrink font-mono px-2" />
+                  <McpScopeSelect value={mode.scope} onChange={mode.onScopeChange} projectLocal={mode.projectLocal} directory={directory} protectedCredentials />
+                </SettingsFieldRow>
+                {matchesField(failure, 'name') ? <p role="alert" className="typography-meta text-[var(--status-error-text)]">{failure?.message}</p> : null}
+              </div>
+              {/* The fieldset disables real controls only; this row is a div, so it needs its own disabled while a create runs. */}
+              <SettingsCheckboxRow checked onChange={() => mode.onUnprotect(form.name, form.transport)} disabled={controlsDisabled} settingsItem="mcp.protect"
+                label={t('settings.mcp.page.server.protect')} ariaLabel={t('settings.mcp.page.server.protect')}
+                info={t('settings.mcp.page.scope.protectedInfo')}
+                description={service?.administration === 'shared' ? t('settings.mcp.page.scope.sharedAdministration') : undefined} />
+            </div> : <>
               <SettingsFieldRow label={t('settings.mcp.protectedPage.enabled')}><Switch checked={form.enabled} aria-label={t('settings.mcp.protectedPage.enabled')} onCheckedChange={(enabled) => { setForm({ ...form, enabled }); autosave.requestSave(); }} /></SettingsFieldRow>
               {cards.map((card) => {
                 const liveStatus = runtimeStatus[card.name]?.status.status ?? runtimeDiagnostics[card.name]?.status;

@@ -126,7 +126,7 @@ test('aliases, unused, off-here and orphan selections share the ordinary MCP gri
   const alias = cardFor('alias');
   expect(alias.textContent).toContain('original · /usr/bin/fixture');
   expect(alias.textContent).toContain('Connected');
-  expect(alias.textContent).toContain('This project');
+  expect(alias.textContent).toContain('Local project');
   expect(alias.closest('.grid')).toBe(cardFor('ordinary').closest('.grid'));
   expect(cardFor('unused').textContent).toContain('https://fixture.test/mcp');
   expect(cardFor('unused').textContent).toContain('Ready');
@@ -261,7 +261,7 @@ test('using a connection here writes the selection in the Settings directory and
   expect(requests.filter((request) => request.method === 'PUT')).toEqual([{
     url: '/api/protected-mcp/selections/fixture?directory=%2Fproject', method: 'PUT', body: JSON.stringify({ scope: 'project', connection: 'id-fixture' }),
   }]);
-  expect(cardFor('fixture').textContent).toContain('This project');
+  expect(cardFor('fixture').textContent).toContain('Local project');
 });
 
 test('confirming server deletion sends the displayed revision and refreshes the grid', async () => {

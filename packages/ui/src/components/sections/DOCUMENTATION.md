@@ -118,7 +118,7 @@ builds one card per connection and selection name. The title is the name the
 agent sees, the subtitle adds the connection's own name when the two differ,
 and every selection action changes only entries of that name that point at that
 connection. Unselected connections appear under their own names. The footer
-shows a lock and All projects, This project, Off in this project or Not in use.
+shows a lock and Global, Local project, Off in this project or Not in use.
 Unused, off-here and busy cards are muted. Badge priority is Disabled, Missing
 credential, Needs sign-in, then the live OpenCode status when this name is
 effective for this connection; otherwise it is Ready.
@@ -136,11 +136,20 @@ remains. Unverified and unprotected checks show their lead sentence and every
 finding, with its subject in monospace; unknown codes get a localized fallback.
 Shared administration alone leaves a passing protection check unchanged.
 
-Creation offers the Protected scope when the host supports it, plus Use in:
-This project or All projects. This project is the default with a directory and
-is disabled without one. Installed services that cannot be reached show the
-scope disabled with a reason. Protected is separate from OpenCode's config
-scopes and does not change their stored format.
+Creation offers Protect credentials under the name and scope when the host
+supports it; installed services that cannot be reached show it disabled with
+the reason. Checking it opens `ProtectedMcpPage` with the name, transport and
+scope kept, and with the name row and checkbox in the same place, so the
+checkbox stays under the pointer; unchecking hands the name and transport back.
+Either way the checkbox of the new form takes focus, and it is disabled while a
+create request runs. Protection belongs to the draft and Settings directory it
+was turned on for: a new draft or another project opens the ordinary form.
+Global selects the connection for all projects and Local project for this
+project, with the identity personal entries use. Shared project is disabled
+with a reason, and checking the box while it is chosen moves the scope to Local
+project, or to Global when Local project is unavailable. While administration
+is shared, the stage 1 warning sits under the checked box. Protection does not
+change the stored format of OpenCode's scopes.
 
 `ProtectedMcpPage` edits the broker's full connection definition, including
 secret files, private paths, package commands and tool policy. Secrets are
@@ -191,6 +200,14 @@ The lock and use chip keep protected connections identifiable within the MCP
 list. A separate list would split browsing and selection from the edit flow.
 Service-wide failures appear once above the grid, while orphan cards retain
 the selection cleanup that remains valid without the service.
+
+#### Why protection is a checkbox and not a scope
+
+Protection decides where the credential lives; scope decides which projects get
+the server. As a fourth scope, Protected needed its own Use in choice that
+repeated Global and Local project in other words. As a checkbox, the scope
+select keeps one meaning for every server, and the cards reuse the scope words
+for the two selections that reach the same projects.
 
 #### Why the grid and editor share protected status
 

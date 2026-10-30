@@ -1,13 +1,15 @@
 import type { IconName } from '@/components/icon/icons';
 import type { I18nKey } from '@/lib/i18n';
+import { MCP_SCOPE_LABEL_KEYS } from './mcpScope';
 import type { ProtectedConnection, ProtectedMcpStatus, ProtectedSelectionRequest } from './protectedMcp';
 
 /** Where a connection is used under one MCP name, in the project Settings shows. */
 type ProtectedUse = 'global' | 'project' | 'off-here' | 'unused';
 
+/** A global selection reaches the same projects as the Global scope, and a project selection those of Local project. */
 export const PROTECTED_USE_LABEL_KEYS = {
-  global: 'settings.mcp.protected.use.global',
-  project: 'settings.mcp.protected.use.project',
+  global: MCP_SCOPE_LABEL_KEYS.user,
+  project: MCP_SCOPE_LABEL_KEYS.local,
   'off-here': 'settings.mcp.protected.use.offHere',
   unused: 'settings.mcp.protected.use.unused',
 } as const satisfies Record<ProtectedUse, I18nKey>;

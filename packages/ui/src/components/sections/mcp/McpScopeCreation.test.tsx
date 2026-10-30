@@ -27,6 +27,7 @@ const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
 const { useMcpConfigStore } = await import('@/stores/useMcpConfigStore');
 const { useMcpStore } = await import('@/stores/useMcpStore');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
+const { useUIStore } = await import('@/stores/useUIStore');
 const { McpPage } = await import('./McpPage');
 const initialConfigState = useMcpConfigStore.getState();
 const initialRuntimeState = useMcpStore.getState();
@@ -142,14 +143,25 @@ const protectedDraft: McpDraft = {
   protocol: 'legacy', timeoutStartup: '', timeoutCatalog: '', timeoutExecution: '', codemode: 'default', disabled: false,
 };
 
+const protectRow = () => [...container.querySelectorAll<HTMLElement>('[role="button"]')]
+  .find((entry) => entry.textContent?.includes(dict['settings.mcp.page.server.protect']));
+const scopeOption = (label: string) => [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')]
+  .find((entry) => entry.textContent?.includes(label));
+const scopeTrigger = () => {
+  const trigger = container.querySelector<HTMLButtonElement>('[data-slot="select-trigger"]');
+  if (!trigger) throw new Error('Missing scope selector');
+  return trigger;
+};
+
 for (const service of ['unsupported', 'not_installed', 'unreachable', 'available'] as const) {
-  test(`protected scope ${service} controls availability and routes creation without changing OpenCode scopes`, async () => {
+  test(`Protect credentials ${service} controls availability and keeps the OpenCode scopes`, async () => {
     // Given a new server and the connected host's protected-service status.
     useMcpConfigStore.setState({ selectedMcpName: protectedDraft.name, selectedProtectedId: null, mcpDraft: protectedDraft });
+    let capabilityReads = 0;
     fetchSpy.mockImplementation(async (input, init) => {
       const request = new Request(input instanceof Request ? input : new URL(String(input), browser.location.href), init);
       const path = new URL(request.url).pathname;
-      if (path === '/api/config/mcp-capabilities') return Response.json({ projectLocal: true });
+      if (path === '/api/config/mcp-capabilities') { capabilityReads += 1; return Response.json({ projectLocal: true }); }
       if (path === '/api/config') return Response.json([]);
       if (path === '/api/protected-mcp/status') {
         if (service === 'unsupported') return Response.json({ code: 'unsupported_host' }, { status: 501 });
@@ -164,47 +176,170 @@ for (const service of ['unsupported', 'not_installed', 'unreachable', 'available
       return Response.json(projectSettings);
     });
     await act(async () => { root.render(<I18nProvider><McpPage /></I18nProvider>); });
-    const trigger = container.querySelector<HTMLButtonElement>('[data-slot="select-trigger"]');
-    if (!trigger) throw new Error('Missing scope selector');
-    // When the person opens the scope picker.
-    await clickWithPointer(trigger, 'mouse');
-    const protectedOption = [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')]
-      .find((entry) => entry.textContent === dict['settings.mcp.page.scope.protected']);
-    // Then unsupported or missing services hide it; a reachable service opens the protected form.
+    // When the person looks for protection under the name and scope.
+    const row = protectRow();
+    // Then unsupported or missing services hide it, and an unreachable one says why it is off.
     if (service === 'unsupported' || service === 'not_installed') {
-      expect(protectedOption).toBeUndefined();
+      expect(row).toBeUndefined();
       return;
     }
-    if (!protectedOption) throw new Error('Missing Protected option');
+    if (!row) throw new Error('Missing Protect credentials');
     if (service === 'unreachable') {
-      expect(protectedOption.getAttribute('aria-disabled')).toBe('true');
-      expect(document.body.textContent).toContain(dict['settings.mcp.protected.service.unreachable']);
+      expect(row.getAttribute('aria-disabled')).toBe('true');
+      expect(container.textContent).toContain(dict['settings.mcp.protected.service.unreachable']);
       return;
     }
-    await clickWithPointer(protectedOption, 'mouse');
-    expect(container.textContent).toContain(dict['settings.mcp.protectedPage.useIn']);
-    expect(container.textContent).toContain(dict['settings.mcp.protectedPage.tools']);
-    const name = container.querySelector<HTMLInputElement>('input[aria-label="Server name"]');
-    expect(name?.value).toBe(protectedDraft.name);
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    // When the person presses Enter on the row's info button.
+    const info = row.querySelector('button');
+    if (!info) throw new Error('Missing info button');
+    await act(async () => { info.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    // Then the key belongs to the info button and protection stays off.
+    expect(protectRow()?.getAttribute('aria-pressed')).toBe('false');
+    expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    const readsBeforeProtect = capabilityReads;
+    // When the person checks it.
+    await act(async () => { row.click(); });
+    // Then the protected form keeps the name, transport and scope, warns about shared administration and asks nothing else about projects.
+    expect(container.textContent).toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    expect(document.activeElement?.getAttribute('data-settings-item')).toBe('mcp.protect');
+    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true');
+    expect(capabilityReads).toBe(readsBeforeProtect);
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="Server name"]')?.value).toBe(protectedDraft.name);
+    expect(container.querySelector('input[aria-label="Server name"]')?.getAttribute('dir')).toBe('ltr');
     expect(container.querySelector('input[aria-label="URL"]')).not.toBeNull();
     expect(container.textContent).toContain(dict['settings.mcp.page.scope.sharedAdministration']);
-    // Choosing another scope retains the name and transport in the ordinary form.
-    const protectedTrigger = container.querySelector<HTMLButtonElement>('[data-slot="select-trigger"]');
-    if (!protectedTrigger) throw new Error('Missing protected scope selector');
-    await clickWithPointer(protectedTrigger, 'mouse');
-    const global = [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')]
-      .find((entry) => entry.textContent?.includes(dict['settings.mcp.grid.scope.user']));
-    if (!global) throw new Error('Missing Global option');
-    await clickWithPointer(global, 'mouse');
-    expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.useIn']);
-    expect([...container.querySelectorAll<HTMLInputElement>('input')].some((entry) => entry.value === protectedDraft.name)).toBe(true);
+    expect(container.textContent).not.toContain('Use in');
+    expect(scopeTrigger().textContent).toContain(dict['settings.mcp.grid.scope.user']);
+    // When the person opens the scope picker and chooses Local project.
+    await clickWithPointer(scopeTrigger(), 'mouse');
+    expect(scopeOption(dict['settings.mcp.grid.scope.project'])?.getAttribute('aria-disabled')).toBe('true');
+    expect(document.body.textContent).toContain(dict['settings.mcp.page.scope.projectUnavailableProtected']);
+    const local = scopeOption(dict['settings.mcp.grid.scope.local']);
+    if (!local) throw new Error('Missing Local project option');
+    expect(local.getAttribute('aria-disabled')).not.toBe('true');
+    await clickWithPointer(local, 'mouse');
+    expect(scopeTrigger().textContent).toContain(dict['settings.mcp.grid.scope.local']);
+    // When the person unchecks protection.
+    const checked = protectRow();
+    if (!checked) throw new Error('Missing checked Protect credentials');
+    expect(checked.getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { checked.click(); });
+    // Then the ordinary form keeps the name, transport and chosen scope, and the checkbox keeps focus.
+    expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    const name = [...container.querySelectorAll<HTMLInputElement>('input')].find((entry) => entry.value === protectedDraft.name);
+    expect(name?.getAttribute('dir')).toBe('ltr');
     expect(container.textContent).toContain(dict['settings.mcp.page.connection.kindLink']);
+    expect(scopeTrigger().textContent).toContain(dict['settings.mcp.grid.scope.local']);
+    expect(protectRow()?.getAttribute('aria-pressed')).toBe('false');
+    expect(document.activeElement).toBe(protectRow() ?? null);
+  });
+}
+
+const availableStatus = (administration: 'shared' | 'separate') => Response.json({
+  host: { supported: true }, service: { state: 'available', status: {
+    administration, enforcement: { status: 'protected', findings: [] }, connections: [],
+  } }, selections: { global: {}, project: {}, effective: {} }, selectionsError: null,
+});
+
+test('a new draft opens the ordinary form even while the previous one was protected', async () => {
+  // Given a protected draft.
+  fetchSpy.mockImplementation(async (input, init) => {
+    const request = new Request(input instanceof Request ? input : new URL(String(input), browser.location.href), init);
+    const path = new URL(request.url).pathname;
+    if (path === '/api/config/mcp-capabilities') return Response.json({ projectLocal: true });
+    if (path === '/api/config' || path === '/api/config/mcp') return Response.json([]);
+    if (path === '/api/protected-mcp/status') return availableStatus('separate');
+    return Response.json(projectSettings);
+  });
+  useMcpConfigStore.setState({ selectedMcpName: protectedDraft.name, selectedProtectedId: null, mcpDraft: { ...protectedDraft, scope: 'local' } });
+  await act(async () => { root.render(<I18nProvider><McpPage /></I18nProvider>); });
+  const row = protectRow();
+  if (!row) throw new Error('Missing Protect credentials');
+  await act(async () => { row.click(); });
+  expect(container.textContent).toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+  // When Settings search or Add server replaces the draft.
+  await act(async () => { useMcpConfigStore.setState({ selectedMcpName: 'next-server', mcpDraft: { ...protectedDraft, name: 'next-server' } }); });
+  // Then the new draft starts unprotected on its own name and scope.
+  expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+  expect(protectRow()?.getAttribute('aria-pressed')).toBe('false');
+  expect([...container.querySelectorAll<HTMLInputElement>('input')].some((entry) => entry.value === 'next-server')).toBe(true);
+  expect(scopeTrigger().textContent).toContain(dict['settings.mcp.grid.scope.user']);
+});
+
+test('another Settings project ends protection, and coming back does not restore it', async () => {
+  // Given two projects and a protected draft in the first.
+  fetchSpy.mockImplementation(async (input, init) => {
+    const request = new Request(input instanceof Request ? input : new URL(String(input), browser.location.href), init);
+    const path = new URL(request.url).pathname;
+    if (path === '/api/config/mcp-capabilities') return Response.json({ projectLocal: true });
+    if (path === '/api/config' || path === '/api/config/mcp') return Response.json([]);
+    if (path === '/api/protected-mcp/status') return availableStatus('separate');
+    return Response.json(projectSettings);
+  });
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }, { id: 'other', path: '/other' }], activeProjectId: 'project' });
+  useMcpConfigStore.setState({ selectedMcpName: protectedDraft.name, selectedProtectedId: null, mcpDraft: protectedDraft });
+  try {
+    await act(async () => { root.render(<I18nProvider><McpPage /></I18nProvider>); });
+    const row = protectRow();
+    if (!row) throw new Error('Missing Protect credentials');
+    await act(async () => { row.click(); });
+    expect(container.textContent).toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    // When Settings switches to the other project and back.
+    await act(async () => { useUIStore.setState({ settingsProjectPath: '/other' }); });
+    // Then the other project shows the ordinary form, and so does the first one again.
+    expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    await act(async () => { useUIStore.setState({ settingsProjectPath: '/project' }); });
+    expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    expect(protectRow()?.getAttribute('aria-pressed')).toBe('false');
+  } finally {
+    useUIStore.setState({ settingsProjectPath: null });
+  }
+});
+
+for (const projectLocal of [true, false] as const) {
+  test(`checking Protect credentials on Shared project moves the scope to ${projectLocal ? 'Local project' : 'Global'}`, async () => {
+    // Given a Shared project draft and the host's local project support.
+    let markCapabilityConsumed = () => {};
+    const capabilityConsumed = new Promise<void>((resolve) => { markCapabilityConsumed = resolve; });
+    fetchSpy.mockImplementation(async (input, init) => {
+      const request = new Request(input instanceof Request ? input : new URL(String(input), browser.location.href), init);
+      const path = new URL(request.url).pathname;
+      if (path === '/api/config/mcp-capabilities') {
+        const response = Response.json({ projectLocal });
+        const readJson = response.json.bind(response);
+        spyOn(response, 'json').mockImplementation(async () => {
+          const body: unknown = await readJson();
+          markCapabilityConsumed();
+          return body;
+        });
+        return response;
+      }
+      if (path === '/api/config') return Response.json([]);
+      if (path === '/api/protected-mcp/status') return Response.json({
+        host: { supported: true }, service: { state: 'available', status: {
+          administration: 'separate', enforcement: { status: 'protected', findings: [] }, connections: [],
+        } }, selections: { global: {}, project: {}, effective: {} }, selectionsError: null,
+      });
+      return Response.json(projectSettings);
+    });
+    useMcpConfigStore.setState({ selectedMcpName: protectedDraft.name, selectedProtectedId: null, mcpDraft: { ...protectedDraft, scope: 'project' } });
+    await act(async () => { root.render(<I18nProvider><McpPage /></I18nProvider>); });
+    await act(async () => { await capabilityConsumed; });
+    expect(scopeTrigger().textContent).toContain(dict['settings.mcp.grid.scope.project']);
+    const row = protectRow();
+    if (!row) throw new Error('Missing Protect credentials');
+    // When the person checks Protect credentials.
+    await act(async () => { row.click(); });
+    // Then the protected form starts on the nearest scope a protected server can use.
+    expect(container.textContent).toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    expect(scopeTrigger().textContent).toContain(dict[projectLocal ? 'settings.mcp.grid.scope.local' : 'settings.mcp.grid.scope.user']);
   });
 }
 
 for (const ending of ['cancel', 'create'] as const) {
-  test(`a protected ${ending} resets scope before the next ordinary draft mounts`, async () => {
-    // Given a protected draft opened through the real scope picker.
+  test(`a protected ${ending} resets protection and scope before the next ordinary draft mounts`, async () => {
+    // Given a Local project draft protected through the checkbox.
     let capabilityReads = 0;
     const definition = { name: protectedDraft.name, enabled: true, transport: 'http', http: { url: 'https://mcp.test', headers: {} }, policy: {} };
     const view = { id: 'pmcp_created_scope', name: definition.name, revision: 1, enabled: true, transport: 'http', secrets: {}, credential: 'none', editable: definition };
@@ -221,15 +356,12 @@ for (const ending of ['cancel', 'create'] as const) {
       if (path.startsWith('/api/protected-mcp/connections')) return Response.json({ connection: view });
       return Response.json(projectSettings);
     });
-    useMcpConfigStore.setState({ selectedMcpName: protectedDraft.name, selectedProtectedId: null, mcpDraft: protectedDraft });
+    useMcpConfigStore.setState({ selectedMcpName: protectedDraft.name, selectedProtectedId: null, mcpDraft: { ...protectedDraft, scope: 'local' } });
     await act(async () => { root.render(<ThemeSystemProvider><I18nProvider><McpPage /></I18nProvider></ThemeSystemProvider>); });
-    const trigger = container.querySelector<HTMLButtonElement>('[data-slot="select-trigger"]');
-    if (!trigger) throw new Error('Missing scope picker');
-    await clickWithPointer(trigger, 'mouse');
-    const option = [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')]
-      .find((entry) => entry.textContent === dict['settings.mcp.page.scope.protected']);
-    if (!option) throw new Error('Missing Protected option');
-    await clickWithPointer(option, 'mouse');
+    const row = protectRow();
+    if (!row) throw new Error('Missing Protect credentials');
+    await act(async () => { row.click(); });
+    expect(scopeTrigger().textContent).toContain(dict['settings.mcp.grid.scope.local']);
     const action = (label: string) => {
       const target = [...container.querySelectorAll<HTMLButtonElement>('button')].find((entry) => entry.textContent === label || entry.getAttribute('aria-label') === label);
       if (!target) throw new Error(`Missing action ${label}`);
@@ -248,9 +380,10 @@ for (const ending of ['cancel', 'create'] as const) {
     const add = container.querySelector<HTMLButtonElement>('[data-settings-item="mcp.create"]');
     if (!add) throw new Error('Missing Add server card');
     await act(async () => { add.click(); });
-    // Then an ordinary draft never mounts the protected editor, even for one commit.
-    expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.useIn']);
-    expect(container.querySelector('[data-slot="select-trigger"]')?.textContent).toContain(dict['settings.mcp.grid.scope.user']);
+    // Then an ordinary Global draft mounts with protection off, never the protected editor.
+    expect(container.textContent).not.toContain(dict['settings.mcp.protectedPage.hiddenTools']);
+    expect(protectRow()?.getAttribute('aria-pressed')).toBe('false');
+    expect(scopeTrigger().textContent).toContain(dict['settings.mcp.grid.scope.user']);
     expect(capabilityReads).toBe(readsBeforeNextDraft);
   });
 }
