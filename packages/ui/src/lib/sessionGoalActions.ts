@@ -124,12 +124,6 @@ export async function setSessionGoalStatus(
   directory: string | undefined,
   status: Extract<SessionGoalStatus, 'active' | 'paused' | 'complete'>,
 ): Promise<void> {
-  // Pausing a goal also stops the agent's current turn — same mental model
-  // as the stop button, expressed through goal control. A no-op when the
-  // session is already idle.
-  if (status === 'paused') {
-    void abortCurrentOperation(sessionId);
-  }
   await writeGoal(sessionId, directory, (currentGoal) => {
     if (!currentGoal) return null;
     return {
@@ -145,6 +139,11 @@ export async function setSessionGoalStatus(
       updatedAt: Date.now(),
     };
   });
+  // Persist the pause before abort emits idle, so a goal driver cannot read
+  // an active goal and immediately continue the turn we just stopped.
+  if (status === 'paused') {
+    void abortCurrentOperation(sessionId);
+  }
 }
 
 export async function clearSessionGoal(sessionId: string, directory: string | undefined): Promise<void> {
