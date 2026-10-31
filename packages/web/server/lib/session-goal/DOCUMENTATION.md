@@ -60,6 +60,11 @@ because the plugin cannot read OpenChamber's objective files. When the
 extension is paused or removed the goal is an ordinary goal again and this
 loop picks it up on the next idle.
 
+Pausing persists `status: paused` before aborting the current turn. The abort
+can emit idle immediately, so the driver must already be able to read the
+pause when it decides whether to continue. A failed metadata write does not
+abort the still-active goal.
+
 ## File-backed objectives
 
 The objective TEXT lives in `<data-dir>/goals/<sessionId>.md` (data dir =
