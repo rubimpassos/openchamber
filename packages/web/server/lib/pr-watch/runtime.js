@@ -6,8 +6,8 @@
 // the pull request through the tracked-items service, whether or not any
 // window is open, and wakes the session with one synthetic message
 // when something the agent has to act on happens: a check failed, every check
-// passed, someone commented or reviewed, it conflicts with or fell behind its
-// base, it was merged or closed. A wake ends the watch; the agent watches
+// passed, the merge queue removed it, someone commented or reviewed, it
+// conflicts with or fell behind its base, it was merged or closed. A wake ends the watch; the agent watches
 // again when it needs to wait once more.
 //
 // Delivery follows `../dispatch-results`: the message waits until the session
@@ -44,6 +44,7 @@ const EVENT_TEXT = {
   closed: 'it was closed without merging',
   'checks-failed': 'a check failed',
   'checks-passed': 'every check passed',
+  dequeued: 'it was removed from the merge queue',
   conflict: 'it conflicts with its base branch',
   behind: 'its branch is behind the base branch',
   activity: 'someone commented or reviewed',
@@ -51,6 +52,7 @@ const EVENT_TEXT = {
 const EVENTS = Object.keys(EVENT_TEXT);
 
 const sessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{4,128}$/);
+const queueRemovalSchema = z.object({ at: z.string(), reason: z.string().nullable() });
 const snapshotSchema = z.object({
   state: z.enum(['open', 'closed', 'merged']),
   headSha: z.string().nullable(),
@@ -58,6 +60,8 @@ const snapshotSchema = z.object({
   merge: z.string().nullable(),
   activity: z.number().int().nonnegative().nullable(),
   title: z.string(),
+  // Missing in a file written before it was followed: no baseline, so no event.
+  queueRemoval: queueRemovalSchema.nullable().optional(),
 });
 const watchSchema = z.object({
   sessionID: sessionIdSchema,
@@ -90,6 +94,7 @@ const pullStateSchema = z.object({
   mergeableState: z.string().nullable().optional(),
   checks: z.object({ state: z.enum(['success', 'failure', 'pending', 'unknown']) }).nullable().optional(),
   activity: z.number().int().nonnegative().optional(),
+  queueRemoval: queueRemovalSchema.nullable().optional(),
 });
 const statusEventSchema = z.object({
   type: z.literal('session.status'),
@@ -147,6 +152,7 @@ const snapshotOf = (value) => {
     merge: state.mergeableState ?? null,
     activity: state.activity ?? null,
     title: state.title ?? '',
+    queueRemoval: state.queueRemoval ?? null,
   };
 };
 
@@ -165,6 +171,11 @@ export const changesBetween = (previous, next) => {
   const newHead = Boolean(previous.headSha && next.headSha && previous.headSha !== next.headSha);
   if (next.checks === 'failure' && (previous.checks !== 'failure' || newHead)) events.push('checks-failed');
   if (next.checks === 'success' && (previous.checks !== 'success' || newHead)) events.push('checks-passed');
+  // A removal after the baseline's, for any reason but the merge itself.
+  const removal = next.queueRemoval;
+  if (removal && previous.queueRemoval !== undefined && removal.at !== previous.queueRemoval?.at && removal.reason !== 'MERGED') {
+    events.push('dequeued');
+  }
   if (next.merge === 'dirty' && previous.merge !== 'dirty') events.push('conflict');
   if (next.merge === 'behind' && previous.merge !== 'behind') events.push('behind');
   if (next.activity !== null && previous.activity !== null && next.activity > previous.activity) events.push('activity');
@@ -186,15 +197,20 @@ const nameList = (names) => {
   return clean.length > MAX_NAMES ? `${shown} and ${clean.length - MAX_NAMES} more` : shown;
 };
 
-const describeEvent = (event, wake) => {
-  const names = event === 'checks-failed' ? nameList(wake.failedChecks) : event === 'activity' ? nameList(wake.authors) : '';
+const describeEvent = (event, wake, reason) => {
+  const names = {
+    'checks-failed': () => nameList(wake.failedChecks),
+    activity: () => nameList(wake.authors),
+    // FAILED_CHECKS reads as "failed checks".
+    dequeued: () => nameList([(reason ?? '').toLowerCase().replace(/_/g, ' ')]),
+  }[event]?.() ?? '';
   return names ? `${EVENT_TEXT[event]} (${names})` : EVENT_TEXT[event];
 };
 
 /** The synthetic message that wakes the agent. */
 const buildWakeMessage = (watch) => {
   const number = numberOf(watch);
-  const changes = watch.wake.events.map((event) => describeEvent(event, watch.wake));
+  const changes = watch.wake.events.map((event) => describeEvent(event, watch.wake, watch.last?.queueRemoval?.reason));
   const finished = watch.wake.events.some((event) => event === 'merged' || event === 'closed');
   const next = finished
     ? 'There is nothing more to wait for.'
@@ -605,7 +621,7 @@ export function createPrWatchRuntime({
     await commit(sessionID);
     return {
       watching: toPublicWatch(record),
-      next: 'A message arrives in this session when a check fails, every check passes, someone comments or reviews, the branch conflicts or falls behind, or the pull request is merged or closed.',
+      next: 'A message arrives in this session when a check fails, every check passes, the merge queue removes it, someone comments or reviews, the branch conflicts or falls behind, or the pull request is merged or closed.',
     };
   };
 

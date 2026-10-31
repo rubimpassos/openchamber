@@ -25,7 +25,8 @@ new `pr.watch` replaces the session's previous one. `item` is the tracked item
 the address names (`parsePullRequestUrl`): a GitHub pull request, on another
 host a GitHub Enterprise one, or a GitLab merge request read on its own
 origin. Other providers are refused. `last` is the last state seen (state,
-head commit, check outcome, merge state, `activity` count, title); `wake` is a
+head commit, check outcome, merge state, `activity` count, title, last
+merge queue removal); `wake` is a
 pending wake with its events and the id of the message that carries it.
 
 `pr.watch` reads the pull request before it answers, so what cannot be
@@ -50,6 +51,12 @@ moved state here, and `changesBetween(last, next)` names the events:
 - `merged`, `closed`;
 - `checks-failed`: the checks turned failing, or failed again on a new push;
 - `checks-passed`: every check passed, or passed again on a new push;
+- `dequeued`: the merge queue removed it after the baseline, for any reason
+  but the merge itself (GitHub's `queueRemoval`); the message carries the
+  reason, `it was removed from the merge queue (failed checks)`. The head's
+  checks stay green when a queue check fails, so `checks-failed` never sees it.
+  A baseline saved before removals were followed has none and waits for one
+  more read;
 - `conflict`: the merge state turned `dirty`;
 - `behind`: it turned `behind` (GitHub reports it only where the base branch
   requires branches to be up to date; GitLab not at all);

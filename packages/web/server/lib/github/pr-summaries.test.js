@@ -207,6 +207,21 @@ describe('fetchPrSummaries', () => {
     ]);
   });
 
+  test('reads the last removal from the merge queue', async () => {
+    const octokit = fakeOctokit(new Map([
+      [7, prNode(7, { queueRemovals: { nodes: [{ createdAt: '2026-10-01T10:00:00Z', reason: 'FAILED_CHECKS' }] } })],
+      [8, prNode(8, { queueRemovals: { nodes: [] } })],
+    ]));
+    const queries = [];
+    const graphql = octokit.graphql;
+    octokit.graphql = async (query, variables) => { queries.push(query); return graphql(query, variables); };
+
+    const { summaries } = await fetchPrSummaries({ octokit, refs: [7, 8].map((number) => ({ owner: 'acme', repo: 'app', number })) });
+
+    expect(queries[0]).toContain('REMOVED_FROM_MERGE_QUEUE_EVENT');
+    expect(summaries.map((summary) => summary.queueRemoval)).toEqual([{ at: '2026-10-01T10:00:00Z', reason: 'FAILED_CHECKS' }, null]);
+  });
+
   test('packs 25 PRs per GraphQL document', async () => {
     const refs = Array.from({ length: 26 }, (_, index) => ({ owner: 'acme', repo: 'app', number: index + 1 }));
     const octokit = fakeOctokit(new Map(refs.map((ref) => [ref.number, prNode(ref.number)])));
