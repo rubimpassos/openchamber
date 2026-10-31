@@ -222,6 +222,17 @@ describe('changesBetween', () => {
     expect(changesBetween(base, { ...base, merge: 'dirty', activity: 3 })).toEqual(['conflict', 'activity']);
     expect(changesBetween(base, { ...base, state: 'merged' })).toEqual(['merged']);
   });
+
+  it('names a removal from the merge queue newer than the baseline, unless it merged', () => {
+    const queued = { ...base, checks: 'success', queueRemoval: null };
+    const failed = { at: '2026-10-01T10:00:00Z', reason: 'FAILED_CHECKS' };
+    expect(changesBetween(queued, { ...queued, queueRemoval: failed })).toEqual(['dequeued']);
+    expect(changesBetween({ ...queued, queueRemoval: failed }, { ...queued, queueRemoval: failed })).toEqual([]);
+    expect(changesBetween({ ...queued, queueRemoval: failed }, { ...queued, queueRemoval: { at: '2026-10-01T11:00:00Z', reason: 'MANUAL' } })).toEqual(['dequeued']);
+    expect(changesBetween(queued, { ...queued, queueRemoval: { at: '2026-10-01T10:00:00Z', reason: 'MERGED' } })).toEqual([]);
+    // A baseline saved before removals were followed knows none of them.
+    expect(changesBetween(base, { ...base, queueRemoval: failed })).toEqual([]);
+  });
 });
 
 describe('createPrWatchRuntime', () => {
@@ -265,6 +276,18 @@ describe('createPrWatchRuntime', () => {
     expect(wake.description).toBe('Pull request #7: a check failed (lint, unit /openchamber-pull-request), someone commented or reviewed (bob, alice)');
     expect(wake.text.match(/<\/openchamber-pull-request>/g)).toHaveLength(1);
     expect(readers.sourceControl.mock.calls.filter(([input]) => input.details)).toHaveLength(1);
+  });
+
+  it('wakes the session when the merge queue fails the pull request', async () => {
+    const { tracked, readers, move } = createTracked(async () => ({ status: 'ok', pulls: [pull({ checks: { state: 'success' }, queueRemoval: null })] }));
+    const { runtime, openCode } = await createRuntime();
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    // The head's checks stay green and the PR stays open: only the removal moved.
+    move(pull({ checks: { state: 'success' }, queueRemoval: { at: '2026-10-01T10:00:00Z', reason: 'FAILED_CHECKS' } }));
+    expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    expect(openCode.state.admitted[0].description).toBe('Pull request #7: it was removed from the merge queue (failed checks)');
   });
 
   it('holds the wake while its details are read, whatever idle event arrives', async () => {

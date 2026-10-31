@@ -31,6 +31,9 @@ const SUMMARY_FIELDS = `
   baseRefName
   comments { totalCount }
   reviews { totalCount }
+  queueRemovals: timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+    nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } }
+  }
   commits(last: 1) {
     nodes {
       commit {
@@ -143,6 +146,9 @@ const prNodeSchema = z.object({
   baseRefName: z.string(),
   comments: z.object({ totalCount: z.number().int() }).nullish(),
   reviews: z.object({ totalCount: z.number().int() }).nullish(),
+  queueRemovals: z.object({
+    nodes: z.array(z.object({ createdAt: z.string(), reason: z.string().nullable() }).nullable()),
+  }).nullish(),
   recentComments: activityNodesSchema('createdAt'),
   recentReviews: activityNodesSchema('submittedAt'),
   commits: z.object({
@@ -313,6 +319,14 @@ function toSummary(ref, value, details) {
   // pull request (a reply in a review thread is a review of its own), so an
   // agent waiting on it hears about it (`../pr-watch`).
   if (node.comments && node.reviews) summary.activity = node.comments.totalCount + node.reviews.totalCount;
+  // The last time the merge queue let go of it. Queue checks run on a merge
+  // group commit, outside the head's check rollup, and the PR stays open, so a
+  // queue that failed it shows nowhere else (`../pr-watch`). `reason` is
+  // GitHub's free text: FAILED_CHECKS, MERGED, a manual removal, a timeout.
+  if (node.queueRemovals) {
+    const removal = node.queueRemovals.nodes.at(-1);
+    summary.queueRemoval = removal ? { at: removal.createdAt, reason: removal.reason } : null;
+  }
   if (details) {
     summary.failedChecks = state === 'open' ? failedCheckNames(contexts) : [];
     summary.recentActivity = recentActivityOf(node);
