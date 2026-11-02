@@ -58,11 +58,12 @@ import {
   previewSnippet,
   setWebSearchSelection,
   setWarmingEnabled,
+  setCompactionSettings,
   setSkillEnabled,
   getWebSearchSource,
   type SnippetScope,
 } from './opencodeConfig';
-import { parseWebSearchSelection, skillSwitchRequestSchema } from './opencode-config-v2';
+import { compactionUpdateSchema, parseWebSearchSelection, skillSwitchRequestSchema } from './opencode-config-v2';
 import {
   getSkillsCatalogSourceItems,
   getSkillsCatalogSources,
@@ -414,6 +415,17 @@ export async function handleConfigBridgeMessage(
 
     case 'api:config/mcp-capabilities':
       return { id, type, success: true, data: { projectLocal: ctx?.manager?.getDebugInfo().mode === 'managed' } };
+
+    // PUT /api/config/compaction — see the web route in
+    // packages/web/server/lib/opencode/routes.js.
+    case 'api:config/compaction': {
+      const parsed = compactionUpdateSchema.safeParse(payload ?? {});
+      if (!parsed.success) {
+        return { id, type, success: false, error: 'buffer must be a token count, a share such as "20%" or null, keepTokens a token count or null, auto and background booleans' };
+      }
+      const result = setCompactionSettings(parsed.data);
+      return { id, type, success: true, data: { success: true, changed: result.changed } };
+    }
 
     // PUT /api/config/skill-switch — see the web route in
     // packages/web/server/lib/opencode/skill-routes.js.

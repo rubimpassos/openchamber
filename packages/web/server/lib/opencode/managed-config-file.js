@@ -18,6 +18,13 @@ export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
 
 /**
+ * OpenCode's own `experimental_image_generate` tool (2.2.1+, on by default
+ * since 2.2.2), switched off while `openchamber_image` is
+ * on, so the agent sees one image tool, the one using the model the user chose.
+ */
+const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
+
+/**
  * The managed OpenCode config layer.
  *
  * OpenCode 2 watches every config source it reads, including the file named by
@@ -51,8 +58,6 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  * @param {object|null} [dependencies.agentToolRuntime]
  * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
- * @param {() => boolean} dependencies.isAgentMemoryAvailable
- * @param {() => boolean} [dependencies.isWorkflowAvailable] whether workflows ship in this build (`../workflows/feature-flag.js`)
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -63,8 +68,6 @@ export const createManagedConfigRuntime = ({
   agentToolRuntime = null,
   limitFailoverRuntime = null,
   readSettings,
-  isAgentMemoryAvailable,
-  isWorkflowAvailable = () => false,
 }) => {
   // Fail at construction: a missing directory otherwise only surfaces when the
   // managed OpenCode child is about to spawn, leaving the server up without it.
@@ -78,9 +81,9 @@ export const createManagedConfigRuntime = ({
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
 
-  const writeConfigFile = async ({ directories, permissions }) => {
+  const writeConfigFile = async ({ disabled, directories, permissions }) => {
     await fsPromises.mkdir(instanceDir, { recursive: true });
-    const config = { plugins: [...DISABLED_BUILTIN_PLUGINS, ...directories] };
+    const config = { plugins: [...disabled, ...directories] };
     if (permissions.length > 0) config.permissions = permissions;
     const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
@@ -105,19 +108,19 @@ export const createManagedConfigRuntime = ({
     const includeControl = settings?.agentControlToolEnabled !== false;
     const includeSchedule = settings?.agentScheduleToolEnabled !== false;
     const includeWeb = settings?.agentWebToolEnabled !== false;
-    const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
+    const includeMemory = settings?.agentMemoryToolEnabled === true;
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
     const includeImage = settings?.agentImageToolEnabled === true;
-    // On by default wherever the build has workflows: the build flag is the opt-in.
-    const includeWorkflow = isWorkflowAvailable() && settings?.agentWorkflowToolEnabled !== false;
+    const includeSecret = settings?.agentSecretToolEnabled !== false;
+    const includeWorkflow = settings?.agentWorkflowToolEnabled === true;
     const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [await materializeLocalMcpPlugin({ dataDir })];
     let permissions = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeWorkflow)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeWorkflow, codeMode }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeWorkflow)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow, codeMode }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
     // Only while an option is on: otherwise every limit error would cost the
@@ -126,7 +129,8 @@ export const createManagedConfigRuntime = ({
       directories.push(await limitFailoverRuntime.materializePlugin());
     }
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
-    return { directories, permissions };
+    const disabled = includeImage ? [...DISABLED_BUILTIN_PLUGINS, BUILTIN_IMAGE_PLUGIN] : DISABLED_BUILTIN_PLUGINS;
+    return { disabled, directories, permissions };
   };
 
   /**
@@ -142,7 +146,7 @@ export const createManagedConfigRuntime = ({
       return { ...childEnv, OPENCODE_CONFIG: filePath };
     }
     let content = env.OPENCODE_CONFIG_CONTENT;
-    for (const directory of [...DISABLED_BUILTIN_PLUGINS, ...enabled.directories]) {
+    for (const directory of [...enabled.disabled, ...enabled.directories]) {
       content = appendManagedPlugin(content, directory, 'managed plugin');
     }
     if (enabled.permissions.length > 0) content = appendManagedPermissions(content, enabled.permissions);

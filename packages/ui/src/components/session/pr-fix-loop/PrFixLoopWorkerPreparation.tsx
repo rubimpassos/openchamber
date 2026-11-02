@@ -61,7 +61,9 @@ export function PrFixLoopWorkerPreparation({ target, onPrepared }: {
     </SettingsStackedField>
     <SettingsStackedField label={t('spaces.create.place.label')}>
       <Select value={placeId} disabled={busy || places.state !== 'ready'} onValueChange={(value) => { if (value) setPlaceId(value); }}>
-        <SelectTrigger aria-label={t('spaces.create.place.label')}><SelectValue placeholder={t('prFixLoop.worker.choosePlace')} /></SelectTrigger>
+        <SelectTrigger aria-label={t('spaces.create.place.label')}><SelectValue placeholder={t('prFixLoop.worker.choosePlace')}>
+          {place ? place.machine ?? t('spaces.create.place.localDocker') : null}
+        </SelectValue></SelectTrigger>
         <SelectContent>{places.state === 'ready' ? places.places.map((entry) => <SelectItem key={entry.id} value={entry.id} disabled={!entry.available || !entry.hostIsolation}>
           {entry.machine ?? t('spaces.create.place.localDocker')}
         </SelectItem>) : null}</SelectContent>

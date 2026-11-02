@@ -3,7 +3,7 @@
 ## Ownership
 
 Owns exclusive admission for Auto Review, PR fix-loop writers, queued sends,
-pull-request wakes and priority restart resumes in one OpenChamber server.
+pull-request wakes and restart continuations in one OpenChamber server.
 `server/index.js` injects one instance. Each server inside a Space has its own
 instance and sees only its own OpenCode. The owning runtimes retain their state
 machines, trust checks, worker confinement and publication authority.
@@ -24,8 +24,10 @@ machines, trust checks, worker confinement and publication authority.
 - Queue sends revalidate fix-loop authority before model, agent, knowledge,
   goal and content writes. Auto Review checks stop between admissions.
 - A pull-request wake leases both session and PR keys at final admission. An
-  owned wake stays persisted and releases re-arm it. A held priority restart
-  resume returns to its existing manual notice.
+  owned wake stays persisted and releases re-arm it. A held manual restart
+  continuation retains its existing notice.
+- Automatic restart recovery leases the same session keys. An ownership hold
+  keeps its timer pending without sending or consuming its recovery budget.
 - Only releases matching an ownership-held wake re-arm it. Failed sends keep
   their own retry deadlines, and unrelated owners cause no wake reads.
 

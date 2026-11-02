@@ -250,7 +250,17 @@ export async function handleFsBridgeMessage(
     }
 
     case 'api:fs/home': {
-      return { id, type, success: true, data: { home: deps.normalizeFsPath(os.homedir()) } };
+      const home = os.homedir();
+      const chatsRoot = path.join(home, '.config', 'openchamber', 'chats');
+      const canonicalChatsRoot = await fs.promises.realpath(chatsRoot).catch(() => undefined);
+      const data = {
+        home: deps.normalizeFsPath(home),
+        chatsRoot: deps.normalizeFsPath(chatsRoot),
+      };
+      if (canonicalChatsRoot) {
+        return { id, type, success: true, data: { ...data, canonicalChatsRoot: deps.normalizeFsPath(canonicalChatsRoot) } };
+      }
+      return { id, type, success: true, data };
     }
 
     case 'api:fs:read': {

@@ -508,6 +508,8 @@ export function createAutoReviewRuntime({
     // Before anything is admitted: a routing failure fails the whole attempt.
     if (routeSend) await routeSend({ sessionId: send.sessionID, directory: run.directory, text: send.text });
     if (!stillCurrent(run)) return;
+    // The response style is left out: a handoff or feedback send lands in the
+    // user's own session, whose style entry must stay as it is.
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(send.sessionID, run.directory);
     if (!stillCurrent(run)) return;
     for (const [index, text] of send.context.entries()) {

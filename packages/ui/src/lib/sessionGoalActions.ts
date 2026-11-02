@@ -21,6 +21,7 @@ const writeGoal = (
   sessionId: string,
   directory: string | undefined,
   update: (currentGoal: Metadata | null) => Metadata | null,
+  expectedRuntimeKey?: string,
 ) =>
   patchSessionMetadata(sessionId, directory, (metadata) => {
     const namespace = isRecord(metadata.openchamber) ? metadata.openchamber : {};
@@ -33,7 +34,7 @@ const writeGoal = (
       delete nextNamespace.goal;
     }
     return { ...metadata, openchamber: nextNamespace };
-  });
+  }, expectedRuntimeKey);
 
 export interface SetSessionGoalInput {
   objective: string;
@@ -71,6 +72,7 @@ export async function setSessionGoal(
   directory: string | undefined,
   input: SetSessionGoalInput,
   existing: SessionGoalPayload | null,
+  expectedRuntimeKey?: string,
 ): Promise<void> {
   const creation = waitForSessionCreation(sessionId);
   if (creation) await creation;
@@ -116,7 +118,7 @@ export async function setSessionGoal(
       createdAt: now,
       updatedAt: now,
     };
-  });
+  }, expectedRuntimeKey);
 }
 
 export async function setSessionGoalStatus(

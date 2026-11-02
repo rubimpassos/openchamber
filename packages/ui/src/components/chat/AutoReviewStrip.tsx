@@ -15,6 +15,7 @@ import { useChatSessionSelection } from './chatColumnSession';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { prFixLoopStore, usePrFixLoopProjection, usePrFixLoopStore } from '@/stores/usePrFixLoopStore';
 import { PrFixLoopRow } from './PrFixLoopRow';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SettledStatus = Exclude<AutoReviewRun['status'], 'running'>;
 
@@ -73,7 +74,7 @@ const AutoReviewRunRow = memo(({ run }: { readonly run: AutoReviewRun }) => {
       ? t('chat.autoReview.status.waitingForReviewer')
       : t('chat.autoReview.status.waitingForImplementer');
     return (
-      <div role="status" className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-border/60 ps-3 pe-1.5">
+      <div role="status" className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5">
         <Spinner className="size-3.5 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm text-foreground">
           {t('chat.autoReview.title')}
@@ -106,7 +107,7 @@ const AutoReviewRunRow = memo(({ run }: { readonly run: AutoReviewRun }) => {
   const runId = `${run.originalSessionID}:${run.startedAt}`;
   const unfolded = Boolean(run.dispute) && unfoldedRun === runId;
   return (
-    <div role="status" className="border-b border-border/60" title={run.error}>
+    <div role="status" className="border-b border-edge" title={run.error}>
       <div className="flex oc-composer-row min-w-0 items-center gap-2 ps-3 pe-1.5">
         <Icon name={result.icon} className={`size-3.5 flex-shrink-0 ${result.className}`} aria-hidden="true" />
         {run.dispute ? (
@@ -137,9 +138,9 @@ const AutoReviewRunRow = memo(({ run }: { readonly run: AutoReviewRun }) => {
         </Button>
       </div>
       {unfolded ? (
-        <div id={disputeId} className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words ps-8 pe-3 pb-2 text-sm text-muted-foreground">
+        <ScrollableOverlay id={disputeId} outerClassName="max-h-48" className="whitespace-pre-wrap break-words ps-8 pe-3 pb-2 text-sm text-muted-foreground" disableHorizontal>
           {run.dispute}
-        </div>
+        </ScrollableOverlay>
       ) : null}
     </div>
   );

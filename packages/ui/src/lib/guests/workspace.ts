@@ -57,7 +57,7 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     // is waiting for the user to answer", so the public activity value stays.
     else if (child?.form[session.id]?.length) activity = 'waiting-question';
   }
-  return {
+  const record: GuestSessionRecord = {
     id: session.id, title: session.title || session.id, projectId, directory,
     parentId: session.parentID ?? null, createdAt: session.time.created, updatedAt: session.time.updated,
     archivedAt: session.time.archived || null, worktree,
@@ -73,6 +73,8 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     // extension's opaque `data` stays out.
     links: linked.map((item) => ({ title: item.title, url: item.url, kind: isLinkedChange(item) ? 'change' : 'issue', linkedAt: item.linkedAt })),
   };
+  if (session.agent) record.agent = session.agent;
+  return record;
 };
 
 /** Store projection only. Layout-owned sync and topology discovery supply hydration. */

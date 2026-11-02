@@ -47,7 +47,9 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
+import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
+import { subscribeSessionAdmission } from "./session-admission"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -96,6 +98,7 @@ import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { isDirectoryOfKnownSpace, isSpaceDirectoryStopped, isSpaceStopped, knownSpaceIds, refreshSpacesJourney, spaceIdsGone, spacesRuntimeGeneration, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
+import { formatMessage, useI18nStore } from "@/lib/i18n"
 import { appendErrorNotification, markSessionViewed } from "./notification-store"
 import { isSessionUnread } from "./session-unread"
 import { recordSessionError, responseBodyOf, summarizeOpenCodeError } from "./session-error-log"
@@ -136,7 +139,7 @@ import { openSessionFromToast } from "./session-navigation"
 import { revealRequest } from "./request-reveal"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { isFilesystemError } from "@/lib/api/files-errors"
 import { showRestartInterruptedToast } from "./restart-interrupted-toast"
@@ -144,7 +147,7 @@ import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
 import { notifyWatchedFileChanged, renewWatchedFiles } from "@/lib/watchedFiles"
 import { listGlobalSessionPages, splitGlobalSessionsByArchived, type GlobalSessionRecord, type SessionPageLister } from "@/stores/globalSessions"
-import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
+import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests, computeSubtreeIds } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
@@ -316,6 +319,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     applyBackgroundShellEvents(directory, events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
+    applyRecoverableQuestionEvents(directory, events)
   }
   for (const store of batch.changedStores) {
     const state = batch.states.get(store)
@@ -677,6 +681,25 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
 
   if (kind === "opencode-restart-interrupted") {
     showRestartInterruptedToast(notification, directory)
+  } else if (kind === "opencode-restart-resuming") {
+    const dictionary = useI18nStore.getState().dictionary
+    const title = formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.title")
+    const options = {
+      id: "opencode-restart-interrupted",
+      description: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.autoResumeDescription"),
+      duration: Infinity,
+    }
+    if (sessionId && directory) {
+      toast.info(title, {
+        ...options,
+        action: {
+          label: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.openSession"),
+          onClick: () => openSessionFromToast(sessionId, directory),
+        },
+      })
+    } else {
+      toast.info(title, options)
+    }
   } else if (notification.showWhenFocused === true && isUiFocused()) {
     showPluginNotificationToast(kind, title, body, tag)
   }
@@ -1460,6 +1483,7 @@ export async function resyncBlockingRequestsForDirectory(
   candidateSessionIds?: string[],
   options?: { includePermissions?: boolean },
 ) {
+  const isCurrentRuntime = captureRuntimeInstance()
   const before = store.getState()
   const candidateIds = new Set<string>(candidateSessionIds ?? [
     ...before.session.map((session) => session.id),
@@ -1479,6 +1503,8 @@ export async function resyncBlockingRequestsForDirectory(
       candidates.map((sessionId) => [sessionId, requestSignature(before.form[sessionId])]),
     )
     const pendingForms = await opencodeClient.listPendingForms({ directories: [directory] })
+    if (!isCurrentRuntime()) return false
+    noteQuestionFormSnapshot(directory, pendingForms)
     const grouped: Record<string, FormRequest[]> = {}
     for (const form of pendingForms) {
       if (!form?.id || !form.sessionID) continue
@@ -1535,6 +1561,7 @@ export async function resyncBlockingRequestsForDirectory(
       candidates.map((sessionId) => [sessionId, requestSignature(before.permission[sessionId])]),
     )
     const pendingPermissions = await opencodeClient.listPendingPermissions({ directories: [directory] })
+    if (!isCurrentRuntime()) return false
     const grouped: Record<string, PermissionRequest[]> = {}
     for (const permission of pendingPermissions) {
       if (!permission?.id || !permission.sessionID) continue
@@ -2171,6 +2198,7 @@ export function handleEvent(
       applyBackgroundShellEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
+      applyRecoverableQuestionEvents(directory, [payload])
     }
   }
 
@@ -2642,6 +2670,7 @@ export function interruptedTurnToolParts(
   sessionID: string,
   now = Date.now(),
   failure?: StructuredError,
+  recordedInterruption = false,
 ): { messageID: string; messages: Message[]; parts?: Part[] } | null {
   if ((state.form?.[sessionID] ?? []).length > 0) return null
   if ((state.permission?.[sessionID] ?? []).length > 0) return null
@@ -2662,16 +2691,17 @@ export function interruptedTurnToolParts(
 
   const message = messages[messageIndex]
   if (message.role !== "assistant") return null
-  if (message.time.completed !== undefined) {
+  const completed = message.time.completed !== undefined
+  if (completed && !recordedInterruption) {
     // The turn finished; a missed terminal tool event is the tail refresh's
     // job, not an interruption.
     return null
   }
 
   const messageID = message.id
-  const nextMessages = [...messages]
+  const nextMessages = completed ? messages : [...messages]
   const error: StructuredError = failure ?? { type: "aborted", message: "aborted" }
-  nextMessages[messageIndex] = {
+  if (!completed) nextMessages[messageIndex] = {
     ...message,
     time: { ...message.time, completed: now },
     error,
@@ -2680,8 +2710,15 @@ export function interruptedTurnToolParts(
 
   let partsChanged = false
   const currentParts = state.part[messageID]
-  const nextParts = currentParts?.map((part) => {
+  const nextParts = currentParts?.map((part): Part => {
     if (part.type !== "tool") return part
+    // Materialization also manufactures this error under completed messages.
+    // Only the recorded turn interruption grants it recovery provenance.
+    if (recordedInterruption && part.state.status === "error" && part.state.error === "Interrupted"
+      && part.state.errorSource === undefined && part.state.errorType === undefined) {
+      partsChanged = true
+      return { ...part, state: { ...part.state, errorSource: "local" } }
+    }
     if (part.state.status !== "pending" && part.state.status !== "running") return part
     partsChanged = true
     const start = part.state.status === "running" ? part.state.time.start : now
@@ -2689,13 +2726,18 @@ export function interruptedTurnToolParts(
       ...part,
       state: {
         ...part.state,
-        status: "error" as const,
+        status: "error",
         error: "Interrupted",
+        // A local mark, not OpenCode's report: an authoritative transition
+        // that arrives later supersedes it (`event-reducer`), and recovery
+        // reads the provenance to tell a manufactured end from a real one.
+        errorSource: "local",
         time: { start, end: now },
       },
     }
   })
 
+  if (completed && !partsChanged) return null
   return {
     messageID,
     messages: nextMessages,
@@ -2758,7 +2800,7 @@ export function markRecordedInterruptedTurn(store: StoreApi<DirectoryStore>, ses
   const end = recordedTurnEnd(state, sessionID)
   const recorded = end?.outcome === "interrupted" || end?.outcome === "failed"
   const interrupted = recorded
-    ? interruptedTurnToolParts(state, sessionID, Date.now(), end.outcome === "failed" ? end.error : undefined)
+    ? interruptedTurnToolParts(state, sessionID, Date.now(), end.outcome === "failed" ? end.error : undefined, true)
     : restartCutTurnToolParts(state, sessionID)
   if (!interrupted) return
 
@@ -3216,6 +3258,7 @@ export function SyncProvider(props: {
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
     const unsubscribeQueueEvents = subscribeMessageQueueSync(runtimeKey)
+    const unsubscribeSessionAdmission = subscribeSessionAdmission()
     const unsubscribeAutoReviewEvents = subscribeAutoReviewSync(runtimeKey)
     const unsubscribePrWatchEvents = subscribePrWatchSync(runtimeKey)
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
@@ -3367,6 +3410,7 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
       unsubscribeQueueEvents()
+      unsubscribeSessionAdmission()
       unsubscribeAutoReviewEvents()
       unsubscribePrWatchEvents()
       unsubscribeSessionWarming()
@@ -3459,6 +3503,7 @@ export function SyncProvider(props: {
       try {
         const before = store.getState()
         const statuses = await runBackgroundNetworkTask(() => resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "monotonic"), "active-session")
+        if (statuses === undefined) return
         if (statuses === null) {
           recordFailure()
           return
@@ -4100,6 +4145,24 @@ export function useScopedBlockingPermissions(sessionID: string | null, directory
 
 export function useScopedBlockingForms(sessionID: string | null, directory?: string): FormRequest[] {
   return useScopedBlockingRequests(sessionID, directory, selectFormRequestsBySession, EMPTY_FORM_REQUESTS, collectComposerForms)
+}
+
+/**
+ * The questions whose ask died with their turn, for this session's scope (the
+ * session and its subtree). A recovered question is a local re-ask, not a
+ * pending request: it blocks nothing, and answering it starts a new turn.
+ */
+export function useRecoveredQuestions(sessionID: string | null, directory?: string): RecoveredQuestion[] {
+  const store = useDirectoryStore(directory)
+  const sessions = useStore(store, (state) => state.session)
+  const form = useStore(store, (state) => state.form)
+  const part = useStore(store, (state) => state.part)
+  const recovery = useRecoverableQuestionsStore()
+  return useMemo(() => deriveRecoveredQuestions(
+    { form, part },
+    recovery,
+    sessionID ? computeSubtreeIds(sessions, sessionID) : new Set<string>(),
+  ), [form, part, recovery, sessionID, sessions])
 }
 
 const sessionsByIdCache = new WeakMap<State["session"], Map<string, Session>>()

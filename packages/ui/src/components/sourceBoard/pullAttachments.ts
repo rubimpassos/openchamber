@@ -9,13 +9,14 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PullStack, RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { resolvePullStackReferences } from '@/components/references/resolvePullStackReferences';
-import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
+import { usePendingComposerReferences, type ComposerReferenceHandoff } from '@/components/chat/composer/pendingComposerReferences';
+import { readComposerDraftTarget } from '@/hooks/useComposerAddress';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
 import type { CIRun } from '@/lib/source-control/types';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /** A failed run as the agent reads it: what failed, where, and what the host said. */
 const failedRunText = (run: CIRun): string => {
@@ -52,13 +53,12 @@ export function usePullAttachments(reference: RepositoryReference | null) {
     const { sourceControl } = useRuntimeAPIs();
 
     const target = React.useCallback((): InlineCommentDraftTarget | null => {
-        const session = useSessionUIStore.getState();
-        const sessionKey = session.newSessionDraft?.open ? 'draft' : session.currentSessionId;
-        if (!directory || !sessionKey) {
+        const into = readComposerDraftTarget(directory);
+        if (!into) {
             toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
             return null;
         }
-        return { directory, sessionKey };
+        return into;
     }, [directory, t]);
 
     // How the chip names what it came from: a change request by its provider's
@@ -129,6 +129,9 @@ export function usePullAttachments(reference: RepositoryReference | null) {
         let runtimeCurrent = true;
         const stopRuntime = subscribeRuntimeEndpointWillChange(() => { runtimeCurrent = false; });
         const initialDraft = useSessionUIStore.getState().newSessionDraft;
+        const handoff: ComposerReferenceHandoff | null = into.sessionKey === 'draft'
+            ? initialDraft.workDraftId ? { kind: 'draft', workDraftId: initialDraft.workDraftId, runtimeKey: runtime } : null
+            : { kind: 'session', sessionId: into.sessionKey };
         const isCurrent = () => {
             const state = useSessionUIStore.getState();
             return runtimeCurrent && getRuntimeKey() === runtime && currentDirectory.current === into.directory && (into.sessionKey === 'draft'
@@ -142,7 +145,7 @@ export function usePullAttachments(reference: RepositoryReference | null) {
         }
         pin(into, { source: 'pr-comment', fileLabel: t('prStacks.title'), startLine: 0, endLine: 0,
             code: result.summary, language: 'text', text: '' });
-        usePendingComposerReferences.getState().push(result.references);
+        if (handoff) usePendingComposerReferences.getState().push(result.references, handoff);
         if (result.failures.length) toast.error(t('prStacks.attachPartial', { members: result.failures.map((failure) => `#${failure.number}`).join(', ') }), {
             description: result.failures.map((failure) => `#${failure.number}: ${failure.error}`).join('\n'),
         });

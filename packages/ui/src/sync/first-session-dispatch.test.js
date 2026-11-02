@@ -34,7 +34,12 @@ beforeEach(() => {
   originalConfig = useConfigStore.getState(); originalCommands = useCommandsStore.getState();
   useConfigStore.setState({ isConnected: true, hasEverConnected: true, activateDirectory: async () => {}, agents: [] });
   useSessionGoalArmStore.getState().setArmed(false, null);
-  useProjectsStore.setState({ projects: [], activeProjectId: null });
+  useProjectsStore.setState({ projects: [
+    { id: 'project', path: directory },
+    { id: 'canonical-first-dispatch', path: '/canonical-first-dispatch' },
+    { id: 'canonical-knowledge', path: '/canonical-knowledge' },
+    { id: 'canonical-accepted-dispatch', path: '/canonical-accepted-dispatch' },
+  ], activeProjectId: null });
   stores = new ChildStoreManager();
   setSyncRefs(opencodeClient.getSdkClient(), stores, directory); setActionRefs(stores, () => directory);
   loader = new SessionMessageLoader(stores, { runtimeKey: getRuntimeKey(), sdk: { getSessionMessages: async () => ({ items: [], cursor: {} }) } });
@@ -165,8 +170,8 @@ test('serializes knowledge writes behind the initial submission and before each 
     delivery.resolve(); await first; await nextSyncStarted.promise;
     // Then that write targets the confirmed owner and gates the second prompt.
     expect(knowledgeWrites).toEqual([
-      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID } },
-      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID } },
+      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID, responseStyleInstruction: null } },
+      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID, responseStyleInstruction: null } },
     ]);
     expect(messages).toHaveLength(1);
   } finally {

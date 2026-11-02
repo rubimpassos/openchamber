@@ -36,6 +36,7 @@ const { createWebSourceControlAPI } = await import('../../../../web/src/api/sour
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { usePendingComposerReferences } = await import('@/components/chat/composer/pendingComposerReferences');
 const { useInlineCommentDraftStore } = await import('@/stores/useInlineCommentDraftStore');
+const { getRuntimeKey } = await import('@/lib/runtime-switch');
 
 const context = { provider: 'github', instance: 'github.com', directory: '/repo', repositoryId: 'repo-id',
   accountId: 'account', bindingRevision: 1, primaryRemote: 'origin' };
@@ -64,6 +65,7 @@ let failStack = false;
 const apis = createWebAPIs();
 const originalDraft = useSessionUIStore.getState().newSessionDraft;
 const destination = { directory: '/repo', sessionKey: 'draft' };
+const handoffTarget = { kind: 'draft', workDraftId: 'stack-attachment-draft', runtimeKey: getRuntimeKey() } as const;
 const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: () => new Promise<Response>(() => {}) });
 const sourceControl = {
   ...createWebSourceControlAPI({ fetch: async (path) => {
@@ -91,8 +93,8 @@ const sourceControl = {
 beforeEach(() => {
   stackReads = 0;
   failStack = false;
-  useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...originalDraft, open: true, directoryOverride: '/repo' } });
-  usePendingComposerReferences.getState().consume();
+  useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...originalDraft, open: true, directoryOverride: '/repo', workDraftId: handoffTarget.workDraftId } });
+  usePendingComposerReferences.getState().consume(handoffTarget);
   useInlineCommentDraftStore.getState().clearDrafts(destination);
   repositoryBindingOwner.reset();
   const descriptor = githubLikeDescriptor();
@@ -110,7 +112,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: originalDraft });
-  usePendingComposerReferences.getState().consume();
+  usePendingComposerReferences.getState().consume(handoffTarget);
   useInlineCommentDraftStore.getState().clearDrafts(destination);
 });
 afterAll(async () => {
@@ -184,7 +186,7 @@ test('attaches the whole stack to the draft with its anchor following membership
   await act(async () => attach.click());
 
   // Then
-  const references = usePendingComposerReferences.getState().references;
+  const references = usePendingComposerReferences.getState().consume(handoffTarget);
   expect(references.map((entry) => entry.kind === 'change-request' ? entry.number : null)).toEqual([1, 2, 3]);
   expect(references.map((entry) => entry.kind === 'change-request' ? entry.followStack : null)).toEqual([undefined, true, undefined]);
   const summary = useInlineCommentDraftStore.getState().getDrafts(destination);

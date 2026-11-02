@@ -79,8 +79,7 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const agentWebToolEnabled = useUIStore((state) => state.agentWebToolEnabled);
   const setAgentWebToolEnabled = useUIStore((state) => state.setAgentWebToolEnabled);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
-  // Absent, not merely off: the feature is finished but unreleased, and a
-  // visible switch invites turning on something that was never announced.
+  // Absent where no OpenChamber server answers settings (VS Code).
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
   const agentKnowledgeToolEnabled = useUIStore((state) => state.agentKnowledgeToolEnabled);
@@ -93,7 +92,9 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentImageToolEnabled = useUIStore((state) => state.setAgentImageToolEnabled);
   const agentImageModel = useUIStore((state) => state.agentImageModel);
   const setAgentImageModel = useUIStore((state) => state.setAgentImageModel);
-  // Absent in builds without workflows, the way memory is.
+  const agentSecretToolEnabled = useUIStore((state) => state.agentSecretToolEnabled);
+  const setAgentSecretToolEnabled = useUIStore((state) => state.setAgentSecretToolEnabled);
+  // Absent without an OpenChamber server, like memory.
   const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
   const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
   const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);
@@ -149,6 +150,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
   }, []);
   const imageModelOptions = imageModels.status === 'ready' ? imageModels.models : [];
   const imageModelKnown = imageModelOptions.some((model) => model.value === agentImageModel);
+
+  const handleAgentSecretToolChange = React.useCallback((enabled: boolean) => {
+    setAgentSecretToolEnabled(enabled);
+    void updateDesktopSettings({ agentSecretToolEnabled: enabled });
+  }, [setAgentSecretToolEnabled]);
 
   const handleAgentKnowledgeToolChange = React.useCallback((enabled: boolean) => {
     setAgentKnowledgeToolEnabled(enabled);
@@ -303,6 +309,17 @@ export const OpenChamberToolsSettings: React.FC = () => {
             </Select>
           </div>
         </div>
+
+        <ToolRow
+          icon="shield-keyhole"
+          settingsItem="sessions.agent-secret-tool"
+          checked={agentSecretToolEnabled}
+          onChange={handleAgentSecretToolChange}
+          title={t('settings.openchamber.tools.field.agentSecretTool')}
+          summary={t('settings.openchamber.tools.field.agentSecretToolSummary')}
+          info={t('settings.openchamber.tools.field.agentSecretToolInfo')}
+          ariaLabel={t('settings.openchamber.tools.field.agentSecretToolAria')}
+        />
 
         <ToolRow
           icon="sticky-note"

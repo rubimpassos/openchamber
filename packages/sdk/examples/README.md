@@ -1,6 +1,6 @@
 # Extension gallery
 
-Eleven examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Fourteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -14,6 +14,9 @@ Eleven examples to use, explore, and adapt. The five panel extensions also have 
 | `plan-shelf` | **Plan Shelf** | Add Markdown files under `.plan-shelf/` with a `# Title`, a `status: draft\|running\|blocked\|done` line and `- [ ]` tasks, then open Project knowledge → Plans. The plans appear under **Shelf plans** with their progress and status, open and save in place, and offer Review, Run and Resume, each confirmed before a session starts. Run needs a `/plan-shelf-run` command and Resume a `plan-shelf` skill in the project; without them the host refuses the action and runs nothing. It has no panel; the background frame describes the plans. |
 | `tools-only` | **Tool Gallery** | Render review findings and project checks as tables inside chat. This extension has no panel. Its optional read-only MCP fixture makes the results reproducible; see [its README](./tools-only/README.md). |
 | `source-control-provider` | **Teahouse** (a Git host) | Adds a Git host next to GitHub, GitLab, Gitea and Gerrit, written against a subset of Gitea's REST API. Point it at a Gitea 1.21+ server: on the **Teahouse** card in Settings → Integrations, add the server's address and a token, then open a project whose remote is on that server and browse its pull requests and issues, comment, close, or merge. It has no panel, and the token stays in OpenChamber; see [its README](./source-control-provider/README.md). |
+| `session-events-log` | **Session Journal** | Allow its local service and the content line in the approval dialog, then `tail -f ~/.openchamber-session-events.log`. Every finished turn, failed turn, permission request and question in any project lands as one JSON line, with what the agent said or asked, whether or not a window is open. It has no panel; see [its README](./session-events-log/README.md). |
+| `notification-webhook` | **Webhook Notifier** | Run `bun packages/sdk/examples/notification-webhook/receiver.ts`, allow the local service, then connect the receiver's address and token on the **Webhook** card in Settings → Integrations. Every notification you would get on the phone is posted to the receiver, following your notification toggles; the token stays in OpenChamber. It has no panel; see [its README](./notification-webhook/README.md). |
+| `tracker-provider` | **Teaboard Tracker** | Run `bun packages/sdk/examples/tracker-provider/tracker-server.ts`, allow the local service, then connect the server's address and the token `demo` on the **Teaboard** card under Extension accounts in Settings → Integrations. Search its items in the picker and start a worktree from one; the token stays in OpenChamber. It has no panel; see [its README](./tracker-provider/README.md). |
 
 ## Install and explore
 
@@ -62,6 +65,9 @@ bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/browser-pr
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/browser-provider-stub/panel/main.ts packages/sdk/examples/browser-provider-stub/panel/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/source-control-provider/service/main.ts packages/sdk/examples/source-control-provider/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/plan-shelf/background/main.ts packages/sdk/examples/plan-shelf/background/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/session-events-log/service/main.ts packages/sdk/examples/session-events-log/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/notification-webhook/service/main.ts packages/sdk/examples/notification-webhook/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tracker-provider/service/main.ts packages/sdk/examples/tracker-provider/service/main.js
 ```
 
 Rebuild all panels after editing `shared.ts` or the SDK. Commit built files with the extension; installation never builds source or installs dependencies. Bump the extension's own version when publishing an update through Git. A Bun upgrade also invalidates every panel bundle, because the minifier assigns different identifier names; regenerate them with the Bun version the repository pins in `package.json`.
@@ -75,4 +81,4 @@ bun run --cwd packages/sdk test
 bun test packages/ui/src/lib/guests/sdk-examples.test.ts
 ```
 
-SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, the Git host service against its fake forge, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.
+SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, the Git host service against its fake forge, the Session Journal service against posted events, the Webhook Notifier service against its receiver, the Teaboard Tracker service against its fake tracker, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.

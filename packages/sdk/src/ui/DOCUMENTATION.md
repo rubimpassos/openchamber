@@ -24,7 +24,7 @@ Every `mountX(root, props)` returns `{ update(partial), dispose() }`.
 - `spinner.ts`: `mountSpinner`. 16px ring, `role="status"`.
 - `banner.ts`: `mountBanner`. Toned box with title, body, optional `xs` outline action.
 - `separator.ts`: `mountSeparator`. Hairline, optional label.
-- `progress.ts`: `mountProgress`. `role="progressbar"`, value clamped to 0..100.
+- `progress.ts`: `mountProgress`. `role="progressbar"`, value clamped to 0..100 and rounded down, so it never shows 100% before it is done; at 100 the bar turns green and the percent takes a check, like the app's progress.
 - `menu.ts`: `mountMenu`. Button trigger plus `role="menu"` popup. Items may be `destructive`, `disabled`, or `{ separator: true }`.
 - `text.ts`: `mountText`. Plain text through `textContent`; `![alt](https://…)` becomes `img`, `[label](https://…)` becomes `a` that calls `onOpenUrl`. `splitTextMedia` is the pure splitter.
 - `tooltip.ts`: `mountTooltip` shows an element's text in the host's tooltip (`host.showTooltip`) after a hover delay or on keyboard focus, hides it on leave, press, scroll, wheel and Escape, and falls back to the native `title` when the host refuses (`features.tooltips` absent). `update` swaps the text; `dispose` before replacing the element.

@@ -46,7 +46,7 @@ beforeEach(() => {
   opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/test', chatsRoot: '/home/test/chats' });
   originalConfig = useConfigStore.getState();
   useConfigStore.setState({ isConnected: true, activateDirectory: async () => {}, agents: [] });
-  useProjectsStore.setState({ projects: [], activeProjectId: null });
+  useProjectsStore.setState({ projects: [directory, '/canonical-repo', '/canonical-history', '/confirmed-recovery'].map((path) => ({ id: path, path })), activeProjectId: directory });
   stores = new ChildStoreManager();
   setSyncRefs(opencodeClient.getSdkClient(), stores, directory);
   setActionRefs(stores, () => directory);
@@ -127,7 +127,7 @@ test('moves the prompt and its shadow when creation canonicalizes the directory'
   expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/canonical-repo');
   expect(stores.getChild(directory).getState().message[prompt.sessionID]).toBeUndefined();
   expect(stores.getChild('/canonical-repo').getState().message[prompt.sessionID]).toEqual([prompt]);
-  expect(knowledgeSyncs).toEqual([{ method: 'POST', body: { directory: '/canonical-repo', sessionId: prompt.sessionID } }]);
+  expect(knowledgeSyncs).toEqual([{ method: 'POST', body: { directory: '/canonical-repo', sessionId: prompt.sessionID, responseStyleInstruction: null } }]);
 });
 
 test('records first-prompt history and restorable files under the confirmed directory', async () => {

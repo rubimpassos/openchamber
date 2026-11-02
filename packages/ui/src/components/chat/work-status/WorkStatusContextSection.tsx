@@ -29,6 +29,7 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
+import { useCopyReferenceLink } from '@/components/references/useCopyReferenceLink';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { resolveDraftPinnedKnowledge } from './draftKnowledge';
@@ -266,6 +267,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     return looks;
   }, [branchPrSummary, changeSummaries, linkedTrackerEntries, linkedWorkItemStates, repositoryChanges, repositoryIssueRefs, repositoryIssueStates, t, urlMatcher]);
   const openTrackerItem = useOpenTrackerItem();
+  const copyLink = useCopyReferenceLink();
   const leaveWorkStatus = useLeaveWorkStatus();
   const trackerDescriptors = useTrackerDescriptors();
   // Connected servers only. A disabled server contributes nothing to the
@@ -388,7 +390,9 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     >
       {/* Attached threads first: they are specific to this session, while the
           counts below describe the workspace. */}
-      {linked.map((entry) => (
+      {linked.map((entry) => {
+        const pull = getRepositoryThreadRef(entry, urlMatcher);
+        return (
         <WorkStatusRow
           key={entry.id}
           leading={renderLinkedIcon(entry)}
@@ -402,40 +406,54 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
             openTrackerItem(entry.url, directory, event);
             leaveWorkStatus?.();
           }}
+          className="group/linked"
           // The panel that shows what a session carries is the one that can
           // take an item back off; a pinned row's control is the precedent.
           // This sits in the trailing value slot, where row actions live.
-          value={(() => {
-            const pull = getRepositoryThreadRef(entry, urlMatcher);
-            const unlink = (
-            <button
-              type="button"
-              disabled={!sessionId || !directory}
-              aria-label={t('chat.workStatus.linkedIssues.unlink')}
-              onClick={(event) => {
-                event.stopPropagation();
-                unlinkLinkedThread(entry);
-              }}
-              className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground"
-            >
-              <Icon name="close" className="size-3.5" />
-            </button>
-            );
-            return pull && supportsGitHubAutomation(pull) && pull.thread === 'pull' ? <>
-              {/* Fix loop first: the follow chip can hide, and nothing after it shifts. */}
-              <LinkedPrFixLoopControl pull={pull} sessionId={sessionId} directory={directory} />
-              <LinkedPullStackFollow entry={entry} sessionId={sessionId} directory={directory}
-                membership={stackMembership(pull.owner, pull.repo, pull.number)} />
-              {unlink}
-            </> : unlink;
-          })()}
+          // Copying the link appears on hover and takes no space at rest, so
+          // the title keeps the full width; focus inside the row shows it for
+          // the keyboard, and a touch screen, which has no hover, shows it always.
+          value={(
+            <>
+              {pull && supportsGitHubAutomation(pull) && pull.thread === 'pull' ? <>
+                <LinkedPrFixLoopControl pull={pull} sessionId={sessionId} directory={directory} />
+                <LinkedPullStackFollow entry={entry} sessionId={sessionId} directory={directory}
+                  membership={stackMembership(pull.owner, pull.repo, pull.number)} />
+              </> : null}
+              <button
+                type="button"
+                aria-label={t('references.link.copy')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  copyLink(entry.url);
+                }}
+                className="hidden shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground group-focus-within/linked:block group-hover/linked:block pointer-coarse:block pointer-coarse:p-2"
+              >
+                <Icon name="link" className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                disabled={!sessionId || !directory}
+                aria-label={t('chat.workStatus.linkedIssues.unlink')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  unlinkLinkedThread(entry);
+                }}
+                // A finger needs more than the icon, and a missed copy must not land on unlink.
+                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground pointer-coarse:p-2"
+              >
+                <Icon name="close" className="size-3.5" />
+              </button>
+            </>
+          )}
           ariaLabel={entry.kind === 'tracker'
             ? t('chat.workStatus.linkedIssues.openTrackerItem', { identifier: entry.identifier, provider: trackerNameOf(entry.provider) })
             : entry.kind === 'guest' || entry.kind === 'external'
               ? t('chat.workStatus.linkedIssues.openGuest', { id: entry.identifier })
               : openLinkedAriaLabel(entry)}
         />
-      ))}
+        );
+      })}
 
       {/* Named individually: a count alone would not identify this session's context. */}
       {/* The pin is the control, exactly as in the pinned-messages section
