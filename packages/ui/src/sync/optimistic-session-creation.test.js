@@ -29,7 +29,7 @@ beforeEach(() => {
   sent = []; requests = []; knowledgeSyncs = []; historyReads = []; aborts = [];
   originals = { createSession: opencodeClient.createSession, sendMessage: opencodeClient.sendMessage,
     listSessionsPage: opencodeClient.listSessionsPage, getFilesystemHomeInfo: opencodeClient.getFilesystemHomeInfo,
-    abortSession: opencodeClient.abortSession };
+    abortSession: opencodeClient.abortSession, getSession: opencodeClient.getSession };
   originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
@@ -40,6 +40,7 @@ beforeEach(() => {
     return Response.json(url.includes('session-knowledge') ? { text: '', signature: '' } : {});
   };
   opencodeClient.createSession = async () => response.promise;
+  opencodeClient.getSession = async () => response.promise;
   opencodeClient.sendMessage = async (params) => { sent.push(params); return 'accepted'; };
   opencodeClient.abortSession = async (id) => { aborts.push(id); return true; };
   opencodeClient.listSessionsPage = async () => ({ sessions: [], cursor: {} });

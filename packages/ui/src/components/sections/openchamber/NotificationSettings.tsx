@@ -66,6 +66,8 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnSubtasks = useUIStore(state => state.setNotifyOnSubtasks);
   const notifyOnCompletion = useUIStore(state => state.notifyOnCompletion);
   const setNotifyOnCompletion = useUIStore(state => state.setNotifyOnCompletion);
+  const notifyOnPullRequests = useUIStore(state => state.notifyOnPullRequests);
+  const setNotifyOnPullRequests = useUIStore(state => state.setNotifyOnPullRequests);
   const notifyOnError = useUIStore(state => state.notifyOnError);
   const setNotifyOnError = useUIStore(state => state.setNotifyOnError);
   const notifyOnQuestion = useUIStore(state => state.notifyOnQuestion);
@@ -539,6 +541,15 @@ export const NotificationSettings: React.FC = () => {
                   label={t('settings.notifications.page.events.completionLabel')}
                   ariaLabel={t('settings.notifications.page.events.completionAria')}
                 />
+                {!isVSCode && (
+                  <SettingsCheckboxRow
+                    settingsItem="notifications.pullRequests"
+                    checked={notifyOnPullRequests}
+                    onChange={setNotifyOnPullRequests}
+                    label={t('settings.notifications.pullRequests.label')}
+                    info={t('settings.notifications.pullRequests.info')}
+                  />
+                )}
 
                 {/* Jev runs on the OpenChamber server, which VS Code does not have. */}
                 {!isVSCode && notifyOnCompletion && (

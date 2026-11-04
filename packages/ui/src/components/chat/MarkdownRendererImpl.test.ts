@@ -238,6 +238,16 @@ test('links keep the old renderer behaviour: inert when unsafe, bare URLs LTR, f
   expect(openedLinks).toEqual([]);
 });
 
+test('a bare link takes the same way as a named one', async () => {
+  openedLinks.length = 0;
+  const url = 'https://github.com/openchamber/openchamber/pull/6206';
+  await render(`${url} and [#6206](${url})`);
+  for (const anchor of host.querySelectorAll('a')) {
+    anchor.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+  expect(openedLinks).toEqual([url, url]);
+});
+
 test('a code block without a language is labelled text', async () => {
   await render('```\nplain\n```');
   expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toContain('text');
@@ -666,6 +676,34 @@ test('wrap settings update the actual Markdown root without replacing content', 
   expect(host.querySelector('p') === stable).toBe(true);
   expect(paragraph?.textContent).toBe('same source');
   state.tableCellWrap = true;
+});
+
+test('wrap toggle buttons show their pressed fill while active (#6042)', async () => {
+  const source = '```js\nconst x = 1;\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |';
+  const rerender = () => act(async () => {
+    root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, { content: source, enableFileReferences: false })));
+  });
+  await render(source);
+
+  state.codeBlockLineWrap = true;
+  state.tableCellWrap = true;
+  await rerender();
+  const codeWrap = host.querySelector('[data-streamdown="code-block-actions"] button[aria-pressed="true"]');
+  expect(codeWrap).not.toBeNull();
+  // The pressed fill is what tells the user the toggle is on; aria-pressed
+  // alone was invisible on the ghost variant (#6042).
+  expect(codeWrap?.className).toContain('bg-interactive-selection');
+  const tableWrap = host.querySelector('[data-streamdown="table-controls"] button[aria-pressed="true"]');
+  expect(tableWrap).not.toBeNull();
+  expect(tableWrap?.className).toContain('bg-interactive-selection');
+
+  state.codeBlockLineWrap = false;
+  state.tableCellWrap = false;
+  await rerender();
+  const restingCodeWrap = host.querySelector('[data-streamdown="code-block-actions"] button[aria-pressed="false"]');
+  expect(restingCodeWrap?.className).not.toContain('bg-interactive-selection');
+  const restingTableWrap = host.querySelector('[data-streamdown="table-controls"] button[aria-pressed="false"]');
+  expect(restingTableWrap?.className).not.toContain('bg-interactive-selection');
 });
 
 test('same-source theme repaint keeps nodes and publishes syntax variables on the consumer root', async () => {

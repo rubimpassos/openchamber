@@ -80,6 +80,14 @@ export const createScheduledTaskService = (dependencies) => {
     throw new OpenChamberControlError(`Project not found for directory: ${resolvedDirectory}`, 404);
   };
 
+  const resolveExecutionDirectory = async (projectID, targetSessionId) => {
+    const project = await findProjectByID(projectID);
+    if (targetSessionId) {
+      return (await scheduledTasksRuntime.validateTarget(project.id, targetSessionId)).directory;
+    }
+    return project.path;
+  };
+
   const list = async (projectID) => {
     const { id } = await findProjectByID(projectID);
     return scheduledTasksRuntime.syncProject(id);
@@ -258,6 +266,7 @@ export const createScheduledTaskService = (dependencies) => {
   return {
     listProjects,
     resolveProjectID,
+    resolveExecutionDirectory,
     list,
     upsert,
     remove,

@@ -5,6 +5,8 @@ import type { InputState } from "./input-store"
 import type { isOpencodeNotFound } from '@/lib/opencode/client'
 import { z } from 'zod'
 
+const transportErrors = await import("@/lib/relay/transport-error")
+
 // Records the client calls the actions make. The actions talk to
 // `opencodeClient` only: OpenCode's own SDK never reaches this layer.
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
@@ -433,6 +435,7 @@ mock.module("../lib/runtime-switch", () => ({
 }))
 
 mock.module("@/lib/relay/transport-error", () => ({
+  ...transportErrors,
   markAmbiguousTransportFailure: (error: Error) => Object.assign(error, { [AMBIGUOUS_TRANSPORT_FAILURE]: true }),
   isAmbiguousTransportFailure: (error: unknown) => Boolean(
     error

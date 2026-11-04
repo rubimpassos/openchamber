@@ -24,10 +24,12 @@ beforeEach(() => {
   messages = []; commands = [];
   originals = { createSession: opencodeClient.createSession, sendMessage: opencodeClient.sendMessage,
     sendCommand: opencodeClient.sendCommand, getFilesystemHomeInfo: opencodeClient.getFilesystemHomeInfo,
-    getSessionMessages: opencodeClient.getSessionMessages, shellSession: opencodeClient.shellSession };
+    getSessionMessages: opencodeClient.getSessionMessages, shellSession: opencodeClient.shellSession,
+    getSession: opencodeClient.getSession };
   originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({ text: '', signature: '' });
   opencodeClient.createSession = async () => response.promise;
+  opencodeClient.getSession = async (id, scope) => stores.getChild(scope)?.getState().session.find((entry) => entry.id === id) ?? response.promise;
   opencodeClient.sendMessage = async (params) => { messages.push(params); return 'accepted'; };
   opencodeClient.sendCommand = async (params) => { commands.push(params); return 'accepted'; };
   opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/test', chatsRoot: '/home/test/chats' });

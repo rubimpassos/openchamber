@@ -8,6 +8,7 @@ import type { IconName } from '@/components/icon/icons';
  * names itself here while it is on screen.
  */
 export const COMPOSER_STATUS_ROW_ORDER = [
+    'folderMissing',
     'worktree',
     'creating',
     'space',

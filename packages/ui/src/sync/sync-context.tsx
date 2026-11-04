@@ -84,6 +84,8 @@ import { subscribeSessionFoldersSync } from "./session-folders-sync"
 import { startPendingQuestionsSync, usePendingQuestion } from "./pending-questions"
 import { subscribeSessionDraftsSync } from "./session-drafts-sync"
 import { subscribePermissionPolicySync, subscribeSpacePermissionModes } from "./permission-mode-sync"
+import { subscribeControlStreamSync } from "./control-stream-sync"
+import type { ControlStreamSyncEvent } from "@/lib/openchamberEvents"
 import { spaceFoldersOfProject, subscribeSpaceCatalogs } from "./space-catalog-sync"
 import { subscribeSpaceSessionProject } from "./space-session-project"
 import {
@@ -91,7 +93,7 @@ import {
   processVSCodeReconciledPermissionAutoAccept,
 } from "./vscode-permission-auto-accept"
 import { markConfigCatalogStale, useConfigStore } from "@/stores/useConfigStore"
-import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
+import { refreshStoresForCatalogKinds } from "@/stores/catalogRefresh"
 import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
@@ -110,7 +112,7 @@ import {
   setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
-import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
+import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKeys, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
@@ -165,6 +167,20 @@ useWorkflowRunsStore.subscribe((state) => {
   setWorkflowRunningSessions(Object.entries(state.bySession).flatMap(([sessionId, entry]) => (
     entry.runs.some((run) => run.state === "running") ? [sessionId] : []
   )))
+})
+
+// A waiting page's toast leaves with the page, however the index learned it
+// stopped waiting: its end event, or the host's snapshot after that event fell
+// into a gap of the control stream.
+// Only a toast on screen is dismissed: most waiting pages never raised one.
+useGlobalBlockingRequestsStore.subscribe((state, previous) => {
+  if (state.bySession === previous.bySession) return
+  const settled = settledPageKeys(previous.bySession, state.bySession)
+  if (settled.length === 0) return
+  const shown = new Set(toast.getToasts().map((entry) => entry.id))
+  for (const key of settled) {
+    if (shown.has(`page-${key}`)) toast.dismiss(`page-${key}`)
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -1727,8 +1743,8 @@ const isCatalogRuntimeCurrent = (runtime: CatalogRuntime): boolean =>
  * its catalog. A directory OpenCode names in an event is already running.
  *
  * The sync stores only hold what chat needs; the Settings lists and the
- * composer read their own stores, which `refreshStoresForCatalogKind` re-reads
- * for the same kind.
+ * composer read their own stores, which `refreshStoresForCatalogKinds` refreshes
+ * once for the entire burst.
  */
 async function reloadCatalog(
   kind: CatalogKind,
@@ -1741,8 +1757,6 @@ async function reloadCatalog(
   // client cached seconds ago.
   if (kind === "config") opencodeClient.clearConfigCache()
 
-  void refreshStoresForCatalogKind(kind, eventDirectories)
-
   if (kind === "project") {
     const projects = await opencodeClient.listProjects().catch(() => null)
     if (isCatalogRuntimeCurrent(runtime) && projects) {
@@ -1752,7 +1766,7 @@ async function reloadCatalog(
   }
   // Config is the only catalog the directory stores hold. Agents, commands,
   // providers and the rest live in the stores their consumers read, which
-  // `refreshStoresForCatalogKind` re-reads for the same kind.
+  // `refreshStoresForCatalogKinds` refreshes once for the entire burst.
   if (kind !== "config") return
 
   await Promise.all(eventDirectories.map(async (directory) => {
@@ -1817,6 +1831,7 @@ function scheduleCatalogReload(
       if (currentKinds.has(pendingKind) && currentDirectory) pendingDirectories.add(currentDirectory)
       void reloadCatalog(pendingKind, childStores, [...pendingDirectories], scheduledRuntime)
     }
+    void refreshStoresForCatalogKinds(new Map([...reloads].map(([kind, directories]) => [kind, [...directories]])))
   }, CATALOG_RELOAD_DEBOUNCE_MS)
 }
 
@@ -1987,11 +2002,7 @@ const notifyFormCreated = (form: FormRequest, directory: string): void => {
  * user's answer: shown while the user looks at another session, dismissed
  * once the page stops waiting. The native notification comes from the server.
  */
-const notifyWaitingPage = (event: Extract<SyncEvent, { type: "openchamber.page-waiting" | "openchamber.page-settled" }>): void => {
-  if (event.type === "openchamber.page-settled") {
-    toast.dismiss(`page-${event.properties.sessionID}:${event.properties.pageID}`)
-    return
-  }
+const notifyWaitingPage = (event: Extract<SyncEvent, { type: "openchamber.page-waiting" }>): void => {
   const { sessionID, page } = event.properties
   const directory = event.properties.directory ?? resolveCachedSessionDirectory(sessionID)
   if (!directory || isViewedInCurrentSession(directory, sessionID)) return
@@ -2043,6 +2054,43 @@ const recordTurnOutcomeNotification = (
   })
 }
 
+type ControlStreamOnlyEvent = Exclude<ControlStreamSyncEvent, { type: "session.patched" }>
+
+const isControlStreamOnlyEvent = (payload: SyncEvent): payload is ControlStreamOnlyEvent => (
+  payload.type === "openchamber.page-waiting"
+  || payload.type === "openchamber.page-settled"
+  || payload.type === "openchamber.session-assist"
+  || payload.type === "openchamber.workflow-run"
+  || payload.type === "openchamber.workflow-run-removed"
+)
+
+/**
+ * OpenChamber's own announcements that only the control stream feeds in. Each
+ * one switches something on and off (a waiting page, a pending recap) or
+ * replaces a run summary without a revision, so a second copy from the
+ * WebSocket, arriving in a different order, could undo a newer change.
+ */
+const applyControlStreamOnlyEvent = (payload: ControlStreamOnlyEvent): void => {
+  switch (payload.type) {
+    // A page that waits for the user's answer lives only in the cross-directory
+    // index: no directory store holds it, since OpenCode never hears of the wait.
+    case "openchamber.page-waiting":
+    case "openchamber.page-settled":
+      applyWaitingPageEvent(payload, resolveCachedSessionDirectory)
+      if (payload.type === "openchamber.page-waiting") notifyWaitingPage(payload)
+      return
+    case "openchamber.session-assist":
+      applySessionAssistEvent(payload.properties, resolveCachedSessionDirectory)
+      return
+    case "openchamber.workflow-run":
+      useWorkflowRunsStore.getState().apply(payload.properties.run)
+      return
+    case "openchamber.workflow-run-removed":
+      useWorkflowRunsStore.getState().remove(payload.properties.parentSessionId, payload.properties.runId)
+      return
+  }
+}
+
 export function handleEvent(
   rawDirectory: string,
   payload: SyncEvent,
@@ -2066,37 +2114,14 @@ export function handleEvent(
     return
   }
 
-  // A page that waits for the user's answer lives only in the cross-directory
-  // index: no directory store holds it, since OpenCode never hears of the wait.
-  if (payload.type === "openchamber.page-waiting" || payload.type === "openchamber.page-settled") {
-    if (expectedRuntimeKey !== getRuntimeKey()) return
-    applyWaitingPageEvent(payload, resolveCachedSessionDirectory)
-    notifyWaitingPage(payload)
-    return
-  }
-
-  if (payload.type === "openchamber.session-assist") {
-    if (expectedRuntimeKey !== getRuntimeKey()) return
-    applySessionAssistEvent(payload.properties, resolveCachedSessionDirectory)
-    return
-  }
+  // Applied from the control stream (`applyControlStreamOnlyEvent`), which carries
+  // them on every transport; this WebSocket copy is the same change.
+  if (isControlStreamOnlyEvent(payload)) return
 
   // A watched file changed: the views showing it re-read it (`lib/watchedFiles`).
   if (payload.type === "filesystem.changed") {
     if (expectedRuntimeKey !== getRuntimeKey()) return
     notifyWatchedFileChanged(payload.properties.file)
-    return
-  }
-
-  // Workflow runs live in their own store, keyed by the session that proposed them.
-  if (payload.type === "openchamber.workflow-run") {
-    if (expectedRuntimeKey !== getRuntimeKey()) return
-    useWorkflowRunsStore.getState().apply(payload.properties.run)
-    return
-  }
-  if (payload.type === "openchamber.workflow-run-removed") {
-    if (expectedRuntimeKey !== getRuntimeKey()) return
-    useWorkflowRunsStore.getState().remove(payload.properties.parentSessionId, payload.properties.runId)
     return
   }
 
@@ -3270,6 +3295,12 @@ export function SyncProvider(props: {
       runtimeKey,
       (event) => handleEvent("global", event, childStores, routingIndex, runtimeKey),
     )
+    // An archive patch goes the usual way: the WebSocket copy is the same
+    // patch, and applying it twice changes nothing.
+    const unsubscribeControlStream = subscribeControlStreamSync(runtimeKey, (event) => {
+      if (event.type === "session.patched") handleEvent("global", event, childStores, routingIndex, runtimeKey)
+      else applyControlStreamOnlyEvent(event)
+    })
     const unsubscribeSpaceCatalogs = subscribeSpaceCatalogs(runtimeKey)
     const unsubscribeSpaceSessionProject = subscribeSpaceSessionProject(runtimeKey)
     const resyncAfterStreamGap = (reason: SessionMaterializationReason) => {
@@ -3345,6 +3376,10 @@ export function SyncProvider(props: {
         if (known && progress.step !== "ready" && progress.step !== "failed") return
         void refreshSpacesJourney().catch(() => undefined)
       },
+      onSpaceTaskTitle: (spaceId, taskTitle) => {
+        if (runtimeKey !== getRuntimeKey()) return
+        if (!useSpacesStore.getState().noteTaskTitle(spaceId, taskTitle)) void refreshSpacesJourney().catch(() => undefined)
+      },
       onSpaceSetup: () => {
         // The setup commands of a space moved on; what they do now is in the list.
         void refreshSpacesJourney().catch(() => undefined)
@@ -3361,8 +3396,6 @@ export function SyncProvider(props: {
         }
         // Queue recovery is independent of the directory-bootstrap debounce.
         void useMessageQueueStore.getState().resync().catch(() => undefined)
-        // Workflow run changes during a gap are not replayed: read the shown sessions' runs again.
-        useWorkflowRunsStore.getState().reloadLoaded()
         // OpenCode keeps file watches in memory; a restart behind the gap dropped them.
         renewWatchedFiles()
         useConfigStore.setState({
@@ -3419,6 +3452,7 @@ export function SyncProvider(props: {
       unsubscribeSpaceModes()
       stopPendingQuestions()
       unsubscribePermissionPolicy()
+      unsubscribeControlStream()
       unsubscribeSpaceCatalogs()
       unsubscribeSpaceSessionProject()
     }
@@ -4534,6 +4568,41 @@ export function buildSessionMessageRecordsSnapshot(
   }
 }
 
+export function readSessionMessageRecordsSnapshot(
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  current: SessionMessageRecordsSnapshot,
+  suspendPartUpdates: boolean,
+  suspendedPartUpdatesMessageID?: string,
+): SessionMessageRecordsSnapshot {
+  const state = store.getState()
+  const sameSession = current.sessionID === sessionID
+  // A suspension that changes within a session continues from what the chat
+  // shows now. A snapshot cached under the other suspension can hold older
+  // parts of the message it suspended, and its parts check skips that message.
+  const suspensionChanged = sameSession && (
+    current.suspendPartUpdates !== suspendPartUpdates
+    || current.suspendedPartUpdatesMessageID !== suspendedPartUpdatesMessageID
+  )
+  const reusableSnapshot = suspensionChanged
+    ? undefined
+    : getReusableSessionMessageRecordsSnapshot(store, state, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
+  if (reusableSnapshot) return reusableSnapshot
+
+  const previousSnapshot = sameSession
+    ? current
+    : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
+  const nextSnapshot = buildSessionMessageRecordsSnapshot(
+    state,
+    sessionID,
+    previousSnapshot,
+    suspendPartUpdates,
+    suspendedPartUpdatesMessageID,
+  )
+  rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
+  return nextSnapshot
+}
+
 export function useSessionRenderable(sessionID: string, directory?: string): boolean {
   const store = useDirectoryStore(directory)
   const renderableRef = useRef(false)
@@ -4655,35 +4724,14 @@ export function useSessionMessageRecords(
       return snapshotRef.current.sessionID === sessionID ? snapshotRef.current.list : EMPTY_SESSION_MESSAGE_RECORDS
     }
 
-    const state = store.getState()
-    const suspendPartUpdates = Boolean(options?.suspendPartUpdates)
-    const suspendedPartUpdatesMessageID = options?.suspendPartUpdatesForMessageId ?? undefined
-    const reusableSnapshot = getReusableSessionMessageRecordsSnapshot(
+    snapshotRef.current = readSessionMessageRecordsSnapshot(
       store,
-      state,
       sessionID,
-      suspendPartUpdates,
-      suspendedPartUpdatesMessageID,
+      snapshotRef.current,
+      Boolean(options?.suspendPartUpdates),
+      options?.suspendPartUpdatesForMessageId ?? undefined,
     )
-    if (reusableSnapshot) {
-      snapshotRef.current = reusableSnapshot
-      return reusableSnapshot.list
-    }
-
-    const previousSnapshot = snapshotRef.current.sessionID === sessionID
-      ? snapshotRef.current
-      : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
-
-    const nextSnapshot = buildSessionMessageRecordsSnapshot(
-      state,
-      sessionID,
-      previousSnapshot,
-      suspendPartUpdates,
-      suspendedPartUpdatesMessageID,
-    )
-    snapshotRef.current = nextSnapshot
-    rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
-    return nextSnapshot.list
+    return snapshotRef.current.list
   }, [options?.enabled, options?.suspendPartUpdates, options?.suspendPartUpdatesForMessageId, sessionID, store])
 
   const subscribe = useCallback((notify: () => void) => {

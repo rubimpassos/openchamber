@@ -1177,6 +1177,7 @@ interface UIStore {
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
+  notifyOnPullRequests: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
   notificationClassifierEnabled: boolean;
@@ -1513,6 +1514,7 @@ interface UIStore {
   setDockBadgeEnabled: (value: boolean) => void;
   setAlwaysShowScrollbars: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
+  setNotifyOnPullRequests: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
   setNotificationClassifierEnabled: (value: boolean) => void;
@@ -1758,6 +1760,7 @@ export const useUIStore = create<UIStore>()(
 
         // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
+        notifyOnPullRequests: true,
         notifyOnError: true,
         notifyOnQuestion: true,
         notificationClassifierEnabled: true,
@@ -3507,6 +3510,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
+        setNotifyOnPullRequests: (value) => { set({ notifyOnPullRequests: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
         setNotificationClassifierEnabled: (value) => { set({ notificationClassifierEnabled: value }); },
@@ -4111,6 +4115,7 @@ export const useUIStore = create<UIStore>()(
           dockBadgeEnabled: state.dockBadgeEnabled,
           alwaysShowScrollbars: state.alwaysShowScrollbars,
           notifyOnCompletion: state.notifyOnCompletion,
+          notifyOnPullRequests: state.notifyOnPullRequests,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
           notificationClassifierEnabled: state.notificationClassifierEnabled,

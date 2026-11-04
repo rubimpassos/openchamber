@@ -1134,5 +1134,6 @@ export const registerGuestRoutes = (app, {
       res.status(500).json({ error: 'Failed to serve guest asset' });
     }
   });
-  return loopbackRuntime;
+  // The runtime stops the watch on shutdown and before registering the routes again.
+  return { ...loopbackRuntime, stopPackageWatch: () => packageWatch?.stop() };
 };

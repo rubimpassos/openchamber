@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { z } from 'zod';
 import { genericNotificationTitle, truncateNotificationText } from './message.js';
+import { pullRequestNotificationTitle } from './pull-request-locales.js';
 import {
   defaultNotificationTemplates,
   notificationTexts,
@@ -113,7 +115,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   const toApnsGenericPayload = (payload) => {
     const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
     const knownSessionName = typeof data.sessionName === 'string' ? data.sessionName.trim() : '';
-    const sessionName = knownSessionName || 'Session';
+    const sessionName = knownSessionName || (data.type === 'pull-request' ? '' : 'Session');
     const phoneBody = payload?.phoneBody ?? '';
     // sessionId and url are forwarded so a tapped push can deep-link; both are
     // opaque identifiers (a session id, a same-shape `/?session=…` path), not
@@ -1182,6 +1184,25 @@ export const createNotificationTriggerRuntime = (deps) => {
     await sendSettlePush({ sessionId, directory, type: 'review', tag, title, body });
   };
 
+  const notifyPullRequest = async ({ item, event }) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnPullRequests === false) return;
+    if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;
+    const title = pullRequestNotificationTitle(settings.locale, event);
+    if (!title) return;
+    const body = `${item.owner}/${item.repo}#${item.number}`;
+    // The tag reaches every channel even when enterprise mode strips the body,
+    // so it names the pull request only through a digest.
+    const tag = `pull-request-${createHash('sha256').update(`${item.instance}\n${body}`).digest('hex').slice(0, 16)}-${event}`;
+    const payload = { title, body, tag, kind: 'pull-request', requireHidden: settings.notificationMode !== 'always' };
+    if (settings.nativeNotificationsEnabled) {
+      const desktopNotificationDelivered = emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered });
+    }
+    await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: 'pull-request' } }, { requireNoSse: true });
+    sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
+  };
+
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
@@ -1192,5 +1213,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     sendBrowserHelpPush,
     isSubagentSession,
     notifyAutoReviewEnded,
+    notifyPullRequest,
   };
 };

@@ -167,7 +167,8 @@ request and never drops the newest session first (session ids descend with
 time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
-the surface stays one shape. Top to bottom: worktree setup, session creation
+the surface stays one shape. Top to bottom: the session's folder being gone
+(`SessionFolderMissingRow`), worktree setup, session creation
 after a draft's first message, and a message waiting for its space
 (`ComposerStatusStrip`; the creating line yields to the worktree line and
 appears only after 300 ms through `useShownAfter`), the notice that an OpenCode
@@ -206,11 +207,32 @@ server-owned review runs nor PR fix loops.
 While a session's first send is pending (`pendingDraftSends` in
 `session-ui-store`, from Enter in the draft until the request that starts the
 turn has left), the composer keeps what is typed and sends nothing: Send is
-disabled, Stop is not offered, Enter and the pill's arrow do nothing, and
-nothing is queued. A first send that fails restores its text under the
+disabled, Enter and the pill's arrow do nothing, and nothing is queued. Stop
+cancels creation until the server acknowledges it; after acknowledgment, Stop
+stays unavailable until the turn-starting request leaves. A first send that fails restores its text under the
 identity `DraftSendError` names: the created session's composer, or the
 reopened draft's, with the text typed meanwhile kept above the sent text
 (*A draft's first send* in `sync/DOCUMENTATION.md`).
+
+### Why a session whose folder is gone gets a row and keeps its text
+
+OpenCode answers every request of such a session with `LocationNotFoundError`,
+so the model list stays on Loading and a send can only fail. When the session
+opens and when the window regains focus, `useFolderMissing` asks the server's
+folder stat, and only if that says missing asks OpenCode
+(`getLocationAvailability`): OpenChamber's stat alone would be wrong when
+`OPENCODE_HOST` puts OpenCode on another machine, and a hold on sending must not
+rest on it. `SessionFolderMissingRow` then names the folder and offers Move session.
+While the row shows, Send and queueing keep the text, send nothing and look at
+the folder again, so a raw error never replaces the row. VS Code has no folder
+stat: there the row appears when a send comes back with `LocationNotFoundError`,
+the next send asks OpenCode again because nothing else could lift the row, and
+the same answer covers a folder that vanished while the window kept focus.
+Isolated spaces take no row: the server's stat cannot see inside the container,
+and a space's session cannot leave it. The move stays
+manual (*Missing worktree directories* in `sync/DOCUMENTATION.md`): only the user
+knows where the folder went. A running location outlives its folder and keeps
+answering, so no row shows while sends still work; the row comes once it unloads.
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
@@ -709,6 +731,14 @@ composer holds a prompt, not a source file: it is short enough that a full pass
 is cheaper and far simpler than incremental mapping, and it keeps the editor
 and the send path reading the same grammar.
 
+### Why reference summaries shrink inside the editor
+
+The content flex item has a zero minimum width, so a long message-link summary
+cannot set the wrapping width of every line in the draft. Session-link widgets
+cap their width at the available line width minus the shared chip's 2px inline
+margins; the label's existing ellipsis then handles long summaries. This is local
+to the composer and leaves the source string and sent-message chips unchanged.
+
 ## Ordering rules worth knowing
 
 ### Why mention deduplication requires a full path
@@ -977,7 +1007,16 @@ spinner row shows only when there are no rows yet, and "no matches" only
 once the current query's search has answered; the two rows share one height.
 Server hits carry the key of the search they answer (`mentionSearchKey`), so
 an older query's hits never show as the current one's. Enter picks the row on
-screen, held or not; a new answer selects its first row.
+screen, held or not; a new query's answer selects its first row.
+
+A query has up to two answers. OpenCode's index answers at once and its hits
+show as soon as there are any; the search behind the hidden and gitignored
+toggles may walk the project for seconds, and the list does not wait for it, or
+a large project shows only agents until it ends. Its extra rows join when it
+answers, and new rows for the same query leave the selection on the row it was
+on. Only a row pushed out of the list sends the selection back to the first
+row. An index answer of nothing keeps the query searching until the second
+answer, so "no matches" still means both finished.
 `../FileMentionAutocomplete.test.tsx` covers these states.
 
 ## Other sessions as context
@@ -1235,8 +1274,8 @@ linear interpolation. This keeps their keyboard curve together while letting
 WebKit composite the fade; a CSS `linear()` spring easing keeps opacity on the
 main thread.
 
-On a phone the top rows (worktree setup, space wait, restart interruption, goal, auto review,
-background commands, reverted, queue, done hint, suggestion) pass through
+On a phone the top rows (missing folder, worktree setup, space wait, restart interruption,
+goal, auto review, background commands, reverted, queue, done hint, suggestion) pass through
 `ui/MobileComposerTopRows.tsx`. Each row names itself with
 `useComposerStatusChip` (`state/composerStatusChips.ts`) while it renders. One
 row shows as it is; two or more fold into a single line of chips, and any chip
@@ -1387,11 +1426,16 @@ the dialog keeps its size. Lanes share the project directory by default;
 worktrees are opt-in, and a tab row only
 once there are two or more variants. Model pickers there render through a
 portal because the box clips its content; the footer drops the model button
-and keeps the ordinary send button (`ComposerActionButtons` with a
-`sendLabel` naming the run count), disabled below two runs or while
-launching. Enter and the send button launch instead of sending. Launching goes through `useMultiRunStore.createMultiRun`, clears the
+but keeps the agent picker (`ModelControls` with `agentOnly`), because every
+lane starts on that agent, and the ordinary send button
+(`ComposerActionButtons` with a `sendLabel` naming the run count), disabled
+below two runs or while launching. Enter and the send button launch instead of
+sending. Launching goes through `useMultiRunStore.createMultiRun`, clears the
 draft text and attachments, and opens the run overview. Attachments go to every
-variant; prompt text is sent as typed, the way the old launcher sent it.
+variant; prompt text is sent as typed, the way the old launcher sent it. An
+armed goal button makes each lane a goal of its own, with its variant's prompt
+as the objective and the default token budget per lane; a launch that created
+sessions disarms the button.
 
 ## Chat quote highlights
 

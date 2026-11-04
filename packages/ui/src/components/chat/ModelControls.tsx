@@ -367,6 +367,8 @@ type ModelControlsProps = {
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
     /** Offers "Run on several models" at the top of the desktop model picker. */
     onRunInParallel?: () => void;
+    /** Shows the agent picker alone, for a composer whose models are chosen elsewhere. Desktop only. */
+    agentOnly?: boolean;
     /**
      * Picker effort changes become the model's remembered level. Off for a
      * BTW fork, whose own effort must not change the main chat's default.
@@ -392,6 +394,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     mobilePanel,
     onMobilePanelChange,
     onRunInParallel,
+    agentOnly = false,
     selection,
     sessionId: controlledSessionId,
     agentSelectable = false,
@@ -1604,6 +1607,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             if (options?.applyVariant) {
                 rememberVariantForModel(providerId, modelId, options.variant ?? null);
             }
+            const pickedSessionId = selection ? controlledSessionId : currentSessionId;
+            if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
             if (!selection && !options?.applyVariant && !isAutoModel(providerId, modelId)) {
                 // Add to recent models on successful selection. Auto is pinned, not recent.
                 addRecentModel(providerId, modelId);
@@ -1929,6 +1934,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
             return;
         }
+        const pickedSessionId = selection ? controlledSessionId : currentSessionId;
+        if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
         if (!selection) setLastSelectedModel(providerId, modelId);
         setMobileDetailsEntry(null);
         closeMobilePanel();
@@ -3015,6 +3022,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         isMobile && 'w-full',
         className,
     );
+
+    if (agentOnly) {
+        return <div className={cn(inlineClassName, 'justify-end')}>{renderAgentSelector()}</div>;
+    }
 
     return (
         <>

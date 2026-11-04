@@ -43,6 +43,7 @@ import { registerPrWatchRoutes } from '../pr-watch/runtime.js';
 import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
+import { createThemeFolderWatch } from './theme-watch.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
@@ -125,6 +126,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
 
+  let themeFolderWatch = null;
+  let stopGuestPackageWatch = () => {};
   let quotaProviders = null;
   let loopbackRuntime;
   const getQuotaProviders = async () => {
@@ -257,6 +260,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
       validateDirectoryPath,
+      // Absent in tests; without it the themes folder is not watched.
+      customThemesDir = null,
       readCustomThemesFromDisk,
       saveImportedTheme,
       deleteImportedTheme,
@@ -304,6 +309,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       prFixLoopRuntime,
       autoReviewRuntime,
       prWatchRuntime = null,
+      mergeFollowRuntime = null,
       routingRuntime,
       globalEventHub,
       openchamberVersion,
@@ -575,6 +581,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
     app.use(providerReadCache.middleware);
     walkthroughBindingService = registerSourceControlRoutes(app, {
+      onMutationSucceeded: (mutation) => mergeFollowRuntime?.onMutationSucceeded(mutation),
+      onMutationStarting: (mutation) => mergeFollowRuntime?.onMutationStarting(mutation) ?? null,
       onRepositoryTransportChanged: syncRepositoryTransport,
       validateManagedSshCredential: managedSshInventory.assertAvailable,
       readManagedSshCredentialPresentation: managedSshInventory.presentation,
@@ -662,6 +670,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     prWatchRuntime?.attach({ trackedItems: trackedItemsService, readers: trackedItemReaders });
     if (prFixLoopRuntime) void prFixLoopRuntime.attachTracking(trackedItemsService)
       .catch(() => console.warn('[pr-fix-loop] observation could not restore its saved loops; dispatch remains disabled'));
+    void mergeFollowRuntime?.attach(trackedItemsService).catch((error) => console.warn('[merge-follow] attach failed:', error.message));
     const resolveGitIdentity = async (identityId) => {
       if (identityId === 'global') {
         const identity = await getGlobalIdentity();
@@ -774,6 +783,16 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         }
       }
     };
+    // Theme files edited by hand or by an agent reach every client without a reload.
+    themeFolderWatch?.stop();
+    themeFolderWatch = customThemesDir
+      ? createThemeFolderWatch({
+        fsPromises,
+        path,
+        themesDir: customThemesDir,
+        onChange: () => announceChange('openchamber:themes-changed'),
+      })
+      : null;
     // Extensions that act as a Git host, kept in step with the catalog; every
     // client re-reads the provider list when the set changes.
     const extensionSourceControlProviders = createExtensionProviders({
@@ -804,6 +823,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       persistPath: extensionsPersistPath(openchamberDataDir),
       emitChanged: () => announceChange('openchamber:tracker-providers-changed'),
     });
+    stopGuestPackageWatch();
+    loopbackRuntime?.dispose();
     loopbackRuntime = registerGuestRoutes(app, {
       openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,
       // One failing listener never skips the other: a browser role that
@@ -845,6 +866,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         }
       },
     });
+    stopGuestPackageWatch = loopbackRuntime.stopPackageWatch;
     // The providers extensions served before the restart, before any request reads the list.
     await extensionSourceControlProviders.reconcile().catch((error) => {
       console.warn('Failed to load extension Git hosts:', error?.message ?? error);
@@ -1007,5 +1029,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
     dispose: () => loopbackRuntime?.dispose(),
+    /** Both folder watches: the themes folder and the extensions installed from a folder. */
+    stopFolderWatches: () => {
+      themeFolderWatch?.stop();
+      themeFolderWatch = null;
+      stopGuestPackageWatch();
+      stopGuestPackageWatch = () => {};
+    },
   };
 };

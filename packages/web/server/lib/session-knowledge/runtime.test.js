@@ -40,7 +40,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'isReadAloudEnabled', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'collectFollowedPullStacks',
+    'isPageRenderingAvailable', 'isReadAloudEnabled', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'collectFollowedPullStacks', 'isWorkNamingAvailable',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -94,6 +94,7 @@ describe('writing the knowledge into a session', () => {
   test('syncs fork context alongside upstream response style and secret guidance', async () => {
     const instructionEntries = createEntriesStub();
     const snapshots = [{ anchor: { owner: 'team', repo: 'project', number: 1 }, status: 'unavailable', reason: 'read-failed' }];
+    let naming = true;
     const runtime = createRuntime({
       ...pinnedStore(),
       instructionEntries,
@@ -101,6 +102,8 @@ describe('writing the knowledge into a session', () => {
       isReadAloudEnabled: async () => true,
       isSecretRequestAvailable: async () => true,
       isPageRenderingAvailable: async () => true,
+      isSessionLinkingAvailable: async () => true,
+      isWorkNamingAvailable: async () => naming,
     });
 
     expect(await runtime.sync('ses_a', DIRECTORY, 'Keep replies short.')).toBe(true);
@@ -109,10 +112,14 @@ describe('writing the knowledge into a session', () => {
     expect(instructionEntries.held.get(GUIDANCE)).toContain(SECRET_REQUEST_GUIDANCE);
     expect(instructionEntries.held.get(GUIDANCE)).toContain(UI_BLOCKS_GUIDANCE);
     expect(instructionEntries.held.get(GUIDANCE)).toContain(TABLE_SPEECH_GUIDANCE);
+    expect(instructionEntries.held.get(GUIDANCE)).toContain(WORK_NAME_GUIDANCE);
 
+    naming = false;
     expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
     expect(instructionEntries.held.get(RESPONSE_STYLE)).toBe('Keep replies short.');
     expect(instructionEntries.held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks)).toContain(JSON.stringify(snapshots));
+    expect(instructionEntries.held.get(GUIDANCE)).not.toContain(WORK_NAME_GUIDANCE);
+    expect(instructionEntries.held.get(GUIDANCE)).toContain(TABLE_SPEECH_GUIDANCE);
   });
 
   test('puts each source under its own key and removes the empty ones', async () => {
@@ -227,7 +234,7 @@ describe('when to link', () => {
     });
     const entries = await entriesFor(runtime, NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${WORK_NAME_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
     expect(entries[PINNED]).toBe('');
     expect(entries[MEMORY]).toBe('');
   });
@@ -235,6 +242,20 @@ describe('when to link', () => {
   test('asks for the task name in the language of the user, the branch in English', () => {
     expect(WORK_NAME_GUIDANCE).toContain("in the language of the user's latest message");
     expect(WORK_NAME_GUIDANCE).toContain('A branch name stays in English.');
+  });
+
+  test('naming guidance is restricted to linked worktrees and spaces', async () => {
+    const runtime = createRuntime({
+      isSessionLinkingAvailable: async () => true,
+      isWorkNamingAvailable: async (directory) => directory === '/linked' || directory === '/spaces/abcdef123456/project',
+    });
+    for (const directory of ['/linked', '/spaces/abcdef123456/project']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).toContain(WORK_NAME_GUIDANCE);
+    }
+    for (const directory of ['/main', '/plain']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
+    }
+    expect((await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true, isWorkNamingAvailable: async () => { throw new Error('unavailable'); } })))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
   });
 
   test('is left out without the tool, or when the check fails', async () => {

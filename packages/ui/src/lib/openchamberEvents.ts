@@ -169,6 +169,12 @@ type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 type GuestsChangedEvent = { type: 'guests-changed' };
 
 /**
+ * A theme file in the server's custom themes folder was added, removed or
+ * rewritten. Carries nothing; listeners re-read the custom themes.
+ */
+type ThemesChangedEvent = { type: 'themes-changed' };
+
+/**
  * A usage limit stopped a session and the server moved on: the provider to
  * its next account (for every session), or this session to the fallback model.
  */
@@ -243,6 +249,32 @@ type RoutingSafetySkippedEvent = { type: 'routing-safety-skipped' } & z.infer<ty
 export type PermissionPolicySyncEvent = Extract<SyncEvent, { type: 'openchamber.permission-auto-accept' | 'openchamber.permission-left-for-user' }>;
 type PermissionPolicyEvent = { type: 'permission-policy'; event: PermissionPolicySyncEvent };
 
+/**
+ * OpenChamber's own session announcements the sync layer applies: a page
+ * waiting for an answer, a pending recap, a workflow run, an archive. The main
+ * event stream carries them only over the WebSocket; over SSE it is OpenCode's
+ * own stream, so this stream is where every transport hears them.
+ */
+const CONTROL_STREAM_SYNC_TYPES = new Set([
+  'openchamber:page-waiting',
+  'openchamber:page-settled',
+  'openchamber:session-assist',
+  'openchamber:session-archived',
+  'openchamber:workflow-run',
+  'openchamber:workflow-run-removed',
+]);
+export type ControlStreamSyncEvent = Extract<SyncEvent, {
+  type: 'openchamber.page-waiting' | 'openchamber.page-settled' | 'openchamber.session-assist' | 'session.patched'
+    | 'openchamber.workflow-run' | 'openchamber.workflow-run-removed';
+}>;
+type ControlStreamSyncEnvelope = { type: 'control-sync'; event: ControlStreamSyncEvent };
+
+const isControlStreamSyncEvent = (event: SyncEvent): event is ControlStreamSyncEvent => (
+  event.type === 'openchamber.page-waiting' || event.type === 'openchamber.page-settled'
+  || event.type === 'openchamber.session-assist' || event.type === 'session.patched'
+  || event.type === 'openchamber.workflow-run' || event.type === 'openchamber.workflow-run-removed'
+);
+
 /** Followed pull requests, merge requests or issues whose state the server saw move. */
 type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infer<typeof trackedItemRecordsSchema> };
 
@@ -263,6 +295,7 @@ const notificationPropertiesSchema = z.object({
 });
 
 type OpenChamberEvent =
+  | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   /** The server's notification center changed: an entry added, some read, or all cleared. */
   | { type: 'notification-center-changed'; change: NotificationCenterChange }
@@ -281,6 +314,7 @@ type OpenChamberEvent =
   | AutoReviewUpdatedEvent
   | PrWatchUpdatedEvent
   | PermissionPolicyEvent
+  | ControlStreamSyncEnvelope
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
   /** The host follows this space's queue again; what changed in a gap is read from the space. */
@@ -298,6 +332,7 @@ type OpenChamberEvent =
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
   | GuestsChangedEvent
+  | ThemesChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
@@ -328,6 +363,10 @@ let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
 const listeners = new Set<Listener>();
+// The ready event of the open connection. A listener that subscribes after it
+// arrived gets it replayed, since the server sends it once per connection and
+// some listeners (tracked-items interest) cannot act until they have it.
+let readyEvent: Extract<OpenChamberEvent, { type: 'event-stream-ready' }> | null = null;
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
@@ -371,6 +410,7 @@ const scheduleReconnect = () => {
 };
 
 const cleanupSource = () => {
+  readyEvent = null;
   clearHeartbeatTimer();
   streamAbortController?.abort();
   streamAbortController = null;
@@ -475,6 +515,10 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+  if (envelope.type === 'openchamber:terminal-sessions-changed') {
+    for (const listener of listeners) listener({ type: 'terminal-sessions-changed' });
+    return;
+  }
   if (envelope.type === 'openchamber:notification') {
     const parsed = notificationPropertiesSchema.safeParse(envelope.properties);
     if (parsed.success) {
@@ -493,7 +537,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     reconnectAttempt = 0;
     const ready = eventStreamReadySchema.safeParse(envelope.properties);
     const connectionId = ready.success ? ready.data.connectionId ?? null : null;
-    for (const listener of listeners) listener({ type: 'event-stream-ready', connectionId });
+    const event = { type: 'event-stream-ready', connectionId } as const;
+    readyEvent = event;
+    for (const listener of listeners) listener(event);
     return;
   }
 
@@ -551,6 +597,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     for (const { event } of classified.events) {
       if (event.type !== 'openchamber.permission-auto-accept' && event.type !== 'openchamber.permission-left-for-user') continue;
       for (const listener of listeners) listener({ type: 'permission-policy', event });
+    }
+    return;
+  }
+
+  if (CONTROL_STREAM_SYNC_TYPES.has(envelope.type)) {
+    const classified = classifyStreamPayload(envelope, undefined);
+    if (classified.kind !== 'events') return;
+    for (const { event } of classified.events) {
+      if (!isControlStreamSyncEvent(event)) continue;
+      for (const listener of listeners) listener({ type: 'control-sync', event });
     }
     return;
   }
@@ -637,6 +693,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:guests-changed') {
     for (const listener of listeners) listener({ type: 'guests-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:themes-changed') {
+    for (const listener of listeners) listener({ type: 'themes-changed' });
     return;
   }
 
@@ -856,6 +917,12 @@ export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => 
   listeners.add(listener);
   ensureRuntimeChangeSubscription();
   connect();
+  if (readyEvent) {
+    const event = readyEvent;
+    queueMicrotask(() => {
+      if (readyEvent === event && listeners.has(listener)) listener(event);
+    });
+  }
 
   return () => {
     listeners.delete(listener);
