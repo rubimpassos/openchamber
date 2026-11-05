@@ -1044,6 +1044,11 @@ within a ten-minute overall deadline.
       has a store release: every Android build, an APK from an earlier release
       included, is offered the newest APK of the `canary` GitHub pre-release. Other app types stay on releases.
   - `POST /api/openchamber/update-install`
+    - A host install (`../host-install/`) runs no command: the route drops the
+      empty update request for the root updater and answers with
+      `restartManager: 'host-updater'`, and the update check never marks it
+      `installBlocked`. The updater picks the release itself, so the request
+      gives the server no say in what gets installed.
     - A copy no package manager installed answers 409 before any command
       runs: a global install would add a second copy and leave the running
       one as it is. Detection reports such a copy as `unmanaged-install` when

@@ -14,6 +14,10 @@ it only into the service's private state.
 
 ## 1. Install the service and keep the brokers running
 
+On a host where OpenChamber itself is a host install (`install.sh --host`, see
+`../host-install/DOCUMENTATION.md`), the service is already installed and
+updated with OpenChamber; go to step 2. Otherwise install it alone:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh \
   | sudo bash -s -- --protected-mcp --engine-user dev --engine-unit openchamber.service
