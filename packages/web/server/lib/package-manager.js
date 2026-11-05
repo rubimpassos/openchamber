@@ -1009,7 +1009,8 @@ export async function checkForUpdates(options = {}) {
   const appType = normalizeAppType(options.appType);
   const platform = normalizePlatform(options.platform);
 
-  const forkSource = getForkReleaseSource(appType === 'web' ? readUpdateChannel(currentVersion) : undefined);
+  // `options.channel` is for a caller whose installer reads one channel only, such as a host install.
+  const forkSource = getForkReleaseSource(appType === 'web' ? options.channel ?? readUpdateChannel(currentVersion) : undefined);
   if (forkSource) {
     try {
       return { ...await checkForkRelease(currentVersion, forkSource, { appType, platform }), packageManager: pm };

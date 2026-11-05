@@ -2,7 +2,11 @@
 # OpenChamber Install Script
 # Usage: curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
 #
-# Protected MCP service (Linux, as root):
+# System-wide install on a Linux host (as root): OpenChamber runs as <account>,
+# with the protected MCP service and a root updater:
+#   curl -fsSL .../install.sh | sudo bash -s -- --host --owner <account> [--port 3000] [--repo owner/name]
+#
+# Protected MCP service alone (Linux, as root):
 #   curl -fsSL .../install.sh | sudo bash -s -- --protected-mcp --engine-user <account>
 #   curl -fsSL .../install.sh | sudo bash -s -- --protected-mcp-uninstall [--purge-state --engine-user <account>]
 
@@ -310,8 +314,75 @@ protected_mcp_uninstall() {
   "$node" "$installer" uninstall "$@"
 }
 
+# The GitHub repository whose releases a host install uses, unless --repo names another.
+HOST_DEFAULT_REPO="rubimpassos/openchamber"
+
+# Installs OpenChamber system-wide. The package comes from the repository's
+# GitHub release and is checked against the SHA-256 digest GitHub records for
+# it; its own host installer (server/lib/host-install) does the rest as root.
+host_install() {
+  if [ "$(uname -s)" != "Linux" ]; then
+    error "The host install is for Linux hosts with systemd."
+    exit 1
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    error "Run this with sudo: the host install creates system accounts and units."
+    exit 1
+  fi
+  local node repo="" release workdir version url digest arg previous=""
+  for arg in "$@"; do
+    [ "$previous" = "--repo" ] && repo="$arg"
+    previous="$arg"
+  done
+  node=$(protected_mcp_node)
+  if [ -z "$node" ]; then
+    error "Install Node.js $MIN_NODE_VERSION+ system-wide at /usr/bin/node or /usr/local/bin/node, owned by root and writable only by root along its whole path, without ACLs (your distribution or NodeSource does this), then run this again."
+    exit 1
+  fi
+  if ! protected_mcp_trusted_path /var/cache 0; then
+    error "/var/cache must be owned and writable only by root: the package is unpacked there."
+    exit 1
+  fi
+  # A reinstall keeps the repository the host was installed from unless --repo names another.
+  if [ -z "$repo" ] && [ -f /etc/openchamber/host.json ]; then
+    repo=$("$node" -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync("/etc/openchamber/host.json", "utf8")).repo || ""))') || repo=""
+  fi
+  repo="${repo:-$HOST_DEFAULT_REPO}"
+  info "Reading the latest release of $repo..."
+  release=$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo/releases/latest")
+  read -r version url digest < <(printf '%s' "$release" | "$node" -e '
+    let s = ""; process.stdin.on("data", (c) => s += c).on("end", () => {
+      const r = JSON.parse(s); const v = String(r.tag_name || "").replace(/^v/, "");
+      const a = (r.assets || []).find((x) => x.name === `openchamber-web-${v}.tgz`);
+      if (!a || !/^sha256:[0-9a-f]{64}$/.test(a.digest || "")) process.exit(1);
+      process.stdout.write(`${v} ${a.browser_download_url} ${a.digest.slice(7)}\n`);
+    });') || { error "The latest release of $repo has no web package with a recorded digest."; exit 1; }
+  workdir=$(mktemp -d /var/cache/openchamber-host-install.XXXXXX)
+  protected_mcp_remove_on_exit "$workdir"
+  curl -fsSL "$url" -o "$workdir/package.tgz"
+  if [ "$(sha256sum "$workdir/package.tgz" | cut -d' ' -f1)" != "$digest" ]; then
+    error "The downloaded package does not match the digest GitHub records."
+    exit 1
+  fi
+  tar -xzf "$workdir/package.tgz" -C "$workdir" --no-same-owner --no-same-permissions
+  chown -R root:root "$workdir"
+  chmod -R go-w "$workdir"
+  if [ ! -f "$workdir/package/server/lib/host-install/main.js" ]; then
+    error "OpenChamber $version has no host installer; it needs a newer release."
+    exit 1
+  fi
+  success "Verified OpenChamber $version"
+  "$node" "$workdir/package/server/lib/host-install/main.js" install \
+    --repo "$repo" "$@" --tarball "$workdir/package.tgz" --version "$version"
+}
+
 main() {
   case "${1:-}" in
+    --host)
+      shift
+      host_install "$@"
+      return
+      ;;
     --protected-mcp)
       shift
       protected_mcp_install "$@"

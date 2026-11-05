@@ -204,6 +204,11 @@ systemd unit the installer writes, with both groups as supplementary groups so
 it can hand each socket to its group. The unit's `RuntimeDirectory` lists both
 directories at mode `0750`.
 
+A host install (`scripts/install.sh --host`, `../host-install/`) installs the
+service together with OpenChamber and updates both on every OpenChamber update,
+with the owner as engine account and `openchamber.service` as engine unit. The
+rest of this section covers installing the service alone.
+
 `scripts/install.sh --protected-mcp` runs Node as root only after
 `protected_mcp_trusted_path` accepts `/usr/bin/node` or `/usr/local/bin/node`.
 It walks the path the way `integrity.js` does, and every directory and link on

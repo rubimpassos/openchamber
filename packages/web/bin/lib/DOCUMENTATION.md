@@ -60,6 +60,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Implements `openchamber update`.
   - Loads the package-manager helper, performs update flow, and coordinates restart behavior after updates.
   - Installs the exact version returned by the update check and verifies the globally installed version after the package manager exits; a zero exit status without the target version is a loud failure, not a success report (#3083).
+  - On a host install (`server/lib/host-install/`), the command installs nothing: it drops the update request for the root updater and returns, in every output mode.
   - An instance that is the Linux startup service (its PID is the unit's `MainPID`) is not stopped before the install: with `Restart=always`, systemd would start the old release again while the package manager replaces its files. The service keeps running through the install, then `systemctl --user restart` starts the new release, the way the Update button does (#2542). The command then waits for `/health` to report the target version and fails with a pointer to `openchamber startup enable` when it does not, which is what a unit written by an older release looks like (#5793).
 
 - `commands-tunnel.js`
