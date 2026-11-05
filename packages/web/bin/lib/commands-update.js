@@ -7,6 +7,7 @@ import {
   stopInstanceProcess,
 } from './cli-process.js';
 import { getStartupServicePid, restartStartupService } from './cli-startup.js';
+import { isHostManagedInstall, requestHostUpdate } from '../../server/lib/host-install/managed.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -41,9 +42,30 @@ function createUpdateCommand({
   discoverInstances = discoverRunningInstances,
   startupService = { getPid: getStartupServicePid, restart: restartStartupService },
   waitForVersion = waitForServerVersion,
+  hostInstall = { isManaged: isHostManagedInstall, requestUpdate: requestHostUpdate },
 }) {
   return async function updateCommand(options = {}) {
     const showOutput = shouldRenderHumanOutput(options);
+
+    // A host install belongs to its root updater: this account can only ask it to run.
+    if (hostInstall.isManaged()) {
+      try {
+        hostInstall.requestUpdate();
+      } catch (error) {
+        throw new Error(`Could not ask the host updater for an update (${error.code ?? error.message}). Only the account OpenChamber runs as can ask; root runs the updater directly: systemctl start openchamber-updater.service`);
+      }
+      if (isJsonMode(options)) {
+        printJson({ requested: true, updater: 'host' });
+      } else if (isQuietMode(options)) {
+        process.stdout.write('requested host-updater\n');
+      } else if (showOutput) {
+        clackIntro('OpenChamber Update');
+        logStatus('info', 'the host updater installs any newer release and restarts OpenChamber');
+        logStatus('info', '[HOST_UPDATER]', 'journalctl -u openchamber-updater.service shows its progress');
+        clackOutro('update requested');
+      }
+      return;
+    }
     const updateSpin = createSpinner(options);
 
     const {

@@ -140,4 +140,29 @@ describe('update command', () => {
       }
     });
   });
+
+  it('asks the host updater and installs nothing itself on a host install', async () => {
+    // Given
+    const originalWrite = process.stdout.write;
+    const written = [];
+    process.stdout.write = vi.fn((chunk) => written.push(String(chunk)));
+    const importFromFilePath = vi.fn();
+    const requestUpdate = vi.fn();
+    const updateCommand = createUpdateCommand({
+      packageManagerPath: '/fake/package-manager.js',
+      serveCommand: vi.fn(),
+      importFromFilePath,
+      hostInstall: { isManaged: () => true, requestUpdate },
+    });
+    try {
+      // When
+      await updateCommand({ json: true });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    // Then
+    expect(requestUpdate).toHaveBeenCalledOnce();
+    expect(importFromFilePath).not.toHaveBeenCalled();
+    expect(JSON.parse(written.join(''))).toMatchObject({ requested: true, updater: 'host' });
+  });
 });
