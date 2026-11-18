@@ -55,3 +55,16 @@ existing shell needs that result, but broadening strict reads would make pins
 and references attribute parent messages to a child and make existence checks
 accept messages outside that session's history. All shared UI runtimes use the
 same completion path through the runtime-aware SDK transport.
+
+### Why "retry now" interrupts the turn instead of asking OpenCode to cut the wait
+
+OpenCode sleeps out an automatic retry's delay inside the running step, and no
+route shortens it: a new prompt or a waking synthetic message only queues behind
+the sleep. `retrySessionNow` admits a hidden steer note with `resume: false`,
+then interrupts with `resume: true`, which starts a successor execution from
+that note. OpenCode retries only an attempt that produced no output, so the
+successor sends the same context again. Verified on OpenCode 2.2.5 with a
+provider answering 429 with a 600-second `retry-after`: the next request left
+right after the press and the turn finished. Doing the wait in the
+`limit-failover` plugin instead was rejected: it covers only waits the plugin
+decides, and the countdown is published only after the hook returns.

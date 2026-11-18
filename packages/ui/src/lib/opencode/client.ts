@@ -1797,6 +1797,29 @@ class OpencodeService {
   }
 
   /**
+   * Skips the wait before an automatic retry. OpenCode sleeps out the delay
+   * inside the running step and has no route that cuts it short, so a steer
+   * note is admitted without waking the session, then the turn is interrupted
+   * with `resume`, which starts a successor execution from that steer note.
+   * The failed attempt produced no output (OpenCode retries only then), so the
+   * new step sends the same context again. The note has no context metadata,
+   * so the timeline hides it. Its text stays true when it is delivered later,
+   * as happens when the interrupt fails after the note went in.
+   */
+  async retrySessionNow(id: string, directory?: string | null): Promise<void> {
+    await call("session.synthetic", () =>
+      this.clientFor(directory).session.synthetic({
+        sessionID: id,
+        text: "The user asked to retry the failed request without waiting. Carry on with the task.",
+        metadata: { openchamberRetryNow: true },
+        delivery: "steer",
+        resume: false,
+      }),
+    )
+    await call("session.interrupt", () => this.clientFor(directory).session.interrupt({ sessionID: id, resume: true }))
+  }
+
+  /**
    * Hands the agent input the user gave outside the composer, such as the
    * choices in a UI block of its last reply, and starts its next turn. The
    * input is a synthetic message: the chat shows no user bubble for it, and

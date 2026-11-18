@@ -7,9 +7,11 @@ import { useI18n } from '@/lib/i18n';
 import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
+import { useRetrySessionNow } from '@/hooks/useRetrySessionNow';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { BackgroundWorkButton } from './BackgroundWorkButton';
+import { RetryNowButton } from './RetryNowButton';
 import { registerFloatingPanelClearanceReader } from '@/components/chat/composer/state/composerInsetReaders';
 
 /** The scroll action: the arrow, plus the status label while the session works. */
@@ -51,6 +53,7 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     const { activeModel, working } = useAssistantStatus();
     const providers = useConfigStore((state) => state.providers);
     const backgroundWork = useBackgroundSessionWork();
+    const retryNow = useRetrySessionNow();
 
     const modelName = React.useMemo(() => {
         if (!activeModel) return null;
@@ -66,10 +69,11 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
             <ScrollAction onClick={onClick}>
                 {/* leading-5: `truncate` clips at the line box, and a 16px one
                     cut off descenders in fonts with taller metrics. */}
-                <span className={cn('-ms-px min-w-0 truncate text-[0.8125rem] leading-5 text-muted-foreground', working.canBackground ? 'pe-1' : 'pe-2')}>
+                <span className={cn('-ms-px min-w-0 truncate text-[0.8125rem] leading-5 text-muted-foreground', working.canBackground || working.retryInfo ? 'pe-1' : 'pe-2')}>
                     {label}
                 </span>
             </ScrollAction>
+            {working.retryInfo ? <RetryNowButton onClick={retryNow} className={working.canBackground ? 'h-6 w-6' : 'me-0.5 h-6 w-6'} /> : null}
             {working.canBackground ? <BackgroundWorkButton onClick={backgroundWork} className="me-0.5 h-6 w-6" /> : null}
         </>
     );
