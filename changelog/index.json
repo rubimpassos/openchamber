@@ -1,5 +1,25 @@
 [
   {
+    "version": "2.7.6",
+    "date": "2026-11-18",
+    "title": "Accounts wait out their limits",
+    "intro": null,
+    "app": {
+      "new": [
+        "**Session account:** a session can stay on one provider account. Preferred starts each turn there and moves when that account's limit is hit. Fixed stays there, and a limit waits for the reset."
+      ],
+      "improvements": [
+        "Settings/Providers: each Claude account shows its 5-hour, weekly and per-model usage, and until when an exhausted one comes back."
+      ],
+      "fixes": [
+        "Chat: hitting Claude's Fable limit moves the session to an account that still has Fable.",
+        "Chat: a GLM 5-hour limit waits until the time named in the error and continues."
+      ],
+      "misc": []
+    },
+    "vscode": null
+  },
+  {
     "version": "2.7.2",
     "date": "2026-11-15",
     "title": "Share pages with your teammates",
