@@ -2,6 +2,12 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.7] - 2026-11-18
+
+### New
+
+- **Chat: retry now.** While a turn waits for an automatic retry, the button beside the countdown runs it right away.
+
 ## [2.7.6] - 2026-11-18
 
 ### New

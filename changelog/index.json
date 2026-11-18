@@ -1,5 +1,27 @@
 [
   {
+    "version": "2.7.7",
+    "date": "2026-11-18",
+    "title": "Retry now, no waiting",
+    "intro": null,
+    "app": {
+      "new": [
+        "**Chat: retry now.** While a turn waits for an automatic retry, the button beside the countdown runs it right away."
+      ],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    },
+    "vscode": {
+      "new": [
+        "Chat: while a turn waits for an automatic retry, the button beside the countdown runs it right away."
+      ],
+      "improvements": [],
+      "fixes": [],
+      "misc": []
+    }
+  },
+  {
     "version": "2.7.6",
     "date": "2026-11-18",
     "title": "Accounts wait out their limits",

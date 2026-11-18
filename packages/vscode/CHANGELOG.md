@@ -1,3 +1,9 @@
+## [2.7.7] - 2026-11-18
+
+### New
+
+- Chat: while a turn waits for an automatic retry, the button beside the countdown runs it right away.
+
 ## [2.7.2] - 2026-11-15
 
 ### New
