@@ -3,6 +3,7 @@ import React from 'react';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
 import { useKeybind } from '@/hooks/useKeybind';
+import { useRetrySessionNow } from '@/hooks/useRetrySessionNow';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
@@ -17,6 +18,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const providers = useConfigStore((state) => state.providers);
     const backgroundWork = useBackgroundSessionWork();
+    const retryNow = useRetrySessionNow();
 
     // The shortcut lives with the status that knows whether anything can go
     // to the background; otherwise it yields the key.
@@ -47,6 +49,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             modelName={modelDisplayName}
             providerId={activeModel?.providerId ?? null}
             onBackground={working.canBackground ? backgroundWork : undefined}
+            onRetryNow={working.retryInfo ? retryNow : undefined}
         />
     );
 });
