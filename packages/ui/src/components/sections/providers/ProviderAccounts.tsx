@@ -15,6 +15,8 @@ import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
+import { AccountUsageLines } from '@/components/chat/composer/ui/AccountUsageLines';
+import type { LimitAccount } from '@/lib/limit-failover/client';
 import { connectionNeedsAuth, type CredentialConnection } from './providerAuth';
 
 interface ProviderAccountsProps {
@@ -39,6 +41,10 @@ interface ProviderAccountsProps {
   onActivate: (account: CredentialConnection) => void;
   onRename: (account: CredentialConnection, label: string) => void;
   onRemove: (account: CredentialConnection) => void;
+  /** Each account's swept usage and limit marks, by credential id; absent where nothing reports usage. */
+  limits?: ReadonlyMap<string, LimitAccount>;
+  /** The account the provider returns to once its limit lifts, in the preferred mode. */
+  preferredId?: string | null;
 }
 
 const AccountTile: React.FC<{ icon: IconName }> = ({ icon }) => (
@@ -133,6 +139,8 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
   onActivate,
   onRename,
   onRemove,
+  limits,
+  preferredId = null,
 }) => {
   const { t } = useI18n();
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
@@ -154,6 +162,7 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
         }
 
         const active = connection.id === activeId;
+        const accountLimits = limits?.get(connection.id);
         const unused = unusedIds.has(connection.id);
         const busy = busyId !== null;
         const methodLabel = connection.method === 'oauth'
@@ -188,8 +197,14 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
                         {t('settings.providers.accounts.active')}
                       </span>
                     ) : null}
+                    {preferredId === connection.id ? (
+                      <span className="shrink-0 rounded-full bg-[var(--surface-muted)] px-2 py-px text-[0.625rem] font-medium text-muted-foreground">
+                        {t('settings.providers.accounts.mode.preferred')}
+                      </span>
+                    ) : null}
                   </div>
                   <AccountSubtitle connection={connection} fallback={methodLabel} />
+                  {accountLimits ? <AccountUsageLines account={accountLimits} /> : null}
                 </div>
                 <SignInAgainButton connection={connection} account={connection.label} />
                 {canSwitch && !active && !unused ? (

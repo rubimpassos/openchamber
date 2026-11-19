@@ -1482,7 +1482,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'providers.auth',
     page: 'providers',
     titleKey: 'settings.providers.accounts.title',
-    keywords: ['api key', 'oauth', 'credentials', 'accounts', 'switch account', 'disconnect'],
+    keywords: ['api key', 'oauth', 'credentials', 'accounts', 'switch account', 'disconnect', 'usage limit', 'preferred account', 'fixed account'],
   },
   {
     id: 'providers.logo',

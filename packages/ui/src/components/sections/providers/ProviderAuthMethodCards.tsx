@@ -9,6 +9,7 @@ import {
 } from '@/components/sections/integrations/IntegrationCatalogCard';
 import { useI18n } from '@/lib/i18n';
 import { ProviderAccounts } from './ProviderAccounts';
+import type { LimitAccount } from '@/lib/limit-failover/client';
 import { ProviderApiKeyForm, type IntegrationKeyRequest } from './ProviderApiKeyForm';
 import { ProviderOAuthMethods } from './ProviderOAuthMethods';
 import { connectionNeedsAuth, type CredentialConnection, type SignInMethod } from './providerAuth';
@@ -34,6 +35,8 @@ interface ProviderAuthAccounts {
   onActivate: (account: CredentialConnection) => void;
   onRename: (account: CredentialConnection, label: string) => void;
   onRemove: (account: CredentialConnection) => void;
+  limits?: ReadonlyMap<string, LimitAccount>;
+  preferredId?: string | null;
 }
 
 interface ProviderAuthMethodCardsProps {
@@ -220,6 +223,8 @@ export const ProviderAuthMethodCards: React.FC<ProviderAuthMethodCardsProps> = (
                   onActivate={accounts.onActivate}
                   onRename={accounts.onRename}
                   onRemove={accounts.onRemove}
+                  limits={accounts.limits}
+                  preferredId={accounts.preferredId}
                 />
               ) : null}
               {canAdd ? renderAddForm(kind, stored.length > 0) : null}

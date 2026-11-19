@@ -11,74 +11,143 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
+import { findIntegrationForProvider, getCredentialConnections } from '@/components/sections/providers/providerAuth';
 import { useI18n } from '@/lib/i18n';
-import { getCurrentIntlLocale } from '@/lib/i18n/intl';
 import {
+  ACCOUNT_PROVIDER,
   fetchLimitAccounts,
   fetchSessionAccount,
-  modelWindows,
   setSessionAccount,
-  windowPercent,
   type LimitAccount,
-  type SessionAccountPin,
+  type SessionAccountMode,
 } from '@/lib/limit-failover/client';
+import { loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges } from '@/lib/opencode/integration-catalog';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useDraftSessionAccountStore } from '@/stores/useDraftSessionAccountStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { AccountUsageLines } from './AccountUsageLines';
 
-const ACCOUNT_PROVIDER = 'anthropic';
+type Account = { id: string; label: string; limits: LimitAccount | null };
 
-const formatReset = (resetAt: number): string => new Intl.DateTimeFormat(getCurrentIntlLocale(), {
-  month: 'short',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-}).format(resetAt);
+
+/** The provider's stored accounts from OpenCode, with the usage the failover swept for them. */
+// A session account swaps the request's sign-in token, so only sign-ins count.
+const signInAccounts = (integrations: Parameters<typeof findIntegrationForProvider>[0], providerId: string) => (
+  getCredentialConnections(findIntegrationForProvider(integrations, providerId)).filter((credential) => credential.method === 'oauth')
+);
+
+const useProviderAccounts = (providerId: string, enabled: boolean): Account[] => {
+  const [credentials, setCredentials] = React.useState<{ id: string; label: string }[]>(() => (
+    signInAccounts(peekIntegrationCatalog()?.integrations ?? [], providerId)
+  ));
+  const [limits, setLimits] = React.useState<LimitAccount[]>([]);
+  const [revision, setRevision] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    const reload = () => setRevision((value) => value + 1);
+    const unsubscribeCredentials = subscribeCredentialChanges(reload);
+    const unsubscribeEvents = subscribeOpenchamberEvents((event) => {
+      if (event.type === 'limit-failover') reload();
+    });
+    return () => {
+      unsubscribeCredentials();
+      unsubscribeEvents();
+    };
+  }, [enabled]);
+
+  React.useEffect(() => {
+    if (!enabled) return undefined;
+    let active = true;
+    void loadIntegrationCatalog()
+      .then((catalog) => {
+        if (active) setCredentials(signInAccounts(catalog.integrations, providerId));
+      })
+      .catch(() => undefined);
+    // Usage only decorates the list: an unreachable sweep leaves the accounts listed.
+    void fetchLimitAccounts(providerId)
+      .then((next) => {
+        if (active) setLimits(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [enabled, providerId, revision]);
+
+  return React.useMemo(() => credentials.map((credential) => ({
+    id: credential.id,
+    label: credential.label,
+    limits: limits.find((entry) => entry.id === credential.id) ?? null,
+  })), [credentials, limits]);
+};
 
 /**
- * The account a session runs on, and whether a limit may move it. Shown only
- * for a provider with several stored accounts, beside the model picker.
+ * The account a session runs on, and whether a limit may move it. Shown for a
+ * provider with several stored accounts, beside the model picker, in a session
+ * and in a new session's draft (the choice is stored when the draft is sent).
  */
 export const SessionAccountControl: React.FC<{ sessionId: string | null }> = ({ sessionId }) => {
   const { t } = useI18n();
   const providerId = useConfigStore((state) => state.currentProviderId);
-  const [accounts, setAccounts] = React.useState<LimitAccount[] | null>(null);
-  const [pin, setPin] = React.useState<SessionAccountPin | null>(null);
+  const modelId = useConfigStore((state) => state.currentModelId);
+  const draftId = useSessionUIStore((state) => (!sessionId && state.newSessionDraft.open ? state.newSessionDraft.draftId : null));
+  const draftChoice = useDraftSessionAccountStore((state) => (draftId !== null && state.choice?.draftId === draftId ? state.choice : null));
+  const setDraftChoice = useDraftSessionAccountStore((state) => state.setChoice);
+  const enabled = providerId === ACCOUNT_PROVIDER && (sessionId !== null || draftId !== null);
+  const accounts = useProviderAccounts(ACCOUNT_PROVIDER, enabled);
+
+  const [sessionPin, setSessionPin] = React.useState<{ mode: SessionAccountMode; credentialId: string | null; accountId: string | null } | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [revision, setRevision] = React.useState(0);
 
   React.useEffect(() => {
-    if (providerId !== ACCOUNT_PROVIDER || !sessionId) {
-      setAccounts(null);
-      setPin(null);
-      return;
-    }
+    if (!enabled || !sessionId) return undefined;
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type === 'limit-failover' && event.failover.sessionId === sessionId) setRevision((value) => value + 1);
+    });
+  }, [enabled, sessionId]);
+
+  React.useEffect(() => {
+    setSessionPin(null);
+    if (!enabled || !sessionId) return undefined;
     let active = true;
-    void Promise.all([fetchLimitAccounts(providerId), fetchSessionAccount(sessionId)])
-      .then(([nextAccounts, nextPin]) => {
-        if (!active) return;
-        setAccounts(nextAccounts);
-        setPin(nextPin);
+    void fetchSessionAccount({ sessionId, providerId: ACCOUNT_PROVIDER, modelId })
+      .then(({ pin, accountId }) => {
+        if (active) setSessionPin({ mode: pin?.mode ?? 'global', credentialId: pin?.credentialID ?? null, accountId });
       })
-      .catch(() => {
-        if (active) setAccounts(null);
-      });
+      .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [providerId, sessionId]);
+  }, [enabled, sessionId, modelId, revision]);
 
-  if (providerId !== ACCOUNT_PROVIDER || !sessionId || !accounts || accounts.length < 2) return null;
+  if (!enabled || accounts.length < 2) return null;
 
-  const mode = pin?.mode ?? 'global';
-  const chosen = accounts.find((account) => account.id === pin?.credentialID) ?? null;
-  const triggerLabel = mode === 'global' ? t('chat.sessionAccount.mode.global') : (chosen?.label ?? t('chat.sessionAccount.mode.preferred'));
+  const current: { mode: SessionAccountMode; credentialId: string | null; accountId: string | null } = sessionId
+    ? sessionPin ?? { mode: 'global', credentialId: null, accountId: null }
+    : { mode: draftChoice?.mode ?? 'global', credentialId: draftChoice?.credentialId ?? null, accountId: draftChoice?.credentialId ?? null };
+  const mode = current.mode;
+  const labelOf = (id: string | null) => accounts.find((account) => account.id === id)?.label ?? null;
+  const triggerLabel = mode === 'global'
+    ? labelOf(current.accountId) ?? t('chat.sessionAccount.mode.global')
+    : labelOf(current.credentialId) ?? t('chat.sessionAccount.mode.preferred');
 
-  const save = async (next: { mode: 'global' | 'preferred' | 'fixed'; credentialId?: string }) => {
-    const previous = pin;
+  const save = async (next: { mode: SessionAccountMode; credentialId?: string }) => {
+    if (!sessionId) {
+      if (draftId === null) return;
+      setDraftChoice(next.mode === 'global' || !next.credentialId
+        ? null
+        : { draftId, providerId: ACCOUNT_PROVIDER, mode: next.mode, credentialId: next.credentialId });
+      return;
+    }
     setSaving(true);
     try {
-      const saved = await setSessionAccount({ sessionId, providerId, mode: next.mode, credentialId: next.credentialId });
-      setPin(saved);
+      const saved = await setSessionAccount({ sessionId, providerId: ACCOUNT_PROVIDER, mode: next.mode, credentialId: next.credentialId });
+      setSessionPin({ mode: saved?.mode ?? 'global', credentialId: saved?.credentialID ?? null, accountId: saved?.credentialID ?? null });
+      setRevision((value) => value + 1);
     } catch {
-      setPin(previous);
       toast.error(t('chat.sessionAccount.error'));
     } finally {
       setSaving(false);
@@ -90,7 +159,7 @@ export const SessionAccountControl: React.FC<{ sessionId: string | null }> = ({ 
       void save({ mode: 'global' });
       return;
     }
-    const credentialId = pin?.credentialID ?? accounts[0]?.id;
+    const credentialId = current.credentialId ?? current.accountId ?? accounts[0]?.id;
     if (!credentialId) return;
     void save({ mode: value === 'fixed' ? 'fixed' : 'preferred', credentialId });
   };
@@ -104,7 +173,7 @@ export const SessionAccountControl: React.FC<{ sessionId: string | null }> = ({ 
           aria-label={t('chat.sessionAccount.button')}
           className="inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 typography-ui-label text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
         >
-          <Icon name="user" className="size-3.5 shrink-0" />
+          <Icon name={mode === 'fixed' ? 'lock' : 'user'} className="size-3.5 shrink-0" />
           <span className="max-w-24 truncate">{triggerLabel}</span>
         </button>
       </DropdownMenuTrigger>
@@ -128,13 +197,13 @@ export const SessionAccountControl: React.FC<{ sessionId: string | null }> = ({ 
           <>
             <DropdownMenuSeparator />
             <DropdownMenuRadioGroup
-              value={pin?.credentialID ?? ''}
+              value={current.credentialId ?? ''}
               onValueChange={(credentialId) => void save({ mode, credentialId })}
             >
               {accounts.map((account) => (
                 <DropdownMenuRadioItem key={account.id} value={account.id} className="flex-col items-start">
                   <span className="truncate">{account.label}</span>
-                  <AccountUsageLine account={account} />
+                  {account.limits ? <AccountUsageLines account={account.limits} firstExhaustionOnly /> : null}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
@@ -142,32 +211,5 @@ export const SessionAccountControl: React.FC<{ sessionId: string | null }> = ({ 
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-};
-
-const AccountUsageLine: React.FC<{ account: LimitAccount }> = ({ account }) => {
-  const { t } = useI18n();
-  const windows = (['5h', '7d'] as const)
-    .map((window) => ({ window, percent: windowPercent(account.usage, window) }))
-    .filter((entry): entry is { window: '5h' | '7d'; percent: number } => entry.percent !== null);
-  const models = modelWindows(account.usage);
-  const exhaustion = account.exhausted[0];
-  if (windows.length === 0 && models.length === 0 && !exhaustion) return null;
-  return (
-    <span className="flex flex-col typography-meta text-muted-foreground">
-      {windows.length > 0 ? (
-        <span>{windows.map((entry) => t('chat.sessionAccount.usage', { window: entry.window, used: Math.round(entry.percent) })).join(' · ')}</span>
-      ) : null}
-      {models.map((entry) => (
-        <span key={entry.model}>{t('chat.sessionAccount.usage', { window: entry.model, used: Math.round(entry.usedPercent) })}</span>
-      ))}
-      {exhaustion ? (
-        <span className={exhaustion.scope === '*' ? 'text-destructive' : 'text-[var(--status-warning-text)]'}>
-          {exhaustion.scope === '*'
-            ? t('chat.sessionAccount.exhaustedAccount', { time: formatReset(exhaustion.resetAt) })
-            : t('chat.sessionAccount.exhaustedModel', { model: exhaustion.scope, time: formatReset(exhaustion.resetAt) })}
-        </span>
-      ) : null}
-    </span>
   );
 };
