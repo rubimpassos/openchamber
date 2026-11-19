@@ -58,6 +58,7 @@ import { watchGuestFiles } from '@/lib/guests/file-watch';
 import { useHostDevice } from '@/lib/guests/useHostDevice';
 import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
+import { readGuestModels } from '@/lib/guests/models';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
@@ -787,6 +788,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       const requestDocument = frameDocumentRef.current;
 
       void answerGuestMessage(message, {
+        listModels: () => {
+          if (!guestMay(currentGuest(), 'model')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
+          return readGuestModels(directoryRef.current || undefined);
+        },
         ...createGuestLoopback({
           guestId: requestingGuestId, currentGuest, signal: lifetime.signal,
           transport: srcDoc === undefined ? 'url' : 'document',

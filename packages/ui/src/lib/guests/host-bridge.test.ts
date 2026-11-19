@@ -22,6 +22,7 @@ const toast: GuestMessage = {
 
 type BridgeEffects = Parameters<typeof answerGuestMessage>[1];
 const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
+  listModels: overrides.listModels ?? (() => []),
   loopbackUrl: overrides.loopbackUrl ?? (async () => { throw new HostRequestError('UNSUPPORTED', 'No loopback URL transport.'); }),
   loopbackRequest: overrides.loopbackRequest ?? (async () => { throw new HostRequestError('UNSUPPORTED', 'No loopback request transport.'); }),
   workspaceRead: overrides.workspaceRead ?? (() => ({ kind: 'projects', state: 'ready', projects: [] })),

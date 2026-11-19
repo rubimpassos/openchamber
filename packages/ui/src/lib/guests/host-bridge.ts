@@ -2,6 +2,7 @@
 import {
   HostRequestError,
   type GuestStorageRequest,
+  type GuestModelCatalog,
   type FilesWatchRequest,
   type GuestStorageResult,
   type GuestStatusControl,
@@ -56,6 +57,8 @@ import type { createGuestLoopback } from '@/lib/guests/loopback';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 
 type HostBridgeEffects = ReturnType<typeof createGuestLoopback> & {
+  /** Picker catalog only; the pane checks the existing `model` grant. */
+  listModels: () => GuestModelCatalog;
   workspaceRead: (query: GuestWorkspaceQuery) => GuestWorkspaceSnapshot;
   workspaceSubscribe: (subscription: GuestWorkspaceSubscription) => void;
   workspaceUnsubscribe: (subscriptionId: string) => void;
@@ -302,6 +305,7 @@ export const answerGuestMessage = async (
 ): Promise<HostMessage | null> => {
   try {
   switch (message.type) {
+    case 'listModels': return okResult(message.id, effects.listModels());
     case 'workspace-read': return okResult(message.id, effects.workspaceRead(message.payload));
     case 'workspace-subscribe': effects.workspaceSubscribe(message.payload); return okResult(message.id);
     case 'workspace-unsubscribe': effects.workspaceUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
