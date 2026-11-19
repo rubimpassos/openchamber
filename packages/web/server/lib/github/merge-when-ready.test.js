@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { cancelWaitingMerge, enableMergeWhenReady } from './merge-when-ready.js';
+import { cancelWaitingMerge, enableMergeWhenReady, mergeWhenReadyInQueue, readMergeOptions } from './merge-when-ready.js';
 
 const project = { owner: 'acme', name: 'app' };
 const target = { number: 7, base: 'main', headSha: 'abc' };
@@ -56,5 +56,69 @@ describe('GitHub merge when ready', () => {
     const octokit = client(pull({ state: 'MERGED' }));
     expect(await cancelWaitingMerge(octokit, project, target)).toEqual({ merged: true });
     expect(octokit.graphql).toHaveBeenCalledTimes(1);
+  });
+});
+
+const settingsAnswer = ({ settings = {}, linear = false, admin = false } = {}) => ({ repository: {
+  mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: true, ...settings,
+  pullRequest: { viewerCanMergeAsAdmin: admin, baseRef: { branchProtectionRule: linear ? { requiresLinearHistory: true } : null } },
+} });
+const rulesAnswer = ({ rules = [], queue = false } = {}) => ({ repository: {
+  pullRequest: { isMergeQueueEnabled: queue, baseRef: { rules: { nodes: rules } } },
+} });
+
+describe('GitHub merge options', () => {
+  const ref = { owner: 'acme', repo: 'app', number: 7 };
+  const read = (settings, rules) => readMergeOptions({ graphql: vi.fn(async (query) => {
+    if (!query.includes('rules(')) return settings;
+    if (rules instanceof Error) throw rules;
+    return rules;
+  }) }, ref);
+
+  it('keeps the methods both the settings and the base branch rules allow', async () => {
+    expect(await read(settingsAnswer({ settings: { mergeCommitAllowed: false } }),
+      rulesAnswer({ rules: [{ type: 'PULL_REQUEST', parameters: { allowedMergeMethods: ['REBASE', 'MERGE'] } }] })))
+      .toEqual({ methods: ['rebase'], queue: null, canBypass: false });
+  });
+  it('drops merge commits under a linear-history rule or classic protection', async () => {
+    expect((await read(settingsAnswer(), rulesAnswer({ rules: [{ type: 'REQUIRED_LINEAR_HISTORY', parameters: null }] }))).methods).toEqual(['squash', 'rebase']);
+    expect((await read(settingsAnswer({ linear: true }), rulesAnswer())).methods).toEqual(['squash', 'rebase']);
+  });
+  it('reports the base branch queue, its method, and whether the viewer may bypass', async () => {
+    expect(await read(settingsAnswer({ admin: true }), rulesAnswer({ queue: true, rules: [{ type: 'MERGE_QUEUE', parameters: { mergeMethod: 'REBASE' } }] })))
+      .toEqual({ methods: ['merge', 'squash', 'rebase'], queue: { method: 'rebase' }, canBypass: true });
+  });
+  it('still narrows by the settings when the rules cannot be read', async () => {
+    expect(await read(settingsAnswer({ settings: { mergeCommitAllowed: false, squashMergeAllowed: false } }), new Error('Field rules does not exist')))
+      .toEqual({ methods: ['rebase'], queue: null, canBypass: false });
+  });
+  it('is null for a number that is no pull request, and refuses a malformed answer', async () => {
+    expect(await read({ repository: { mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: true, pullRequest: null } }, rulesAnswer())).toBeNull();
+    await expect(read({ repository: { pullRequest: {} } }, rulesAnswer())).rejects.toThrow('invalid merge options');
+  });
+});
+
+describe('GitHub merge when ready on a queue branch', () => {
+  it('enables auto-merge without a method, guarded by the head', async () => {
+    const octokit = client(pull(), { id: 'MQ' });
+    octokit.graphql.mockImplementationOnce(async () => ({ repository: { pullRequest: pull(), mergeQueue: { id: 'MQ' } } }))
+      .mockImplementationOnce(async () => ({ enablePullRequestAutoMerge: { pullRequest: { isInMergeQueue: false, autoMergeRequest: { enabledAt: 'now' } } } }));
+    expect(await mergeWhenReadyInQueue(octokit, project, target)).toEqual({ merged: false, outcome: 'auto-merge' });
+    expect(octokit.graphql.mock.calls[1][0]).not.toContain('mergeMethod');
+    expect(octokit.graphql.mock.calls[1][1]).toEqual({ id: 'PR_7', sha: 'abc' });
+  });
+  it('reports a ready PR that GitHub queued at once', async () => {
+    const octokit = client(pull(), { id: 'MQ' });
+    octokit.graphql.mockImplementationOnce(async () => ({ repository: { pullRequest: pull(), mergeQueue: { id: 'MQ' } } }))
+      .mockImplementationOnce(async () => ({ enablePullRequestAutoMerge: { pullRequest: { isInMergeQueue: true, autoMergeRequest: null } } }));
+    expect(await mergeWhenReadyInQueue(octokit, project, target)).toEqual({ merged: false, outcome: 'queued' });
+  });
+  it('asks nothing again for a PR already queued or waiting', async () => {
+    const queued = client(pull({ isInMergeQueue: true }), { id: 'MQ' });
+    expect(await mergeWhenReadyInQueue(queued, project, target)).toEqual({ merged: false, outcome: 'queued' });
+    expect(queued.graphql).toHaveBeenCalledTimes(1);
+  });
+  it('refuses a base branch without a queue as a definite failure', async () => {
+    await expect(mergeWhenReadyInQueue(client(), project, target)).rejects.toMatchObject({ message: 'The base branch has no merge queue', status: 409 });
   });
 });

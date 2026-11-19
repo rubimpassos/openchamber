@@ -148,6 +148,7 @@ export const BranchPullRequestPreview: React.FC<{
                         submitRequirements={latestPull?.submitRequirements}
                         submitRequirementsUnreadable={latest.status === 'error'}
                         mergeable={changeRequest.mergeable ?? null}
+                        mergeOptions={detail.status === 'ready' ? detail.value.pull?.mergeOptions : undefined}
                     />
                 )}
                 revisionChoice={latestPull?.revisions ? {

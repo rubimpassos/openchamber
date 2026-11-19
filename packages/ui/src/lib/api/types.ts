@@ -1834,6 +1834,18 @@ export type RepositoryReferenceReviewer = {
   avatarUrl?: string;
 };
 
+/**
+ * How a repository lets one change request merge: the methods its settings
+ * and the base branch's rules allow, the base branch's merge queue (whose own
+ * method lands it, null when the host does not say), and whether this account
+ * may bypass the rules and merge at once.
+ */
+export type ChangeRequestMergeOptions = {
+  methods: Array<'merge' | 'squash' | 'rebase'>;
+  queue: { method: 'merge' | 'squash' | 'rebase' | null } | null;
+  canBypass: boolean;
+};
+
 /** What the preview adds for one item; too slow to ask for a whole page. */
 export type RepositoryReferenceDetail = {
   number: number;
@@ -1860,6 +1872,8 @@ export type RepositoryReferenceDetail = {
     commitTotal: number | null;
     /** The stack the PR is a layer of; null when it is in none, absent when the host could not say. */
     stack?: PullRequestStack | null;
+    /** An open GitHub PR's: how its repository lets it merge. Absent when the host could not say. */
+    mergeOptions?: ChangeRequestMergeOptions;
     /** Where the host reviews by votes: the labels, what this account may cast, and who voted. */
     voteLabels?: ChangeRequestVoteLabel[];
     /** Where the host says what submission needs. */

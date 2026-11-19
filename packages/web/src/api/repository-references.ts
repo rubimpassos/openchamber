@@ -162,6 +162,12 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
             head: z.string(),
           })),
         }).nullable().optional().catch(undefined),
+        // Like the stack: one that does not hold together is unknown.
+        mergeOptions: z.object({
+          methods: z.array(z.enum(['merge', 'squash', 'rebase'])),
+          queue: z.object({ method: z.enum(['merge', 'squash', 'rebase']).nullable() }).nullable(),
+          canBypass: z.boolean(),
+        }).optional().catch(undefined),
       }).nullable(),
       discussion: z.object({ canComment: z.boolean(), canClose: z.boolean(), canReopen: z.boolean() }).optional(),
     }).nullable(),

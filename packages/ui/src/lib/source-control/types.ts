@@ -752,6 +752,11 @@ export interface MergeChangeRequestInput extends SourceControlMutationContext<So
   method: MergeMethod;
   /** GitHub only: remove from the queue or disable auto-merge. */
   cancel?: boolean;
+  /**
+   * GitHub only, on a base branch with a merge queue: `queue` joins it once
+   * the requirements pass, `direct` bypasses it and merges now.
+   */
+  action?: 'queue' | 'direct';
 }
 
 export type ReadyChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;

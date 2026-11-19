@@ -3,7 +3,7 @@ import { changeRequestNetworkTarget } from '../source-control/repository-network
 import { prepareStackMutation } from '../source-control/standard-mutations.js';
 import { performStackMutation, requireMergeStackOrder } from './stack-mutations.js';
 import { reviewCommentPosition } from '../source-control/review-position.js';
-import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js';
+import { cancelWaitingMerge, enableMergeWhenReady, mergeWhenReadyInQueue, readWaitingMerge } from './merge-when-ready.js';
 import {
   invalidProviderPayload,
   isPlainObject,
@@ -196,8 +196,11 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
     const method = requiredText(body.method, 'method');
     if (!['merge', 'squash', 'rebase'].includes(method)) throw mutationError('merge method is invalid');
     if (body.cancel !== undefined && body.cancel !== true && body.cancel !== false) throw mutationError('cancel is invalid');
-    return body.cancel === true
-      ? { input: { method, cancel: true }, digest: (target) => digestOf({ target, method, cancel: true }) }
+    if (body.action !== undefined && body.action !== 'queue' && body.action !== 'direct') throw mutationError('merge action is invalid');
+    if (body.cancel === true) return { input: { method, cancel: true }, digest: (target) => digestOf({ target, method, cancel: true }) };
+    // A merge without an action keeps the digest it always had.
+    return body.action
+      ? { input: { method, action: body.action }, digest: (target) => digestOf({ target, method, action: body.action }) }
       : { input: { method }, digest: (target) => digestOf({ target, method }) };
   }
   if (operation === 'ready' || operation === 'draft') return { input: {}, digest: (target) => digestOf({ target }) };
@@ -392,7 +395,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     }
     return { merged: data.merged };
   };
-  const mergePullRequest = async (octokit, project, target, method) => {
+  const mergePullRequest = async (octokit, project, target, method, action) => {
+    if (action === 'queue') {
+      try { return await mergeWhenReadyInQueue(octokit, project, target); }
+      catch (error) { throw graphqlRejection(error); }
+    }
     const whenReady = async () => {
       try { return await enableMergeWhenReady(octokit, project, target, method); }
       catch (error) { throw graphqlRejection(error); }
@@ -400,9 +407,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     const route = { owner: project.owner, repo: project.name, pull_number: target.number };
     let answer;
     try {
-      const response = await octokit.request('PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async', {
-        ...route, merge_method: method, sha: target.headSha, bypass_rules: true,
-      });
+      // `direct` skips the base branch's merge queue, which only an actor
+      // allowed to bypass its rules may do.
+      const body = { ...route, merge_method: method, sha: target.headSha, bypass_rules: true };
+      if (action === 'direct') body.merge_action = 'direct_merge';
+      const response = await octokit.request('PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async', body);
       answer = mergeAsyncAnswer(response?.data);
     } catch (error) {
       const status = error?.response?.status ?? error?.status;
@@ -995,7 +1004,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
           try { return await cancelWaitingMerge(octokit, project, target); }
           catch (error) { throw graphqlRejection(error); }
         }
-        return mergePullRequest(octokit, project, target, input.method);
+        return mergePullRequest(octokit, project, target, input.method, input.action);
       case 'labels':
       case 'issue-labels':
         return setLabels(octokit, project, target.number, input.labels);

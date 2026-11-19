@@ -20,7 +20,7 @@ import { readTrackerDescriptor } from '@/lib/trackers/registry';
 import { resolveComposerReferences } from '@/components/references/resolveComposerReferences';
 import { readMergeMethod, rememberMergeMethod, type RememberedMergeMethod } from '@/components/views/git/mergeMethodPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { RepositoryChangeRequestReference, RepositoryDiscussionReference, PullRequestStack, SourceControlReadContext } from '@/lib/api/types';
+import type { ChangeRequestMergeOptions, RepositoryChangeRequestReference, RepositoryDiscussionReference, PullRequestStack, SourceControlReadContext } from '@/lib/api/types';
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -49,6 +49,12 @@ const MERGE_METHOD_LABELS = {
     merge: 'gitView.pr.mergeMethod.merge',
     rebase: 'gitView.pr.mergeMethod.rebase',
     submit: 'gitView.pr.mergeMethod.submit',
+} as const;
+
+const BYPASS_METHOD_LABELS = {
+    merge: 'sourceBoard.merge.bypass.merge',
+    squash: 'sourceBoard.merge.bypass.squash',
+    rebase: 'sourceBoard.merge.bypass.rebase',
 } as const;
 
 const MERGE_METHOD_KEYS = {
@@ -139,7 +145,9 @@ export const SourceBoardActions: React.FC<{
     submitRequirementsUnreadable?: boolean;
     /** Whether the host would merge or submit the previewed change, from its status; null when it does not say. */
     mergeable?: boolean | null;
-}> = ({ item, project, context: readContext, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null }) => {
+    /** How the previewed PR's repository lets it merge, once its detail says. */
+    mergeOptions?: ChangeRequestMergeOptions;
+}> = ({ item, project, context: readContext, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null, mergeOptions }) => {
     // A linked item is only read: it can be attached, and nothing here acts on it.
     const context = readContext?.linked ? null : readContext;
     const { t } = useI18n();
@@ -163,7 +171,7 @@ export const SourceBoardActions: React.FC<{
         ? liveMerge.mergeQueueEntry?.position != null
             ? t('sourceBoard.merge.queuePosition', { position: liveMerge.mergeQueueEntry.position })
             : t('sourceBoard.merge.inQueue')
-        : t('sourceBoard.merge.autoMerge');
+        : t(mergeOptions?.queue ? 'sourceBoard.merge.whenReadyOn' : 'sourceBoard.merge.autoMerge');
     // Asked only while an open PR is previewed: nothing else merges.
     const capabilities = useCapabilities(openPull ? context : null);
 
@@ -206,8 +214,10 @@ export const SourceBoardActions: React.FC<{
 
     // The last method chosen anywhere, while this repository allows it.
     const [chosenMethod, setChosenMethod] = React.useState<RememberedMergeMethod>(readMergeMethod);
+    const hostMethods = capabilities?.mergeChangeRequests ? capabilities.mergeMethods ?? [] : [];
     const { methods: mergeMethods, method: mergeMethod, unmet, hold: submitHold, blocked: submitBlocked } = mergeChoiceOf({
-        allowed: capabilities?.mergeChangeRequests ? capabilities.mergeMethods ?? [] : [],
+        // The repository's settings and the base branch's rules narrow what the host can do.
+        allowed: mergeOptions ? hostMethods.filter((method) => mergeOptions.methods.some((allowed) => allowed === method)) : hostMethods,
         remembered: chosenMethod,
         checksRequirements: descriptor.features.submitRequirements,
         requirements: submitRequirements,
@@ -221,6 +231,21 @@ export const SourceBoardActions: React.FC<{
         rememberMergeMethod(method);
     };
     const submits = mergeMethod === 'submit';
+    // A base branch with a merge queue lands a PR through the queue, as on
+    // GitHub: "Merge when ready". Someone who may bypass the rules can pick
+    // a method and merge at once instead; that choice is never remembered.
+    const queue = capabilities?.mergeChangeRequests ? mergeOptions?.queue ?? null : null;
+    const pullKey = openPull ? `${openPull.sourceRepo.owner}/${openPull.sourceRepo.repo}#${openPull.number}` : null;
+    const [bypassChoice, setBypassChoice] = React.useState<{ pull: string; method: RememberedMergeMethod } | null>(null);
+    const bypassMethods = queue && mergeOptions?.canBypass
+        ? mergeMethods.filter((method): method is RememberedMergeMethod => method !== 'submit')
+        : [];
+    const bypassMethod = bypassChoice && bypassChoice.pull === pullKey && bypassMethods.includes(bypassChoice.method) ? bypassChoice.method : null;
+    const whenReady = queue !== null && bypassMethod === null;
+    const chooseMergeMode = (value: string) => {
+        const method = bypassMethods.find((candidate) => candidate === value);
+        setBypassChoice(method && pullKey ? { pull: pullKey, method } : null);
+    };
     const reference = pull ? formatChangeRequestReference(descriptor, pull.number) : '';
     const referenceOf = (number: number) => formatChangeRequestReference(descriptor, number);
     // The open layers below that land with it: GitHub's stack on merge, a change's chain on submit.
@@ -233,9 +258,44 @@ export const SourceBoardActions: React.FC<{
     const stackOnTop = onStartOnTop && openPull && descriptor.features.branchHeads && isStackable(openPull) ? () => onStartOnTop(openPull) : null;
     const stackOnTopLabel = t('stacks.actions.newOnTop');
 
+    const mergeWhenReady = async () => {
+        if (!openPull || !context || !queue) return;
+        const methodNote = queue.method ? t(MERGE_METHOD_KEYS[queue.method], { base: openPull.base }) : null;
+        const queueNote = t('sourceBoard.merge.queueNote', { base: openPull.base });
+        const approved = await confirmation.confirm({
+            title: t('sourceBoard.merge.queueConfirmTitle', { reference }),
+            message: methodNote ? `${queueNote}\n\n${methodNote}` : queueNote,
+            action: t('sourceBoard.merge.whenReady'),
+        });
+        if (!approved) return;
+        setBusy('merge');
+        try {
+            const receipt = await sourceControl.changeRequestMerge({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number, head: openPull.head, base: openPull.base, headSha: openPull.headSha },
+                // The queue merges with its own method; the route still names one.
+                method: queue.method ?? 'merge',
+                action: 'queue',
+            });
+            const { merged, outcome } = receipt.result;
+            if (merged) toast.success(t('sourceBoard.toast.merged', { reference }));
+            else if (outcome === 'queued') toast.message(t('sourceBoard.toast.mergeQueued', { reference }));
+            else toast.message(t('sourceBoard.toast.mergeWhenReady', { reference }));
+        } catch (error) {
+            toast.error(t('sourceBoard.toast.mergeFailed', { reference }), { description: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setBusy(null);
+            onChanged();
+        }
+    };
+
     const merge = async (origin?: HTMLElement) => {
+        if (whenReady) return mergeWhenReady();
         if (!openPull || !context || !mergeMethod || submitBlocked) return;
-        const methodNote = t(MERGE_METHOD_KEYS[mergeMethod], { base: openPull.base });
+        const methodNote = bypassMethod
+            ? `${t('sourceBoard.merge.bypassNote')}\n\n${t(MERGE_METHOD_KEYS[bypassMethod], { base: openPull.base })}`
+            : t(MERGE_METHOD_KEYS[mergeMethod], { base: openPull.base });
         const stackNote = submits
             ? submitsBelow
             : landsBelow.length === 0
@@ -257,7 +317,7 @@ export const SourceBoardActions: React.FC<{
                 ...context,
                 idempotencyKey: newMutationKey(),
                 target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number, head: openPull.head, base: openPull.base, headSha: openPull.headSha },
-                method: mergeMethod,
+                ...(bypassMethod ? { method: bypassMethod, action: 'direct' as const } : { method: mergeMethod }),
             });
             const { merged, outcome, message } = receipt.result;
             // One volley more than a push, plus one for each layer of a stack landing with it.
@@ -302,6 +362,17 @@ export const SourceBoardActions: React.FC<{
         } finally { setBusy(null); onChanged(); }
     };
 
+    // What the merge control offers: the queue and, for someone who may
+    // bypass it, each method at once; otherwise the methods themselves.
+    const mergeChoices: { value: string; label: string }[] = queue
+        ? [
+            { value: 'queue', label: t('sourceBoard.merge.whenReady') },
+            ...bypassMethods.map((method) => ({ value: method, label: t(BYPASS_METHOD_LABELS[method]) })),
+        ]
+        : mergeMethods.map((method) => ({ value: method, label: t(MERGE_METHOD_LABELS[method]) }));
+    const selectedValue = queue ? bypassMethod ?? 'queue' : mergeMethod;
+    const selectedChoice = mergeChoices.find((choice) => choice.value === selectedValue) ?? null;
+
     const maintenance = (
         <>
             {waitingMerge ? (
@@ -309,24 +380,26 @@ export const SourceBoardActions: React.FC<{
                     <span className="text-muted-foreground typography-small">{waitingLabel}</span>
                     <ActionButton icon="close" label={t('sourceBoard.merge.cancel')} tooltip={t('contextTooltips.tracker.cancelMerge')} onClick={() => void cancelMerge()} busy={busy === 'merge'} />
                 </>
-            ) : openPull && !openPull.draft && mergeMethod ? (
+            ) : openPull && !openPull.draft && mergeChoices.length > 0 && selectedChoice ? (
                 // One control, as on the host: the button says how it merges,
                 // the arrow beside it picks another way.
                 <div className="flex shrink-0 items-center">
-                    <ButtonTooltip label={t(submits ? 'contextTooltips.tracker.submitTo' : 'contextTooltips.tracker.mergeInto', { branch: openPull.base })}>
+                    <ButtonTooltip label={whenReady
+                        ? t('sourceBoard.merge.whenReadyTooltip', { branch: openPull.base })
+                        : t(submits ? 'contextTooltips.tracker.submitTo' : 'contextTooltips.tracker.mergeInto', { branch: openPull.base })}>
                         <Button
                             size="sm"
                             variant="outline"
                             // Two halves of one control: the inner corners stay square.
-                            className={cn(mergeMethods.length > 1 && 'rounded-e-none')}
+                            className={cn(mergeChoices.length > 1 && 'rounded-e-none')}
                             disabled={busy === 'merge' || submitBlocked}
                             onClick={(event) => void merge(event.currentTarget)}
                         >
                             <Icon name={busy === 'merge' ? 'loader-4' : 'git-merge'} className={busy === 'merge' ? 'size-3.5 animate-spin' : 'size-3.5'} />
-                            {t(MERGE_METHOD_LABELS[mergeMethod])}
+                            {selectedChoice.label}
                         </Button>
                     </ButtonTooltip>
-                    {mergeMethods.length > 1 ? (
+                    {mergeChoices.length > 1 ? (
                         <DropdownMenu>
                             <ButtonTooltip label={t('contextTooltips.tracker.chooseMergeMethod')}>
                                 <DropdownMenuTrigger asChild>
@@ -341,10 +414,10 @@ export const SourceBoardActions: React.FC<{
                                     </Button>
                                 </DropdownMenuTrigger>
                             </ButtonTooltip>
-                            <DropdownMenuContent align="start" className="w-56">
-                                <DropdownMenuRadioGroup value={mergeMethod} onValueChange={(value) => chooseMergeMethod(String(value))}>
-                                    {mergeMethods.map((method) => (
-                                        <DropdownMenuRadioItem key={method} value={method}>{t(MERGE_METHOD_LABELS[method])}</DropdownMenuRadioItem>
+                            <DropdownMenuContent align="start" className="w-64">
+                                <DropdownMenuRadioGroup value={selectedChoice.value} onValueChange={(value) => (queue ? chooseMergeMode : chooseMergeMethod)(String(value))}>
+                                    {mergeChoices.map((choice) => (
+                                        <DropdownMenuRadioItem key={choice.value} value={choice.value}>{choice.label}</DropdownMenuRadioItem>
                                     ))}
                                 </DropdownMenuRadioGroup>
                             </DropdownMenuContent>

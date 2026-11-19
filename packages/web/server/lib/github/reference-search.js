@@ -26,6 +26,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
+import { readMergeOptions } from './merge-when-ready.js';
 
 const REFERENCE_PAGE_SIZE = 30;
 const ACROSS_REPO_CHUNK_SIZE = 40;
@@ -621,9 +622,12 @@ const byCreatedAt = (left, right) => (Date.parse(left.createdAt ?? '') || 0) - (
 export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   // The stack is read beside the detail; a host that cannot answer it leaves
   // the PR's stack unknown (absent), which is not the same as in none (null).
-  const [response, stack] = await Promise.all([
+  // How it may merge is read the same way: unknown leaves the board offering
+  // every method the host has.
+  const [response, stack, mergeOptions] = await Promise.all([
     octokit.graphql(DETAIL_QUERY, { owner, repo, number }),
     fetchPullStack({ octokit, owner, repo, number }).catch(() => undefined),
+    readMergeOptions(octokit, { owner, repo, number }).catch(() => undefined),
   ]);
   const parsed = detailSchema.parse(response);
   const item = parsed.repository?.issueOrPullRequest;
@@ -710,6 +714,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     },
   };
   if (stack !== undefined) detail.pull.stack = stack;
+  if (mergeOptions && item.state === 'OPEN') detail.pull.mergeOptions = mergeOptions;
   return detail;
 }
 
