@@ -2,6 +2,15 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.10] - 2026-11-19
+
+### Improvements
+
+- **Chat: a session fixed to an account stays on it.** Choosing Preferred or Fixed in the account picker beside the model now moves only that session; the other sessions keep their own account.
+- Chat: the account picker also shows on a new session, so the first message already goes out on the account you chose.
+- Settings/Providers: when an account hits its usage limit, choose Automatic, Preferred or Fixed. Preferred returns to the account you mark once its limit resets, and each account's usage now shows in its own row.
+- Chat: the Usage section of the work status shows the limits of the account the session is running on.
+
 ## [2.7.9] - 2026-11-19
 
 ### Improvements
