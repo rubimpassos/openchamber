@@ -2,6 +2,16 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.8] - 2026-11-19
+
+### New
+
+- **Git: merge when ready.** On a branch with a merge queue, the merge button adds the pull request to the queue once its checks and reviews pass. Anyone allowed to bypass the rules can still merge right away.
+
+### Fixes
+
+- Git: the merge button offers only the merge methods the repository allows, so a rebase-only repository no longer shows squash or merge commit.
+
 ## [2.7.7] - 2026-11-18
 
 ### New
