@@ -198,6 +198,13 @@ export type GenerateRequest = {
 
 export type GenerateResult = { text: string };
 
+/** Read-only picker catalog. IDs include the provider; variants are machine IDs. */
+export type GuestModelCatalog = readonly {
+  readonly id: string;
+  readonly name: string;
+  readonly variants: readonly string[];
+}[];
+
 /**
  * The outcome of a `generate` whose frame was gone when the model answered:
  * the panel closed or its frame reloaded first. `request` is what that frame
@@ -210,6 +217,7 @@ export type LateGenerateResult = { request: GenerateRequest } & (
 );
 
 export type HostResultPayload =
+  | GuestModelCatalog
   | LoopbackUrlResult
   | LoopbackRequestResult
   | GuestStorageResult
@@ -858,6 +866,7 @@ export type GuestMicrophoneOpenMessage = GuestCall<'microphone-open', Microphone
 export type GuestMicrophoneCloseMessage = GuestCall<'microphone-close'>;
 
 export type GuestMessage =
+  | GuestCall<'listModels'>
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
   | GuestCall<'workspace-subscribe', GuestWorkspaceSubscription>
   | GuestCall<'workspace-unsubscribe', { subscriptionId: string }>

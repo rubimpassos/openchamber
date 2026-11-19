@@ -1,3 +1,4 @@
+// allow: SIZE_OK — public SDK export registry; implementations live in their owning modules.
 export { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL, OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
 export { GUEST_SCROLLBAR_CSS, GUEST_SCROLLBAR_SCRIPT } from './scrollbar-style.ts';
 export { guestFramePolicy } from './frame-policy.ts';
@@ -509,6 +510,7 @@ export type {
   FileWriteResult,
   GenerateRequest,
   GenerateResult,
+  GuestModelCatalog,
   LateGenerateResult,
   GuestFileEntryKind,
   GuestFileListMessage,

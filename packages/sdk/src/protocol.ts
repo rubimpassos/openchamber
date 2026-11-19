@@ -227,6 +227,11 @@ const microphoneOpenResultPayloadSchema = z.object({
 });
 
 const hostResultPayloadSchema = z.union([
+  z.array(z.object({
+    id: z.string().min(1),
+    name: z.string(),
+    variants: z.array(z.string().min(1)).readonly(),
+  }).strict().readonly()).readonly(),
   loopbackUrlResultSchema,
   loopbackRequestResultSchema,
   guestStorageResultSchema,
@@ -565,6 +570,7 @@ export const hostMessageSchema = z.union([
 const filePathSchema = z.string().min(1).max(GUEST_FILE_PATH_MAX).refine(isGuestFilePath);
 
 export const guestMessageSchema = z.discriminatedUnion('type', [
+  z.object({ ...envelope, type: z.literal('listModels'), id: z.string().min(1) }).strict(),
   z.object({ ...envelope, type: z.literal('loopback-url'), id: z.string().min(1), payload: loopbackUrlRequestSchema }).strict(),
   z.object({ ...envelope, type: z.literal('loopback-request'), id: z.string().min(1), payload: loopbackRequestSchema }).strict(),
   z.object({
