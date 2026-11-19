@@ -15,14 +15,27 @@ import type { ServerBrowserScope, ServerBrowserState } from './types';
  */
 type PanelTabClaims = {
   readonly claims: Readonly<Record<string, string>>;
+  readonly failedNavigations: ReadonlySet<string>;
   claim: (scopeId: string, panelTabId: string, chromeTabId: string) => void;
   release: (scopeId: string, panelTabId: string) => void;
+  setNavigationFailed: (scopeId: string, chromeTabId: string, failed: boolean) => void;
 };
 
 const claimKey = (scopeId: string, panelTabId: string): string => `${scopeId}\u0000${panelTabId}`;
 
 export const useServerBrowserPanelTabs = create<PanelTabClaims>((set) => ({
   claims: {},
+  failedNavigations: new Set(),
+  setNavigationFailed: (scopeId, chromeTabId, failed) => set((state) => {
+    // A navigation may finish after its panel tab closed and released the claim.
+    if (!panelTabsByChromeTab(state.claims, scopeId).has(chromeTabId)) return state;
+    const key = claimKey(scopeId, chromeTabId);
+    if (state.failedNavigations.has(key) === failed) return state;
+    const next = new Set(state.failedNavigations);
+    if (failed) next.add(key);
+    else next.delete(key);
+    return { failedNavigations: next };
+  }),
   claim: (scopeId, panelTabId, chromeTabId) => set((state) => ({
     claims: { ...state.claims, [claimKey(scopeId, panelTabId)]: chromeTabId },
   })),
@@ -30,8 +43,10 @@ export const useServerBrowserPanelTabs = create<PanelTabClaims>((set) => ({
     const key = claimKey(scopeId, panelTabId);
     if (!(key in state.claims)) return state;
     const next = { ...state.claims };
+    const failedNavigations = new Set(state.failedNavigations);
+    failedNavigations.delete(claimKey(scopeId, next[key]));
     delete next[key];
-    return { claims: next };
+    return { claims: next, failedNavigations };
   }),
 }));
 
@@ -40,6 +55,10 @@ export const claimedChromeTab = (
   scopeId: string,
   panelTabId: string,
 ): string | null => claims[claimKey(scopeId, panelTabId)] ?? null;
+
+export const hasFailedPanelNavigation = (scopeId: string, chromeTabId: string): boolean => (
+  useServerBrowserPanelTabs.getState().failedNavigations.has(claimKey(scopeId, chromeTabId))
+);
 
 /** Chrome tabs of a scope that no panel tab shows yet. */
 export const unclaimedChromeTabs = (

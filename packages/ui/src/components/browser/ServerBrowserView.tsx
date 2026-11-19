@@ -47,6 +47,8 @@ import { supportsSurfaceAudio } from '@/lib/guests/surface-audio';
 import { isFollowingBrowserAgent, useUIStore } from '@/stores/useUIStore';
 import { getSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import { useServerBrowserConnection } from '@/lib/browser/serverBrowser/useServerBrowserConnection';
+import { usePanelNavigation } from '@/lib/browser/serverBrowser/usePanelNavigation';
+import { forgetBrowserTabOpenedWithAddress, wasBrowserTabOpenedWithAddress } from '@/lib/browser/devServerWait';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
 
 import { BrowserToolbar } from './BrowserToolbar';
@@ -311,6 +313,17 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const pairingRef = React.useRef(false);
   const tabsSignature = scope ? scope.tabs.map((tab) => `${tab.id}:${tab.active ? 1 : 0}`).join(',') : '';
 
+  const runNavigation = async (action: () => Promise<ServerBrowserState | null>): Promise<ServerBrowserState | null> => {
+    const next = await action();
+    if (scope && myChromeTab) useServerBrowserPanelTabs.getState().setNavigationFailed(scope.id, myChromeTab, next === null);
+    return next;
+  };
+
+  const navigationPending = usePanelNavigation({
+    directory, tabID, scope, chromeTabId: myChromeTab,
+    navigate: (url) => runNavigation(() => serverBrowser.navigate(url)), error: serverBrowser.error, disabled: Boolean(signIn),
+  });
+
   React.useEffect(() => {
     if (signIn || !scope || pairingRef.current) return;
     const mine = myChromeTab ? scope.tabs.find((tab) => tab.id === myChromeTab) : undefined;
@@ -388,7 +401,11 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
       }
       const url = scope.tabs.find((tab) => tab.id === chromeTabId)?.url ?? '';
       const panelTabId = openAgentBrowserTab(directory, url === BLANK_URL ? '' : url, scope.sessionId);
-      if (panelTabId) claim(scope.id, panelTabId, chromeTabId);
+      if (panelTabId) {
+        // This page is already open in Chrome; the new panel tab only mirrors it.
+        forgetBrowserTabOpenedWithAddress(directory, panelTabId);
+        claim(scope.id, panelTabId, chromeTabId);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope?.id, tabsSignature, myChromeTab, claims, panelTabs, signIn]);
@@ -408,13 +425,14 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   React.useEffect(() => {
     if (!scope) return;
     for (const [chromeTabId, panelTabId] of panelTabsByChromeTab(claims, scope.id)) {
+      if (wasBrowserTabOpenedWithAddress(directory, panelTabId) || (panelTabId === tabID && navigationPending)) continue;
       const chromeTab = scope.tabs.find((tab) => tab.id === chromeTabId);
       if (!chromeTab) continue;
       const url = chromeTab.url === BLANK_URL ? '' : toDisplayUrl(chromeTab.url);
       const panelTab = panelTabs?.find((tab) => tab.id === panelTabId);
       if (panelTab && (panelTab.targetPath ?? '') !== url) setContextPanelTabTargetPath(directory, panelTabId, url);
     }
-  }, [claims, directory, panelTabs, scope, setContextPanelTabTargetPath]);
+  }, [claims, directory, navigationPending, panelTabs, scope, setContextPanelTabTargetPath, tabID]);
 
   // Their icons too: the tab strip finds icons by the origin of the address it shows.
   const putFavicon = useBrowserFaviconStore((store) => store.put);
@@ -668,13 +686,13 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         onSubmit={(value) => {
           const next = normalizeBrowserUrl(value);
           if (next === BLANK_URL) return;
-          void serverBrowser.navigate(next);
+          void runNavigation(() => serverBrowser.navigate(next));
         }}
         suggestions={suggestions}
         onForgetSuggestion={(url) => forgetHistoryVisit(directory, url)}
-        onBack={() => void serverBrowser.back()}
-        onForward={() => void serverBrowser.forward()}
-        onReload={() => void (scope?.isLoading ? serverBrowser.stop() : serverBrowser.reload())}
+        onBack={() => void runNavigation(serverBrowser.back)}
+        onForward={() => void runNavigation(serverBrowser.forward)}
+        onReload={() => void (scope?.isLoading ? serverBrowser.stop() : runNavigation(serverBrowser.reload))}
         onOpenExternal={() => void openExternalUrl(scope?.url || address)}
         canGoBack={scope?.canGoBack ?? false}
         canGoForward={scope?.canGoForward ?? false}
@@ -751,7 +769,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         ) : null}
         {!loaded && showingMine ? (
           <div className="absolute inset-0">
-            <BrowserEmptyState onOpen={(url) => void serverBrowser.navigate(normalizeBrowserUrl(url))} directory={directory} visible={visible} />
+            <BrowserEmptyState onOpen={(url) => void runNavigation(() => serverBrowser.navigate(normalizeBrowserUrl(url)))} directory={directory} visible={visible} />
           </div>
         ) : null}
       </div>
