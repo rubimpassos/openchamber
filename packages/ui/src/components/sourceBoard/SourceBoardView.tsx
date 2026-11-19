@@ -632,6 +632,7 @@ const SourceBoardBody: React.FC<{
             submitRequirements={latestPull?.submitRequirements}
             submitRequirementsUnreadable={previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'error'}
             mergeable={previewPullStatus?.mergeable ?? null}
+            mergeOptions={previewItem?.source === 'repository' && browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.pull?.mergeOptions : undefined}
         />
     ) : null;
 
