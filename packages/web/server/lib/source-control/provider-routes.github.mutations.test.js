@@ -952,6 +952,25 @@ describe('canonical GitHub mutations', () => {
     ]);
   });
 
+  it('bypasses the merge queue only when asked to merge directly, under its own digest', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const writes = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      if (options.method === 'PUT') writes.push(JSON.parse(options.body));
+      if (new URL(url).pathname === '/repos/acme/app/pulls') return jsonResponse([]);
+      return options.method === 'GET'
+        ? jsonResponse(pullRequest())
+        : jsonResponse({ status: 'merged', details: { message: 'Merged', sha: 'def456' } });
+    }));
+    const { app } = makeApp();
+
+    await request(app).post('/api/source-control/github/pr/merge').send({ ...mergeBody(account.accountId), action: 'direct' }).expect(200);
+    expect(writes).toEqual([{ merge_method: 'merge', sha: 'abc123', bypass_rules: true, merge_action: 'direct_merge' }]);
+    // The same key without the action names another write.
+    await request(app).post('/api/source-control/github/pr/merge').send(mergeBody(account.accountId)).expect(409);
+    await request(app).post('/api/source-control/github/pr/merge').send({ ...mergeBody(account.accountId), action: 'later' }).expect(400);
+  });
+
   it('follows a background merge until it lands, and says so when it joins a merge queue', async () => {
     const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
     let final = 'merged';
