@@ -147,6 +147,20 @@ describe('dev server wait', () => {
     expect(loads).toEqual(['http://localhost:5173/']);
   });
 
+  test('an unmounted tab receives only its latest load request on subscription', () => {
+    const tabID = 'queued-browser-tab';
+    const loads: string[] = [];
+    requestBrowserTabLoad('/queue-fixture', tabID, 'https://example.com/old');
+    requestBrowserTabLoad('/queue-fixture', tabID, 'https://example.com/latest');
+
+    const stop = subscribeBrowserTabLoadRequests('/queue-fixture', tabID, (url) => loads.push(url));
+    expect(loads).toEqual(['https://example.com/latest']);
+    stop();
+    const stopAgain = subscribeBrowserTabLoadRequests('/queue-fixture', tabID, (url) => loads.push(url));
+    expect(loads).toEqual(['https://example.com/latest']);
+    stopAgain();
+  });
+
   test('a load request reloads a failed tab but leaves a working page alone', () => {
     const url = 'http://localhost:5173/';
     const failed = { kind: 'failed', url, code: -102, description: 'ERR_CONNECTION_REFUSED' } as const;

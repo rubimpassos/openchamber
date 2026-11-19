@@ -63,6 +63,7 @@ type LoadRequestListener = (url: string) => void;
 
 /** Mounted tabs listening for someone asking them to load an address again. */
 const loadRequestListeners = new Map<string, Set<LoadRequestListener>>();
+const pendingLoadRequests = new Map<string, string>();
 
 /**
  * Asks an existing tab to load an address, as if the user had typed it.
@@ -71,12 +72,16 @@ const loadRequestListeners = new Map<string, Set<LoadRequestListener>>();
  * not enough when the tab is showing a failure: a project action that just
  * started the server announces the same address, and the page must load now,
  * waiting for the server like any other load someone started. The tab decides
- * with {@link acceptsBrowserTabLoadRequest}; a tab that is not mounted misses
- * the request and loads on its next mount instead.
+ * with {@link acceptsBrowserTabLoadRequest}. A tab without a mounted listener
+ * retains the latest request until its view subscribes.
  */
 export const requestBrowserTabLoad = (directory: string, tabID: string, url: string): void => {
-  const listeners = loadRequestListeners.get(tabKey(directory, tabID));
-  if (!listeners) return;
+  const key = tabKey(directory, tabID);
+  const listeners = loadRequestListeners.get(key);
+  if (!listeners) {
+    pendingLoadRequests.set(key, url);
+    return;
+  }
   for (const listener of listeners) listener(url);
 };
 
@@ -98,6 +103,11 @@ export const subscribeBrowserTabLoadRequests = (
   const listeners = loadRequestListeners.get(key) ?? new Set<LoadRequestListener>();
   listeners.add(listener);
   loadRequestListeners.set(key, listeners);
+  const pending = pendingLoadRequests.get(key);
+  if (pending !== undefined) {
+    pendingLoadRequests.delete(key);
+    listener(pending);
+  }
   return () => {
     listeners.delete(listener);
     if (listeners.size === 0) loadRequestListeners.delete(key);
