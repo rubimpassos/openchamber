@@ -201,6 +201,9 @@ const reportSchema = z.object({
       return credential.success ? [credential.data] : [];
     })),
   activeCredentialID: z.string().min(1).optional().catch(undefined),
+  // The account the plugin put on the failed request for a pinned session;
+  // absent when the request went out on the active account.
+  usedCredentialID: z.string().min(1).optional().catch(undefined),
 });
 
 /**

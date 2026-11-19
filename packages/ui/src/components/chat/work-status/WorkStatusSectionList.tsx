@@ -35,7 +35,7 @@ export const WorkStatusSectionList: React.FC<{
   // Keep these elements owned here so primary readout updates do not rerender
   // unrelated sections through the composition callback.
   const secondarySections = {
-    usage: <WorkStatusUsageSection visible={visible} />,
+    usage: <WorkStatusUsageSection visible={visible} sessionId={sessionId} />,
     telemetry: <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} />,
     subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
     tasks: <WorkStatusTasksSection sessionId={sessionId} />,

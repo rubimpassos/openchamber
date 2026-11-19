@@ -23,6 +23,31 @@ export type UsageProviderGroup = {
   status: string | null;
 };
 
+/** The rows of one provider's usage: its windows, then the selected models' first window each. */
+export const buildUsageRows = (
+  providerId: QuotaProviderId,
+  usage: { windows?: Record<string, UsageWindow>; models?: Record<string, { windows?: Record<string, UsageWindow> }> } | null | undefined,
+  selectedModels: readonly string[],
+): UsageLimitRow[] => {
+  const rows: UsageLimitRow[] = [];
+  for (const [label, window] of Object.entries(usage?.windows ?? {})) {
+    rows.push({ key: `window-${label}`, label: formatWindowLabel(label), window });
+  }
+  const modelEntries = Object.entries(usage?.models ?? {});
+  for (const [modelName, modelUsage] of selectVisibleModelEntries(providerId, modelEntries, selectedModels)) {
+    const entries = Object.entries(modelUsage.windows ?? {});
+    if (entries.length === 0) continue;
+    const [label, window] = entries[0];
+    rows.push({
+      key: `model-${modelName}-${label}`,
+      label: formatWindowLabel(label),
+      subtitle: getDisplayModelName(modelName),
+      window,
+    });
+  }
+  return rows;
+};
+
 /**
  * Quota windows grouped by provider, shaped for the compact usage list.
  *
@@ -51,26 +76,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
       })
       .map((providerMeta) => {
         const result = resultsByProvider.get(providerMeta.id);
-        const rows: UsageLimitRow[] = [];
-
-        for (const [label, window] of Object.entries(result?.usage?.windows ?? {})) {
-          rows.push({ key: `window-${label}`, label: formatWindowLabel(label), window });
-        }
-
-        const modelEntries = Object.entries(result?.usage?.models ?? {});
-        const providerSelectedModels = selectedQuotaModels[providerMeta.id] ?? [];
-        const visibleModelEntries = selectVisibleModelEntries(providerMeta.id, modelEntries, providerSelectedModels);
-        for (const [modelName, modelUsage] of visibleModelEntries) {
-          const entries = Object.entries(modelUsage.windows ?? {});
-          if (entries.length === 0) continue;
-          const [label, window] = entries[0];
-          rows.push({
-            key: `model-${modelName}-${label}`,
-            label: formatWindowLabel(label),
-            subtitle: getDisplayModelName(modelName),
-            window,
-          });
-        }
+        const rows = buildUsageRows(providerMeta.id, result?.usage, selectedQuotaModels[providerMeta.id] ?? []);
 
         const refreshError = refreshErrors[providerMeta.id];
         let status: string | null = null;

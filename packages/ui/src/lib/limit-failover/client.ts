@@ -1,16 +1,32 @@
 import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { UsageWindow } from '@/types';
 
 /**
- * The limit failover's account list and per-session pin, as the server keeps
- * them. The plugin sweeps each stored Claude account's plan usage and reports
- * the windows it has seen run out; the UI reads both here.
+ * The limit failover's account list, per-session pin and the provider's
+ * preferred account, as the server keeps them. The plugin sweeps each stored
+ * Claude account's plan usage and reports the windows it has seen run out;
+ * the UI reads both here.
  */
 
 const ROUTE = '/api/openchamber/limit-failover';
 
-const windowSchema = z.object({ usedPercent: z.number().nullable().optional() });
+/** The account picker and the provider page offer accounts of this provider only. */
+export const ACCOUNT_PROVIDER = 'anthropic';
+
+const nullableNumber = z.number().nullable().default(null);
+const nullableString = z.string().nullable().default(null);
+const windowSchema = z.object({
+  usedPercent: nullableNumber,
+  remainingPercent: nullableNumber,
+  windowSeconds: nullableNumber,
+  resetAfterSeconds: nullableNumber,
+  resetAt: nullableNumber,
+  resetAtFormatted: nullableString,
+  resetAfterFormatted: nullableString,
+  valueLabel: z.string().nullable().optional(),
+}) satisfies z.ZodType<UsageWindow, unknown>;
 const usageSchema = z.object({
   windows: z.record(z.string(), windowSchema).optional(),
   models: z.record(z.string(), z.object({ windows: z.record(z.string(), windowSchema).optional() })).optional(),
@@ -37,9 +53,16 @@ const sessionAccountSchema = z.object({
   updatedAt: z.number(),
 });
 
+const providerAccountSchema = z.object({
+  providerID: z.string(),
+  credentialID: z.string(),
+  updatedAt: z.number(),
+});
+
 export type LimitAccount = z.infer<typeof accountSchema>;
-type LimitAccountUsage = z.infer<typeof usageSchema>;
-export type SessionAccountPin = z.infer<typeof sessionAccountSchema>;
+export type LimitAccountUsage = z.infer<typeof usageSchema>;
+type SessionAccountPin = z.infer<typeof sessionAccountSchema>;
+export type SessionAccountMode = 'global' | 'preferred' | 'fixed';
 
 /** A window's used percent, or null when the sweep has not seen it. */
 export const windowPercent = (usage: LimitAccountUsage | null, window: string): number | null => {
@@ -67,17 +90,28 @@ export const fetchLimitAccounts = async (providerId: string): Promise<LimitAccou
   return (await parseBody(response, accountsResponseSchema)).accounts;
 };
 
-/** The session's pin, or null when it follows the global settings. */
-export const fetchSessionAccount = async (sessionId: string): Promise<SessionAccountPin | null> => {
-  const response = await runtimeFetch(`${ROUTE}/session-account?sessionID=${encodeURIComponent(sessionId)}`);
-  return (await parseBody(response, z.object({ config: sessionAccountSchema.nullable() }))).config;
+/**
+ * The session's pin (null when it follows the global settings) and the
+ * account its next request on this provider and model goes out on, when the
+ * server knows it.
+ */
+export const fetchSessionAccount = async (input: {
+  sessionId: string;
+  providerId: string;
+  modelId?: string | null;
+}): Promise<{ pin: SessionAccountPin | null; accountId: string | null }> => {
+  const query = new URLSearchParams({ sessionID: input.sessionId, providerID: input.providerId });
+  if (input.modelId) query.set('modelID', input.modelId);
+  const response = await runtimeFetch(`${ROUTE}/session-account?${query.toString()}`);
+  const body = await parseBody(response, z.object({ config: sessionAccountSchema.nullable(), account: z.string().nullable().default(null) }));
+  return { pin: body.config, accountId: body.account };
 };
 
 /** Sets the session's pin. `global` clears it; the others name an account. */
 export const setSessionAccount = async (input: {
   sessionId: string;
   providerId: string;
-  mode: 'global' | 'preferred' | 'fixed';
+  mode: SessionAccountMode;
   credentialId?: string;
 }): Promise<SessionAccountPin | null> => {
   const response = await runtimeFetch(`${ROUTE}/session-account`, {
@@ -91,4 +125,20 @@ export const setSessionAccount = async (input: {
     }),
   });
   return (await parseBody(response, z.object({ config: sessionAccountSchema.nullable() }))).config;
+};
+
+/** The account the provider's global "preferred" mode returns to, or null. */
+export const fetchPreferredAccount = async (providerId: string): Promise<string | null> => {
+  const response = await runtimeFetch(`${ROUTE}/provider-account?providerID=${encodeURIComponent(providerId)}`);
+  return (await parseBody(response, z.object({ config: providerAccountSchema.nullable() }))).config?.credentialID ?? null;
+};
+
+/** Sets the provider's preferred account; null clears it. */
+export const setPreferredAccount = async (providerId: string, credentialId: string | null): Promise<void> => {
+  const response = await runtimeFetch(`${ROUTE}/provider-account`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ providerID: providerId, credentialID: credentialId }),
+  });
+  await parseBody(response, z.object({ config: providerAccountSchema.nullable() }));
 };

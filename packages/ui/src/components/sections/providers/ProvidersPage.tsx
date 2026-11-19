@@ -45,8 +45,8 @@ import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { ProviderAccounts } from './ProviderAccounts';
-import { AccountLimitList } from './AccountLimitList';
-import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
+import { ProviderAccountModeField } from './ProviderAccountMode';
+import { useAccountLimits, useProviderAccountMode } from './useProviderAccountMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { CustomProviderForm } from './CustomProviderForm';
 import { ProviderLogoImageControl } from './ProviderLogoImageControl';
@@ -392,6 +392,10 @@ export const ProvidersPage: React.FC = () => {
   }, [refreshIntegrations, refreshProviderSources, setSelectedProvider]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
+  // The account mode and usage come from the managed OpenCode plugin; VS Code runs its own OpenCode without it.
+  const accountFailoverAvailable = Boolean(selectedProvider) && !isVSCodeRuntime();
+  const accountMode = useProviderAccountMode(selectedProviderId, accountFailoverAvailable);
+  const accountLimits = useAccountLimits(selectedProviderId, accountFailoverAvailable);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
 
   const [logoBusyId, setLogoBusyId] = React.useState<string | null>(null);
@@ -559,6 +563,8 @@ export const ProvidersPage: React.FC = () => {
     account,
     async () => {
       await opencodeClient.getSdkClient().credential.activate({ credentialID: account.id });
+      // In the preferred mode, the account chosen here is the one to come back to.
+      if (accountMode.mode === 'preferred') await accountMode.setMode('preferred', account.id);
     },
     {
       success: t('settings.providers.accounts.toast.switched', { account: account.label }),
@@ -578,6 +584,8 @@ export const ProvidersPage: React.FC = () => {
     account,
     async () => {
       await opencodeClient.getSdkClient().credential.remove({ credentialID: account.id });
+      // A removed preferred account leaves the provider switching without one.
+      if (accountMode.mode === 'preferred' && accountMode.preferredId === account.id) await accountMode.setMode('automatic', null);
       refreshProviderSources();
     },
     {
@@ -905,6 +913,8 @@ export const ProvidersPage: React.FC = () => {
               onActivate: (account) => void handleActivateAccount(account),
               onRename: (account, label) => void handleRenameAccount(account, label),
               onRemove: (account) => void handleRemoveAccount(account),
+              limits: accountLimits,
+              preferredId: accountMode.mode === 'preferred' ? accountMode.preferredId : null,
             }}
             inUseWithoutCredential={inUseWithoutCredential}
             canAdd={!enterpriseLocked}
@@ -914,12 +924,9 @@ export const ProvidersPage: React.FC = () => {
           />
         )}
 
-        {/* The switch happens in the managed OpenCode plugin; VS Code runs its own OpenCode without it. */}
-        {usedCredentials.length > 0 && !isVSCodeRuntime() ? (
-          <ProviderAccountSwitchToggle providerId={selectedProvider.id} accountCount={usedCredentials.length} />
+        {usedCredentials.length > 0 && accountFailoverAvailable ? (
+          <ProviderAccountModeField state={accountMode} accountCount={usedCredentials.length} activeId={activeAccountId} />
         ) : null}
-
-        <AccountLimitList providerId={selectedProvider.id} />
 
         {enterpriseLocked ? (
           <p className="typography-meta text-muted-foreground">{t('settings.providers.enterpriseMode')}</p>

@@ -101,6 +101,8 @@ import {
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { useDraftSessionAccountStore } from "@/stores/useDraftSessionAccountStore"
+import { setSessionAccount } from "@/lib/limit-failover/client"
 import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
 import { sessionGoalIntro, setSessionGoal } from "@/lib/sessionGoalActions"
 import { useUIStore } from "@/stores/useUIStore"
@@ -2306,6 +2308,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         if (sentDraftIds.has(draft.draftId)) throw new Error("The session is still being created.")
         sentDraftIds.add(draft.draftId)
         const selection: DraftSessionSelection = { providerID, modelID, agent: trimmedAgent, variant }
+        // Read now, taken once stored: a send that fails before then leaves
+        // the choice on the draft for the next try.
+        const draftAccount = useDraftSessionAccountStore.getState().choice?.draftId === draft.draftId
+          ? useDraftSessionAccountStore.getState().choice
+          : null
         let directory: string | null = null
         let chatDirectoryCleanup: CapturedChatDirectoryCleanup | null = null
         try {
@@ -2374,6 +2381,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             markSessionStatus(sessionId, createdDirectory, "busy")
             await applyArmedGoal(sessionId, createdDirectory)
             assertCurrentRuntime()
+            // The account chosen on the draft is stored before the first
+            // prompt, whose requests read it. A pin for another provider than
+            // the model's would not apply, so it is not stored.
+            if (draftAccount && draftAccount.providerId === providerID) {
+              await setSessionAccount({ sessionId, providerId: draftAccount.providerId, mode: draftAccount.mode, credentialId: draftAccount.credentialId })
+              useDraftSessionAccountStore.getState().take(draft.draftId)
+              assertCurrentRuntime()
+            }
             // The server writes the project knowledge into the new session while
             // the message is already on screen: only the prompt request waits.
             if (inputMode !== "shell") await syncSessionKnowledge(createdDirectory, sessionId, await responseStyleInstruction, capturedRuntimeKey)

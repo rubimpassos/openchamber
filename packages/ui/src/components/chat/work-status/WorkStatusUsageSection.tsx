@@ -9,10 +9,11 @@ import { preloadProviderLogos } from '@/hooks/useProviderLogo';
 import { compactQuotaValueLabel, formatQuotaResetLabel, formatQuotaResetShort, formatQuotaWindowValueLabel, isExtensionQuotaProviderId } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useUsageProviderGroups } from '@/components/usage/usageGroups';
+import { buildUsageRows, useUsageProviderGroups, type UsageProviderGroup } from '@/components/usage/usageGroups';
 import { UsageGiftResetButton } from '@/components/usage/UsageGiftResetButton';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { pickUsageHeadline } from './usageHeadline';
+import { pickUsageHeadline, resolveQuotaProviderId } from './usageHeadline';
+import { useSessionAccountUsage } from './useSessionAccountUsage';
 import { WorkStatusRow, WorkStatusCollapsibleSection, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { usageValueTone } from './usageValueTone';
@@ -32,9 +33,9 @@ import { usageValueTone } from './usageValueTone';
  */
 
 
-export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
+export const WorkStatusUsageSection: React.FC<{ visible?: boolean; sessionId?: string | null }> = ({ visible = true, sessionId = null }) => {
   const { t } = useI18n();
-  const groups = useUsageProviderGroups();
+  const providerGroups = useUsageProviderGroups();
   const displayMode = useQuotaStore((state) => state.displayMode);
   const isLoading = useQuotaStore((state) => state.isLoading);
   const loadedRuntimeKey = useQuotaStore((state) => state.loadedRuntimeKey);
@@ -42,6 +43,21 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
   const fetchQuotas = useQuotaStore((state) => state.fetchQuotas);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
+  const currentModelId = useConfigStore((state) => state.currentModelId);
+  const selectedQuotaModels = useQuotaStore((state) => state.selectedModels);
+  const quotaResults = useQuotaStore((state) => state.results);
+  const sessionAccount = useSessionAccountUsage(visible ? sessionId : null, currentProviderId, currentModelId, quotaResults);
+  // A session on one of several stored accounts shows that account's usage
+  // in its provider's group, in place of the active sign-in's.
+  const groups = React.useMemo<UsageProviderGroup[]>(() => {
+    const quotaProviderId = resolveQuotaProviderId(currentProviderId);
+    if (!sessionAccount || !quotaProviderId) return providerGroups;
+    return providerGroups.map((group) => {
+      if (group.providerId !== quotaProviderId) return group;
+      const rows = buildUsageRows(group.providerId, sessionAccount.usage, selectedQuotaModels[group.providerId] ?? []);
+      return rows.length > 0 ? { ...group, accountLabel: sessionAccount.label, rows, status: null } : group;
+    });
+  }, [currentProviderId, providerGroups, selectedQuotaModels, sessionAccount]);
 
   // Bootstrap once to discover providers. Confirmed absence renders no readout
   // and creates no ongoing refresh demand; credential changes invalidate it.

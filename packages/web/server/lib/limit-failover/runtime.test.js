@@ -315,33 +315,73 @@ describe('limit failover decisions', () => {
     }))).resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
   });
 
-  it('fails a fixed session on its own account, and moves one that ran elsewhere', async () => {
+  it('fails a fixed session on its own account without touching the active one', async () => {
     const { runtime, app } = pinnedApp();
     await request(app).put('/api/openchamber/limit-failover/session-account')
-      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_A.id })
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_B.id })
       .expect(200);
-    const fableOut = quotaReport({
-      sessionID: 'ses_1',
-      modelID: 'claude-fable-5-2',
-      error: { type: 'provider.rate-limit', message: '', body: null },
-      proposed: { retry: false },
-      captured: { status: 'rejected', resetAt: NOW + 24 * 60 * 60_000, claim: 'seven_day_fable' },
+    // The session's request went out on B while A stays active for everyone else.
+    await expect(runtime.decide(quotaReport({ sessionID: 'ses_1', usedCredentialID: ACCOUNT_B.id })))
+      .resolves.toEqual({ action: 'fail' });
+    const list = await request(app).get('/api/openchamber/limit-failover/accounts?providerID=anthropic').expect(200);
+    const marked = list.body.accounts.map((account) => account.id);
+    expect(marked).toEqual([ACCOUNT_B.id]);
+    // Another session keeps the global behavior on A, and skips B, which ran out.
+    await expect(runtime.decide(quotaReport({ sessionID: 'ses_2', credentials: [ACCOUNT_A, ACCOUNT_B, ACCOUNT_C] })))
+      .resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_C.id });
+  });
+
+  it('retries a pinned session on its pin when its request ran on the active account, then treats the pin as out', async () => {
+    let now = NOW;
+    const created = createRuntime({ now: () => now });
+    const app = express();
+    created.runtime.registerUiRoutes(app, express);
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_B.id })
+      .expect(200);
+    await expect(created.runtime.decide(quotaReport({ sessionID: 'ses_1' }))).resolves.toEqual({ action: 'retry' });
+    // The plugin still could not sign with B: B counts as out, and the fixed turn ends.
+    await expect(created.runtime.decide(quotaReport({ sessionID: 'ses_1' }))).resolves.toEqual({ action: 'fail' });
+    now += 61_000;
+    await expect(created.runtime.decide(quotaReport({ sessionID: 'ses_1' }))).resolves.toEqual({ action: 'fail' });
+    now += DEFAULT_EXHAUSTION_MS;
+    await expect(created.runtime.decide(quotaReport({ sessionID: 'ses_1', usedCredentialID: ACCOUNT_A.id })))
+      .resolves.toEqual({ action: 'retry' });
+  });
+
+  it('moves a preferred session alone to another account, and back to its pin once the mark lifts', async () => {
+    let now = NOW;
+    const created = createRuntime({ now: () => now });
+    const app = express();
+    created.runtime.registerRoutes(app, express);
+    created.runtime.registerUiRoutes(app, express);
+    const accountOf = (sessionID, modelID = 'claude-opus') => request(app)
+      .post('/api/openchamber/limit-failover/request-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID, providerID: 'anthropic', modelID, activeCredentialID: ACCOUNT_A.id })
+      .expect(200)
+      .then((response) => response.body);
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_B.id })
+      .expect(200);
+    await expect(accountOf('ses_1')).resolves.toEqual({ credentialID: ACCOUNT_B.id, strict: false });
+    await expect(accountOf('ses_2')).resolves.toEqual({ credentialID: null, strict: false });
+
+    const credentials = [ACCOUNT_A, ACCOUNT_B, ACCOUNT_C];
+    await expect(created.runtime.decide(quotaReport({ sessionID: 'ses_1', credentials, usedCredentialID: ACCOUNT_B.id })))
+      .resolves.toEqual({ action: 'retry' });
+    expect(created.broadcastUiEvent).toHaveBeenCalledWith({
+      type: 'openchamber:limit-failover',
+      properties: { kind: 'account', sessionId: 'ses_1', providerId: 'anthropic', fromAccount: ACCOUNT_B.label, toAccount: ACCOUNT_C.label },
     });
-    await expect(runtime.decide(fableOut)).resolves.toEqual({ action: 'fail' });
-    // The pin skipped while A was out of Fable, so the session ran on B and
-    // B's five-hour window ran out: A still serves every other model, so the
-    // session moves back to it.
-    await expect(runtime.decide(quotaReport({
-      sessionID: 'ses_1',
-      modelID: 'claude-sonnet-5-5',
-      credentials: [ACCOUNT_B, ACCOUNT_A],
-      activeCredentialID: ACCOUNT_B.id,
-      captured: { status: 'rejected', resetAt: NOW + 3_600_000, claim: 'five_hour' },
-    }))).resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
-    // Another session keeps the global behavior: B ran out for it, and A is
-    // offered for the model its own mark does not cover.
-    await expect(runtime.decide(quotaReport({ sessionID: 'ses_2', credentials: [ACCOUNT_B, ACCOUNT_A], activeCredentialID: ACCOUNT_B.id })))
-      .resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
+    await expect(accountOf('ses_1')).resolves.toEqual({ credentialID: ACCOUNT_C.id, strict: false });
+    // The active account never moved.
+    await expect(accountOf('ses_2')).resolves.toEqual({ credentialID: null, strict: false });
+    const shown = await request(app).get('/api/openchamber/limit-failover/session-account?sessionID=ses_1&providerID=anthropic').expect(200);
+    expect(shown.body.account).toBe(ACCOUNT_C.id);
+
+    now += DEFAULT_EXHAUSTION_MS + 1;
+    await expect(accountOf('ses_1')).resolves.toEqual({ credentialID: ACCOUNT_B.id, strict: false });
   });
 
   it('prefers the account with the most headroom in the failing family', async () => {
@@ -454,51 +494,43 @@ describe('limit failover route', () => {
     expect(cleared.body.config).toBeNull();
   });
 
-  it('answers the prompt hook with the account to activate', async () => {
+  it('returns a global session to the provider preferred account when its turn starts', async () => {
     const app = createApp();
-    await request(app).post('/api/openchamber/limit-failover/session-account')
-      .send({ sessionID: 'ses_1' })
-      .expect(401);
-    await request(app).post('/api/openchamber/limit-failover/session-account')
+    const promptHook = (body) => request(app).post('/api/openchamber/limit-failover/session-account')
       .set('authorization', 'Bearer token')
-      .send({})
-      .expect(400);
-    await request(app).put('/api/openchamber/limit-failover/session-account')
-      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
+      .send(body);
+    await request(app).post('/api/openchamber/limit-failover/session-account').send({ sessionID: 'ses_1' }).expect(401);
+    await promptHook({}).expect(400);
+    // No preferred account: the active one stays.
+    await promptHook({ sessionID: 'ses_1', providerID: 'anthropic', activeCredentialID: ACCOUNT_B.id }).expect(200, { activate: null });
+
+    await request(app).put('/api/openchamber/limit-failover/provider-account')
+      .send({ providerID: 'anthropic', credentialID: ACCOUNT_A.id })
       .expect(200);
-    await request(app).post('/api/openchamber/limit-failover/session-account')
-      .set('authorization', 'Bearer token')
-      .send({ sessionID: 'ses_1' })
-      .expect(200, { activate: ACCOUNT_A.id });
-    await request(app).post('/api/openchamber/limit-failover/session-account')
-      .set('authorization', 'Bearer token')
-      .send({ sessionID: 'ses_2' })
-      .expect(200, { activate: null });
+    const stored = await request(app).get('/api/openchamber/limit-failover/provider-account?providerID=anthropic').expect(200);
+    expect(stored.body.config).toMatchObject({ providerID: 'anthropic', credentialID: ACCOUNT_A.id });
+    await promptHook({ sessionID: 'ses_1', providerID: 'anthropic', activeCredentialID: ACCOUNT_B.id }).expect(200, { activate: ACCOUNT_A.id });
+    await promptHook({ sessionID: 'ses_1', providerID: 'anthropic', activeCredentialID: ACCOUNT_A.id }).expect(200, { activate: null });
+
+    // A pinned session never moves the active credential.
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_2', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_B.id })
+      .expect(200);
+    await promptHook({ sessionID: 'ses_2', providerID: 'anthropic', activeCredentialID: ACCOUNT_B.id }).expect(200, { activate: null });
+
+    await request(app).put('/api/openchamber/limit-failover/provider-account')
+      .send({ providerID: 'anthropic', credentialID: null })
+      .expect(200, { config: null });
+    await promptHook({ sessionID: 'ses_1', providerID: 'anthropic', activeCredentialID: ACCOUNT_B.id }).expect(200, { activate: null });
   });
 
-  it('stops naming an account the prompt hook should activate once the account ran out', async () => {
+  it('keeps the preferred account out while any of its limits is out', async () => {
     const app = createApp();
-    await request(app).put('/api/openchamber/limit-failover/session-account')
-      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
+    await request(app).put('/api/openchamber/limit-failover/provider-account')
+      .send({ providerID: 'anthropic', credentialID: ACCOUNT_A.id })
       .expect(200);
-    // A runs out for the whole account; the pin waits for its reset instead of
-    // putting every session back on it.
-    await request(app).post('/api/openchamber/limit-failover')
-      .set('authorization', 'Bearer token')
-      .send(quotaReport({ sessionID: 'ses_1' }))
-      .expect(200);
-    await request(app).post('/api/openchamber/limit-failover/session-account')
-      .set('authorization', 'Bearer token')
-      .send({ sessionID: 'ses_1' })
-      .expect(200, { activate: null });
-  });
-
-  it('skips a pin that is out for the turn\'s model, and keeps it for other models', async () => {
-    const app = createApp();
-    await request(app).put('/api/openchamber/limit-failover/session-account')
-      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
-      .expect(200);
-    // A runs out of Fable only.
+    // A runs out of Fable only. Putting it back for a Sonnet turn would send
+    // the sessions on Fable back to the spent window.
     await request(app).post('/api/openchamber/limit-failover')
       .set('authorization', 'Bearer token')
       .send(quotaReport({
@@ -511,30 +543,49 @@ describe('limit failover route', () => {
       .expect(200);
     await request(app).post('/api/openchamber/limit-failover/session-account')
       .set('authorization', 'Bearer token')
-      .send({ sessionID: 'ses_1', modelID: 'claude-fable-5-2' })
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', modelID: 'claude-sonnet-5-5', activeCredentialID: ACCOUNT_B.id })
       .expect(200, { activate: null });
-    await request(app).post('/api/openchamber/limit-failover/session-account')
-      .set('authorization', 'Bearer token')
-      .send({ sessionID: 'ses_1', modelID: 'claude-sonnet-5-5' })
-      .expect(200, { activate: ACCOUNT_A.id });
   });
 
-  it('does not grant a grace retry to a turn that was already on its pin', async () => {
+  it('moves a preferred session whose pin cannot take its requests, instead of retrying on the spent account', async () => {
     const { runtime } = createRuntime();
     const app = express();
     runtime.registerRoutes(app, express);
     runtime.registerUiRoutes(app, express);
     await request(app).put('/api/openchamber/limit-failover/session-account')
-      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_A.id })
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'preferred', credentialID: ACCOUNT_B.id })
       .expect(200);
-    // The turn started on A and A was already active: nothing switched.
-    await request(app).post('/api/openchamber/limit-failover/session-account')
+    const credentials = [ACCOUNT_A, ACCOUNT_B, ACCOUNT_C];
+    // The plugin could not sign with B, so the request ran on the active A.
+    await expect(runtime.decide(quotaReport({ sessionID: 'ses_1', credentials }))).resolves.toEqual({ action: 'retry' });
+    // The retry went out on A again: B is out of the rotation, the session moves to C.
+    await expect(runtime.decide(quotaReport({ sessionID: 'ses_1', credentials }))).resolves.toEqual({ action: 'retry' });
+    const answer = await request(app).post('/api/openchamber/limit-failover/request-account')
       .set('authorization', 'Bearer token')
-      .send({ sessionID: 'ses_1', modelID: 'claude-fable-5-2', activeCredentialID: ACCOUNT_A.id })
-      .expect(200, { activate: ACCOUNT_A.id });
-    // So the limit A hits is A's own, and the session moves.
-    await expect(runtime.decide(quotaReport({ sessionID: 'ses_1', modelID: 'claude-fable-5-2' })))
-      .resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_B.id });
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', modelID: 'claude-opus', activeCredentialID: ACCOUNT_A.id })
+      .expect(200);
+    expect(answer.body).toEqual({ credentialID: ACCOUNT_C.id, strict: false });
+  });
+
+  it('names the account a fixed request must use, and fails it closed', async () => {
+    const app = createApp();
+    const accountOf = (sessionID, providerID = 'anthropic') => request(app)
+      .post('/api/openchamber/limit-failover/request-account')
+      .set('authorization', 'Bearer token')
+      .send({ sessionID, providerID, modelID: 'claude-opus', activeCredentialID: ACCOUNT_A.id });
+    await request(app).post('/api/openchamber/limit-failover/request-account').send({ sessionID: 'ses_1', providerID: 'anthropic' }).expect(401);
+    await accountOf('ses_1').expect(200, { credentialID: null, strict: false });
+    await request(app).put('/api/openchamber/limit-failover/session-account')
+      .send({ sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_B.id })
+      .expect(200);
+    await accountOf('ses_1').expect(200, { credentialID: ACCOUNT_B.id, strict: true });
+    // A pin for another provider does not apply.
+    await accountOf('ses_1', 'openai').expect(200, { credentialID: null, strict: false });
+    const shown = await request(app).get('/api/openchamber/limit-failover/session-account?sessionID=ses_1&providerID=anthropic').expect(200);
+    expect(shown.body.account).toBe(ACCOUNT_B.id);
+    // A global session shows the active account the plugin last reported.
+    const global = await request(app).get('/api/openchamber/limit-failover/session-account?sessionID=ses_2&providerID=anthropic').expect(200);
+    expect(global.body).toEqual({ config: null, account: ACCOUNT_A.id });
   });
 
   it('waits out a fixed session\'s named reset instead of moving it to some other account', async () => {
@@ -562,6 +613,25 @@ describe('limit failover route', () => {
       activeCredentialID: ACCOUNT_B.id,
       captured: { status: 'rejected', resetAt: NOW + 3_600_000, claim: 'seven_day_fable' },
     }))).resolves.toEqual({ action: 'wait', delay: 3_600_000 + 15_000 });
+  });
+
+  it('reads a pin file written before the preferred account existed, and keeps its pins', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-session-accounts-'));
+    temporaryDirectories.push(dataDir);
+    await fs.mkdir(path.join(dataDir, 'limit-failover'));
+    const pin = { sessionID: 'ses_1', providerID: 'anthropic', mode: 'fixed', credentialID: ACCOUNT_A.id, updatedAt: NOW };
+    await fs.writeFile(path.join(dataDir, 'limit-failover', 'session-accounts.json'), JSON.stringify({ version: 1, sessions: [pin] }));
+    const runtime = createLimitFailoverRuntime({
+      fsPromises: fs, path, instanceDir: os.tmpdir(), dataDir, readSettings: async () => ({}), authorizeRequest: () => true, now: () => NOW,
+    });
+    const app = express();
+    runtime.registerUiRoutes(app, express);
+    await request(app).put('/api/openchamber/limit-failover/provider-account')
+      .send({ providerID: 'anthropic', credentialID: ACCOUNT_B.id })
+      .expect(200);
+    const written = JSON.parse(await fs.readFile(path.join(dataDir, 'limit-failover', 'session-accounts.json'), 'utf8'));
+    expect(written.sessions).toEqual([pin]);
+    expect(written.providers).toEqual([{ providerID: 'anthropic', credentialID: ACCOUNT_B.id, updatedAt: NOW }]);
   });
 
   it('serves the usage sweep merged with the exhaustion marks', async () => {
@@ -784,6 +854,59 @@ describe('limit failover plugin', () => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ activate: null }))));
       await hooks.prompt({ sessionID: 'ses_1', messageID: 'msg_2', prompt: { text: 'hi' }, delivery: 'queue' });
       expect(ctx.credential.activate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('signs a pinned session request with its own account, on the same request object', async () => {
+    const plugin = await loadPlugin();
+    const { ctx, hooks } = createContext();
+    await plugin.setup(ctx);
+    await withCallbackEnv(async () => {
+      let answer = { credentialID: ACCOUNT_B.id, strict: true };
+      const fetchMock = vi.fn(async (url) => new Response(JSON.stringify(
+        String(url).endsWith('/request-account') ? answer : { action: 'fail' },
+      )));
+      vi.stubGlobal('fetch', fetchMock);
+      const httpEvent = () => ({
+        sessionID: 'ses_1',
+        agent: 'build',
+        model: { providerID: 'anthropic', id: 'claude-opus' },
+        kind: 'primary',
+        request: new Request('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { authorization: 'Bearer token-cred_a' } }),
+      });
+
+      const pinned = httpEvent();
+      const original = pinned.request;
+      await hooks['http.request'](pinned);
+      expect(pinned.request).toBe(original);
+      expect(pinned.request.headers.get('authorization')).toBe('Bearer token-cred_b');
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+        sessionID: 'ses_1', providerID: 'anthropic', modelID: 'claude-opus', activeCredentialID: ACCOUNT_A.id,
+      });
+      // The failure that follows names the account the request went out on.
+      await hooks.retry(retryEvent());
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).usedCredentialID).toBe(ACCOUNT_B.id);
+
+      // A global session's request keeps the active account.
+      answer = { credentialID: null, strict: false };
+      const global = httpEvent();
+      await hooks['http.request'](global);
+      expect(global.request.headers.get('authorization')).toBe('Bearer token-cred_a');
+      await hooks.retry(retryEvent());
+      expect(JSON.parse(fetchMock.mock.calls[3][1].body).usedCredentialID).toBeUndefined();
+
+      // A fixed account that cannot sign stops the request instead of using another account.
+      ctx.integration.connection.resolve.mockResolvedValueOnce({ type: 'api', key: 'k' });
+      answer = { credentialID: ACCOUNT_B.id, strict: true };
+      await expect(hooks['http.request'](httpEvent())).rejects.toThrow(/fixed to/);
+      // So does a fixed session when the server cannot be asked.
+      fetchMock.mockRejectedValueOnce(new Error('offline'));
+      await expect(hooks['http.request'](httpEvent())).rejects.toThrow(/fixed to/);
+      ctx.integration.connection.resolve.mockResolvedValueOnce(undefined);
+      answer = { credentialID: ACCOUNT_B.id, strict: false };
+      const preferred = httpEvent();
+      await hooks['http.request'](preferred);
+      expect(preferred.request.headers.get('authorization')).toBe('Bearer token-cred_a');
     });
   });
 

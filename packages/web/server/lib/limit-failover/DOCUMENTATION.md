@@ -6,8 +6,10 @@ What happens when a provider's usage limit stops a session: switching the
 provider to its next stored account, and moving the session to the fallback
 model. Two settings drive it, both off by default:
 
-- `accountSwitchProviders`: provider ids the user opted in on the provider's
-  page in Settings → Providers (`ProviderAccountSwitchToggle.tsx`).
+- `accountSwitchProviders`: provider ids whose account mode on the provider's
+  page in Settings → Providers (`ProviderAccountMode.tsx`) is Automatic or
+  Preferred. Preferred also stores the account to return to on the server
+  (`session-accounts.js`, `providers`); Fixed is the provider left out.
 - `fallbackModel`: `provider/model`, Settings → Sessions → Session defaults,
   with its thinking level in `fallbackVariant` (the select beside the picker,
   shown when the model has levels; cleared when the model changes).
@@ -54,9 +56,18 @@ same token.
    is forgotten, so its account does not count as just switched to.
 
 A session can pin an account (`session-accounts.js`, read and set through the
-UI routes). The plugin's `prompt` hook asks which account the turn should
-start on and activates it. OpenCode keeps one active credential per provider,
-so two sessions pinned to different accounts take turns with it.
+UI routes, and from the composer before the session exists). The pin never
+changes the active credential, which every other session runs on. The
+plugin's `http.request` hook asks `POST .../request-account` which account the
+request goes out on and swaps the bearer token for that account's own; the
+Claude sign-in plugin has already signed the request with the active
+credential, since it loads from the global config, before OpenChamber's
+managed layer. The failure report then names `usedCredentialID`. Fixed fails
+closed: a pinned account that cannot sign throws instead of sending the
+request on another account.
+
+The plugin's `prompt` hook returns a session following the global settings to
+the provider's preferred account, once its mark lifted for the turn's model.
 
 The plugin also sweeps each stored Claude account's plan usage and posts it to
 `POST .../limit-failover/usage`. `decide` uses it to prefer the account with
@@ -89,10 +100,12 @@ accounts first, then moved to the fallback.
 - The fallback model is never chosen for a session already on it, so a limit
   on the fallback ends in OpenCode's own error and not in a loop.
 - Decisions run one at a time.
-- A session pinned to an account starts each turn on it. Pinned `fixed`, a
-  limit on that account ends the turn instead of moving it; pinned
-  `preferred`, it moves like the global setting and returns to the pin once
-  the mark lifts. A pin for another provider does not apply.
+- A session pinned to an account sends every request on it, and only its own
+  requests. Pinned `fixed`, a limit on that account ends the turn (or waits
+  out a named reset); pinned `preferred`, the session alone moves to the
+  account with the most room and returns to the pin once the mark lifts. A
+  request that ran elsewhere while the pin is free gets one retry a minute on
+  the pin. A pin for another provider does not apply.
 - Works only with an OpenCode OpenChamber starts: an external OpenCode
   (`OPENCODE_HOST`, skip-start) and VS Code never load the plugin, the
   Settings hints say so, and VS Code hides both controls.
@@ -116,15 +129,18 @@ limit error is the cost of not stopping the turn. Both settings stay in
 one on still rewrites the watched config. Installs where the user's own
 environment sets `OPENCODE_CONFIG` need a restart, like the agent tools.
 
-### Why a switch is global, and not per session
+### Why a pinned session swaps the token per request, and not the active credential
 
-An account's limit belongs to the account. OpenCode keeps one active
-credential per integration, and leaving any session on the exhausted account
-would only fail it again. A session can still pin an account, but the pin is
-applied by activating that credential when the session's turn starts, not by
-overriding the request: the plugin that signs Anthropic requests overwrites
-the `Authorization` header with the active credential, so a per-request
-override never reaches Anthropic.
+OpenCode keeps one active credential per integration. The first version
+pinned a session by activating its account when its turn started, which moved
+every other session to that account too: two sessions on different accounts
+both ran on whichever activated last. The token swap touches only the pinned
+session's request. It runs in `http.request` after the Claude sign-in plugin,
+which reads the active credential and writes `Authorization`; the swap keeps
+the same `Request` object, because that plugin keys its response transforms
+on it. A switch for sessions following the global settings still activates
+the next credential: the limit belongs to the account, and leaving them on it
+would only fail again.
 
 ### Why the reset comes from the captured headers, and not the error body
 
