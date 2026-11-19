@@ -68,6 +68,14 @@ person reach the Browser pane instead:
 
 - **One Chrome per chat.** A scope is a project and a chat; nothing is
   shared between two chats' scopes, closing one closes only its Chrome.
+  A chat's Chrome closes with its last tab, unless an agent waits on it for
+  help or it is a sign-in browser, and the dock state lists that chat in
+  `emptiedSessions` until it browses again. The panel then closes the tabs
+  that showed it. Until it closes, the viewer gets no frame: asking one of a
+  browser with no tab opens a blank tab, which would keep it alive on the
+  dev-server list. A Chrome that never had a tab (the panel just opened it)
+  is kept. Opening a chat whose Chrome has tabs shows it in the panel while
+  the person follows that chat's agent.
   The Browser pane shows the scope of the chat on screen and keeps only that
   chat's tabs in its strip (`parkedBrowserTabs` in `useUIStore`).
 - **The page keeps its size.** A new scope lays pages out at the desktop
@@ -94,11 +102,15 @@ person reach the Browser pane instead:
   agent opened (`browser.open`, or a page one of its tabs opened), naming it
   or, without `tabId`, its most recent one. A tab the person opened is
   refused and stays open.
-- **Login help needs a profile to last.** `browser.requestHelp` with
-  `kind: 'login'` signs into the project's bound profile. A chat without one
-  gets the ordinary hand-over of its page, and the answer carries
-  `profileSaved: false` and a `note`, so the agent does not take the login
-  for saved. A profile bound after a chat's browser started does not reach
+- **Login help goes into a profile.** `browser.requestHelp` with
+  `kind: 'login'` signs into the project's bound profile: the person signs in
+  on the profile's sign-in browser and one Save stores it and hands control
+  back, so the agent continues on a fresh copy. Cancel closes it unsaved and
+  answers `declined` at once. A project without a profile first gets the
+  `kind: 'profile'` request below, named after the project folder; after
+  Allow the sign-in follows. Declining it leaves the ordinary hand-over of
+  the page, and the answer carries `profileSaved: false` and a `note`, so
+  the agent does not take the login for saved. A profile bound after a chat's browser started does not reach
   that browser; `browser.saveProfile` says so and how to restart onto it.
 - **An agent asks before it touches profiles.** `browser.requestHelp` with
   `kind: 'profile'` (and `profileName`, default the project folder's name)

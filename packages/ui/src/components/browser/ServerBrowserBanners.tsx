@@ -176,8 +176,9 @@ export const ServerBrowserBanners: React.FC<{
           ? <ProfileRequestBanner help={help} profile={help.profile} onAnswer={onAnswerProfileRequest} />
           : <HelpBanner help={help} />}
         {/* Handing back is how the user answers the request, so the bar with
-            that button has to stay while they hold control. */}
-        {control.controller === 'user' && control.mine ? (
+            that button has to stay while they hold control. A login request
+            is answered by the sign-in bar's Save, which hands back itself. */}
+        {help.kind !== 'login' && control.controller === 'user' && control.mine ? (
           <ControlBar control={control} connection={connection} focused={focused} onHandBack={onHandBack} />
         ) : null}
       </>

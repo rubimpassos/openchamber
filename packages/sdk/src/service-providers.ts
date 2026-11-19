@@ -282,7 +282,7 @@ export type BrowserCloseData = { closed: true; tabId?: string };
  * person did (or the page unchanged, on a timeout).
  */
 export type BrowserRequestHelpData = {
-  /** `approved`/`declined` answer a `kind: 'profile'` request. */
+  /** `approved`/`declined` answer a `kind: 'profile'` request; `declined` also answers a `kind: 'login'` whose sign-in the person cancelled. */
   outcome: 'handed-back' | 'signed-in' | 'timeout' | 'approved' | 'declined';
   tabId?: string;
   url: string;

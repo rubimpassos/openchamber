@@ -1013,15 +1013,69 @@ test('asks the person for help on the chat\'s tab and resumes when they hand bac
   assert.equal(manager.state().help, null);
 });
 
-test('a login request in a chat without a profile hands the page over and says the login was not saved', async () => {
+const settle = async () => {
+  for (let index = 0; index < 8; index += 1) await new Promise((resolve) => setImmediate(resolve));
+};
+
+test('a login request in a chat without a profile first asks to keep the project\'s logins in one, then signs in there', async () => {
+  // Given a chat whose project is bound to no profile, stuck on a login page.
+  const bindings = {};
+  const store = fakeProfiles(bindings);
+  const { factory, runtimes } = copyRuntimes(store);
+  const manager = createBrowserManager({ createRuntime: factory, profiles: store });
+  await manager.perform('browser.open', { url: 'https://app.test/login' }, undefined, context('/work/acme', 'ses_one'));
+  runtimes.get('ses_one').tabs = [{ id: 't1', url: 'https://app.test/login', active: true }];
+
+  // When the agent asks for a login, then the person is asked for a profile named after the project.
+  const asked = manager.requestHelp({ reason: 'Sign in to app.test', timeoutSeconds: 120, kind: 'login' }, undefined, context('/work/acme', 'ses_one'));
+  await settle();
+  assert.equal(manager.state().help.kind, 'profile');
+  assert.deepEqual(manager.state().help.profile, { name: 'acme', exists: false });
+
+  // When they allow it, then the profile's sign-in browser opens for the login.
+  manager.answerProfileRequest(true, {});
+  await settle();
+  const acme = (await store.list()).find((profile) => profile.name === 'acme');
+  assert.equal(bindings['/work/acme'], acme.id);
+  assert.equal(manager.state().help.kind, 'login');
+
+  // When they save the sign-in, then the agent hears it was saved into that profile.
+  await manager.closeProfile(acme.id);
+  const result = await asked;
+  assert.equal(result.outcome, 'signed-in');
+  assert.equal(result.profile, 'acme');
+  assert.equal(manager.state().help, null);
+});
+
+test('cancelling a sign-in answers the agent at once instead of leaving it waiting', async () => {
+  // Given a login request on a bound project.
+  const store = fakeProfiles({ '/work': 'p1' });
+  const { factory } = copyRuntimes(store);
+  const manager = createBrowserManager({ createRuntime: factory, profiles: store });
+  const asked = manager.requestHelp({ reason: 'Sign in', timeoutSeconds: 60, kind: 'login' }, undefined, context('/work', 'ses_one'));
+  await settle();
+
+  // When the person closes the sign-in browser without saving.
+  const signIn = manager.state().scopes.find((scope) => scope.signIn);
+  await manager.closeScope(signIn.id, manager.state().generation, {});
+
+  // Then the agent gets a decline and nothing was saved.
+  const result = await asked;
+  assert.equal(result.outcome, 'declined');
+  assert.equal(result.profileSaved, false);
+  assert.equal(store.versions.get('p1'), 0);
+});
+
+test('a login request whose profile offer the person declines hands the page over and says the login was not saved', async () => {
   // Given a chat whose project is bound to no profile.
   const { factory } = createRuntimeFactory();
   const manager = createBrowserManager({ createRuntime: factory, profiles: fakeProfiles({}) });
 
-  // When the agent asks for a login and the person hands back.
+  // When the agent asks for a login, the person declines the profile, then hands back.
   const asked = manager.requestHelp({ reason: 'Sign in', timeoutSeconds: 60, kind: 'login' }, undefined, context('/repo', 'ses_one'));
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  await settle();
+  manager.answerProfileRequest(false, {});
+  await settle();
   await manager.surfaceControl('user', 'viewer-a');
   await manager.surfaceControl('none');
 
@@ -1030,6 +1084,89 @@ test('a login request in a chat without a profile hands the page over and says t
   assert.equal(result.outcome, 'handed-back');
   assert.equal(result.profileSaved, false);
   assert.match(result.note, /not saved anywhere/);
+});
+
+test('closes a chat\'s browser when its last tab closes and reports the chat until it browses again', async () => {
+  // Given a chat browsing in one tab, and a frame request waiting on it.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  const runtime = runtimes.get('ses_one');
+  runtime.tabs = [{ id: 't1', url: 'https://one.test', active: true }];
+  runtime.changeTabs();
+
+  // When its last tab closes.
+  runtime.tabs = [];
+  runtime.changeTabs();
+
+  // Then no frame is asked of it (that would open a blank tab), the browser closes, and the chat is reported.
+  assert.equal(await manager.surfaceFrame({ after: 0, wait: 0 }), null);
+  await settle();
+  assert.deepEqual(runtime.calls.at(-1), ['close']);
+  assert.deepEqual(manager.state().scopes, []);
+  assert.deepEqual(manager.state().emptiedSessions, ['ses_one']);
+
+  // When the chat browses again, then it is no longer reported.
+  await manager.perform('browser.open', { url: 'https://two.test' }, undefined, context('/repo', 'ses_one'));
+  assert.deepEqual(manager.state().emptiedSessions, []);
+});
+
+test('a viewer opening a chat whose browser just emptied gets a new browser, not the closing one', async () => {
+  // Given a chat whose last tab just closed, its close still queued.
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_one'));
+  const old = runtimes.get('ses_one');
+  old.tabs = [{ id: 't1', url: 'https://one.test', active: true }];
+  old.changeTabs();
+  old.tabs = [];
+  old.changeTabs();
+
+  // When the panel opens the chat again before the close ran; the close changes
+  // the view first, so the panel retries once with the new generation, as it does.
+  await manager.openScope(context('/repo', 'ses_one'), manager.state().generation, {})
+    .catch(() => manager.openScope(context('/repo', 'ses_one'), manager.state().generation, {}));
+
+  // Then the old browser closed and the chat shows a new one.
+  assert.deepEqual(old.calls.at(-1), ['close']);
+  assert.notEqual(runtimes.get('ses_one'), old);
+  assert.equal(manager.state().scopes.find((scope) => scope.sessionId === 'ses_one').selected, true);
+});
+
+test('a sign-in browser that crashes fails the login request instead of reporting a cancel', async () => {
+  const store = fakeProfiles({ '/work': 'p1' });
+  const { factory, runtimes } = copyRuntimes(store);
+  const manager = createBrowserManager({ createRuntime: factory, profiles: store });
+  const asked = manager.requestHelp({ reason: 'Sign in', timeoutSeconds: 60, kind: 'login' }, undefined, context('/work', 'ses_one'));
+  await settle();
+  runtimes.get('sign-in').die();
+  await assert.rejects(asked, /closed before the sign-in was saved/);
+});
+
+test('keeps a browser that never had a tab, and one an agent waits on for help', async () => {
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+
+  // A browser the panel just opened has no tab yet: it stays.
+  await manager.openScope(context('/repo', 'ses_new'), manager.state().generation, {});
+  runtimes.get('ses_new').changeTabs();
+  await settle();
+  assert.equal(manager.state().scopes.length, 1);
+
+  // A browser whose last tab closes while the agent waits for help stays too.
+  await manager.perform('browser.open', { url: 'https://one.test' }, undefined, context('/repo', 'ses_help'));
+  const runtime = runtimes.get('ses_help');
+  runtime.tabs = [{ id: 't1', url: 'https://one.test', active: true }];
+  runtime.changeTabs();
+  const asked = manager.requestHelp({ reason: 'Sign in', timeoutSeconds: 60 }, undefined, context('/repo', 'ses_help'));
+  await settle();
+  runtime.tabs = [];
+  runtime.changeTabs();
+  await settle();
+  assert.ok(manager.state().scopes.some((scope) => scope.sessionId === 'ses_help'));
+  await manager.surfaceControl('user', 'viewer-a');
+  await manager.surfaceControl('none');
+  await asked;
 });
 
 test('stops waiting for help at its time limit or when cancelled', async () => {

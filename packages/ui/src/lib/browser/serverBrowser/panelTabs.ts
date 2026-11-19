@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import type { ServerBrowserScope } from './types';
+import type { ServerBrowserScope, ServerBrowserState } from './types';
 
 /**
  * Which Chrome tab on the server each Browser panel tab shows.
@@ -64,6 +64,23 @@ export const panelTabsByChromeTab = (
     if (key.startsWith(prefix)) result.set(tabId, key.slice(prefix.length));
   }
   return result;
+};
+
+/**
+ * Panel tabs that showed a Chrome tab of the chat's browser after the service
+ * closed that browser with its last tab (`emptiedSessions`): they close with
+ * it. A panel tab opened after that holds no claim on the old browser, so it
+ * gets a new one. The scope id is the service's (project, chat) key.
+ */
+export const emptiedChatPanelTabs = (
+  state: ServerBrowserState | null,
+  directory: string,
+  sessionId: string | null,
+): string[] => {
+  if (!sessionId || !state?.emptiedSessions?.includes(sessionId)) return [];
+  const scopeId = JSON.stringify([directory, sessionId]);
+  if (state.scopes.some((scope) => scope.id === scopeId)) return [];
+  return [...panelTabsByChromeTab(useServerBrowserPanelTabs.getState().claims, scopeId).values()];
 };
 
 /**

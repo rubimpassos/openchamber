@@ -71,9 +71,11 @@ itself; it can only ask and wait.
   help request. `kind` (`'login'` or `'page'`, from the agent's parameters)
   only changes the notification's title (`../notifications/DOCUMENTATION.md`)
   — the router passes it through untouched, the provider decides what to do
-  with it. The built-in provider answers a `login` it had no saved profile
-  for with `profileSaved: false` and a `note`, so the agent never takes a
-  plain hand-over for a saved login. `kind: 'profile'` (with an optional
+  with it. The built-in provider answers a `login` for a project without a
+  saved profile by first asking the person to create one (the `profile`
+  request below), then signing in there; only when they decline does the
+  answer carry `profileSaved: false` and a `note`, so the agent never takes
+  a plain hand-over for a saved login. `kind: 'profile'` (with an optional
   `profileName`, at most 80 characters, refused with any other kind) asks
   the person to approve keeping the chat's logins in that saved profile; the
   provider changes nothing until they do and answers `approved`, `declined`,

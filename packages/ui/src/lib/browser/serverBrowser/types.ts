@@ -124,6 +124,8 @@ export type ServerBrowserState = {
   readonly agentScopeId?: string | null;
   readonly generation: number;
   readonly help: ServerBrowserHelp | null;
+  /** Chats whose browser closed with its last tab, until that chat opens a browser again. */
+  readonly emptiedSessions?: readonly string[];
   readonly chrome: ServerBrowserChromeStatus;
   readonly scopes: readonly ServerBrowserScope[];
 };

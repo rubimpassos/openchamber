@@ -9,6 +9,8 @@ const EVICTABLE_AFTER_MS = 60_000;
 
 const scopeId = ({ directory, sessionId }) => JSON.stringify([directory, sessionId]);
 const HELP_TIMEOUT_DEFAULT_S = 300;
+const HELP_MIN_WAIT_S = 30;
+const SIGN_IN_START_S = 15;
 const LOGIN_NOT_SAVED_NOTE = 'This chat\'s browser does not run on a saved profile, so the login was not saved anywhere: it lasts only as long as this chat\'s browser. To keep logins across chats, the user binds this project to a profile on the Server Browser page; a chat browser opened after that uses it.';
 // A dock opens a profile for signing in under this pseudo-project; agents
 // never send it, because the host fills their context from the chat.
@@ -140,6 +142,8 @@ export const createBrowserManager = ({
   // when it closes; an agent's copy is saved only on request.
   const removeScope = (entry, { save = isSignIn(entry) } = {}) => {
     scopes.delete(entry.id);
+    // A login request waits on this save rather than taking the close for a cancel.
+    entry.saving = save;
     notifyControl();
     if (selectedScopeId === entry.id) {
       for (const pending of frameControllers) pending.abort();
@@ -150,6 +154,10 @@ export const createBrowserManager = ({
     return Promise.resolve(entry.runtime.close({ save })).then((version) => {
       if (save && entry.profile) noteSaved(entry.profile.id, version);
       return version;
+    }, (error) => {
+      entry.saving = false;
+      notifyControl();
+      throw error;
     });
   };
 
@@ -162,6 +170,34 @@ export const createBrowserManager = ({
       message: `The browser profile "${entry.profile?.name ?? ''}" could not be saved: ${error instanceof Error ? error.message : error}`,
     };
   });
+
+  // A chat's browser whose last tab closed (the agent's browser.close, the
+  // person closing the panel tab) closes too, and the chat is reported in
+  // `emptiedSessions` so its viewers close their Browser panel tabs. Until the
+  // close runs, the viewer gets no frame: a frame request would open a blank
+  // tab and keep the browser alive on the dev-server list. A browser that
+  // never had a tab is the panel opening an empty one, which keeps that tab.
+  // A sign-in browser and one an agent waits on for help stay open.
+  const emptiedSessions = new Set();
+  const closeWhenEmptied = (entry) => {
+    if ((entry.runtime.tabs?.length ?? 0) > 0) {
+      entry.hadTabs = true;
+      entry.emptied = false;
+      return;
+    }
+    if (!entry.hadTabs || entry.emptied || isSignIn(entry)) return;
+    entry.emptied = true;
+    void enqueue(async () => {
+      if (scopes.get(entry.id) !== entry || !entry.emptied) return;
+      if (entry.helpPending > 0) {
+        entry.emptied = false;
+        return;
+      }
+      emptiedSessions.add(entry.sessionId);
+      if (emptiedSessions.size > 50) emptiedSessions.delete(emptiedSessions.values().next().value);
+      await removeScope(entry, { save: false });
+    }).catch(() => {});
+  };
 
   // Other browsers on the same profile, so an agent can tell whose changes are whose.
   const profileUsers = (entry) => [...scopes.values()]
@@ -195,6 +231,7 @@ export const createBrowserManager = ({
     if (signIn && !requestedProfile) throw new Error('Open a profile for signing in from the Server Browser page');
     const profile = requestedProfile ?? (profiles ? await profiles.resolve(context.directory) : null);
     await makeRoom();
+    emptiedSessions.delete(context.sessionId);
     const entry = {
       id,
       directory: context.directory,
@@ -218,6 +255,7 @@ export const createBrowserManager = ({
     // A tab switch changes what the dock commands act on, like a scope switch.
     entry.runtime.onTabsChanged(() => {
       if (selectedScopeId === entry.id) viewGeneration += 1;
+      closeWhenEmptied(entry);
     });
     if (!selectedScopeId) {
       select(entry);
@@ -278,10 +316,12 @@ export const createBrowserManager = ({
   // on the profile's sign-in browser, opened on the chat's page, and saves
   // it; the chat then continues on a fresh copy. A chat without a profile
   // gets the ordinary hand-over of its own page (null here).
-  const signInForHelp = async ({ tabId, reason, timeoutSeconds }, signal, context, startedAt) => {
+  const signInForHelp = async ({ tabId, reason, timeoutSeconds, afterApproval = false }, signal, context, startedAt) => {
     const prepared = await enqueue(async () => {
       if (closed) throw new Error('Browser manager is closed');
-      if (controller === 'user') throw new Error('The user controls the browser. Wait for them to hand control back.');
+      // Right after the person approved a profile they may still hold the
+      // picture; the sign-in browser is what they are handed next.
+      if (controller === 'user' && !afterApproval) throw new Error('The user controls the browser. Wait for them to hand control back.');
       const entry = await ensureScope(context);
       if (!entry.profile) return null;
       const page = entry.runtime.tabs.find((tab) => (tabId === undefined ? tab.active : tab.id === tabId)) ?? null;
@@ -309,10 +349,25 @@ export const createBrowserManager = ({
       const outcome = await waitFor(() => {
         if ((savedVersions.get(entry.profile.id) ?? startVersion) > startVersion) return 'signed-in';
         if (scopes.get(entry.id) !== entry) throw new Error('This chat\'s browser closed while waiting for the sign-in');
+        // Cancel closes the sign-in browser without saving; a save closes it
+        // too, and is waited for. Anything else (a crash, a deleted profile)
+        // is an error, never the person's answer.
+        if (scopes.get(signIn.id) !== signIn && !signIn.saving) {
+          if (signIn.cancelled) return 'declined';
+          throw new Error('The sign-in browser closed before the sign-in was saved');
+        }
         return null;
       }, timeoutSeconds, signal);
       if (outcome !== 'signed-in') {
-        return { outcome, url: entry.runtime.url ?? 'about:blank', title: entry.runtime.title ?? '', waitedSeconds: Math.round((now() - startedAt) / 1000) };
+        const answer = {
+          outcome,
+          profileSaved: false,
+          url: entry.runtime.url ?? 'about:blank',
+          title: entry.runtime.title ?? '',
+          waitedSeconds: Math.round((now() - startedAt) / 1000),
+        };
+        if (outcome === 'declined') answer.note = 'The user closed the sign-in without saving it, so nothing was saved and the chat\'s browser is as it was.';
+        return answer;
       }
       const fresh = await enqueue(async () => {
         const pages = entry.runtime.tabs.filter((tab) => /^https?:/.test(tab.url)).map((tab) => ({ url: tab.url, active: tab.active }));
@@ -518,6 +573,9 @@ export const createBrowserManager = ({
           throw new Error('The user controls the browser. Wait for them to hand control back.');
         }
         const entry = scopes.get(knownScope(context) ? scopeId(context) : '');
+        if (!entry && knownScope(context) && emptiedSessions.has(context.sessionId)) {
+          throw new Error('This chat\'s browser closed with its last tab, so there is nothing to save: logins made in it since the last save are gone. Open a page, sign in again, and call browser.saveProfile before closing the last tab.');
+        }
         if (!entry?.profile) {
           const boundLater = entry && profiles ? await profiles.resolve(entry.directory) : null;
           if (boundLater) {
@@ -565,6 +623,7 @@ export const createBrowserManager = ({
         generation: viewGeneration,
         notice: notice ? { ...notice } : null,
         help: help ? { ...help } : null,
+        emptiedSessions: [...emptiedSessions],
         chrome: chromeStatus(),
         copy: selected()?.runtime.copyRequest ?? null,
         // The visible tab's errors and warnings, only for a dock whose console is open.
@@ -607,7 +666,8 @@ export const createBrowserManager = ({
     async openScope(context, expectedGeneration, access) {
       if (closed) throw new Error('Browser manager is closed');
       const existing = knownScope(context) ? scopes.get(scopeId(context)) : null;
-      if (existing) {
+      // An emptied browser is about to close: the queue below opens the next one after it.
+      if (existing && !existing.emptied) {
         showScope(existing, expectedGeneration, access);
         return;
       }
@@ -626,7 +686,7 @@ export const createBrowserManager = ({
     },
     async selectScope(id, expectedGeneration, access) {
       const entry = scopes.get(id);
-      if (!entry) throw new Error('The selected browser scope no longer exists');
+      if (!entry || entry.emptied) throw new Error('The selected browser scope no longer exists');
       showScope(entry, expectedGeneration, access);
     },
     // Closes a chat's browser without saving, even one on a profile; a save
@@ -638,6 +698,8 @@ export const createBrowserManager = ({
         requireGeneration(expectedGeneration);
         const entry = scopes.get(id);
         if (!entry) throw new Error('The selected browser scope no longer exists');
+        // Closing a sign-in browser from the dock is the person's Cancel.
+        entry.cancelled = isSignIn(entry);
         await removeScope(entry, { save: false });
       });
     },
@@ -791,7 +853,7 @@ export const createBrowserManager = ({
       });
     },
     async surfaceFrame({ after, wait, signal }) {
-      const entry = selected();
+      const entry = selected()?.emptied ? null : selected();
       if (closed) return null;
       signal?.throwIfAborted();
       if (!entry) {
@@ -944,6 +1006,21 @@ export const createBrowserManager = ({
       if (kind === 'login' && profiles) {
         const login = await signInForHelp({ tabId, reason, timeoutSeconds }, signal, context, startedAt);
         if (login) return login;
+        // No profile yet: the person is first asked to keep this project's
+        // logins in one, named after the project folder, and then signs in
+        // there. Declining leaves the plain hand-over below.
+        const bound = await profileForHelp({ reason, timeoutSeconds, profileName }, signal, context, startedAt);
+        if (bound.outcome === 'timeout') return bound;
+        if (bound.outcome === 'approved') {
+          // The host ends the whole request at its own time limit, so the
+          // sign-in gets what is left of it, less time to start its browser.
+          const remaining = timeoutSeconds - Math.round((now() - startedAt) / 1000) - SIGN_IN_START_S;
+          if (remaining < HELP_MIN_WAIT_S) {
+            return { ...bound, note: `${bound.note} Too little of this request's time is left for the sign-in: call browser.requestHelp with kind login again.` };
+          }
+          const signedIn = await signInForHelp({ reason, timeoutSeconds: remaining, afterApproval: true }, signal, context, startedAt);
+          if (signedIn) return { ...signedIn, profile: bound.profile };
+        }
       }
       const entry = await enqueue(async () => {
         if (closed) throw new Error('Browser manager is closed');

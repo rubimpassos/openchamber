@@ -39,6 +39,7 @@ import {
   type ServerBrowserCapture,
   type ServerBrowserResult,
 } from './client';
+import { emptiedChatPanelTabs } from './panelTabs';
 import { findSelectedScope, type ServerBrowserScope, type ServerBrowserState } from './types';
 
 const POLL_MS = 2_000;
@@ -182,6 +183,9 @@ export const useServerBrowserConnection = (
         const current = await getServerBrowserState(guestId, viewerId);
         if (cancelled) return;
         if (current.ok) applyState(current.data);
+        // Its browser closed with its last tab: the view closes the panel
+        // tabs that showed it instead of opening a new, empty browser.
+        if (current.ok && emptiedChatPanelTabs(current.data, directory, sessionId).length > 0) break;
         const result = await openServerBrowserScope(guestId, viewerId, {
           directory,
           sessionId,

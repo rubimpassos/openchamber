@@ -21,6 +21,8 @@ import { browserPartitionOf } from '@/lib/browser/contract';
 import { AGENT_TAB_IDLE_MS, dropIdleAgentTabs, pickLiveBrowserTabs, touchRecentBrowserTab } from '@/lib/browser/liveTabs';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useGuestsStore } from '@/lib/guests/store';
+import { loadGuestServiceStatus } from '@/lib/guests/service';
+import { getServerBrowserState } from '@/lib/browser/serverBrowser/client';
 import { guestHasSharedSurface, guestSurfaceDocking, type GuestSurfaceDocking } from '@/lib/guests/surfaces';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import {
@@ -511,6 +513,29 @@ export const ContextSurfacePanes: React.FC = () => {
       ui.revealSessionBrowser(directory, event.sessionId);
     });
   }, [directoryKey, serverBrowserGuest]);
+  // Opening a chat whose browser is already open on the server (its agent
+  // browsed before, or another window watched it) shows it as well, so the
+  // panel does not wait for the agent's next action. A stopped service is not
+  // started for this.
+  React.useEffect(() => {
+    if (!serverBrowserGuest || !directoryKey || !currentSessionId) return undefined;
+    if (!isFollowingBrowserAgent(useUIStore.getState().browserFollowAgentOffSessions, currentSessionId)) return undefined;
+    let cancelled = false;
+    void (async () => {
+      const status = await loadGuestServiceStatus(serverBrowserGuest);
+      if (cancelled || !status.ok || status.result.status !== 'ready') return;
+      const state = await getServerBrowserState(serverBrowserGuest, undefined);
+      if (cancelled || !state.ok) return;
+      const live = state.data.scopes.some((scope) => scope.sessionId === currentSessionId
+        && !scope.signIn
+        && scope.tabs.length > 0
+        && normalizeContextPanelDirectoryKey(scope.directory) === directoryKey);
+      if (live && useSessionUIStore.getState().currentSessionId === currentSessionId) {
+        useUIStore.getState().revealSessionBrowser(directoryKey, currentSessionId);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentSessionId, directoryKey, serverBrowserGuest]);
   const visibleBrowserTabId = browserZone.isOpen && browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
   React.useEffect(() => {
     if (visibleBrowserTabId && directoryKey) wakeBrowserTab(directoryKey, visibleBrowserTabId);

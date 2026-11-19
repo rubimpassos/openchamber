@@ -1,7 +1,15 @@
 ---
-title:
+title: Logins that stay logged in
 ---
 
 ## App
+
+### Improvements
+- **Server Browser: logins stay saved.** When the agent asks you to sign in and the project has no browser profile yet, you are asked once to create one named after the project. Logins you save there carry over to every later chat of the project.
+- Server Browser: opening a chat whose agent already has pages open in the browser shows them in the Browser panel.
+
+### Fixes
+- Server Browser: closing the last tab closes the Browser panel and stops that chat's browser, so the panel no longer falls back to the list of local ports.
+- Server Browser: saving a sign-in is one click that also hands control back to the agent, so the agent no longer stalls until you also press Hand back. Cancelling the sign-in tells the agent right away.
 
 ## VS Code

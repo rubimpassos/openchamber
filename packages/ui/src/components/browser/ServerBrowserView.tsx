@@ -29,6 +29,7 @@ import {
 } from '@/lib/browser/serverBrowser/client';
 import {
   claimedChromeTab,
+  emptiedChatPanelTabs,
   panelTabsByChromeTab,
   unclaimedChromeTabs,
   useServerBrowserAgentTab,
@@ -321,6 +322,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
       return;
     }
     if (myChromeTab) {
+      // No tab left: the service closes this browser and the claim is what
+      // tells this panel tab to close with it.
+      if (scope.tabs.length === 0) return;
       release(scope.id, tabID);
       // The Chrome tab this panel tab showed closed (the agent's browser.close,
       // a popup that finished) while other panel tabs still show live ones:
@@ -388,6 +392,17 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope?.id, tabsSignature, myChromeTab, claims, panelTabs, signIn]);
+
+  // The chat's browser closed with its last tab: its panel tabs close too,
+  // which closes the Browser panel when no other browser tab is left.
+  const emptiedPanelTabs = emptiedChatPanelTabs(serverBrowser.state, directory, serverBrowser.sessionId).join(',');
+  React.useEffect(() => {
+    if (!emptiedPanelTabs || !serverBrowser.sessionId) return;
+    const closing = emptiedPanelTabs.split(',');
+    const emptiedScopeId = JSON.stringify([directory, serverBrowser.sessionId]);
+    for (const panelTabId of closing) release(emptiedScopeId, panelTabId);
+    closeContextPanelTabs(directory, closing);
+  }, [closeContextPanelTabs, directory, emptiedPanelTabs, release, serverBrowser.sessionId]);
 
   // Panel tab names follow the page each one shows.
   React.useEffect(() => {
@@ -521,6 +536,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     const profileId = scope?.profile?.id;
     if (!profileId) return;
     setSavingSignIn(true);
+    // Saving answers the agent's login request, so it hands control back in
+    // the same click: the agent continues as soon as the save lands.
+    canvasHandleRef.current?.release();
     void closeServerBrowserProfile(guestId, viewerId, { id: profileId })
       .then((result) => {
         if (result.ok) {
@@ -539,6 +557,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   // what it had.
   const cancelSignIn = React.useCallback(() => {
     if (!scope || !isSignInScope) return;
+    canvasHandleRef.current?.release();
     void serverBrowser.closeScope(scope.id).finally(() => setSignIn(null));
   }, [isSignInScope, scope, serverBrowser, setSignIn]);
 
