@@ -78,6 +78,18 @@ person reach the Browser pane instead:
   the person follows that chat's agent.
   The Browser pane shows the scope of the chat on screen and keeps only that
   chat's tabs in its strip (`parkedBrowserTabs` in `useUIStore`).
+- **A chat's Chrome stays open until someone closes it.** Leaving it alone
+  does not close it, so a page the agent left for the person (a login, a
+  question) is still there hours later. It closes when its last tab closes,
+  from the panel's ⋯ menu, when OpenChamber stops, and when a new chat needs
+  a browser while `maxBrowsers` (default 6) are open: then the one left alone
+  longest goes, if it has been alone for a minute and no agent waits on it
+  for help. `closeIdleBrowsersAfterMinutes` brings back closing after a time
+  alone. A browser closed this way is reported in `emptiedSessions` like one
+  that lost its last tab, so its panel tabs close instead of showing an empty
+  browser in its place. The manifest declares `service.keepRunning`, so the
+  host does not stop the service, and every chat's Chrome with it, when
+  nobody has called it for a while.
 - **The page keeps its size.** A new scope lays pages out at the desktop
   preset (1440x900, `source: 'default'`); opening or resizing the panel only
   scales the picture. The page follows the panel only in Fill
@@ -136,6 +148,15 @@ CSS size, so a site the agent was reading at desktop width switched to its
 tablet or phone layout the moment someone looked. A fixed size keeps what the
 person sees equal to what the agent saw.
 
+### Why a browser left alone stays open
+
+It used to close after 5 minutes alone, and the host stopped the whole
+service after 10 minutes without a request. An agent that asked the person
+to sign in, or left a page for them to look at, lost it before they came
+back, and the panel then opened an empty browser in its place. An open Chrome
+with a few tabs costs a few hundred MB, so the bound on how many are open
+(`maxBrowsers`) limits memory, and time alone does not.
+
 ## Configuration
 
 There is no user-editable package directory for a built-in, so configuration
@@ -151,7 +172,12 @@ is read from, in order of increasing priority:
 
 Both files share `config.example.json`'s shape (`allowedOrigins`,
 `allowedNetworks`, `discoverDevServers`, `projectDevServers`, `profileStore`,
-`profileKeyFile`, `chromePath`). `projectDevServers` defaults to `true`;
+`profileKeyFile`, `chromePath`, `maxBrowsers`,
+`closeIdleBrowsersAfterMinutes`). `projectDevServers` defaults to `true`;
+`maxBrowsers` to 6 and `closeIdleBrowsersAfterMinutes` to never;
+the service reads both files when it starts, which is when OpenChamber
+starts, so an edit applies after restarting OpenChamber, and an invalid value
+keeps the browser from starting until it is fixed;
 `allowedOrigins`/`allowedNetworks` default to empty. Profiles, Chrome's
 download, and the profile key still default under XDG data/config
 directories (`${XDG_DATA_HOME:-~/.local/share}/openchamber-server-browser/`,

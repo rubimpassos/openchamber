@@ -2421,7 +2421,29 @@ describe('browser actions by ref, keys, dialogs and waits', () => {
     expect(request).toHaveBeenLastCalledWith('browser.wait', { text: 'Saved', timeoutMs: 15_000 }, expect.anything());
   });
 
+  it('passes a help request\'s reason, kind and profile to the browser, waiting as long as the person has', async () => {
+    const request = vi.fn(async () => ({ outcome: 'handed-back' }));
+    const { service } = createService({ browserControl: { request } });
+
+    await service.execute('browser.requestHelp', { reason: 'Sign in', timeoutSeconds: 600 }, '/repo');
+    expect(request).toHaveBeenLastCalledWith(
+      'browser.requestHelp',
+      { reason: 'Sign in', timeoutSeconds: 600, kind: 'page' },
+      expect.objectContaining({ timeoutMs: 615_000 }),
+    );
+    await service.execute('browser.requestHelp', { reason: 'Keep logins', kind: 'profile', profileName: 'acme' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith(
+      'browser.requestHelp',
+      { reason: 'Keep logins', timeoutSeconds: 300, kind: 'profile', profileName: 'acme' },
+      expect.objectContaining({ timeoutMs: 315_000 }),
+    );
+  });
+
   it.each([
+    ['browser.requestHelp', {}, 'reason is required for browser.requestHelp'],
+    ['browser.requestHelp', { reason: 'x', timeoutSeconds: 5 }, 'timeoutSeconds must be an integer from 30 to 900'],
+    ['browser.requestHelp', { reason: 'x', kind: 'call' }, 'kind must be one of login, page, profile'],
+    ['browser.requestHelp', { reason: 'x', profileName: 'acme' }, 'profileName goes with kind profile only'],
     ['browser.hover', {}, 'browser.hover requires ref, selector or text'],
     ['browser.drag', { ref: 'e1' }, 'browser.drag requires to or toSelector'],
     ['browser.press', {}, 'key is required'],

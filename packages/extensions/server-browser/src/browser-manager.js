@@ -1,8 +1,7 @@
 import { InspectorError } from './inspector.js';
 import { cssSize } from './viewports.js';
 
-const DEFAULT_MAX_SCOPES = 4;
-const DEFAULT_IDLE_MS = 5 * 60_000;
+const DEFAULT_MAX_SCOPES = 6;
 const IDLE_SWEEP_INTERVAL_MS = 60_000;
 // A scope can make room for a new one after this long without activity.
 const EVICTABLE_AFTER_MS = 60_000;
@@ -36,7 +35,7 @@ export const createBrowserManager = ({
   profiles = null,
   chromeStatus = () => ({ status: 'ready', message: '' }),
   maxScopes = DEFAULT_MAX_SCOPES,
-  idleMs = DEFAULT_IDLE_MS,
+  idleMs = null,
   now = Date.now,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -171,14 +170,17 @@ export const createBrowserManager = ({
     };
   });
 
-  // A chat's browser whose last tab closed (the agent's browser.close, the
-  // person closing the panel tab) closes too, and the chat is reported in
-  // `emptiedSessions` so its viewers close their Browser panel tabs. Until the
-  // close runs, the viewer gets no frame: a frame request would open a blank
-  // tab and keep the browser alive on the dev-server list. A browser that
-  // never had a tab is the panel opening an empty one, which keeps that tab.
-  // A sign-in browser and one an agent waits on for help stay open.
+  // A chat's browser that closed without its viewers asking (its last tab
+  // closed, idle, or evicted) is reported in `emptiedSessions`, so they close
+  // their Browser panel tabs. Until a last-tab close runs, the viewer gets no
+  // frame: a frame request would open a blank tab and keep the browser alive.
+  // A browser that never had a tab is the panel opening an empty one, kept.
   const emptiedSessions = new Set();
+  const reportEmptied = (entry) => {
+    if (!isSignIn(entry)) emptiedSessions.add(entry.sessionId);
+    if (emptiedSessions.size > 50) emptiedSessions.delete(emptiedSessions.values().next().value);
+    return entry;
+  };
   const closeWhenEmptied = (entry) => {
     if ((entry.runtime.tabs?.length ?? 0) > 0) {
       entry.hadTabs = true;
@@ -193,9 +195,7 @@ export const createBrowserManager = ({
         entry.emptied = false;
         return;
       }
-      emptiedSessions.add(entry.sessionId);
-      if (emptiedSessions.size > 50) emptiedSessions.delete(emptiedSessions.values().next().value);
-      await removeScope(entry, { save: false });
+      await removeScope(reportEmptied(entry), { save: false });
     }).catch(() => {});
   };
 
@@ -207,12 +207,12 @@ export const createBrowserManager = ({
   const makeRoom = async () => {
     if (scopes.size >= maxScopes) {
       const oldest = [...scopes.values()]
-        .filter((candidate) => now() - candidate.lastActivityAt >= EVICTABLE_AFTER_MS)
+        .filter((candidate) => candidate.helpPending === 0 && now() - candidate.lastActivityAt >= EVICTABLE_AFTER_MS)
         .reduce((best, candidate) => (!best || candidate.lastActivityAt < best.lastActivityAt ? candidate : best), null);
       if (!oldest) {
-        throw new Error(`The browser scope limit (${maxScopes}) is in use by chats active in the last minute; try again shortly`);
+        throw new Error(`The browser scope limit (${maxScopes}) is in use by chats active in the last minute or waiting for the user; try again shortly`);
       }
-      await dropScope(oldest);
+      await dropScope(reportEmptied(oldest));
       // Shutdown may have begun meanwhile, and it closes only the scopes it saw.
       if (closed) throw new Error('Browser manager is closed');
     }
@@ -530,10 +530,10 @@ export const createBrowserManager = ({
   let sweepTimer = null;
   const sweepIdleScopes = () => enqueue(async () => {
     const cutoff = now() - idleMs;
-    await Promise.all([...scopes.values()].filter((entry) => entry.lastActivityAt <= cutoff && entry.helpPending === 0).map(dropScope));
+    await Promise.all([...scopes.values()].filter((entry) => entry.lastActivityAt <= cutoff && entry.helpPending === 0).map((entry) => dropScope(reportEmptied(entry))));
   });
   const scheduleSweep = () => {
-    if (closed) return;
+    if (closed || idleMs === null) return;
     sweepTimer = setTimer(() => {
       sweepTimer = null;
       void sweepIdleScopes().catch(() => {}).finally(scheduleSweep);
@@ -574,7 +574,7 @@ export const createBrowserManager = ({
         }
         const entry = scopes.get(knownScope(context) ? scopeId(context) : '');
         if (!entry && knownScope(context) && emptiedSessions.has(context.sessionId)) {
-          throw new Error('This chat\'s browser closed with its last tab, so there is nothing to save: logins made in it since the last save are gone. Open a page, sign in again, and call browser.saveProfile before closing the last tab.');
+          throw new Error('This chat\'s browser was closed (its last tab closed, or it made room for another chat\'s browser), so there is nothing to save: logins made in it since the last save are gone. Open a page, sign in again, and call browser.saveProfile right after.');
         }
         if (!entry?.profile) {
           const boundLater = entry && profiles ? await profiles.resolve(entry.directory) : null;

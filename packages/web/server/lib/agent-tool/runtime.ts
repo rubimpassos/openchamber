@@ -314,7 +314,7 @@ const SCHEDULE_PARAMETER_PROPERTIES = {
   ...pickParameters(SCHEDULE_PARAMETER_NAMES),
   ...SCHEDULE_PARAMETER_OVERRIDES,
 };
-const WEB_PARAMETER_PROPERTIES = pickParameters(WEB_PARAMETER_NAMES);
+const WEB_PARAMETER_PROPERTIES = pickParameters([...WEB_PARAMETER_NAMES, 'reason', 'timeoutSeconds', 'kind', 'profileName']);
 const MEMORY_PARAMETER_PROPERTIES = {
   ...pickParameters(MEMORY_PARAMETER_NAMES),
   ...MEMORY_PARAMETER_OVERRIDES,
@@ -718,7 +718,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
             // directory on its own side. The signal fires when the session is
             // aborted, so the OpenChamber side stops the action too.
             body: JSON.stringify({ input: args, sessionID: context.sessionID, callID: context.id, tool: ${JSON.stringify(name)} }),
-            signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}
+            signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}${name === 'openchamber_web' ? '\n            ...(args.action === "browser.requestHelp" ? { timeout: false } : {}),' : ''}
           })
           const content = await response.text()
           let result = null

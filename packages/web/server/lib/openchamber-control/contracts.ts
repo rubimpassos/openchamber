@@ -111,6 +111,8 @@ export interface ControlInput {
   answerLater?: unknown;
   share?: unknown;
   reason?: unknown;
+  timeoutSeconds?: unknown;
+  profileName?: unknown;
   placeholder?: unknown;
   program?: unknown;
   inputs?: unknown;

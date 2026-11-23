@@ -703,6 +703,9 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).toContain('url');
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).toContain('label');
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).toContain('value');
+    // browser.requestHelp is refused without a reason, so the tool has to carry it.
+    expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties))
+      .toEqual(expect.arrayContaining(['reason', 'timeoutSeconds', 'kind', 'profileName']));
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('selector');
     // The control tool's own `url` names the link session.unlink removes, not a page.
     expect(tool.openchamber.input.properties.parameters.properties.url.description).toContain('session.unlink');
@@ -751,8 +754,10 @@ describe('managed agent tool runtime', () => {
     const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
     process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
     process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const inits = [];
     globalThis.fetch = async (_endpoint, init) => {
       sent.push(JSON.parse(init.body));
+      inits.push(init);
       return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'browser.open', data: {} }));
     };
     const context = { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_1', progress: async () => {} };
@@ -773,6 +778,11 @@ describe('managed agent tool runtime', () => {
         { action: 'session.messages', sessionId: 'ses_1', limit: 3 },
         context,
       );
+      // A help request waits on a person past Bun's six-minute fetch limit.
+      await tool.openchamber_web.execute(
+        { action: 'browser.requestHelp', parameters: { reason: 'Sign in', timeoutSeconds: 900 } },
+        context,
+      );
     } finally {
       globalThis.fetch = originalFetch;
       process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
@@ -785,6 +795,9 @@ describe('managed agent tool runtime', () => {
     // v2 tools get no directory; the session id is what OpenChamber resolves from.
     expect(sent[2].sessionID).toBe('ses_1');
     expect(sent[2].contextDirectory).toBeUndefined();
+    expect(sent[3].input).toEqual({ action: 'browser.requestHelp', reason: 'Sign in', timeoutSeconds: 900 });
+    expect(inits[3]).toMatchObject({ timeout: false });
+    expect(inits[0]).not.toHaveProperty('timeout');
   });
 
   it('declares the workflow tool only when asked, with the scripting guide on script', async () => {

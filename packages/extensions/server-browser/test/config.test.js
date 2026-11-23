@@ -17,8 +17,20 @@ test('defaults to no private origin grants', () => {
     allowPrivateNetwork: null,
     profileStore: null,
     profileKeyFile: null,
+    maxBrowsers: null,
+    closeIdleBrowsersAfterMinutes: null,
   });
   assert.deepEqual(originGrants(config.allowedOrigins), []);
+});
+
+test('reads the browser limit and the idle close, and refuses values that are not whole minutes or browsers', () => {
+  const config = parseConfig({ maxBrowsers: 8, closeIdleBrowsersAfterMinutes: 1440 });
+  assert.equal(config.maxBrowsers, 8);
+  assert.equal(config.closeIdleBrowsersAfterMinutes, 1440);
+  for (const value of [0, -1, 1.5, '60']) {
+    assert.throws(() => parseConfig({ maxBrowsers: value }), /maxBrowsers must be a positive whole number/);
+    assert.throws(() => parseConfig({ closeIdleBrowsersAfterMinutes: value }), /closeIdleBrowsersAfterMinutes must be a positive whole number/);
+  }
 });
 
 test('takes protected origins only from the host and fails on malformed host policy', () => {
