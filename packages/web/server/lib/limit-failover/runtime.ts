@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { classifyLimitFailure, DEFAULT_EXHAUSTION_MS, modelFamilyOf, reportSchema, parseModelSetting } from './policy.js';
-import { toClaudeUsage } from '../quota/providers/claude/transforms.js';
+import { toClaudeUsage, withoutLapsedWindows } from '../quota/providers/claude/transforms.js';
 import { createSessionAccountStore } from './session-accounts.js';
 import type { LimitFailure, LimitReport, LimitScope } from './policy.js';
 import type { Application, ExpressFactory } from '../shared/http-contracts.js';
@@ -264,11 +264,8 @@ const createManagedAccountSetupCode = (callbackExpr: string) => `
             headers: { authorization: "Bearer " + value.access },
             signal: AbortSignal.timeout(10_000),
           }).catch(() => undefined)
-          if (!response?.ok) continue
-          const usage = await response.json().catch(() => undefined)
-          if (usage !== null && typeof usage === "object") {
-            results.push({ id: connection.id, label: connection.label ?? "", usage })
-          }
+          const usage = response?.ok ? await response.json().catch(() => undefined) : undefined
+          results.push({ id: connection.id, label: connection.label ?? "", usage: usage !== null && typeof usage === "object" ? usage : null })
         }
         if (results.length === 0) return
         await fetch(target.url + "/usage", {
@@ -814,12 +811,15 @@ export const createLimitFailoverRuntime = ({
       if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
       const body = usageReportSchema.safeParse(req.body);
       if (!body.success) return res.status(400).json({ error: 'Invalid usage report' });
+      const at = now();
+      const previous = new Map((usageSnapshot(body.data.providerID)?.accounts ?? []).map((account) => [account.id, account.usage]));
+      const kept = (id: string) => { const usage = previous.get(id); return usage ? withoutLapsedWindows(usage, at) : null; };
       accountUsage.set(body.data.providerID, {
-        at: now(),
+        at,
         accounts: body.data.accounts.map((account) => ({
           id: account.id,
           label: account.label || account.id,
-          usage: toClaudeUsage(account.usage),
+          usage: account.usage === null ? kept(account.id) : toClaudeUsage(account.usage),
         })),
       });
       return res.json({ stored: true });

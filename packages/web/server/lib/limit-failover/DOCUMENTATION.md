@@ -72,6 +72,14 @@ the provider's preferred account, once its mark lifted for the turn's model.
 The plugin also sweeps each stored Claude account's plan usage and posts it to
 `POST .../limit-failover/usage`. `decide` uses it to prefer the account with
 the most room in the failing model's window, and the UI shows it.
+Anthropic rate-limits that read per account, so the sweep reports every stored
+account and a failed read as `usage: null`; the server keeps that account's
+last usage, minus the windows that reset since, and drops accounts the sweep
+no longer lists. The work status Usage section shows a pinned session's own
+account by name, with its usage or, before any read of it succeeded, "No rate
+limits reported", never the active account's numbers in its place. A session
+following the global settings runs on the active account, so without swept
+usage it keeps the active account's quota.
 
 Verified end to end on OpenCode 2.0.32 with a fake provider: an exhausted
 account switched to the next one and the turn finished there; with only a
@@ -148,6 +156,16 @@ the `undefined` returned by its rejection handler.
 
 OpenCode loads the plugin from its own directory, where those dependencies are
 not installed. The callback address and token supply the server boundary.
+
+### Why a failed usage read keeps the last usage, and not an empty entry
+
+The usage endpoint answers 429 for one account while another reads fine, and
+for minutes at a time. Replacing the snapshot with the accounts that read
+fine erased the others, so the picker showed no limits for a pinned account
+and the Usage section fell back to the active account's numbers without a
+name. A window that reset since the last good read is dropped from the kept
+usage, so neither the UI nor the headroom choice reads a percent that no
+longer holds.
 
 ### Why the plugin asks the server, and not the settings baked into the plugin
 

@@ -141,3 +141,12 @@ export const toClaudeUsage = z.unknown().transform((rawPayload): ClaudeUsage => 
 
   return { windows, models };
 }).parse;
+
+const currentWindows = (windows: Record<string, UsageWindow>, at: number) => Object.fromEntries(
+  Object.entries(windows).filter(([, window]) => typeof window.resetAt !== 'number' || window.resetAt > at),
+);
+
+export const withoutLapsedWindows = (usage: ClaudeUsage, at: number): ClaudeUsage => ({
+  windows: currentWindows(usage.windows, at),
+  models: Object.fromEntries(Object.entries(usage.models).map(([model, entry]) => [model, { ...entry, windows: currentWindows(entry.windows, at) }])),
+});
