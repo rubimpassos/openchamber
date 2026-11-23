@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { createBotQuestions } from '../questions.js';
 import { createBotServices } from '../services.js';
-import { questionsFixture, questionPeople } from '../questions-test-support.js';
+import { questionsFixture, questionPeople } from '../questions.test-support.js';
 import { BOT_TOOL_ACTIONS } from '../tool.js';
 import { controlledUpstream, disconnectedPolicy, enterprisePolicy, issueResponse } from './http.test-support.js';
 

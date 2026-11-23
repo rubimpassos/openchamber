@@ -10,6 +10,7 @@ import {
   mergeConfigDocuments,
   projectAgent,
   projectAssistantContent,
+  withSessionMetadata,
   projectMessage,
   projectSession,
   projectToolPart,
@@ -45,6 +46,64 @@ describe("projectSession", () => {
     expect(native.parentID).toBe("ses_native")
     const bogus = projectSession({ ...sessionInfo, metadata: { omoParentID: 42 } })
     expect("parentID" in bogus).toBe(false)
+  })
+
+  test("a workflow agent nests under the session that ran it, which OpenCode does not know as its parent", () => {
+    const metadata = { openchamber: { kind: "workflow-agent", parentID: "ses_parent" } }
+    expect(projectSession({ ...sessionInfo, metadata }).parentID).toBe("ses_parent")
+    expect(projectSession({ ...sessionInfo, parentID: "ses_opencode", metadata }).parentID).toBe("ses_opencode")
+    expect("parentID" in projectSession({ ...sessionInfo, metadata: { openchamber: { parentID: "ses_parent" } } })).toBe(false)
+  })
+
+  test("a session an agent runs for its own work nests under that agent's session until the user takes it over", () => {
+    const link = { openchamber: { kind: "operator-child", parentID: "ses_operator", work: { state: "open" } } }
+    const child = projectSession({ ...sessionInfo, metadata: link })
+    expect(child.parentID).toBe("ses_operator")
+
+    const takenOver = withSessionMetadata(child, { openchamber: { work: { state: "open" } } })
+    expect("parentID" in takenOver).toBe(false)
+    expect(withSessionMetadata(takenOver, link).parentID).toBe("ses_operator")
+  })
+
+  test("a metadata change never moves a subagent away from its OpenCode parent", () => {
+    const subagent = projectSession({ ...sessionInfo, parentID: "ses_opencode" })
+    const relinked = withSessionMetadata(subagent, { openchamber: { kind: "operator-child", parentID: "ses_other" } })
+    expect(relinked.parentID).toBe("ses_opencode")
+    expect(withSessionMetadata(subagent, {}).parentID).toBe("ses_opencode")
+  })
+
+  test("an OpenChamber child link takes precedence over an OMO fallback", () => {
+    // Given metadata carrying both the app's child link and the plugin fallback.
+    const metadata = {
+      omoParentID: "ses_omo",
+      openchamber: { kind: "operator-child", parentID: "ses_operator" },
+    }
+    // When the wire session is projected.
+    const child = projectSession({ ...sessionInfo, metadata })
+    // Then the app's explicit owner wins without dropping either metadata namespace.
+    expect(child.parentID).toBe("ses_operator")
+    expect(child.metadata).toEqual(metadata)
+  })
+
+  test("reconciles an OMO child when its parent metadata changes", () => {
+    // Given a session nested through plugin metadata.
+    const child = projectSession({ ...sessionInfo, metadata: { omoParentID: "ses_old" } })
+    // When a replacement metadata snapshot changes the inferred parent.
+    const updated = withSessionMetadata(child, { omoParentID: "ses_new", sourceWork: { id: "work_1" } })
+    // Then the same metadata reconciliation used by both reducers keeps the new owner.
+    expect(updated.parentID).toBe("ses_new")
+    expect(updated.metadata).toEqual({ omoParentID: "ses_new", sourceWork: { id: "work_1" } })
+    expect(child.parentID).toBe("ses_old")
+  })
+
+  test("removes an inferred OMO parent when its metadata link is removed", () => {
+    // Given a child whose only parent is the plugin link.
+    const child = projectSession({ ...sessionInfo, metadata: { omoParentID: "ses_old" } })
+    // When the authoritative metadata no longer links it.
+    const updated = withSessionMetadata(child, { pinned: true })
+    // Then it no longer appears under the old parent.
+    expect(updated).not.toHaveProperty("parentID")
+    expect(updated.metadata).toEqual({ pinned: true })
   })
 
   test("an untitled session gets an empty title rather than undefined", () => {
@@ -226,6 +285,16 @@ describe("projectUserParts", () => {
   test("an empty prompt text produces no text part", () => {
     const parts = projectUserParts({ text: "" }, { sessionID: "s", messageID: "m", created: 1 })
     expect(parts).toEqual([])
+  })
+
+  test("skills attached to a stored prompt stay on the message without their text", () => {
+    const attached = projectMessage({
+      id: "msg_u", type: "user", time: { created: 1 }, text: "Follow $demo",
+      skills: [{ id: "demo", name: "Demo", text: "<skill_content>…</skill_content>" }],
+    }, "ses_1")
+    expect(attached.message).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1 }, skills: [{ id: "demo", name: "Demo" }] })
+    const plain = projectMessage({ id: "msg_p", type: "user", time: { created: 2 }, text: "hi" }, "ses_1")
+    expect(plain.message).not.toHaveProperty("skills")
   })
 })
 

@@ -69,7 +69,7 @@ describe('front-door OpenCode credentials through the agent proxy', () => {
     // Given an agent-only OpenCode key.
     await setup([{ id: 'cred_gateway', label: 'default', integrationID: 'gateway', active: true, value: { type: 'key', key: 'agent-stored-key' } }]);
     // When the normal host credential helper runs. Then it reads the agent store.
-    expect(await getProviderAuth('gateway')).toEqual({ type: 'api', key: 'agent-stored-key' });
+    expect(await getProviderAuth('gateway')).toEqual({ type: 'api', key: 'agent-stored-key', label: 'default' });
   });
   it.each(['openai', 'github-copilot'])('reads the selected %s browser login through the agent', async (provider) => {
     // Given an agent-selected login. When the normal host reader runs. Then its token and method survive the boundary.
@@ -116,5 +116,54 @@ describe('front-door OpenCode credentials through the agent proxy', () => {
     // Given a failed authenticated transport. When reading. Then no local credential source is consulted.
     const source = createAgentCredentialSource({ origin: 'http://localhost:1', fetch: async () => { throw new Error('synthetic failure'); } });
     await expect(source.list()).rejects.toMatchObject({ code: 'agent_host_credential_unavailable' });
+  });
+  it('preserves the SDK renewal body and nested metadata through the private route', async () => {
+    // Given a synthetic transport accepting the SDK envelope.
+    const requests = [];
+    const metadata = { accountID: 'dummy-account', scopes: ['read', 'write'], nested: { enabled: true, optional: null } };
+    const input = { integrationID: 'openai', label: 'Renewed', activate: true,
+      value: { ...login().value, metadata } };
+    const source = createAgentCredentialSource({ origin: 'http://localhost:12345', fetch: async (request) => {
+      requests.push({ url: request.url, method: request.method, headers: Object.fromEntries(request.headers), body: await request.json() });
+      return Response.json({ data: { ...login(), label: input.label, value: input.value, extraAuthority: true } });
+    } });
+    // When the SDK creates the renewed login.
+    const created = await source.create(input);
+    // Then only the URL changes, and parsed response metadata survives without authority claims.
+    expect(requests).toEqual([{ url: 'http://localhost:12345/api/openchamber/host-credentials/renewed-login', method: 'POST',
+      headers: expect.objectContaining({ 'content-type': 'application/json' }), body: input }]);
+    expect(created).toEqual({ ...login(), label: input.label, value: input.value });
+  });
+  it.each([
+    { integrationID: 'github-copilot' },
+    { active: false },
+    { value: { ...login().value, methodID: 'other-method' } },
+  ])('rejects a renewed login with mismatched identity %j', async (replacement) => {
+    // Given a valid SDK reply for a different selection.
+    const source = createAgentCredentialSource({ origin: 'http://localhost:12345', fetch: async () => Response.json({ data: { ...login(), ...replacement } }) });
+    // When renewing the selected login. Then it cannot be replaced by that reply.
+    await expect(source.create({ integrationID: 'openai', label: 'default', activate: true, value: login().value }))
+      .rejects.toMatchObject({ code: 'agent_host_credential_invalid_response' });
+  });
+  it('keeps SDK deletion on the public credential path', async () => {
+    // Given a synthetic transport recording the SDK request.
+    const requests = [];
+    const source = createAgentCredentialSource({ origin: 'http://localhost:12345', fetch: async (request) => {
+      requests.push({ url: request.url, method: request.method, body: await request.text() });
+      return new Response(null, { status: 204 });
+    } });
+    // When removing a prior credential.
+    await source.remove('cred_previous');
+    // Then the mutation retains its SDK method, path and empty body.
+    expect(requests).toEqual([{ url: 'http://localhost:12345/api/credential/cred_previous', method: 'DELETE', body: '' }]);
+  });
+  it.each(['list', 'create', 'remove'])('redacts transport failures for %s', async (operation) => {
+    // Given a transport failure containing a dummy secret.
+    const source = createAgentCredentialSource({ origin: 'http://localhost:12345', fetch: async () => { throw new Error('dummy-secret'); } });
+    // When a credential operation fails. Then neither the error nor its cause exposes that text.
+    const input = { integrationID: 'openai', label: 'default', activate: true, value: login().value };
+    const result = operation === 'create' ? source.create(input) : operation === 'remove' ? source.remove('cred_previous') : source.list();
+    await expect(result).rejects.toSatisfy((error) => error.code === 'agent_host_credential_unavailable'
+      && !error.message.includes('dummy-secret') && error.cause === undefined);
   });
 });

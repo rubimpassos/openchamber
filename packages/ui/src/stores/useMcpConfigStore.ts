@@ -19,11 +19,6 @@ type McpMutationResult = {
   requiresManualRestart?: boolean;
 };
 
-/**
- * Directory a call operates on. Settings can browse another project without
- * moving the app, so every entry point takes one; omitting it means the
- * project the app is currently on.
- */
 const resolveDirectory = (directory?: string | null): string | null => {
   if (directory !== undefined) {
     const trimmed = directory?.trim();
@@ -50,13 +45,7 @@ const getConfigDirectory = (): string | null => {
   return null;
 };
 
-// ============== TYPES ==============
 
-/**
- * Code Mode as the form offers it. `default` is an absent key: OpenCode then
- * decides per server (on, except servers its own defaults exclude, such as
- * executor.sh). `on` and `off` write an explicit value that OpenCode keeps.
- */
 export type McpCodemodeChoice = 'default' | 'on' | 'off';
 
 export const MCP_CODEMODE_CHOICES: readonly McpCodemodeChoice[] = ['default', 'on', 'off'];
@@ -87,7 +76,6 @@ export interface McpDraft {
   disabled: boolean;
 }
 
-// ============== HELPERS ==============
 
 export const envRecordToArray = (env?: Record<string, string>): Array<{ key: string; value: string }> => {
   if (!env) return [];
@@ -100,7 +88,6 @@ const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Record<st
   return Object.fromEntries(filtered.map((e) => [e.key.trim(), e.value]));
 };
 
-/** A millisecond/port form field, or undefined when it says nothing usable. */
 const positiveInteger = (value: string | undefined): number | undefined => {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
@@ -125,12 +112,9 @@ const getMcpCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_MCP_CACHE_KEY;
 };
 
-// ============== STORE ==============
 
 interface McpConfigStore {
-  /** Servers of the project the app is on. Chat and mobile read this one. */
   mcpServers: McpServerWithScope[];
-  /** Every directory loaded so far, including the ambient one. */
   serversByDirectory: Record<string, McpServerWithScope[]>;
   selectedMcpName: string | null;
   /**
@@ -160,10 +144,6 @@ const invalidateMcpCache = (directory: string | null) => {
 
 const EMPTY_MCP_SERVERS: McpServerWithScope[] = [];
 
-/**
- * Servers of one project. Returns a stored array so components can select it
- * directly; an omitted directory means the project the app is on.
- */
 export const selectMcpServersForDirectory = (
   state: Pick<McpConfigStore, 'serversByDirectory'>,
   directory?: string | null,
@@ -172,12 +152,6 @@ export const selectMcpServersForDirectory = (
   return state.serversByDirectory[cacheKey] ?? EMPTY_MCP_SERVERS;
 };
 
-/**
- * Whether this directory's config catalog has been read at least once. A
- * runtime-only MCP row (#5935) waits for that read: before it, every server
- * the runtime reports would read as runtime-only, and a configured server
- * would flash as one while its config entry was still loading.
- */
 export const hasLoadedMcpConfigsForDirectory = (
   state: Pick<McpConfigStore, 'serversByDirectory'>,
   directory?: string | null,
@@ -450,14 +424,12 @@ export const useMcpConfigStore = create<McpConfigStore>()(
   ),
 );
 
-// ============== HELPERS ==============
 
 function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
 
   if (config.scope !== undefined) body.scope = config.scope;
 
-  // v2 requires `type`: an entry without it is dropped when the config loads.
   if (config.type !== undefined) body.type = config.type;
 
   if (config.type === 'local' || config.command !== undefined) {
@@ -501,8 +473,6 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
       if (scope) oauth.scope = scope;
       if (redirectUri) oauth.redirect_uri = redirectUri;
       if (callbackPort !== undefined) oauth.callback_port = callbackPort;
-      // An emptied field drops the key: the object is rebuilt from the form
-      // every save rather than merged onto what is already stored.
       if (authServerMetadataUrl) oauth.auth_server_metadata_url = authServerMetadataUrl;
 
       if (Object.keys(oauth).length > 0 || config.oauthEnabled) {
@@ -523,7 +493,6 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
     const startup = positiveInteger(config.timeoutStartup);
     const catalog = positiveInteger(config.timeoutCatalog);
     const execution = positiveInteger(config.timeoutExecution);
-    // `startup` is meaningless for a server OpenChamber does not spawn.
     if (startup !== undefined && config.type !== 'remote') timeout.startup = startup;
     if (catalog !== undefined) timeout.catalog = catalog;
     if (execution !== undefined) timeout.execution = execution;
@@ -531,7 +500,6 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
   }
 
   if (config.codemode !== undefined) {
-    // `default` removes the key so OpenCode's own per-server default applies.
     body.codemode = config.codemode === 'default' ? null : config.codemode === 'on';
   }
 
@@ -540,8 +508,6 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
   }
 
   if (config.protocol !== undefined) {
-    // `legacy` is what OpenCode does without the key, so it is written as a
-    // removal: the config file only ever names a non-default negotiation.
     body.protocol = config.protocol === 'legacy' ? null : config.protocol;
   }
 

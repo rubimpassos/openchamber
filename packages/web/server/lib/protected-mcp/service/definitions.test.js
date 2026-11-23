@@ -51,6 +51,19 @@ describe('connection definitions', () => {
     expect(secretSlots(parseDefinition(http))).toEqual(['token']);
   });
 
+  it.each([
+    { ...http, http: { ...http.http, headers: { Authorization: { secret: 42 } } } },
+    { ...http, http: { url: http.http.url, oauth: { scopes: [42] } } },
+    { ...http, policy: { allowTools: [42] } },
+    { ...stdio, stdio: { ...stdio.stdio, command: { package: 'mcp', version: '1.0.0', bin: 42 } } },
+  ])('refuses non-string destination fields without coercing them', (definition) => {
+    // Given malformed JSON fields that regular expressions alone would coerce.
+    // When the definition crosses the service boundary.
+    const parse = () => parseDefinition(definition);
+    // Then the refusal uses the stable service error type, never a parser exception.
+    expect(parse).toThrow(expect.objectContaining({ name: 'ProtectedMcpError' }));
+  });
+
   it('never lets a secret reach command arguments', () => {
     expect(codeOf(() => parseDefinition({ ...stdio, stdio: { ...stdio.stdio, args: [{ secret: 'token' }] } })))
       .toBe('secret_in_arguments');

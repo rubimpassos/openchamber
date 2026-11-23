@@ -58,6 +58,38 @@ describe('the agent\'s trust in the human\'s repositories', () => {
       .rejects.toMatchObject({ code: 'BOT_MIGRATION_GIT_TRUST_FAILED' });
   });
 
+  it('permits a missing checkout only for the explicit removal-history path without granting trust', async () => {
+    // Given a retained checkout that has been removed.
+    const mapping = await retained(); const git = fakeGit();
+    await fs.rm(mapping.directory, { recursive: true });
+    // When removal history explicitly allows that missing checkout.
+    await trustMigratedBotCheckout({ mapping, runGit: git.runGit, allowMissingCheckout: true });
+    // Then no global Git configuration is consulted or changed.
+    expect(git.calls).toEqual([]);
+  });
+
+  it('refuses a missing checkout when removal-history authority was not supplied', async () => {
+    // Given a retained checkout that has been removed.
+    const mapping = await retained(); const git = fakeGit();
+    await fs.rm(mapping.directory, { recursive: true });
+    // When the ordinary trust operation encounters it.
+    const result = trustMigratedBotCheckout({ mapping, runGit: git.runGit });
+    // Then the missing path remains a failure before Git configuration access.
+    await expect(result).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(git.calls).toEqual([]);
+  });
+
+  it('refuses a missing Git directory even when removal history allows a missing checkout', async () => {
+    // Given an existing checkout whose recorded Git directory is missing.
+    const mapping = await retained(); const git = fakeGit();
+    await fs.rmdir(mapping.gitDirectory);
+    // When removal history allows only the checkout itself to be absent.
+    const result = trustMigratedBotCheckout({ mapping, runGit: git.runGit, allowMissingCheckout: true });
+    // Then a missing Git directory cannot gain trust through that exception.
+    await expect(result).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(git.calls).toEqual([]);
+  });
+
   it('trusts each project and the folder of its repository, once, and keeps what was there', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'git-trust-')); roots.push(root);
     const repository = path.join(root, 'repo');

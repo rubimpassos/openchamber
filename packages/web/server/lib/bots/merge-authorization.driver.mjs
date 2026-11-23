@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createMergeAuthorizationDriver } from './merge-authorization-test-support.js';
+import { createMergeAuthorizationDriver } from './merge-authorization.test-support.js';
 
 const results = [];
 const scenario = async (name, run) => {

@@ -13,7 +13,7 @@ import { botDefinitionSchema } from './config.js';
 import { createBotProviderRuntime } from './provider-runtime.js';
 import { createBotIdentityStore } from './identities.js';
 import { createBotServices } from './services.js';
-import { createBotDriver } from './runtime-test-support.js';
+import { createBotDriver } from './runtime.test-support.js';
 import { controlledUpstream, disconnectedPolicy, issueResponse } from './services/http.test-support.js';
 
 await fs.mkdir('/tmp/opencode', { recursive: true });

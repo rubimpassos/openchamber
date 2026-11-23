@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import express from 'express';
 import request from 'supertest';
-import { createHostFixture } from './host-test-support.js';
+import { createHostFixture } from './host.test-support.js';
 import { createBotChildServer } from './host.js';
 import { createBotStore } from './store.js';
 import { createBotItem } from './schema.js';

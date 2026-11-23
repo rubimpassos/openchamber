@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import { createAgentStreams } from './agent-streams.js';
 import { parseAgentStreamEvent } from './agent-stream-schemas.js';
-import { autoLoop } from './fix-loop-test-fixture.js';
+import { autoLoop } from './fix-loop.fixture.js';
 
 test('agent auto events can neither overwrite nor remove owner loop and worker IDs', async () => {
   const controllers = new Map();

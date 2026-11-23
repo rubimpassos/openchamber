@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { stripTypeScriptTypes } from 'node:module';
 import { afterEach, expect, it, vi } from 'vitest';
 import { readRepositoryPolicy, readRepositoryPolicyFiles, parseRepositoryPolicyFiles } from './repository-policy.js';
 import { createBotHostTools } from './host-tools.js';
@@ -41,7 +42,7 @@ it('hashes exact delegated policy bytes on the owner and keeps missing, unreadab
 
   // This executable mutation proves the approval check, independently of the reader.
   const moduleFile = path.join(root, 'policy.mjs');
-  const source = await fs.readFile(new URL('./repository-policy.js', import.meta.url), 'utf8');
+  const source = stripTypeScriptTypes(await fs.readFile(new URL('./repository-policy.ts', import.meta.url), 'utf8'));
   await fs.symlink(path.resolve('node_modules'), path.join(root, 'node_modules'));
   const mutation = source.replace("status: approvals[file] === fingerprint ? 'approved'", "status: true ? 'approved'");
   expect(mutation).not.toBe(source);

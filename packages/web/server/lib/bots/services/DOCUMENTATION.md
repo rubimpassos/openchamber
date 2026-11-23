@@ -3,7 +3,8 @@
 ## Ownership
 
 The server owns service credentials, exact identity resolution, outbound provider
-requests and provider reconciliation. `../services.js` is the engine entry point;
+requests and provider reconciliation. `../services.ts` is the engine entry point,
+imported through its emitted `../services.js` specifier;
 `../identities.js` owns the private identity store. The bot engine owns admission,
 the durable effect journal, delivery cursors and user attention. Repository bindings
 remain owned by source control and are unchanged by a bot operation.
@@ -35,9 +36,15 @@ identity and local checkout. Without a reservation, historical operations retain
 the exact `bot/<itemId>` destination. Existing descriptors and digests remain
 unchanged during reconciliation.
 
+Preflight, execution and reconciliation receive JSON effect envelopes and parse
+them through the existing full-effect schema before using credential authority.
+Their parameter types do not claim that a caller already validated that private
+envelope. The parser's required fields and refusal behavior remain unchanged.
+
 Operations are `git.push`, `pr.open`, `pr.comment`, `pr.auto-merge`, `pr.disable-auto-merge`, `pr.dequeue`,
 `jira.comment`, `jira.question`, `jira.transition`, `discord.send` and `discord.question`. Targets and inputs are
-strictly parsed by `contracts.js`. GitHub targets name `repositoryId`, `owner`
+strictly parsed by `contracts.ts`, imported through the emitted `contracts.js`
+specifier. GitHub targets name `repositoryId`, `owner`
 and `repo`; Jira targets name `projectKey` and `issueKey`; Discord targets name
 `guildId` and `channelId`. A DM uses guild `dm` and an approved `recipientId`.
 `approvedDiscordPeople(effect)` reads the machine-approved directory at use time
@@ -103,7 +110,7 @@ publication. `branch` is the remote destination, while `localBranch` identifies
 the private `bot/<itemId>` source ref. Inputs captured before this split keep
 their historical same-name behavior.
 
-`configureBotWorktreeIdentity({ directory, name, email })` in `git.js` writes worktree-local
+`configureBotWorktreeIdentity({ directory, name, email })` in `git.ts` writes worktree-local
 author settings and disables local commit signing. The checkout must be a linked
 worktree. Shared author and transport settings are preserved. The engine derives
 the name/email from the chosen identity before starting correction.
@@ -127,6 +134,15 @@ the original key and authority on recovery and never invents a replacement key.
 
 ### Focused validation
 
+`contracts.test.ts` covers operation schemas, defaults, strict fields, target and
+recipient refinements, envelope compatibility, error classification and checked
+dispatch types. Run it through the web package's `test` script as a single file.
+
+`http.test.ts` covers fixed destinations, current write-policy admission, read-only
+GraphQL transport, bounded responses and sanitized failures without replay.
+`branch-rules.test.js` covers complete inherited-rule pagination and the authorized
+empty-owner fallback. Run each through the same script as a single file.
+
 `../identities.test.js`, `../services.test.js`, `git.test.js`,
 `../provider-events.test.js`, `../discord-gateway.test.js` and
 `../../source-control/bot-authority.test.js` cover the adapter contracts. Run each
@@ -134,6 +150,10 @@ through the web package's `test` script as a single file. Existing source-contro
 mutation-storage, mutation-executor and audit-storage suites cover user behavior.
 `node packages/web/server/lib/bots/services.driver.mjs` runs successful, replayed
 and failed service calls against a controlled HTTP upstream.
+
+`github.test.ts` covers revocation postconditions, read-only recovery with active
+authorization, authoritative missing branches and denied reads. Its checked
+dispatch cases keep operation/input pairs correlated for the service composer.
 
 `questions.test.js` in this directory covers selected-only mentions, denied
 policy/recipient changes at preparation and both dispatch boundaries, ordinary
@@ -253,6 +273,76 @@ and protocol frames; all conversation sends use the gated HTTPS adapter. Its que
 holds at most 128 frames and reconnects with backoff on overload.
 
 ## Decisions
+
+### Why transport responses remain unknown until provider parsing
+
+`git.ts` and `github.ts` retain the existing `.js` import specifiers. Publication
+inputs come from the operation registry; the GitHub adapter uses tuple unions for
+write, recovery and read dispatch. Git process output and GitHub responses are
+parsed at their existing boundaries. The credential broker receives the explicit
+default HTTPS port, preserving its normalized destination. No transport fallback,
+authorization scope or receipt format changes with the TypeScript conversion.
+GraphQL envelopes retain JSON data until each operation parses its response.
+Provider error arrays reject the operation before any result is consumed.
+Worktree author setup refuses common bare/worktree configurations that would
+require migration. Signed API commits omit author, committer and signature
+overrides so GitHub supplies the App signature; ref updates remain non-forced.
+
+`http.ts` exports checked request and injectable transport contracts while returning
+`unknown`: the provider adapter owns each response schema. `branch-rules.ts` parses
+both rule pages and GraphQL owner counts before establishing a complete result.
+Both modules retain `.js` import specifiers for the emitted server modules.
+
+`discord.ts`, `jira.ts` and `jira-oauth.ts` retain those emitted specifiers too.
+The adapters pair operation names with schema-derived inputs through tuple unions,
+so callers keep the existing two-argument dispatch API while TypeScript rejects
+an input belonging to another operation. Jira rich-text nodes remain permissive
+provider input: text extraction skips malformed nodes without changing the issue
+or comment response contract. OAuth request types reuse the transport contract;
+token state remains private to the captured credential.
+The Jira issue projection and outgoing ADF document are local builders, so their
+optional issue type and paragraph list stay mutable during construction.
+
+### Why dispatch types follow the schema registry
+
+Callers run each schema's `safeParse` at the input or provider boundary.
+`parse` and `providerResult` classify the completed typed result and return its
+output, including transformations and defaults. Keeping validation at the call
+site preserves schema inference without passing raw values through a generic
+parser. Invalid input retains failed/400; invalid provider responses retain
+needs-you/502 before a write and outcome-unknown/502 after a write.
+
+`contracts.ts` keeps literal operation keys and service names in `operations`.
+`BotOperationInputWire` describes pre-parse input; `BotOperationInput` describes
+the output with defaults applied. `BotOperationPayload` and `BotOperationRequest`
+are mapped unions so narrowing an operation also selects its target and input.
+`BotServiceRequest` and `BotServiceEffect` retain the historical opaque wire
+fields until the engine applies the operation-specific schemas. Making the
+wire envelopes discriminated schemas would change when captured data is rejected.
+
+`effects.ts` captures each literal registry operation before parsing its target
+and input. Its checked dispatch union retains the matching provider tuple.
+`provider.ts` resolves the matching service credential and binds that tuple to
+the provider; the shared service owner retains dispatch admission and recovery.
+`reads.ts` preserves provider-read parsing and credential resolution order.
+GitHub read overloads correlate the read name with its response without parsing
+an already parsed response again.
+
+`services.ts` exports `BotServices`, `BotPreparedEffect`,
+`BotServiceExecutionResult`, `BotServiceReconciliationResult` and
+`BotServiceReadResult` for other owners to reuse. Payload hashing constructs a
+new projection and omits an absent publication branch, preserving historical
+digests. Publication validation still precedes service/digest comparison;
+question authority and identity resolution still precede dispatch admission.
+
+### Why replayed receipts retain the storage contract
+
+The source-control journal permits historical successful records with partial or
+absent results. GitHub service receipts retain that result type, including
+`undefined`, rather than imposing a new operation-specific refusal during replay.
+Fresh writes remain checked by their provider adapters. Publication commit maps
+are copied at the journal boundary because publication exposes a readonly array
+and the storage input owns a mutable array; their serialized shape is unchanged.
 
 ### Why a closed pull request and disallowed auto-merge are refused before dispatch
 

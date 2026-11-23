@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createOwnerBotConfig } from './owner-config.js';
 import { createBotsConfig } from './config.js';
-import { createScheduledTasksRuntime } from '../scheduled-tasks/runtime.js';
+import { computeNextRunAt, createScheduledTasksRuntime } from '../scheduled-tasks/runtime.js';
 import { discoverLoops } from '../scheduled-tasks/loops.js';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 
@@ -55,6 +55,39 @@ it('serializes occurrence claims across adapters and preserves storage on write 
   await expect(failing.updateScheduledTaskState('p', 'bot-b', { lastStatus: 'sent' })).rejects.toThrow('disk failed');
   expect(await fs.readFile(f.config.filePathFor('p'), 'utf8')).toBe(before);
   expect((await fs.readdir(f.projectsDirPath)).filter((name) => name.includes('.tmp-'))).toEqual([]);
+});
+
+it.each([
+  { kind: 'daily', time: '09:00' },
+  { kind: 'weekly', time: '09:00', weekdays: [1] },
+  { kind: 'cron', cron: '0 9 * * 1' },
+  { kind: 'once', date: '2026-11-17', time: '09:00' },
+])('preserves legacy $kind rows and partial state through scheduler writes', async (schedule) => {
+  // Given an owner file with legacy fields, an ordinary row and newer-writer data.
+  const f = await fixture();
+  const legacy = { ...row(), enabled: true, botManaged: undefined, schedule: { ...schedule, futureSchedule: ['keep'] },
+    execution: { futureExecution: 'keep' }, state: { lastScheduledFor: 123, lastStatus: 'future-status', futureState: ['keep'] },
+    futureTask: { exact: true } };
+  const ordinary = { id: 'ordinary', future: 'untouched' };
+  await fs.mkdir(f.projectsDirPath, { recursive: true });
+  const file = f.config.filePathFor('p');
+  await fs.writeFile(file, JSON.stringify({ version: 1, futureDocument: ['keep'], scheduledTasks: [ordinary, legacy] }));
+  const before = await f.config.listScheduledTasks('p');
+  const now = Date.parse('2026-11-16T00:00:00Z');
+  const nextRunAt = computeNextRunAt(before[0], now);
+  expect(nextRunAt).toEqual(expect.any(Number));
+
+  // When a state update uses the legacy row in its locked predicate.
+  const result = await f.config.updateScheduledTaskStateIf('p', 'bot-b',
+    (task) => task.state.lastScheduledFor === 123, { nextRunAt });
+
+  // Then known and unknown raw fields survive without adding normalized defaults.
+  expect(result).toMatchObject({ updated: true, task: { schedule: legacy.schedule,
+    execution: legacy.execution, state: { ...legacy.state, nextRunAt } } });
+  expect(result.task.state.createdAt).toBeUndefined();
+  expect(result.task.schedule.timezone).toBeUndefined();
+  expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({ version: 1, futureDocument: ['keep'],
+    scheduledTasks: [ordinary, { ...JSON.parse(JSON.stringify(legacy)), state: result.task.state }] });
 });
 
 it('uses registered project metadata without remapping canonical storage IDs', async () => {

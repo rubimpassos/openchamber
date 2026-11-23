@@ -72,3 +72,20 @@ it.each(['rulesets', 'branchProtectionRules'])('retains REST refusal when GraphQ
     return { data: { repository } };
   } }, target, 'bot/new-item')).rejects.toBe(denied);
 });
+
+it.each([
+  { errors: [{ message: 'Forbidden' }] },
+  { data: { repository: { rulesets: { totalCount: 0, pageInfo: { hasNextPage: true } },
+    branchProtectionRules: { totalCount: 0, pageInfo: { hasNextPage: false } } } } },
+])('retains REST refusal when GraphQL cannot establish complete absence', async (response) => {
+  // Given
+  const denied = new BotServiceError('BOT_SERVICE_AUTH_REQUIRED', 'Plan refusal', 'needs-you', 403);
+  const credential = { request: async ({ path }) => {
+    if (path !== '/graphql') throw denied;
+    return response;
+  } };
+  // When
+  const result = readGitHubBranchRules(credential, target, 'bot/new-item');
+  // Then
+  await expect(result).rejects.toBe(denied);
+});

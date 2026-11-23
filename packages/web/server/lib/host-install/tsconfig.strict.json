@@ -1,0 +1,19 @@
+{
+  "extends": "../../../tsconfig.server-check.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "noCheck": false,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true
+  },
+  "files": [
+    "host-inputs.ts",
+    "host-paths.ts",
+    "host-files.ts",
+    "host-package.ts",
+    "host-units.ts",
+    "release.ts"
+  ],
+  "include": [],
+  "exclude": []
+}

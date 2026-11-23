@@ -38,29 +38,37 @@ selected MCP servers with `codemode: false`, as the editor explains.
 
 ## Files
 
-- `config.js` — the `suggestedTasks` key of the per-user project config
+- `config.ts` — the `suggestedTasks` key of the per-user project config
   (`../projects/project-config.js` owns the file and its lock). Zod schemas
   with defaults; `readSuggestedTasksConfig` turns a missing key into the
   default and a key that no longer validates into an error, never into
   "off". `lensApprovals` (repository lens file → fingerprint) is written only
   by the approval route.
-- `presets.js` — starting prompts for a lens. Adding one copies the prompt
+- `presets.ts` — starting prompts for a lens. Adding one copies the prompt
   into the config; later changes here never reach existing lenses.
-- `repo-lenses.js` — `.agents/lenses/*.md` in the project root. A repository
+- `repo-lenses.ts` — `.agents/lenses/*.md` in the project root. A repository
   lens runs only while the approval recorded on this machine matches the
   fingerprint of its whole definition, so a pull that changes it waits for a
   new approval (the rule repository loops follow).
-- `scan-prompt.js` — the prompt a lens session receives, the parser of its
+- `scan-prompt.ts` — the prompt a lens session receives, the parser of its
   answer, glob matching, title similarity, and `selectSuggestions`.
-- `store.js` — the inbox: `<projectsDir>/<project stem>/suggested-tasks.json`.
-- `issue-links.js` — prefilled new-issue URLs for GitHub, GitLab and Linear.
-- `open-issues.js` reads open issues using ready repository bindings and mapped
+- `store.ts` — the inbox: `<projectsDir>/<project stem>/suggested-tasks.json`.
+- `issue-links.ts` — prefilled new-issue URLs for GitHub, GitLab and Linear.
+- `open-issues.ts` reads open issues using ready repository bindings and mapped
   Linear teams. It reuses the provider readers and exact bound accounts, with
   at most 10 pages per provider. Partial reads keep successful pages and report
   warnings on the run. A run snapshots issue titles for restart-safe deduplication.
-- `runtime.js` — scanning, watching lens sessions, the token budget, timeouts,
+- `runtime.ts` — scanning, watching lens sessions, the token budget, timeouts,
   and the inbox operations.
-- `routes.js` — HTTP routes.
+- `routes.ts` — HTTP routes.
+- `contracts.ts` — runtime dependency contracts. Persisted record types come
+  from the store's schemas; config types come from the config schemas.
+
+### Why imports keep the `.js` suffix
+
+Production implementations are checked TypeScript. NodeNext resolves the existing
+`.js` import specifiers to TypeScript sources and emits JavaScript under the same
+names, preserving consumers and the published server layout.
 
 ## A scan
 

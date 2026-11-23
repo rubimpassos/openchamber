@@ -292,8 +292,8 @@ protected_mcp_install() {
   chmod -R go-w "$workdir"
   package_version=$("$node" -e 'process.stdout.write(require(process.argv[1]).version)' "$workdir/package/package.json")
   success "Verified $PACKAGE_NAME $package_version"
-  "$node" "$workdir/package/server/lib/protected-mcp/service/install.js" install \
-    --source "$workdir/package/server" --version "$package_version" --node "$node" "$@"
+  "$node" "$workdir/package/build/server/lib/protected-mcp/service/install.js" install \
+    --source "$workdir/package/build/server" --version "$package_version" --node "$node" "$@"
 }
 
 protected_mcp_uninstall() {
@@ -319,7 +319,7 @@ HOST_DEFAULT_REPO="rubimpassos/openchamber"
 
 # Installs OpenChamber system-wide. The package comes from the repository's
 # GitHub release and is checked against the SHA-256 digest GitHub records for
-# it; its own host installer (server/lib/host-install) does the rest as root.
+# it; its own host installer (build/server/lib/host-install) does the rest as root.
 host_install() {
   if [ "$(uname -s)" != "Linux" ]; then
     error "The host install is for Linux hosts with systemd."
@@ -367,12 +367,12 @@ host_install() {
   tar -xzf "$workdir/package.tgz" -C "$workdir" --no-same-owner --no-same-permissions
   chown -R root:root "$workdir"
   chmod -R go-w "$workdir"
-  if [ ! -f "$workdir/package/server/lib/host-install/main.js" ]; then
+  if [ ! -f "$workdir/package/build/server/lib/host-install/main.js" ]; then
     error "OpenChamber $version has no host installer; it needs a newer release."
     exit 1
   fi
   success "Verified OpenChamber $version"
-  "$node" "$workdir/package/server/lib/host-install/main.js" install \
+  "$node" "$workdir/package/build/server/lib/host-install/main.js" install \
     --repo "$repo" "$@" --tarball "$workdir/package.tgz" --version "$version"
 }
 

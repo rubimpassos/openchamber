@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createApprovalPublication } from './publication.js';
+import { destinationOf } from './approval-contract.js';
 
 const head = 'a'.repeat(40);
 const commit = 'b'.repeat(40);
@@ -26,6 +27,22 @@ const make = () => createApprovalPublication({
   dataDir: directory,
   git: { output: async (_where, args) => { commands.push(args); return ''; }, run: async () => ({ code: ancestor ? 0 : 1 }) },
   gitServices: () => ({ readBinding: async () => binding, publish: async (...args) => { pushes.push(args); } }),
+});
+
+test.each([...Array.from({ length: 32 }, (_, code) => String.fromCharCode(code)), '\x7f', ' ', '\u2028', '~', '^', ':', '?', '*', '[', '\\'])('refuses a branch containing a reserved character %j', (character) => {
+  // Given a provider head with a character Git cannot publish in a ref.
+  const remote = { ...snapshot, branch: `fix/a${character}b` };
+  // When / Then the destination boundary refuses it before publication authority exists.
+  expect(() => destinationOf(remote)).toThrow();
+});
+
+test.each(['fix/plain', 'fix/café', 'fix/a\u0085b', 'fix/a]b'])('preserves the accepted branch %s', (branch) => {
+  // Given a valid provider head, including C1 and punctuation outside the reserved set.
+  const remote = { ...snapshot, branch };
+  // When the destination is captured.
+  const destination = destinationOf(remote);
+  // Then the exact branch name reaches the publication ref.
+  expect(destination.ref).toBe(`refs/heads/${branch}`);
 });
 
 test('captures a checked object with an immutable host ref and exact fork authority', async () => {

@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { lstat, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { hashIntegrationToken } from '../server/lib/integration-control/auth.js';
-import { validateIntegrationPolicy } from '../server/lib/integration-control/policy.js';
+
+const sourceLoader = new URL('./register-server-sources.mjs', import.meta.url);
+const sourceCheckout = existsSync(sourceLoader);
+if (!process.versions.bun && sourceCheckout) await import(sourceLoader.href);
+const serverRoot = new URL(sourceCheckout ? '../server/' : '../build/server/', import.meta.url);
+const { hashIntegrationToken } = await import(new URL('lib/integration-control/auth.js', serverRoot).href);
+const { validateIntegrationPolicy } = await import(new URL('lib/integration-control/policy.js', serverRoot).href);
 
 const existingFile = async (file) => {
   try {

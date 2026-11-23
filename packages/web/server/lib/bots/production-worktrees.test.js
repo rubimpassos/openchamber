@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { productionFixture, commitFiles } from './production-test-support.js';
+import { productionFixture, commitFiles } from './production.test-support.js';
 import { botGit } from './production-git.js';
 import { BotServiceError } from './services/contracts.js';
 

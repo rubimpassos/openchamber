@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { destinationFingerprint, parseDefinition } from './definitions.js';
 import { createOAuth } from './oauth.js';
 import { openStore } from './store.js';
+import { startHttpFixture } from '../test-support/http-fixture.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -57,6 +58,53 @@ async function setup({ answer = refreshed } = {}) {
 const storedTokens = (store, id) => store.credentialsFor(store.get(id))?.oauth?.tokens ?? null;
 
 describe('OAuth writes that race administrative changes', () => {
+  it.each([false, '2', null, undefined, 2])('completes sign-in with opaque generation %j', async (generation) => {
+    // Given partial OAuth state and a local authorization server.
+    const { store } = await setup();
+    const server = await startHttpFixture({ oauth: true });
+    cleanups.push(server.close);
+    const { connection } = await store.apply({ kind: 'create', definition: parseDefinition({
+      name: 'generation', transport: 'http', http: { url: server.url, oauth: { scopes: [] } },
+    }), secrets: {} });
+    const definition = store.get(connection.id);
+    await store.updateOAuth(definition.id, destinationFingerprint(definition), () => ({ generation }));
+    const oauth = createOAuth({ store });
+    // When sign-in traverses discovery, local consent and the code exchange.
+    const flow = await oauth.start({ id: definition.id, expectedRevision: definition.revision, redirectUri: 'https://app.example/callback' });
+    const consent = await fetch(flow.url, { redirect: 'manual', signal: AbortSignal.timeout(5000) });
+    const callback = new URL(consent.headers.get('location'));
+    const answer = await oauth.complete(Object.fromEntries(callback.searchParams));
+    // Then the existing opaque value cannot prevent authorization.
+    expect(answer.outcome).toBe('authorized');
+  });
+
+  it('returns the original fresh stored grant when authorization metadata is absent', async () => {
+    // Given a stored grant that needs no refresh and has no server or client metadata.
+    const { store, id, oauth } = await setup();
+    const definition = store.get(id);
+    const tokens = { accessToken: 'synthetic-existing', expiresAt: null };
+    await store.updateOAuth(id, destinationFingerprint(definition), () => ({ tokens }));
+    // When the caller requests its usable tokens.
+    const answer = await oauth.tokensFor(definition);
+    // Then the stored object remains the grant's identity.
+    expect(answer).toBe(tokens);
+  });
+
+  it('refreshes a stored grant when its expiry is omitted', async () => {
+    // Given refreshable tokens with no expiry field, distinct from explicit null.
+    const { store, id, oauth, reached, release } = await setup();
+    const definition = store.get(id);
+    await store.updateOAuth(id, destinationFingerprint(definition), (previous) => ({
+      ...previous, tokens: { accessToken: 'at-1', refreshToken: 'rt-1' },
+    }));
+    // When tokens are requested and the refresh answer arrives.
+    const refreshing = oauth.tokensFor(definition);
+    await reached;
+    release();
+    // Then the caller receives the refreshed grant.
+    await expect(refreshing).resolves.toMatchObject({ accessToken: 'at-2', refreshToken: 'rt-2' });
+  });
+
   it('does not bring tokens back when a refresh finishes after the administrator revoked them', async () => {
     const { store, id, oauth, reached, release } = await setup();
     const refreshing = oauth.tokensFor(store.get(id));

@@ -4,7 +4,7 @@ import { registerProviderRoutes } from './provider-routes.js';
 import { createFixLoopGitServices } from './fix-loop-git.js';
 import { createProviderDescriptors } from './provider-descriptors.js';
 import { githubDescriptor } from '../github/descriptor.js';
-import { CONTEXT, HEAD, PULL, TARGET } from '../agent-server/fix-loop-test-fixture.js';
+import { CONTEXT, HEAD, PULL, TARGET } from '../agent-server/fix-loop.fixture.js';
 
 test('agent admission reuses binding validation and exact-account resource admission before any worker exists', async () => {
   const validateReadContext = vi.fn(async (input) => input);

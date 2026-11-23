@@ -9,7 +9,7 @@ the one-way settings projection. Spaces owns the shared forwarding, socket,
 session-merge and space-event mechanics. The server composition chooses which
 runtimes exist; account permissions and hostd enforce filesystem authority.
 
-`ownership.js` is the method/path authority. Unknown API routes go to the agent;
+`ownership.ts` is the method/path authority. Unknown API routes go to the agent;
 an agent failure never enters an owner project handler. Static assets and auth
 remain local. The global session list uses the existing Spaces merge only when
 the request has neither a directory nor a cursor.
@@ -224,6 +224,55 @@ system and global configuration only, and Ubuntu 22.04 ships git 2.34 with the
 ownership check.
 
 ## Decisions
+
+### Why the boundary contracts retain JavaScript import specifiers
+
+Settings projection and Git trust also use strict TypeScript with emitted `.js`
+specifiers. The mirror captures each snapshot before queueing it and keeps failed
+sends from blocking later snapshots. Retained-checkout trust still checks both
+physical identities before reading global Git configuration; its missing-checkout
+exception applies only to the explicit removal-history operation, never to a
+missing Git directory.
+
+Mode, ownership, authenticated upstream transport, session identity checks and
+the leaf event/credential schemas use strict TypeScript. Their `.js` specifiers
+address emitted modules; source runs use the server's existing source resolver.
+Runtime consumers and the stream schema registry can migrate separately.
+
+The credential source and private host-credential routes also use strict
+TypeScript. The source rewrites SDK paths through a `Request`, retaining its
+method, headers, body and cancellation signal. Parsed metadata keeps nested JSON
+values; absent metadata is omitted to match the SDK's optional-field contract.
+The route options reuse the provider reader and local credential-source contracts.
+Authentication order, registered-directory checks, renewal selection and secret
+redaction remain the same.
+
+The fix-loop operation and feedback schemas, exact-head project plumbing,
+display metadata and project registry also use TypeScript with emitted `.js`
+specifiers. Operation input and reply types derive from the existing schemas.
+Registry ownership still requires literal `true`; feedback clipping preserves
+the mention and agent marker without changing response caps or authorization.
+
+Mode is a union that ties a front door to its upstream configuration. Schema
+types come from the existing validators, including bounded credential JSON;
+conversion does not broaden accepted input. Upstream JSON uses the event stream
+owner's `JsonValue` contract, established by `JSON.parse`, until its consumer
+parses the operation's schema. Identity traversal and provenance stripping use
+that same JSON contract. Stripping cannot promise the original object's complete
+type because it removes keys. Dictionary keys need this filtering too, and an
+`origin` holding an object, array or null remains event data rather than a label.
+
+Ownership rules match whole path segments in order. Encoded path delimiters
+cannot select a different upstream owner. Local services and Bot control keep
+their authority even when an SDK carries a Space directory, so their local body
+parsers and socket handlers still run. Browser requests use the SDK's action
+vocabulary but parse each action's parameters independently because the SDK's
+service-side reader trusts host-produced parameters.
+
+The HTTP client response event supplies a numeric status code. Its type is
+distinct from Node's general `IncomingMessage`, which also models requests.
+Focused checks include the server's existing ambient platform declarations for
+the Node/DOM web-stream boundary used by the fetch adapter.
 
 ### Why approval orchestration stays in the front door
 

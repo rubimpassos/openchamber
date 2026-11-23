@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { Identifier } from '@opencode/schema/identifier';
 import { opencodeClient } from '@/lib/opencode/client';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID } from '@/lib/routing/autoModel';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -191,11 +192,12 @@ test('materializes confirmation of a lost first-prompt acknowledgement in the ca
   const confirmations = [];
   const sending = send();
   const prompt = await inserted.promise;
-  const assistant = { id: 'msg_confirmed_assistant', role: 'assistant', sessionID: prompt.sessionID,
+  const assistant = { id: `msg_${Identifier.create(false, prompt.time.created + 1)}`, role: 'assistant', sessionID: prompt.sessionID,
     time: { created: prompt.time.created + 1, completed: prompt.time.created + 2 } };
   opencodeClient.getSessionMessages = async (_id, _options, scope) => {
     confirmations.push(scope);
-    return { items: [{ info: prompt, parts: [] }, { info: assistant, parts: [] }], cursor: {} };
+    // OpenCode's default message page is newest first, in server insertion order.
+    return { items: [{ info: assistant, parts: [] }, { info: prompt, parts: [] }], cursor: {} };
   };
   opencodeClient.sendMessage = async () => { throw new TypeError('Failed to fetch'); };
   // When the prompt response is lost and confirmation recovers the accepted records.

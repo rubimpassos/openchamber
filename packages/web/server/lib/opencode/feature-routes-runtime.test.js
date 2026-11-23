@@ -4,7 +4,7 @@ import request from 'supertest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createFeatureRoutesRuntime } from './feature-routes-runtime.js';
+import { createFeatureRoutesRuntime } from '../server-frame/feature-routes-runtime.js';
 import { createTrackerRegistry } from '../trackers/registry.js';
 
 const noop = () => {};

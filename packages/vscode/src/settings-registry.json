@@ -34,6 +34,9 @@
     "opencodeBinary": {
       "scope": "instance"
     },
+    "useGlobalOpenCodeService": {
+      "scope": "instance"
+    },
     "serverUpdateChannel": {
       "scope": "instance",
       "surfaces": [
@@ -183,6 +186,9 @@
     "agentUsageToolEnabled": {
       "scope": "instance"
     },
+    "agentTerminalToolEnabled": {
+      "scope": "instance"
+    },
     "agentImageToolEnabled": {
       "scope": "instance"
     },
@@ -208,6 +214,12 @@
       "scope": "instance"
     },
     "agentWorkflowToolEnabled": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApprove": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApproveLeads": {
       "scope": "instance"
     },
     "isolatedSpacesEnabled": {
@@ -293,6 +305,9 @@
       "scope": "instance"
     },
     "sttLanguage": {
+      "scope": "profile"
+    },
+    "sttPrompt": {
       "scope": "profile"
     },
     "sttCorrectTranscript": {
@@ -620,6 +635,9 @@
     "largeTextPasteBehavior": {
       "scope": "profile"
     },
+    "documentAttachBehavior": {
+      "scope": "profile"
+    },
     "savePastedImagesAsFiles": {
       "scope": "profile"
     },
@@ -696,6 +714,15 @@
       "scope": "profile"
     },
     "defaultAgent": {
+      "scope": "profile"
+    },
+    "chatsDefaultModel": {
+      "scope": "profile"
+    },
+    "chatsDefaultVariant": {
+      "scope": "profile"
+    },
+    "chatsDefaultAgent": {
       "scope": "profile"
     },
     "smallModelUseDefault": {
@@ -1076,6 +1103,10 @@
       "local": true
     },
     "alwaysShowScrollbars": {
+      "scope": "device",
+      "local": true
+    },
+    "mobileKeepScreenAwake": {
       "scope": "device",
       "local": true
     },

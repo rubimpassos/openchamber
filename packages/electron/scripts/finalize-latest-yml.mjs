@@ -49,10 +49,7 @@ const parse = (content) => {
   return { version: parsedVersion, releaseDate, files };
 };
 
-// electron-updater compares a manifest's minimumSystemVersion with
-// os.release(), the Darwin kernel version. Darwin 22 is macOS 13, the oldest
-// macOS Electron 45 runs on, so an older Mac keeps the version it has instead
-// of updating into an app macOS refuses to open.
+// external: https://www.electron.build/auto-update.html#updateinfo minimumSystemVersion uses the Darwin kernel release, so Darwin 22 keeps unsupported Macs from updating to Electron 45.
 const MAC_MINIMUM_DARWIN_VERSION = '22.0.0';
 
 const serialize = (data) => {
@@ -100,9 +97,6 @@ if (!macOnly) {
   output['latest-arm64.yml'] = serialize(winArm64);
 }
 
-// One manifest serves both Mac architectures. The updater falls back to x64
-// files when it lists no arm64 ones, so a manifest missing an architecture
-// moves Apple Silicon users onto the Intel build under Rosetta.
 const macX64 = await read('latest-yml-x86_64-apple-darwin', 'latest-mac.yml');
 const macArm64 = await read('latest-yml-aarch64-apple-darwin', 'latest-mac.yml');
 if (!windowsOnly && (!macX64 || !macArm64)) {

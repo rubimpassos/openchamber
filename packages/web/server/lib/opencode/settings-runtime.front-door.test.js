@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createSettingsRuntime } from './settings-runtime.js';
-import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
-import { createSettingsHelpers } from './settings-helpers.js';
+import { createSettingsRuntime } from '../settings/settings-runtime.js';
+import { createSettingsNormalizationRuntime } from '../settings/settings-normalization-runtime.js';
+import { createSettingsHelpers } from '../settings/settings-helpers.js';
 import { createProjectRegistry } from '../agent-server/project-registry.js';
 import { createSettingsMirror } from '../agent-server/settings-mirror.js';
 

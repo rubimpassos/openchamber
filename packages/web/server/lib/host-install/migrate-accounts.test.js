@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGENT, fakeSystem, FRONT, hostRoot, OWNER } from './fake-system.js';
+import { AGENT, fakeSystem, FRONT, hostRoot, OWNER } from './fake-system.test-support.js';
 import { classify, migrateAccounts, oldDataDirectory, ownTree } from './migrate-accounts.js';
 import { createOwnerBotConfig } from '../bots/owner-config.js';
 import { createBotItem } from '../bots/schema.js';

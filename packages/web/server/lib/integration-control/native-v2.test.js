@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createNativeFailureFixture } from './native-failure-fixture.js';
+import { createNativeFailureFixture } from './native-failure.fixture.js';
 import { parseResponse } from './contract.js';
-import { requestBody } from './test-app.js';
+import { requestBody } from './test-app.test-support.js';
 
 let fixture;
 beforeEach(async () => {

@@ -63,7 +63,8 @@ it('serializes independent processes updating the same project', async () => {
   const { directory, store } = await setup();
   const storeUrl = new URL('./store.js', import.meta.url).href;
   const schemaUrl = new URL('./schema.js', import.meta.url).href;
-  await Promise.all(['a', 'b', 'c'].map((id) => promisify(execFile)(process.execPath, ['--input-type=module', '-e', `
+  const sourceLoader = new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href;
+  await Promise.all(['a', 'b', 'c'].map((id) => promisify(execFile)(process.execPath, ['--conditions=openchamber-source', '--import', sourceLoader, '--input-type=module', '-e', `
     import { createBotStore } from ${JSON.stringify(storeUrl)};
     import { createBotItem } from ${JSON.stringify(schemaUrl)};
     const store = createBotStore({ projectsDirPath: ${JSON.stringify(directory)} });

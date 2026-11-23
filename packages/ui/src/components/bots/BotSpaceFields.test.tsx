@@ -18,6 +18,7 @@ let root: Root;
 let enabled = true;
 let failLogins = false;
 let emptyLogins = false;
+let openaiLogin = false;
 let requests: string[] = [];
 let config: BotsConfig = { concurrency: 2, retentionDays: 90, definitions: [] };
 let saved = deferred<void>();
@@ -32,7 +33,10 @@ function handle(request: Request): Response | Promise<Response> {
   if (url.pathname.endsWith('/switch')) return Response.json({ enabled, spaces: [] });
   if (url.pathname.endsWith('/places')) return Response.json({ places: [{ id: 'docker', machine: null, available: true, hostIsolation: true }] });
   if (url.pathname.endsWith('/logins')) return failLogins ? Response.json({ code: 'offline' }, { status: 503 })
-    : Response.json({ logins: emptyLogins ? [] : [{ provider: 'github-copilot', method: 'device', expires: null, state: 'usable' }] });
+    : Response.json({ logins: emptyLogins ? [] : [
+      { provider: 'github-copilot', method: 'device', expires: null, state: 'usable' },
+      ...(openaiLogin ? [{ provider: 'openai', method: 'chatgpt', expires: null, state: 'usable' }] : []),
+    ] });
   if (url.pathname.endsWith('/custom-providers')) return Response.json({ providers: [{ id: 'local', name: 'Local Gateway', package: '@ai-sdk/openai-compatible', baseURL: 'http://models.example.com/v1', loopback: false, models: ['local'], hasKey: true, supported: true }] });
   return Response.json({});
 }
@@ -44,7 +48,7 @@ function Harness({ initial }: { readonly initial: BotDefinition }) {
 }
 
 beforeEach(() => {
-  enabled = true; failLogins = false; emptyLogins = false; requests = []; saved = deferred<void>();
+  enabled = true; failLogins = false; emptyLogins = false; openaiLogin = false; requests = []; saved = deferred<void>();
   config = { concurrency: 2, retentionDays: 90, definitions: [] };
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
@@ -209,15 +213,45 @@ describe('isolated bot fields', () => {
     expect(control('input[aria-label="Environment variable with the openai key"]').getAttribute('dir')).toBe('ltr');
   });
 
-  test('offers no typed-key input when selecting a model access source', async () => {
+  test('uses the known provider endpoint when changing a saved login to an environment reference', async () => {
+    // Given a selected OpenAI host login, with no saved model endpoint.
+    openaiLogin = true;
+    await render({ ...configuredBot(), isolated: true, space: { network: { mode: 'allowlist', domains: [] }, grants: [{ kind: 'login', provider: 'openai' }] } });
+
+    // When the user switches the actual source picker to an environment reference and saves.
+    await clickSuggestedTasksControl(control('[role="combobox"][aria-label="Where the openai key comes from"]'));
+    const environment = [...document.querySelectorAll('[role="option"]')].find((element) => element.textContent === 'Environment variable');
+    if (!(environment instanceof HTMLElement)) throw new TypeError('Environment source is unavailable');
+    await clickSuggestedTasksControl(environment);
+    await save();
+
+    // Then the grant contains the provider's known endpoint and variable name.
+    expect(config.definitions[0]?.space?.grants).toEqual([{ kind: 'model', provider: 'openai', upstream: 'https://api.openai.com/v1', secret: { kind: 'env', name: 'OPENAI_API_KEY' } }]);
+  });
+
+  test('preserves a saved model endpoint when its provider is absent from host inventories', async () => {
+    // Given an existing environment grant with no built-in or host provider metadata.
+    const grant = { ...envGrant, provider: 'retired-gateway', upstream: 'https://retired.example.com/v1' };
+    await render({ ...configuredBot(), isolated: true, space: { network: { mode: 'allowlist', domains: [] }, grants: [grant] } });
+
+    // When the user edits the retained variable reference and saves.
+    await input('Environment variable with the retired-gateway key', 'REPLACEMENT_KEY');
+    await save();
+
+    // Then the existing endpoint remains authoritative without an inferred default.
+    expect(config.definitions[0]?.space?.grants).toEqual([{ ...grant, secret: { kind: 'env', name: 'REPLACEMENT_KEY' } }]);
+  });
+
+  test('offers neither typed nor stored keys when selecting a model access source', async () => {
     // Given an environment-backed model grant.
     await render({ ...configuredBot(), isolated: true, space: { network: { mode: 'allowlist', domains: [] }, grants: [envGrant] } });
 
     // When the actual shared source picker opens.
     await clickSuggestedTasksControl(control('[role="combobox"][aria-label="Where the openai key comes from"]'));
 
-    // Then the bot editor cannot offer or mount a raw-secret field.
+    // Then only the supported environment source is offered, with no raw-secret field.
     expect(document.querySelector('[role="option"][data-value="typed"]')).toBeNull();
+    expect(document.querySelector('[role="option"][data-value="stored"]')).toBeNull();
     expect(document.querySelector('input[type="password"]')).toBeNull();
     expect(document.querySelectorAll('[role="option"]').length).toBe(1);
   });

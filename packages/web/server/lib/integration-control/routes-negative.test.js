@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTestApp, requestBody } from './test-app.js';
+import { createTestApp, requestBody } from './test-app.test-support.js';
 
 let fixture;
 beforeEach(async () => {

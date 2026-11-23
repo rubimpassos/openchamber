@@ -2,8 +2,8 @@
 
 ## Ownership
 
-`questions.js` owns outbound question intent, approved recipient selection and the
-item's `waiting-answer` projection. `questions-blame.js` owns read-only Git blame
+`questions.ts` owns outbound question intent, approved recipient selection and the
+item's `waiting-answer` projection. `questions-blame.ts` owns read-only Git blame
 and GitHub commit attribution. Existing config and repository-policy owners grant
 machine approval. Existing effects and services owners journal, authorize, send
 and reconcile writes. The coordinator still owns stage progression, answers,
@@ -217,6 +217,20 @@ reads transmit only repository IDs and commit SHAs through the credential owner.
 No listener, provider entry or telemetry is added. No shared UI export changes.
 
 ## Decisions
+
+### Why journal descriptors are parsed before typed dispatch
+
+The execution journal owns JSON storage. The question owner parses its saved
+descriptor with the service effect contract and its existing question input
+schemas before using it. Both legacy plain-post operations and mention operations
+keep their captured key, operation, target and input. Canonical payload parsing
+provides the operation-specific receipt target without asserting a provider type.
+Effects retain the original wire descriptor so parsing cannot reorder an immutable
+operation when recovering between descriptor persistence and effect creation.
+The version-1 question schemas and `.js` import specifiers stay unchanged.
+The default blame reader requires the credential-bearing GitHub context. An
+injected blame reader accepts the separated owner's binding-only context, keeping
+provider credentials outside that owner.
 
 ### Why repository owners precede requested recipients
 

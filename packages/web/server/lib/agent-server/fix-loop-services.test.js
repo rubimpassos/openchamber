@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { expect, test, vi } from 'vitest';
 import { createAgentFixLoopServices } from './fix-loop-services.js';
 import { FIX_LOOP_BYTES, FIX_LOOP_OPERATIONS, FIX_LOOP_SERVICE_ROUTE } from './fix-loop-contract.js';
-import { AUTHORITY, BINDING, CONTEXT, FEEDBACK, HEAD, PULL, REF, RESULT, TARGET } from './fix-loop-test-fixture.js';
+import { AUTHORITY, BINDING, CONTEXT, FEEDBACK, HEAD, PULL, REF, RESULT, TARGET } from './fix-loop.fixture.js';
 
 const loop = { ...TARGET, directory: CONTEXT.directory, readContext: CONTEXT };
 const published = { ...AUTHORITY, directory: '/repo', operation: 'push', sourceRef: REF, destinationRef: 'refs/heads/fix',

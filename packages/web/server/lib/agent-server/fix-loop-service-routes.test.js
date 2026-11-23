@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { readBoundedBody } from './agent-upstream.js';
 import { FIX_LOOP_INPUT_BYTES, FIX_LOOP_OPERATIONS, FIX_LOOP_SERVICE_ROUTE, FIX_LOOP_BYTES } from './fix-loop-contract.js';
-import { cleanupFixLoops, FEEDBACK, HEAD, RESULT, fixLoopServiceFixture } from './fix-loop-test-fixture.js';
+import { cleanupFixLoops, FEEDBACK, HEAD, RESULT, fixLoopServiceFixture } from './fix-loop.fixture.js';
 import { isAgentText } from '../pr-fix-loop/agent-marker.js';
 
 afterEach(cleanupFixLoops);

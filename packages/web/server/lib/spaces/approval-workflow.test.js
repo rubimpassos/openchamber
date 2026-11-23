@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { startApprovalGatekeeper } from './approval-test-support.js';
+import { startApprovalGatekeeper } from './approval.test-support.js';
 
 const SCHEMA = { type: 'object', properties: { container: { type: 'string' }, tools: { type: 'string' }, url: { type: 'string', default: 'https://example.com' } } };
 const DATA = { container: 'worker', tools: [{ type: 'mcp', url: 'https://example.com' }] };

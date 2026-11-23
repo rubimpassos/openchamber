@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { createToolDispatchDriver } from './tool-dispatch-test-support.js';
+import { createToolDispatchDriver } from './tool-dispatch.test-support.js';
 
 const results = [];
 const scenario = async (name, run) => {

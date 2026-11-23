@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { createHostFixture } from './host-test-support.js';
+import { createHostFixture } from './host.test-support.js';
 
 it('creates and replaces OAuth identities over HTTP without returning or reusing their secrets', async () => {
   // Given the production authenticated-route composition and an OAuth identity definition.

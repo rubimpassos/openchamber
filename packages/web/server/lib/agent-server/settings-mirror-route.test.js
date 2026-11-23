@@ -10,9 +10,9 @@ import { createMemoryDreaming } from '../agent-memory/dreaming.js';
 import { createUsageReadAction } from '../openchamber-control/usage-read.js';
 import { createHiddenSessionRegistry } from '../opencode/hidden-sessions.js';
 import { createManagedConfigRuntime } from '../opencode/managed-config-file.js';
-import { createSettingsHelpers } from '../opencode/settings-helpers.js';
-import { createSettingsNormalizationRuntime } from '../opencode/settings-normalization-runtime.js';
-import { createSettingsRuntime } from '../opencode/settings-runtime.js';
+import { createSettingsHelpers } from '../settings/settings-helpers.js';
+import { createSettingsNormalizationRuntime } from '../settings/settings-normalization-runtime.js';
+import { createSettingsRuntime } from '../settings/settings-runtime.js';
 import { registerSettingsRoutes } from '../opencode/routes.js';
 import { createSettingsMirror, pickAgentSettings } from './settings-mirror.js';
 

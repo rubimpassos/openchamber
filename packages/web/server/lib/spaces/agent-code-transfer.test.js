@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ID, cleanupTransfers, transferFixture } from '../agent-server/space-transfer-fixture.js';
+import { ID, cleanupTransfers, transferFixture } from '../agent-server/space-transfer.fixture.js';
 import { hostState, unexpectedChanges } from './code-in-bait.js';
 
 afterEach(cleanupTransfers);

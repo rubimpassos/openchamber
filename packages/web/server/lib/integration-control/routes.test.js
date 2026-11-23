@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createNativeFailureFixture } from './native-failure-fixture.js';
+import { createNativeFailureFixture } from './native-failure.fixture.js';
 import { MAX_BODY_BYTES, parseResponse } from './contract.js';
-import { createTestApp, requestBody } from './test-app.js';
+import { createTestApp, requestBody } from './test-app.test-support.js';
 
 let fixture;
 let logs;

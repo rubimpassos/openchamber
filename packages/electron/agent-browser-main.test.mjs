@@ -7,7 +7,7 @@ import {
   isStandaloneBrowserPanelPartition, shouldCancelAgentBrowserRequest,
 } from './agent-browser-policy.mjs';
 import {
-  browserPanelPermissionAuditDetails, browserPanelWindowOpenTarget, plainChromeUserAgent,
+  applyBrowserPanelUserAgent, browserPanelPermissionAuditDetails, browserPanelWindowOpenTarget,
   shouldAllowBrowserPanelCertificateError, shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
 import { spaceIdOfPreviewPartition } from './space-preview.mjs';
@@ -37,12 +37,17 @@ const harness = () => {
   const panelSessions = new Set();
   const fromPartition = (partition) => {
     if (!sessions.has(partition)) sessions.set(partition, {
-      getUserAgent: () => 'Chrome/140 Electron/45', setUserAgent() {},
+      userAgent: 'Chrome/140 OpenChamber/2.8.1 Electron/45.0.0 Safari/537.36',
+      getUserAgent() { return this.userAgent; },
+      setUserAgent(value) { this.userAgent = value; },
       registerPreloadScript() {},
       setPermissionRequestHandler(handler) { this.requestPermission = handler; },
       setPermissionCheckHandler(handler) { this.checkPermission = handler; },
       setDevicePermissionHandler(handler) { this.devicePermission = handler; },
-      webRequest: { onBeforeRequest(handler) { this.beforeRequest = handler; } },
+      webRequest: {
+        onBeforeRequest(handler) { this.beforeRequest = handler; },
+        onBeforeSendHeaders(filter, handler) { this.beforeSendHeaders = { filter, handler }; },
+      },
     });
     return sessions.get(partition);
   };
@@ -54,9 +59,9 @@ const harness = () => {
     settingsFilePath: () => '/synthetic/settings.json',
     os: { networkInterfaces: () => ({ eth0: [{ address: '192.168.1.10' }] }) },
     BrowserWindow: { getAllWindows: () => [window] }, browserPanelPopups: new Set(),
-    process: { env: { OPENCHAMBER_SERVER_URL: 'https://env.example' } },
+    process: { env: { OPENCHAMBER_SERVER_URL: 'https://env.example' }, versions: { electron: '45.0.0' } },
     session: { fromPartition }, app: { on() {} },
-    plainChromeUserAgent, shouldAllowBrowserPanelPermission,
+    applyBrowserPanelUserAgent, shouldAllowBrowserPanelPermission,
     shouldAllowBrowserPanelCertificateError, browserPanelPermissionAuditDetails,
     resolveBrowserPanelPreloadPath: () => '/synthetic/preload.cjs',
     log: { info() {}, warn() {} },
@@ -83,8 +88,16 @@ test('main installs the all-resource request filter only on the hardened agent s
   const h = harness();
   assert.equal(h.fromPartition(BROWSER_PANEL_PARTITION).webRequest.beforeRequest, undefined);
   assert.equal(h.fromPartition('persist:space-preview-example').webRequest.beforeRequest, undefined);
+  assert.equal(h.fromPartition('persist:space-preview-example').webRequest.beforeSendHeaders, undefined);
   for (const partition of [BROWSER_PANEL_PARTITION, AGENT_BROWSER_PARTITION]) {
     const panel = h.fromPartition(partition);
+    assert.equal(panel.getUserAgent(), 'Chrome/140 Safari/537.36');
+    const signIn = panel.webRequest.beforeSendHeaders;
+    assert.deepEqual(signIn.filter.urls, ['https://accounts.google.com/*', 'https://accounts.youtube.com/*']);
+    let sent;
+    signIn.handler({ requestHeaders: { Accept: '*/*', 'user-agent': 'stale', 'User-Agent': 'also stale' } },
+      (response) => { sent = response.requestHeaders; });
+    assert.deepEqual(sent, { Accept: '*/*', 'User-Agent': 'Chrome/140 Electron/45.0.0 Safari/537.36' });
     assert.equal(panel.devicePermission(), false);
     assert.equal(panel.checkPermission({ isFocused: () => true }, 'media', 'https://public.example'), false);
     let granted;
@@ -170,7 +183,7 @@ test('agent links remain in their own view while human popups keep their existin
   let created;
   const loads = [];
   const start = main.indexOf("app.on('web-contents-created',");
-  const end = main.indexOf('\n// All desktop_* IPC', start);
+  const end = main.indexOf('\nconst isLocalSender =', start);
   vm.runInNewContext(main.slice(start, end), {
     ...shared, session: h.context.session, app: { on: (_event, handler) => { created = handler; } },
     currentAgentBrowserPolicy: () => buildAgentBrowserPolicy({ serverUrls: ['https://front.example'] }),

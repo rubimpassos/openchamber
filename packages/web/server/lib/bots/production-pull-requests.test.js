@@ -5,8 +5,8 @@ import { createFixLoopRuntime, DEFAULT_CONFIG } from '../pr-fix-loop/runtime.js'
 import { createAutomationAdmission, pullRequestKey, sessionKey } from '../session-automation/runtime.js';
 import { readPullFeedback, readFeedbackAuthorPermission, readFailedChecks } from '../github/pr-feedback.js';
 import { createProductionBotPullRequests } from './production-pull-requests.js';
-import { productionFixture } from './production-test-support.js';
-import { createBotDriver } from './runtime-test-support.js';
+import { productionFixture } from './production.test-support.js';
+import { createBotDriver } from './runtime.test-support.js';
 
 let fixture;
 let runtimes = [];

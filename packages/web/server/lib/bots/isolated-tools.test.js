@@ -38,3 +38,17 @@ it('keeps an aborted request durable and preserves an unknown host outcome', asy
   await restarted.settle({ id: requestId, request, reply: { ok: false, error: { code: 'BOT_EFFECT_OUTCOME_UNKNOWN', status: 409, state: 'outcome-unknown' } } });
   await expect(restarted.request(request)).rejects.toMatchObject({ code: 'BOT_EFFECT_OUTCOME_UNKNOWN', state: 'outcome-unknown' });
 });
+
+it('returns a settlement delivered during the durable pending announcement', async () => {
+  // Given
+  const dataDir = await fs.mkdtemp('/tmp/opencode/bot-tool-inbox-'); roots.push(dataDir);
+  const reply = { ok: true, result: { receipt: { id: 'immediate' } } };
+  const inbox = createBotIsolatedToolInbox({ dataDir, onPending: async ({ requestId }) => {
+    await inbox.settle({ id: requestId, request, reply });
+  } });
+  // When
+  const result = await inbox.request(request);
+  // Then
+  expect(result).toEqual(reply.result);
+  expect(await createBotIsolatedToolInbox({ dataDir, onPending: () => {} }).request(request)).toEqual(reply.result);
+});

@@ -17,17 +17,18 @@ export function BotSpaceGrantFields({ value, onChange, logins, custom, machine }
   readonly machine: string | null;
 }) {
   const { t } = useI18n();
-  const providers = new Map<string, SpaceModelProviderOption>(SPACE_MODEL_PROVIDERS.map(({ id, upstream, envName }) => [id, { id, name: id, key: { upstream, envName }, custom: null }]));
+  const providers = new Map<string, SpaceModelProviderOption>(SPACE_MODEL_PROVIDERS.map(({ id, upstream, envName }) => [id, { id, name: id, key: { upstream, envName }, storedKey: false, custom: null }]));
   for (const login of logins ?? []) {
     const name = SPACE_LOGIN_NAMES.get(login.provider);
-    if (name && !providers.has(login.provider)) providers.set(login.provider, { id: login.provider, name, key: null, custom: null });
+    if (name && !providers.has(login.provider)) providers.set(login.provider, { id: login.provider, name, key: null, storedKey: false, custom: null });
   }
   for (const provider of custom ?? []) providers.set(provider.id, { id: provider.id, name: provider.name,
     key: providers.get(provider.id)?.key ?? null,
+    storedKey: false,
     custom: { hasKey: provider.hasKey, loopback: provider.loopback, blocked: provider.supported ? null : 'unsupported' },
   });
   // A missing inventory entry never discards an already saved reference.
-  for (const grant of value) if (!providers.has(grant.provider)) providers.set(grant.provider, { id: grant.provider, name: grant.provider, key: null, custom: null });
+  for (const grant of value) if (!providers.has(grant.provider)) providers.set(grant.provider, { id: grant.provider, name: grant.provider, key: null, storedKey: false, custom: null });
   const replace = (provider: string, grant?: Grant) => onChange([...value.filter((entry) => entry.provider !== provider), ...(grant ? [grant] : [])]);
 
   return <SettingsControlGroup title={t('spaces.create.access.label')} info={t('bots.space.references')} contentClassName="space-y-4">
@@ -37,9 +38,10 @@ export function BotSpaceGrantFields({ value, onChange, logins, custom, machine }
       const offered = logins?.find((entry) => entry.provider === provider.id && entry.state === 'usable');
       const loginName = SPACE_LOGIN_NAMES.get(provider.id);
       const login: HostLoginOffer | null = offered && loginName ? { name: loginName, state: offered.state, expires: offered.expires } : null;
+      const key = SPACE_MODEL_PROVIDERS.find((entry) => entry.id === provider.id);
       const initial: Grant | undefined = provider.custom?.blocked === null ? { kind: 'custom', provider: provider.id }
         : login ? { kind: 'login', provider: provider.id }
-          : provider.key ? { kind: 'model', provider: provider.id, upstream: provider.key.upstream, secret: { kind: 'env', name: provider.key.envName } } : undefined;
+          : key ? { kind: 'model', provider: provider.id, upstream: key.upstream, secret: { kind: 'env', name: key.envName } } : undefined;
       let modelGrant: Extract<Grant, { kind: 'model' }> | undefined;
       let customSource = false;
       let accessUnavailable = false;
@@ -57,8 +59,13 @@ export function BotSpaceGrantFields({ value, onChange, logins, custom, machine }
         const next = { ...choice, ...change };
         switch (next.source) {
           case 'login': replace(provider.id, { kind: 'login', provider: provider.id }); return;
-          case 'env': replace(provider.id, { kind: 'model', provider: provider.id, upstream: modelAccess?.upstream ?? provider.key?.upstream ?? '', secret: { kind: 'env', name: next.envName } }); return;
-          case 'typed': throw new TypeError('Bots accept host secret references only');
+          case 'env': {
+            const upstream = modelAccess?.upstream ?? key?.upstream;
+            if (upstream === undefined) throw new TypeError('Bots require an explicit model upstream');
+            replace(provider.id, { kind: 'model', provider: provider.id, upstream, secret: { kind: 'env', name: next.envName } }); return;
+          }
+          case 'typed':
+          case 'stored': throw new TypeError('Bots accept host secret references only');
           default: next.source satisfies never;
         }
       };

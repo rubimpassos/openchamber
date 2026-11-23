@@ -59,6 +59,23 @@ describe('hostd client over a real socket', () => {
     const client = await fixture({ request: async (_request, io) => { await io.stderr(Buffer.from('early diagnostic')); return 19; } });
     expect(await client.exec({ op: 'exec', place: 'host', id: '123456abcdef', target: 'space', argv: ['false'] })).toMatchObject({ code: 19, stdout: '', stderr: 'early diagnostic' });
   });
+  it.each([null, '0', -1, 384, 1.5])('rejects an invalid final command exit %j', async (exit) => {
+    // Given a peer that accepts the stream but returns an invalid exit value.
+    const client = await fixture({ request: async () => exit });
+    // When the command completes, then acceptance never becomes a successful result.
+    await expect(client.exec({ op: 'exec', place: 'host', id: '123456abcdef', target: 'space', argv: ['id'] }))
+      .rejects.toMatchObject({ code: 'hostd_answer_unreadable' });
+  });
+  it('starts no command when the caller has already aborted', async () => {
+    // Given an aborted caller and a peer that records command requests.
+    let calls = 0;
+    const client = await fixture({ request: async () => { calls += 1; return 0; } });
+    const signal = AbortSignal.abort();
+    // When execution is requested, then it fails without reaching the peer.
+    await expect(client.exec({ op: 'exec', place: 'host', id: '123456abcdef', target: 'space', argv: ['id'] }, { signal }))
+      .rejects.toMatchObject({ code: 'command_aborted' });
+    expect(calls).toBe(0);
+  });
   it('drains a completed response when the caller starts reading after socket close', async () => {
     let sent;
     const completed = new Promise((resolve) => { sent = resolve; });

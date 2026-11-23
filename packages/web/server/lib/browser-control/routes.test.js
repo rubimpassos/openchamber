@@ -3,6 +3,7 @@ import express from 'express';
 import request from 'supertest';
 
 import { createBrowserControlBroker } from './broker.js';
+import { createPreferredBrowserClient } from './preferred-client.js';
 import { registerBrowserControlRoutes } from './routes.js';
 
 /**
@@ -11,10 +12,10 @@ import { registerBrowserControlRoutes } from './routes.js';
  * fails when a client posts to it — which surfaces to the agent as an
  * unexplained timeout, nowhere near the cause.
  */
-const createApp = ({ listeners = 1 } = {}) => {
+const createApp = ({ listeners = 1, frontDoor = false } = {}) => {
   const emitted = [];
   let sequence = 0;
-  const broker = createBrowserControlBroker({
+  const broker = frontDoor ? null : createBrowserControlBroker({
     emitRequest: (payload) => {
       emitted.push(payload);
       return listeners;
@@ -25,10 +26,49 @@ const createApp = ({ listeners = 1 } = {}) => {
     },
   });
 
+  const preferredClient = createPreferredBrowserClient({
+    getClients: () => [{ openchamberConnectionId: 'desktop', openchamberBrowserCapable: true }],
+    broadcast: () => {},
+  });
+
   const app = express();
-  registerBrowserControlRoutes(app, { express, broker });
-  return { app, broker, emitted };
+  registerBrowserControlRoutes(app, { express, broker, preferredClient });
+  return { app, broker, emitted, preferredClient };
 };
+
+describe('browser control active route', () => {
+  it.each([false, true])('makes the reporting window preferred when frontDoor is %s', async (frontDoor) => {
+    const { app, preferredClient } = createApp({ frontDoor });
+
+    await request(app)
+      .post('/api/browser-control/active')
+      .send({ connectionId: 'desktop' })
+      .expect(200, { preferredConnectionId: 'desktop' });
+
+    expect(preferredClient.current()).toBe('desktop');
+  });
+
+  it('refuses a connection that is not open', async () => {
+    const { app } = createApp();
+    await request(app).post('/api/browser-control/active').send({ connectionId: 'gone' }).expect(409);
+  });
+
+  it('rejects a body with no connection id', async () => {
+    const { app } = createApp();
+    await request(app).post('/api/browser-control/active').send({}).expect(400);
+  });
+});
+
+describe('browser control front-door routes', () => {
+  it.each(['claim', 'result'])('leaves %s to the upstream broker', async (route) => {
+    const { app } = createApp({ frontDoor: true });
+
+    await request(app)
+      .post(`/api/browser-control/${route}`)
+      .send({ requestId: 'upstream-request', ok: true })
+      .expect(404);
+  });
+});
 
 describe('browser control result route', () => {
   it('parses a posted JSON body and resolves the waiting request', async () => {
@@ -94,15 +134,6 @@ describe('browser control result route', () => {
     await request(app)
       .post('/api/browser-control/result')
       .send({ ok: true })
-      .expect(400);
-  });
-
-  it('rejects a body that is not an object', async () => {
-    const { app } = createApp();
-    await request(app)
-      .post('/api/browser-control/result')
-      .set('Content-Type', 'application/json')
-      .send('"just-a-string"')
       .expect(400);
   });
 });

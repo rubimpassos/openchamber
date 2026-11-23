@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGENT, fakeSystem, FRONT, hostRoot, OWNER } from './fake-system.js';
+import { AGENT, fakeSystem, FRONT, hostRoot, OWNER } from './fake-system.test-support.js';
 import { cli } from './main.js';
 import { rootCommand, ROOT_COMMANDS } from './root-commands.js';
 import { layout } from './host-support.js';
@@ -75,6 +75,32 @@ describe('root command entrypoint', () => {
     system.isRoot = () => false;
     // When / Then
     await expect(rootCommand('rotate-agent-token', { root, system })).rejects.toMatchObject({ code: 'root_required' });
+    expect(system.calls).toEqual([]);
+  });
+
+  it.each(['--json', '--quiet', null])('keeps the real passkey listing result in %s mode on single-account installs', async (mode) => {
+    // Given
+    const { root, system, paths } = await setup();
+    await fs.writeFile(paths.configFile, JSON.stringify({ owner: OWNER.name, separation: null }));
+    const out = capture();
+    const err = capture();
+    // When
+    const code = await cli(['root-passkeys', ...(mode ? [mode] : [])], {
+      out, err, commands: { rootCommand: (command, options) => rootCommand(command, { ...options, root, system }) },
+    });
+    // Then
+    expect(code).toBe(0);
+    expect(out.value()).toBe(mode === '--json' ? '{"ok":true,"passkeys":[]}\n' : '{"passkeys":[]}\n');
+    expect(err.value()).toBe('');
+    expect(system.calls).toEqual([]);
+  });
+
+  it.each(['share-project', 'unshare-project', 'revoke-root-passkey'])('refuses %s without an argument before account lookup', async (command) => {
+    // Given
+    const { root, system } = await setup();
+    system.account = async () => { throw new Error('Account lookup must not precede argument validation'); };
+    // When / Then
+    await expect(rootCommand(command, { root, system })).rejects.toMatchObject({ code: 'usage', message: 'Give a project path or passkey ID' });
     expect(system.calls).toEqual([]);
   });
 

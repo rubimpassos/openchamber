@@ -24,6 +24,7 @@ it.each(['plain', 'effects', 'future-field', 'bad-state', 'duplicate-effect', 't
   if (kind === 'malformed-effect') value.effects = [{ ...effect, state: 'toString' }];
   const before = JSON.stringify(value);
   expect(accepts(readBotItem, value)).toBe(botItemSchema.safeParse(value).success);
+  if (accepts(readBotItem, value)) expect(readBotItem(value)).toBe(value);
   expect(JSON.stringify(value)).toBe(before);
 });
 
@@ -42,6 +43,7 @@ it.each(['plain', 'configured', 'duplicate-definition', 'bad-model', 'bad-approv
   if (kind === 'embedded-secret') bot.space = { grants: [{ kind: 'model', provider: 'provider', upstream: 'https://model.example', secret: { kind: 'typed', value: 'not-a-real-secret' } }] };
   const before = JSON.stringify(value);
   expect(accepts(validateOwnerBotsProject, value)).toBe(accepts(runtimeProject, value));
+  if (accepts(validateOwnerBotsProject, value)) expect(validateOwnerBotsProject(value)).toBe(value);
   expect(JSON.stringify(value)).toBe(before);
 });
 
@@ -68,5 +70,6 @@ it.each(['ordinary', 'bot', 'bad-notice', 'attachment', 'bad-context', 'bad-sele
   if (kind === 'bad-selection') value.sendConfig = {};
   const before = JSON.stringify(value);
   expect(accepts(readQueuedItem, value)).toBe(accepts(parseQueuedItemInput, value));
+  if (accepts(readQueuedItem, value)) expect(readQueuedItem(value)).toBe(value);
   expect(JSON.stringify(value)).toBe(before);
 });

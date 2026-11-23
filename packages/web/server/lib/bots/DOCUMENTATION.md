@@ -31,14 +31,14 @@ The production discovery, isolated stage and provider lifecycle adapters are doc
 
 Bot definitions persist `discord: { channels: [{ guildId, channelId }] }`, with an empty channel list for older definitions. Channels are explicit guild destinations; approved people separately authorize DMs. Source discovery uses the user's JQL and selected Jira site without a configured project restriction. Discovery has its own per-occurrence token ledger so candidate admission cannot multiply or discard its usage.
 
-`attention.js` adapts authoritative item transitions to durable notification-center
+`attention.ts` adapts authoritative item transitions to durable notification-center
 requests. [attention-contract.md](attention-contract.md) defines its required
 constructor, alert owner, UI target and failure behavior.
 
-`createBotsConfig({ projectConfigRuntime })` in `config.js` exposes `read(projectId)`, `update(projectId, editableConfig)`, and server-only `setApproval(projectId, relativeFile, fingerprint | null)`. The project config runtime owns locking and whole-document writes. `readBotsConfig(raw)` returns `{ ok: true, config }` or `{ ok: false, error }`. `parseConfigEdit` throws on invalid edits and strips server-only approvals. A missing key defaults to `{ concurrency: 2, retentionDays: 90, definitions: [], approvals: {} }`; explicit null or malformed config fails. Definition parsing is exported as `botDefinitionSchema`.
+`createBotsConfig({ projectConfigRuntime })` in `config.ts` exposes `read(projectId)`, `update(projectId, editableConfig)`, and server-only `setApproval(projectId, relativeFile, fingerprint | null)`. The project config runtime owns locking and whole-document writes. `readBotsConfig(raw)` returns `{ ok: true, config }` or `{ ok: false, error }`. `parseConfigEdit` throws on invalid edits and strips server-only approvals. A missing key defaults to `{ concurrency: 2, retentionDays: 90, definitions: [], approvals: {} }`; explicit null or malformed config fails. Definition parsing is exported as `botDefinitionSchema`.
 
 `createBotScheduler({ projectConfigRuntime, scheduledTasksRuntime })` in
-`scheduler.js` exposes server-only `sync(projectId, managedRows)` and
+`scheduler.ts` exposes server-only `sync(projectId, managedRows)` and
 `remove(projectId, botId)`. `managedRows` is the complete successful
 `config.definitions.map(botTaskFor)` projection for one project. Invalid snapshots
 throw before reconciliation. Existing non-bot IDs cannot be taken over. Sync
@@ -68,7 +68,13 @@ config, project persistence, scheduler and task service with an explicit
 deterministic bot hook. It proves config sync/list/run and refusal without an
 ordinary session; it does not exercise production source discovery or providers.
 
-`createBotStore({ projectsDirPath, fsImpl?, now?, owner? })` in `store.js` exposes:
+`scheduler.contract.test.ts` composes the owner-local store with the Bot-only
+runtime and scheduler adapter under TypeScript, then dispatches a controlled
+manual run without project execution dependencies. `owner-config.test.js`
+preserves legacy schedules, omitted zones, partial state and unknown fields
+through locked state writes. These checks use temporary personal-config files.
+
+`createBotStore({ projectsDirPath, fsImpl?, now?, owner? })` in `store.ts` exposes:
 
 - `read(projectId)` returns `{ revision, items }`.
 - `update(projectId, change)` runs `change(snapshot)` under the file lock. Return `{ snapshot: { revision, items }, result? }` to commit, or `{ result }` to skip. With no result, a commit returns the committed snapshot. The callback receives a detached current value and must preserve its revision and existing item revisions. A state-only mutation replaces a matching item in the array. The store increments revisions and appends transition history. Remote calls must happen after the promise resolves, outside the callback.
@@ -76,7 +82,7 @@ ordinary session; it does not exercise production source discovery or providers.
 - `readArchive(projectId, month?)` returns deduplicated archived items, optionally restricted to `YYYY-MM`.
 - `filePathFor(projectId)` returns `<projectsDir>/<projectConfigFileStemOf(projectId)>/bots.json`. Archives are sibling `bots-archive/YYYY-MM.jsonl` files. Snapshot and archive operations share `bots.json.lock`.
 
-`schema.js` exports `createBotItem({ id?, botId, source, title, description?, now? })`, `botItemSchema`, `botItemSourceSchema`, `botItemStateSchema`, `botEffectSchema`, `botEffectAuthoritySchema`, `botOwnerSchema`, `BOT_ITEM_STATES`, `TERMINAL_ITEM_STATES`, `assertItemTransition`, and `assertEffectTransition`. The source and state schemas are reused by typed execution projections without picking fields from the refined item schema. Sources have `{ kind: manual | jira | suggestion | alert | investigation, id, url? }`; source identity and bot ID are immutable. Sessions are `{ investigation?, fixing?, judge? }` with session IDs as values. Worktree and branch are strings. Evidence is `{ source, summary, url? }[]`. Proof, judgment, wait, token usage, transitions and effects are parsed structured records, never opaque provider payloads.
+`schema.ts` exports `createBotItem({ id?, botId, source, title, description?, now? })`, `botItemSchema`, `botItemSourceSchema`, `botItemStateSchema`, `botEffectSchema`, `botEffectAuthoritySchema`, `botOwnerSchema`, `BOT_ITEM_STATES`, `TERMINAL_ITEM_STATES`, `assertItemTransition`, and `assertEffectTransition`. The source and state schemas are reused by typed execution projections without picking fields from the refined item schema. Sources have `{ kind: manual | jira | suggestion | alert | investigation, id, url? }`; source identity and bot ID are immutable. Sessions are `{ investigation?, fixing?, judge? }` with session IDs as values. Worktree and branch are strings. Evidence is `{ source, summary, url? }[]`. Proof, judgment, wait, token usage, transitions and effects are parsed structured records, never opaque provider payloads.
 
 Effects have stable `key`, a kind, SHA-256 `inputDigest`, `createdAt`, `updatedAt`, and `{ service, identityId, revision, target }` authority. Identity and target are opaque executor-resolved references, never credentials. `prepared` has no result; `dispatching` has `{ pid, host }` owner; `succeeded` has `{ id, url?, sha?, sessionId? }` receipt; `refused` and `outcome-unknown` have a stable `code`. Persist prepared, then dispatching, before a remote write. A persisted dispatching record must be reconciled after restart; it can never become prepared again. Unknown outcomes require human attention until authoritative reconciliation settles them. The coordinator owns that live reconciliation and setting `needs-you`; loading persisted history does not prove activity.
 
@@ -95,6 +101,54 @@ Effects have stable `key`, a kind, SHA-256 `inputDigest`, `createdAt`, `updatedA
 - New, changed, removed or unreadable area rules force human review globally until repaired or explicitly approved/withdrawn. Both old and new diff paths count. `.agents/areas/`, `.openchamber/`, `.github/` and any `CODEOWNERS` file require human review regardless of a judge's response. An unapproved people file supplies no identities.
 
 ## Decisions
+
+### Why gateway projection precedes frame validation
+
+`agent-gateway-transport.ts` retains the credential-bearing Discord socket; the
+owner gateway owns heartbeats, durable cursors and reconnects. Its mutable
+connection state tracks bounded unacknowledged frames and pull waiters. The
+existing provider credential resolver owns authentication and current-identity
+checks; provider HTTP responses remain untrusted until parsed here.
+
+The transport reads the frame envelope before projecting READY and MESSAGE_CREATE
+data through the existing wire schemas. Other dispatches retain only their
+sequence and event name, with null data. Validating their unused snapshots first
+would change which frames are accepted. Fragment-array socket messages retain
+the prior invalid-frame outcome, and `.js` import specifiers remain valid for
+both the source loader and emitted Node modules.
+
+### Why persistence types follow the existing schemas
+
+The TypeScript implementations infer item, effect, definition, identity and journal types from their existing Zod schemas, preserving defaults, strictness and stored versions. Owner project documents retain unknown fields without granting those fields policy or credential authority. Identity responses explicitly project public metadata, while only server-side resolution returns secret-bearing definitions. Source imports keep `.js` specifiers for emitted Node modules and use the server source loader in direct Node tests.
+
+Public Bot routes and separated execution use the same checked TypeScript source
+resolution. Checkout request types describe consumed identity, checkout and
+publication fields; their effects ledger contains only the keys, kinds and states
+used for admission. `BotBindingContext` describes credential-free owner context,
+while local checkout and blame owners still require the GitHub credential API.
+PR construction requires delegated execution when its context returns only a
+binding. No coordinator-only fields are fabricated to satisfy execution types.
+
+Notices, attention, scheduler, placement, presets, space options and proof also
+use TypeScript implementations. Their existing parsers retain input authority:
+notice callers supply only item identity, placement uses captured execution and
+bindings, scheduler rows are parsed before writes, and proof uses immutable
+snapshots. This conversion changes no persisted versions, defaults or dispatch
+ordering. The adapter-state, discovery, effects, events and prompts owners also
+use checked TypeScript with their existing parsers and `.js` import specifiers.
+
+`repository-policy.ts` retains the exact-byte fingerprints, serialized field
+order and validation schemas. Its local type owner, `repository-policy.types.ts`,
+describes policy snapshots and service-specific identity resolution.
+`judge-policy.ts` consumes that resolution directly: a resolved GitHub recipient
+has a GitHub identity; an unresolved recipient carries the question reason.
+
+Proof runs the configured command on separate immutable snapshots, leaving the
+item checkout untouched. Only completed process exit codes count as red/green
+evidence; signals, missing executables and output limits are inconclusive.
+Cleanup releases each Git worktree before deleting its owned directory, and a
+failed release remains visible. Presets return fresh editable definitions with
+independent nested defaults on every call.
 
 ### Why scheduled rows carry the bot ID
 

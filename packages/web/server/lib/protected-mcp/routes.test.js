@@ -10,7 +10,7 @@ import { registerProtectedMcpRoutes } from './routes.js';
 import { readServiceState } from './service-client.js';
 import { createAdminSocketClient } from './test-support/admin-socket-client.js';
 import { SENTINEL, startService } from './test-support/fixtures.js';
-import { registerCommonRequestMiddleware } from '../opencode/core-routes.js';
+import { registerCommonRequestMiddleware } from '../server-frame/core-routes.js';
 
 const cleanups = [];
 afterEach(async () => {

@@ -109,7 +109,6 @@ const StatusPill: React.FC<{
   blocked: boolean;
 }> = ({ status, enabled, blocked }) => {
   const { t } = useI18n();
-  // OpenCode never loads a blocked server, so it has no status of its own to show.
   if (blocked) return <SettingsCardPill tone="warning">{t('settings.mcp.grid.status.blockedByPolicy')}</SettingsCardPill>;
   if (!enabled) return <SettingsCardPill tone="neutral">{t('settings.mcp.grid.status.disabled')}</SettingsCardPill>;
   const pill: { tone: SettingsCardTone; label: string } | null = status === 'connected'
@@ -124,7 +123,6 @@ const StatusPill: React.FC<{
   return pill ? <SettingsCardPill tone={pill.tone}>{pill.label}</SettingsCardPill> : null;
 };
 
-/** Browse view of the MCP page: one card per configured server with its live status. */
 export const McpGrid: React.FC<{ readonly protectedMcp: ReturnType<typeof useProtectedMcp> }> = ({ protectedMcp }) => {
   const { t } = useI18n();
   const settingsDirectory = useSettingsDirectory();
@@ -139,9 +137,6 @@ export const McpGrid: React.FC<{ readonly protectedMcp: ReturnType<typeof usePro
   const [isDeleting, setIsDeleting] = React.useState(false);
   const servers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, settingsDirectory));
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(settingsDirectory));
-  // Runtime-only rows wait for the config catalog: before it is read, every
-  // server the runtime reports would read as runtime-only, and a configured
-  // server would flash as one while its config entry was still loading.
   const configsLoaded = useMcpConfigStore((state) => hasLoadedMcpConfigsForDirectory(state, settingsDirectory));
   const isBlocked = useIntegrationPolicyBlock(settingsDirectory);
   const refreshStatus = useMcpStore((state) => state.refresh);
@@ -160,7 +155,6 @@ export const McpGrid: React.FC<{ readonly protectedMcp: ReturnType<typeof usePro
   const handleRefresh = () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    // Keep the spinner up long enough to read as a refresh.
     const minSpin = new Promise((resolve) => setTimeout(resolve, 500));
     void Promise.all([refreshStatus({ directory: settingsDirectory, silent: true }), reloadProtected(), minSpin])
       .then(() => {
@@ -256,9 +250,8 @@ export const McpGrid: React.FC<{ readonly protectedMcp: ReturnType<typeof usePro
   const cards = protectedStatus ? protectedCards(protectedStatus, connections) : [];
   const orphans = protectedStatus ? orphanedSelections(protectedStatus, connections) : [];
 
-  // Runtime-only servers, such as a signed-in workspace's Console MCP, are
-  // read-only. Configured servers, protected aliases and orphaned selections
-  // already have their own cards, so wait for protected discovery as well.
+  // external: #5935 Console MCP servers have no editable config entry. Wait for
+  // protected discovery so aliases and orphan selections keep their own cards.
   const representedNames = new Set([...servers, ...cards, ...orphans].map((server) => server.name));
   const runtimeServers = configsLoaded && protectedState.kind !== 'loading'
     ? Object.values(mcpStatus).filter((server) => !representedNames.has(server.name))
@@ -285,7 +278,7 @@ export const McpGrid: React.FC<{ readonly protectedMcp: ReturnType<typeof usePro
       namedBySidebar
     >
       <SettingsCardToolbar
-        search={rows.length > 0 ? { value: query, onChange: setQuery, placeholder: t('settings.mcp.grid.searchPlaceholder') } : null}
+        search={cardCount > 0 ? { value: query, onChange: setQuery, placeholder: t('settings.mcp.grid.searchPlaceholder') } : null}
         actions={(
           <>
             <Button
@@ -324,8 +317,6 @@ export const McpGrid: React.FC<{ readonly protectedMcp: ReturnType<typeof usePro
         {filtered.map((row) => {
           if (row.kind === 'runtime') {
             const blocked = isBlocked(`mcp:${row.server.name}`);
-            // No config entry backs this server, so it opens nothing and offers
-            // no delete: the row is what the runtime reports, read-only.
             return (
               <SettingsCard
                 key={row.server.name}

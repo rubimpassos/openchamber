@@ -44,6 +44,18 @@ test('mobile swipe keeps every action reachable in narrow LTR and RTL rows and c
   const clipboard = spyOn(dom.navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   const successToast = spyOn(toast, 'success').mockImplementation(() => 'success');
   const errorToast = spyOn(toast, 'error').mockImplementation(() => 'error');
+  const copied = new Promise<void>((resolve) => {
+    successToast.mockImplementation(() => {
+      resolve();
+      return 'success';
+    });
+  });
+  const copyFailed = new Promise<void>((resolve) => {
+    errorToast.mockImplementation(() => {
+      resolve();
+      return 'error';
+    });
+  });
 
   const Harness: React.FC = () => {
     const [revealed, updateRevealed] = React.useState(true);
@@ -55,6 +67,7 @@ test('mobile swipe keeps every action reachable in narrow LTR and RTL rows and c
 
     return (
       <MobileSwipeActionsRow
+        sessionId={sessionId}
         actionsWidth={ROW_ACTIONS_WIDTH + (extraActions ? 3 * ROW_ACTION_SLOT_WIDTH : 0)}
         revealed={revealed}
         onRevealedChange={onRevealedChange}
@@ -89,7 +102,7 @@ test('mobile swipe keeps every action reachable in narrow LTR and RTL rows and c
 
     await act(async () => {
       getCopyButton().click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await copied;
     });
 
     expect(clipboard.mock.calls[0]?.[0]).toBe(sessionId);
@@ -102,7 +115,7 @@ test('mobile swipe keeps every action reachable in narrow LTR and RTL rows and c
     await act(async () => setRevealed(true));
     await act(async () => {
       getCopyButton().click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await copyFailed;
     });
 
     expect(clipboard.mock.calls[1]?.[0]).toBe(sessionId);
@@ -112,7 +125,7 @@ test('mobile swipe keeps every action reachable in narrow LTR and RTL rows and c
 
     extraActions = true;
     await act(async () => root.render(<I18nProvider><Harness /></I18nProvider>));
-    const row = container.querySelector<HTMLDivElement>('.overflow-hidden');
+    const row = container.querySelector<HTMLDivElement>('[data-mobile-session-row]');
     const actions = row?.querySelector<HTMLDivElement>('[aria-hidden]');
     const content = actions?.nextElementSibling;
     if (!row || !actions || !(content instanceof HTMLElement)) throw new Error('Missing swipe row');

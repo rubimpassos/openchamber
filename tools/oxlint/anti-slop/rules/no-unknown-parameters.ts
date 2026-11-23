@@ -1,5 +1,7 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
+import { isExportedInputParser, isRuntimeFunction } from "../shared/input-parsers.ts";
+import { isSchemaConsumedParameter } from "../shared/schema-consumption.ts";
 
 type Parameter = ESTree.ParamPattern;
 type ParameterOwner =
@@ -39,26 +41,42 @@ function parameterName(parameter: Parameter, sourceText: string): string {
     : sourceText.replace(/\s*:\s*unknown\s*$/u, "");
 }
 
-/** Disallow unknown inputs except explicitly named error-cause enrichment. */
+/** Disallow unknown inputs without boundary parsing evidence or an explicit exception. */
 export const noUnknownParametersRule = defineRule({
   meta: {
     type: "problem",
     docs: {
       description:
-        "Disallow explicitly unknown function parameters except `cause`; decode unknown input at its I/O boundary instead.",
+        "Disallow explicitly unknown function parameters without proven boundary parsing or a configured parser exception, except `cause`.",
     },
     messages: {
       unknownParameter:
         "Parameter `{{parameter}}` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
     },
+    schema: [{
+      type: "object",
+      properties: {
+        allowInTypeGuards: { type: "boolean" },
+        allowInParsers: { type: "array", items: { type: "string" } },
+      },
+      additionalProperties: false,
+    }],
+    defaultOptions: [{ allowInTypeGuards: false, allowInParsers: [] }],
   },
   createOnce(context) {
     const checkParameters = (node: ParameterOwner) => {
+      const option = context.options?.[0];
+      if (typeof option === "object" && option !== null && "allowInTypeGuards" in option
+        && option.allowInTypeGuards === true && node.returnType?.typeAnnotation.type === "TSTypePredicate") return;
+      if (typeof option === "object" && option !== null && "allowInParsers" in option
+        && Array.isArray(option.allowInParsers) && isRuntimeFunction(node)
+        && isExportedInputParser(node, context.filename, option.allowInParsers)) return;
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
         if (annotation?.typeAnnotation.type !== "TSUnknownKeyword") continue;
         const name = parameterName(parameter, context.sourceCode.getText(parameter));
         if (name === "cause") continue;
+        if (isRuntimeFunction(node) && isSchemaConsumedParameter(context.sourceCode, node, parameter)) continue;
         context.report({
           node: annotation.typeAnnotation,
           messageId: "unknownParameter",

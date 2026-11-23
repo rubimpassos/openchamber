@@ -1,5 +1,6 @@
-// Side-effect entry: entry.mjs imports this first so OPENCHAMBER_DATA_DIR is
-// set before anything resolves the data directory.
+// Packaged runs set the fork directory before startup reads settings.
+// Development keeps the launcher's and login shell's directory selection.
+import { app } from 'electron';
 import { applyTurbo2DataDir } from './turbo2-data-dir.mjs';
 
-applyTurbo2DataDir();
+if (app.isPackaged && process.env.OPENCHAMBER_ELECTRON_DEV !== '1') applyTurbo2DataDir();

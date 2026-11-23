@@ -5,16 +5,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const spaces = new URL('../spaces/', import.meta.url);
+const sourceLoader = new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href;
+const sourceArgs = ['--conditions=openchamber-source', '--import', sourceLoader];
 await fs.mkdir('/tmp/opencode', { recursive: true });
 const root = await fs.mkdtemp('/tmp/opencode/bot-allocation-mutation-');
 try {
-  const source = await fs.readFile(new URL('journey.js', spaces), 'utf8');
+  const journey = new URL(import.meta.resolve('../spaces/journey.js'));
+  const source = await fs.readFile(journey, 'utf8');
   const protection = 'if (onAllocated) await onAllocated({ id, directory: entry.directory });';
   assert.equal(source.split(protection).length, 2);
   const copied = source.replace(protection, '/* mutation: allocation persistence omitted */')
-    .replace(/from '(\.[^']+)'/g, (_all, relative) => `from '${new URL(relative, new URL('journey.js', spaces)).href}'`)
+    .replace(/from '(\.[^']+)'/g, (_all, relative) => `from '${new URL(relative, journey).href}'`)
     .replace("from 'zod'", `from '${import.meta.resolve('zod')}'`);
-  const mutant = path.join(root, 'journey.mjs'); await fs.writeFile(mutant, copied);
+  const mutant = path.join(root, 'journey.mts'); await fs.writeFile(mutant, copied);
   const probe = `
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -38,16 +41,16 @@ assert.deepEqual(await place.list(),[],'A container was created before durable a
 await fs.rm(dataDir,{recursive:true,force:true});
 `;
   const file = path.join(root, 'probe.mjs'); await fs.writeFile(file, probe);
-  const run = (module) => spawnSync(process.execPath, [file, module], { encoding: 'utf8', timeout: 30_000 });
-  const original = new URL('journey.js', spaces).href;
+  const run = (module) => spawnSync(process.execPath, [...sourceArgs, file, module], { encoding: 'utf8', timeout: 30_000 });
+  const original = journey.href;
   const before = run(original); assert.equal(before.status, 0, before.stderr);
   const broken = run(pathToFileURL(mutant).href);
   assert.notEqual(broken.status, 0, 'The allocation regression survived its mutation');
   assert.match(broken.stderr, /Missing expected rejection/);
   const restored = run(original); assert.equal(restored.status, 0, restored.stderr);
-  console.log(JSON.stringify({ protection: 'Persist allocation before creating a container', control: 'green', mutation: 'red: missing expected rejection', restored: 'green', module: fileURLToPath(new URL('journey.js', spaces)), dockerIsolation: 'not tested' }));
+  console.log(JSON.stringify({ protection: 'Persist allocation before creating a container', control: 'green', mutation: 'red: missing expected rejection', restored: 'green', module: fileURLToPath(journey), dockerIsolation: 'not tested' }));
 
-  const adapter = new URL('./isolated-stages.js', import.meta.url);
+  const adapter = new URL(import.meta.resolve('./isolated-stages.js'));
   const adapterSource = await fs.readFile(adapter, 'utf8');
   const toolProbe = `
 import assert from 'node:assert/strict';
@@ -93,7 +96,7 @@ try {
 } finally {await fs.rm(dataDir,{recursive:true,force:true});}
 `;
   const toolFile = path.join(root, 'tool-probe.mjs'); await fs.writeFile(toolFile, toolProbe);
-  const runTool = (module, mode) => spawnSync(process.execPath, [toolFile, module, mode], { encoding: 'utf8', timeout: 30_000 });
+  const runTool = (module, mode) => spawnSync(process.execPath, [...sourceArgs, toolFile, module, mode], { encoding: 'utf8', timeout: 30_000 });
   const protections = [
     ['space', 'binding.spaceId !== spaceId || ', ''],
     ['session', "    if (page.requests.some((entry) => entry.request.sessionId !== sessionId\n      || entry.id !== digestMutationInput({ sessionId, callId: entry.request.callId }))) refuse('BOT_ISOLATED_TOOL_SESSION_REQUIRED');", ''],
@@ -104,7 +107,7 @@ try {
       .replace(/from '(\.[^']+)'/g, (_all, relative) => `from '${new URL(relative, adapter).href}'`)
       .replace("from 'zod'", `from '${import.meta.resolve('zod')}'`)
       .replace("from '@opencode/client'", `from '${import.meta.resolve('@opencode/client')}'`);
-    const mutant = path.join(root, `isolated-stages-${mode}.mjs`); await fs.writeFile(mutant, source);
+    const mutant = path.join(root, `isolated-stages-${mode}.mts`); await fs.writeFile(mutant, source);
     const before = runTool(adapter.href, mode); assert.equal(before.status, 0, before.stderr);
     const broken = runTool(pathToFileURL(mutant).href, mode);
     assert.notEqual(broken.status, 0, `The ${mode} authority regression survived its mutation`);

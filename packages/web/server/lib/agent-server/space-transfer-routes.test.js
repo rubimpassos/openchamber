@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PassThrough, Readable } from 'node:stream';
-import { ID, cleanupTransfers, transferFixture } from './space-transfer-fixture.js';
+import { ID, cleanupTransfers, transferFixture } from './space-transfer.fixture.js';
 import { readBoundedBody } from './agent-upstream.js';
 
 afterEach(cleanupTransfers);

@@ -13,7 +13,7 @@ import { botPresets } from './presets.js';
 import { botStagePermissions } from './stage-sessions.js';
 import { createBotSources } from './sources.js';
 import { admitBotJudgment } from './judge-policy.js';
-import { createBotDriver, TEST_HEAD } from './runtime-test-support.js';
+import { createBotDriver, TEST_HEAD } from './runtime.test-support.js';
 
 const directories = [];
 const fixture = async (options) => {

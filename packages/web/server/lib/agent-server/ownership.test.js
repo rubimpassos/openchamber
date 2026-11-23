@@ -56,6 +56,24 @@ describe('front door ownership', () => {
     // Given a socket handshake. When classified, then only explicit upgrades pass.
     expect(classify(request(url, 'GET', { upgrade: 'websocket' }))).toBe(expected);
   });
+  it.each(Array.from({ length: 33 }, (_, code) => code))('refuses raw path control or space U+%i', (code) => {
+    // Given each character in the existing C0-plus-space refusal range.
+    const url = `/api/future/${String.fromCharCode(code)}`;
+    // When classified, then URL parsing cannot discard it and select an owner.
+    expect(classify(request(url))).toBe('refused');
+  });
+  it.each(Array.from({ length: 33 }, (_, code) => code))('refuses encoded path control or space U+%i', (code) => {
+    // Given the same range after percent decoding.
+    const url = `/api/future/%${code.toString(16).padStart(2, '0')}`;
+    // When classified, then the decoded path remains refused.
+    expect(classify(request(url))).toBe('refused');
+  });
+  it.each([0x7f, 0x85, 0xa0])('preserves routing for characters outside the refusal range U+%i', (code) => {
+    // Given a character outside the original C0-plus-space range.
+    const url = `/api/future/${encodeURIComponent(String.fromCharCode(code))}`;
+    // When classified, then the conversion has not broadened the refusal range.
+    expect(classify(request(url))).toBe('agent');
+  });
   it('keeps owner settings and local message sockets local with a carried space directory', () => {
     // Given the directory header an SDK retains while a space is selected.
     const headers = { 'x-opencode-directory': '/spaces/012345abcdef/repo' };

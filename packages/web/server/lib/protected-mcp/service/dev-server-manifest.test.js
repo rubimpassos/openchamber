@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { buildManifest, connectionIdFor } from './dev-server-manifest.js';
 import { parseManifest } from './migrate.js';
+import { emitServiceFixture } from '../test-support/emitted-service.js';
 
 /** The shape of dev-server's `group_vars/all/workspaces.json`, with made-up values. */
 const catalog = {
@@ -116,5 +121,76 @@ describe('dev-server manifest', () => {
   it('gives the same ids every time, so a regenerated manifest resumes', () => {
     expect(buildManifest(catalog).manifest).toEqual(buildManifest(catalog).manifest);
     expect(connectionIdFor('alpha', 'github')).toMatch(/^pmcp_[0-9a-f]{16}$/);
+  });
+});
+
+describe('emitted dev-server manifest CLI', () => {
+  let directory;
+  let entry;
+  let catalogFile;
+  beforeAll(async () => {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dev-server-manifest-'));
+    await emitServiceFixture(directory);
+    entry = path.join(directory, 'lib/protected-mcp/service/dev-server-manifest.js');
+    catalogFile = path.join(directory, 'catalog.json');
+    await fs.writeFile(catalogFile, JSON.stringify(catalog));
+  });
+  afterAll(async () => { await fs.rm(directory, { recursive: true, force: true }); });
+
+  it.each([
+    { args: ['--help'], status: 0, stream: 'stdout', empty: 'stderr' },
+    { args: [], status: 64, stream: 'stderr', empty: 'stdout' },
+    { args: ['--catalog'], status: 64, stream: 'stderr', empty: 'stdout' },
+  ])('reports usage with exit $status for $args', ({ args, status, stream, empty }) => {
+    // Given an emitted entry with no loader or package dependencies.
+    // When Node runs a help or missing-catalog invocation.
+    const result = spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8' });
+    // Then usage stays on the expected stream and the exit code is script-safe.
+    expect(result.status).toBe(status);
+    expect(result[stream]).toMatch(/^Usage: dev-server-manifest\.js --catalog /);
+    expect(result[empty]).toBe('');
+  });
+
+  it('writes a consumable manifest to stdout when no output file is given', () => {
+    // Given the non-secret catalog fixture.
+    // When the emitted CLI projects it.
+    const result = spawnSync(process.execPath, [entry, '--catalog', catalogFile], { encoding: 'utf8' });
+    // Then the migration parser accepts exactly the builder's projection.
+    expect(result.status).toBe(0);
+    const manifest = JSON.parse(result.stdout);
+    expect(() => parseManifest(manifest)).not.toThrow();
+    const expected = buildManifest(catalog);
+    expect(manifest).toEqual(expected.manifest);
+    expect(JSON.parse(result.stderr)).toEqual({ connections: 6, selections: 6, pending: expected.pending });
+  });
+
+  it('writes the broker-filtered manifest to a public-readable output file when requested', async () => {
+    // Given only a running Atlassian broker and a fresh output path.
+    const brokersFile = path.join(directory, 'brokers.json');
+    const output = path.join(directory, 'manifest.json');
+    const brokers = { domains: { alpha: { mcp: { atlassian: 'http://[::1]:41902/mcp' } } } };
+    await fs.writeFile(brokersFile, JSON.stringify(brokers));
+    // When the CLI projects the broker catalog into that file.
+    const result = spawnSync(process.execPath, [entry, '--catalog', catalogFile, '--brokers', brokersFile, '--out', output], { encoding: 'utf8' });
+    // Then stdout is empty and the file retains the bridge without credentials.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    const manifest = JSON.parse(await fs.readFile(output, 'utf8'));
+    expect(() => parseManifest(manifest)).not.toThrow();
+    expect(manifest).toEqual(buildManifest(catalog, { brokers }).manifest);
+    expect(JSON.parse(result.stderr).pending.map((item) => item.action)).toEqual(['skip', 'skip', 'skip', 'bridge', 'skip', 'skip', 'skip', 'skip', 'skip']);
+    expect((await fs.stat(output)).mode & 0o777).toBe(0o644 & ~process.umask());
+  });
+
+  it('reports an invalid catalog without writing a manifest', async () => {
+    // Given a JSON file with no workspace catalog.
+    const invalid = path.join(directory, 'invalid.json');
+    await fs.writeFile(invalid, '{}');
+    // When the emitted CLI reads it.
+    const result = spawnSync(process.execPath, [entry, '--catalog', invalid], { encoding: 'utf8' });
+    // Then the existing catalog error reaches stderr and no manifest is emitted.
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toMatch(/^invalid_catalog:/);
   });
 });

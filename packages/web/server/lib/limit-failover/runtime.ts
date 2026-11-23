@@ -1,0 +1,892 @@
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+
+import { classifyLimitFailure, DEFAULT_EXHAUSTION_MS, modelFamilyOf, reportSchema, parseModelSetting } from './policy.js';
+import { toClaudeUsage } from '../quota/providers/claude/transforms.js';
+import { createSessionAccountStore } from './session-accounts.js';
+import type { LimitFailure, LimitReport, LimitScope } from './policy.js';
+import type { Application, ExpressFactory } from '../shared/http-contracts.js';
+import type { LimitFailoverAnnouncement, LimitFailoverDecision, LimitFailoverDependencies, StoredFailoverSettings } from './runtime-contracts.js';
+export type { LimitFailoverAnnouncement, LimitFailoverDecision, LimitFailoverDependencies, StoredFailoverSettings } from './runtime-contracts.js';
+
+const isStoredModelSelection = (value: unknown): value is string => typeof value === 'string';
+
+interface SwitchTicket {
+  sessionID: string;
+  credentialID: string | null;
+  announcement: LimitFailoverAnnouncement;
+}
+
+type SessionPin = NonNullable<Awaited<ReturnType<ReturnType<typeof createSessionAccountStore>['get']>>>;
+type AccountUsage = { readonly id: string; readonly label: string; readonly usage: ReturnType<typeof toClaudeUsage> | null };
+type UsageSnapshot = { readonly at: number; readonly accounts: readonly AccountUsage[] };
+
+const settleSchema = z.object({ ticket: z.string().min(1), applied: z.boolean() });
+
+// The usage sweep answers for one provider only: the Anthropic OAuth usage
+// endpoint, which every stored Claude account's own token can read.
+const USAGE_PROVIDER_ID = 'anthropic';
+const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+
+const usageReportSchema = z.object({
+  providerID: z.literal(USAGE_PROVIDER_ID),
+  accounts: z.array(z.object({
+    id: z.string().min(1).max(200),
+    label: z.string().max(200).catch(''),
+    usage: z.unknown(),
+  })).min(1).max(20),
+});
+
+const querySchema = z.object({
+  providerID: z.string().min(1).optional(),
+  sessionID: z.string().optional(),
+  modelID: z.string().min(1).optional(),
+});
+
+const sessionAccountBodySchema = z.object({
+  sessionID: z.string().min(1).max(200),
+  providerID: z.string().min(1).max(200).optional().catch(undefined),
+  modelID: z.string().min(1).max(200).optional().catch(undefined),
+  activeCredentialID: z.string().min(1).max(200).optional().catch(undefined),
+});
+
+const requestAccountBodySchema = z.object({
+  sessionID: z.string().min(1).max(200),
+  providerID: z.string().min(1).max(200),
+  modelID: z.string().min(1).max(200).optional().catch(undefined),
+  activeCredentialID: z.string().min(1).max(200).optional().catch(undefined),
+});
+
+const providerAccountPutSchema = z.object({
+  providerID: z.string().min(1).max(200),
+  credentialID: z.string().min(1).max(200).nullable(),
+});
+
+const sessionAccountPutSchema = z.object({
+  sessionID: z.string().min(1).max(200),
+  providerID: z.string().min(1).max(200),
+  mode: z.enum(['global', 'preferred', 'fixed']),
+  credentialID: z.string().min(1).max(200).optional(),
+});
+
+const PLUGIN_ID = 'openchamber-limit-failover';
+const ROUTE = '/api/openchamber/limit-failover';
+
+const SWITCH_GRACE_MS = 60_000;
+
+/** A named reset further out than this holds the turn too long to wait out. */
+const MAX_WAIT_MS = 24 * 60 * 60 * 1000;
+
+/** Retry a little after the named reset, so a clock skew does not hit the closed window. */
+const WAIT_SLACK_MS = 15_000;
+
+const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
+  name: PLUGIN_ID,
+  version: '0.0.0',
+  private: true,
+  type: 'module',
+  exports: { '.': './index.js' },
+}, null, 2)}\n`;
+
+// No imports: OpenCode loads the entry from its own directory, where nothing
+// is installed. It reaches the server through the callback address and token
+// the agent tool runtime puts into the managed child's environment.
+export const LIMIT_FAILOVER_PLUGIN_HELPERS = `const LIMIT_ERROR_TYPES = new Set(["provider.quota", "provider.free-limit", "provider.budget-limit", "provider.model-budget-limit", "provider.go-limit", "provider.chatgpt-limit", "provider.rate-limit"])
+const LIMIT_FAILOVER_ROUTE = ${JSON.stringify(ROUTE)}
+const USAGE_URL = ${JSON.stringify(USAGE_URL)}
+
+// Location-scoped reads answer { location, data }.
+const storedConnections = async (ctx, providerID) => {
+  const provider = (await ctx.provider.get({ providerID }).catch(() => undefined))?.data
+  const integrationID = provider?.integrationID ?? providerID
+  const integration = (await ctx.integration.get({ integrationID }).catch(() => undefined))?.data
+  const active = await ctx.integration.connection.active(integrationID).catch(() => undefined)
+  return {
+    connections: (integration?.connections ?? []).filter((connection) => connection.type === "credential"),
+    activeCredentialID: active?.type === "credential" ? active.id : undefined,
+  }
+}
+const failoverAccounts = async (ctx, providerID) => {
+  const { connections, activeCredentialID } = await storedConnections(ctx, providerID)
+  return {
+    credentials: connections.map((connection) => ({ id: connection.id, label: connection.label })),
+    activeCredentialID,
+  }
+}
+
+// What Anthropic's anthropic-ratelimit-unified-* headers say about a 429: the
+// account's rejected status, the reset epoch and the window that rejected.
+const captureHeaders = (response) => {
+  const status = response.headers.get("anthropic-ratelimit-unified-status")
+  if (!status) return undefined
+  const reset = Number(response.headers.get("anthropic-ratelimit-unified-reset"))
+  const resetAt = Number.isFinite(reset) && reset > 0 ? (reset < 1e10 ? reset * 1000 : reset) : undefined
+  const claim = response.headers.get("anthropic-ratelimit-unified-representative-claim")
+  return { status, ...(resetAt !== undefined ? { resetAt } : {}), ...(claim ? { claim } : {}) }
+}
+
+`;
+
+const createManagedAccountSetupCode = (callbackExpr: string) => `
+    // The 429 headers a session hit last, consumed by the retry report that
+    // follows it; a report without them decides as before.
+    const captured = new Map()
+    const rememberCaptured = (sessionID, info) => {
+      captured.set(sessionID, { info, at: Date.now() })
+      if (captured.size > 100) captured.delete(captured.keys().next().value)
+    }
+    const takeCaptured = (sessionID) => {
+      const entry = captured.get(sessionID)
+      if (!entry) return undefined
+      captured.delete(sessionID)
+      return Date.now() - entry.at <= 60_000 ? entry.info : undefined
+    }
+
+    await ctx.session.hook("http.response", async (event) => {
+      if (event.model.providerID !== "anthropic" || event.response.status !== 429) return
+      const info = captureHeaders(event.response)
+      if (info && info.resetAt !== undefined) rememberCaptured(event.sessionID, info)
+    })
+
+    // The account the last request of each pinned session went out on, for
+    // the failure report that may follow it.
+    const usedCredential = new Map()
+    const rememberUsed = (sessionID, credentialID) => {
+      usedCredential.delete(sessionID)
+      if (credentialID === undefined) return
+      usedCredential.set(sessionID, credentialID)
+      if (usedCredential.size > 200) usedCredential.delete(usedCredential.keys().next().value)
+    }
+
+    // Sessions the server last named a fixed account for: when the server
+    // cannot be asked, their requests still never go out on another account.
+    const fixedSessions = new Set()
+    const FIXED_UNSIGNED = "The account this session is fixed to cannot sign this request. Sign in to it again in Settings, Providers."
+
+    // A pinned session's request goes out on its own account. The Claude
+    // sign-in plugin signs every request with the active credential before
+    // this hook runs (it loads from the global config, this one from
+    // OpenChamber's), so only the token is swapped, on the same request object
+    // the sign-in plugin keeps for its response transforms.
+    await ctx.session.hook("http.request", async (event) => {
+      rememberUsed(event.sessionID, undefined)
+      const target = (${callbackExpr})
+      if (!target) return
+      let answer
+      let stored
+      try {
+        stored = await storedConnections(ctx, event.model.providerID)
+        const response = await fetch(target.url + "/request-account", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: "Bearer " + target.token },
+          body: JSON.stringify({
+            sessionID: event.sessionID,
+            providerID: event.model.providerID,
+            modelID: event.model.id,
+            activeCredentialID: stored.activeCredentialID,
+          }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (!response.ok) throw new Error("request-account " + response.status)
+        answer = await response.json()
+      } catch {
+        if (fixedSessions.has(event.sessionID)) throw new Error(FIXED_UNSIGNED)
+        // The request goes out on the active account.
+        return
+      }
+      if (answer?.strict === true) fixedSessions.add(event.sessionID)
+      else fixedSessions.delete(event.sessionID)
+      if (typeof answer?.credentialID !== "string" || answer.credentialID === stored.activeCredentialID) return
+      // Only a request the sign-in plugin signed with an OAuth token can take
+      // another account's token.
+      const authorization = event.request.headers.get("authorization")
+      const connection = stored.connections.find((candidate) => candidate.id === answer.credentialID)
+      const value = connection && authorization?.startsWith("Bearer ")
+        ? await ctx.integration.connection.resolve(connection).catch(() => undefined)
+        : undefined
+      if (value?.type === "oauth" && typeof value.access === "string" && value.access.length > 0) {
+        event.request.headers.set("authorization", "Bearer " + value.access)
+        rememberUsed(event.sessionID, answer.credentialID)
+        return
+      }
+      // A fixed session never runs on another account: without its own token
+      // the request does not go out.
+      if (answer.strict === true) throw new Error(FIXED_UNSIGNED)
+    }, { providerID: "anthropic" })
+
+    // A session following the global settings starts its turn on the
+    // provider's preferred account once that account's limit lifted.
+    await ctx.session.hook("prompt", async (event) => {
+      const target = (${callbackExpr})
+      if (!target) return
+      try {
+        // The turn's model and the credential active before this turn, so the
+        // server can refuse an account that is out for this model and can tell
+        // a real switch from a turn that was already on it.
+        const session = await ctx.session.get?.({ sessionID: event.sessionID })?.catch(() => undefined)
+        const model = session?.data?.model ?? session?.model
+        const activeCredentialID = model?.providerID
+          ? (await failoverAccounts(ctx, model.providerID).catch(() => undefined))?.activeCredentialID
+          : undefined
+        const response = await fetch(target.url + "/session-account", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: "Bearer " + target.token },
+          body: JSON.stringify({ sessionID: event.sessionID, providerID: model?.providerID, modelID: model?.id, activeCredentialID }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (!response.ok) return
+        const answer = await response.json()
+        if (typeof answer?.activate !== "string") return
+        await ctx.credential.activate({ credentialID: answer.activate })
+      } catch {
+        // The turn runs on whatever account is active.
+      }
+    })
+
+    // Every stored Claude account's plan usage, for the account picker and the
+    // headroom choice. Each account's own token reads only its usage and is
+    // sent nowhere: the sweep posts the usage JSON alone.
+    let sweeping = false
+    const sweepUsage = async () => {
+      const target = (${callbackExpr})
+      if (!target || sweeping) return
+      sweeping = true
+      try {
+        const provider = (await ctx.provider.get({ providerID: "anthropic" }).catch(() => undefined))?.data
+        const integrationID = provider?.integrationID ?? "anthropic"
+        const integration = (await ctx.integration.get({ integrationID }).catch(() => undefined))?.data
+        const connections = (integration?.connections ?? []).filter((connection) => connection.type === "credential")
+        const results = []
+        for (const connection of connections) {
+          const value = await ctx.integration.connection.resolve(connection).catch(() => undefined)
+          if (value?.type !== "oauth" || typeof value.access !== "string" || value.access.length === 0) continue
+          const response = await fetch(USAGE_URL, {
+            headers: { authorization: "Bearer " + value.access },
+            signal: AbortSignal.timeout(10_000),
+          }).catch(() => undefined)
+          if (!response?.ok) continue
+          const usage = await response.json().catch(() => undefined)
+          if (usage !== null && typeof usage === "object") {
+            results.push({ id: connection.id, label: connection.label ?? "", usage })
+          }
+        }
+        if (results.length === 0) return
+        await fetch(target.url + "/usage", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: "Bearer " + target.token },
+          body: JSON.stringify({ providerID: "anthropic", accounts: results }),
+          signal: AbortSignal.timeout(10_000),
+        }).catch(() => undefined)
+      } catch {
+      } finally {
+        sweeping = false
+      }
+    }
+    const sweepTimer = setInterval(sweepUsage, 10 * 60_000)
+    sweepTimer.unref?.()
+    const firstSweep = setTimeout(sweepUsage, 5_000)
+    firstSweep.unref?.()
+
+`;
+
+export const createLimitFailoverSetupCode = ({ callbackExpr, managed = false }: { readonly callbackExpr: string; readonly managed?: boolean }) => `${managed ? createManagedAccountSetupCode(callbackExpr) : ''}
+    await ctx.session.hook("retry", async (event) => {
+      if (!LIMIT_ERROR_TYPES.has(event.error?.type)) return
+      const target = (${callbackExpr})
+      if (!target) return
+${managed ? '      const capturedInfo = takeCaptured(event.sessionID)' : ''}
+      try {
+        const response = await fetch(target.url, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: "Bearer " + target.token },
+          body: JSON.stringify({
+            sessionID: event.sessionID,
+            providerID: event.model.providerID,
+            modelID: event.model.id,
+            error: {
+              type: event.error.type,
+              message: event.error.message,
+              body: event.error.response?.body,
+              retryAfterMs: event.error.retryAfterMs,
+            },
+            proposed: event.decision,
+${managed ? `            ...(capturedInfo ? { captured: capturedInfo } : {}),
+            ...(usedCredential.has(event.sessionID) ? { usedCredentialID: usedCredential.get(event.sessionID) } : {}),` : ''}
+            ...(await failoverAccounts(ctx, event.model.providerID)),
+          }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (!response.ok) return
+        const answer = await response.json()
+        if (answer.action === "fail") {
+          event.decision = { retry: false }
+          return
+        }
+        if (answer.action === "wait") {
+          event.decision = { retry: true, delay: Math.max(0, Math.ceil(answer.delay)) }
+          return
+        }
+        if (answer.action === "retry") {
+          event.decision = { retry: true, delay: 0 }
+          return
+        }
+        if (answer.action !== "activate-credential" && answer.action !== "switch-model") return
+        // The server announces a switch only once it happened, so it hears the outcome either way.
+        const settle = (applied) => answer.ticket
+          ? fetch(target.url + "/settle", {
+              method: "POST",
+              headers: { "content-type": "application/json", authorization: "Bearer " + target.token },
+              body: JSON.stringify({ ticket: answer.ticket, applied }),
+              signal: AbortSignal.timeout(10_000),
+            }).catch(() => undefined)
+          : undefined
+        try {
+          if (answer.action === "activate-credential") {
+            await ctx.credential.activate({ credentialID: answer.credentialID })
+          } else {
+            await ctx.session.switchModel({ sessionID: event.sessionID, model: answer.model })
+          }
+        } catch {
+          await settle(false)
+          return
+        }
+        event.decision = { retry: true, delay: 0 }
+        await settle(true)
+${managed ? '        void sweepUsage()' : ''}
+      } catch {
+        // OpenCode's own decision stands when the server cannot be reached.
+      }
+    })
+
+${managed ? `    return () => {
+      clearInterval(sweepTimer)
+      clearTimeout(firstSweep)
+    }` : ''}`;
+
+const PLUGIN_SOURCE = `${LIMIT_FAILOVER_PLUGIN_HELPERS}
+const callback = () => {
+  const base = process.env.OPENCHAMBER_AGENT_TOOL_URL
+  const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
+  if (!base || !token || !URL.canParse(base)) return null
+  return { url: new URL(LIMIT_FAILOVER_ROUTE, base).href, token }
+}
+
+export default {
+  id: ${JSON.stringify(PLUGIN_ID)},
+  setup: async (ctx) => {
+${createLimitFailoverSetupCode({ callbackExpr: 'callback()', managed: true })}
+  },
+}
+`;
+
+/**
+ * Account switching and the fallback model when a provider's usage limit is
+ * hit. The managed OpenCode plugin reports limit failures from its `retry`
+ * hook, captures Anthropic's own limit headers on every 429, activates a
+ * session's pinned account when its turn starts, and sweeps each stored
+ * Claude account's plan usage; this runtime decides what happens next from
+ * the user's settings, the per-session account pins and the accounts it has
+ * seen run out, and tells every client what it switched.
+ *
+ * @param {object} dependencies
+ * @param {typeof import('node:fs/promises')} dependencies.fsPromises
+ * @param {typeof import('node:path')} dependencies.path
+ * @param {string} dependencies.instanceDir this server's own directory (`../opencode/instance-dir.js`)
+ * @param {string|null} [dependencies.dataDir] the persistent data directory; the
+ *   per-session account pins live there, and stay in memory when it is null
+ * @param {() => Promise<object|null>} dependencies.readSettings
+ * @param {(req: import('express').Request) => boolean} dependencies.authorizeRequest the agent tool's callback check
+ * @param {(event: { type: string, properties: object }) => void} [dependencies.broadcastUiEvent]
+ * @param {() => number} [dependencies.now]
+ */
+export const createLimitFailoverRuntime = ({
+  fsPromises,
+  path,
+  instanceDir,
+  dataDir = null,
+  readSettings,
+  authorizeRequest,
+  broadcastUiEvent = () => {},
+  now = Date.now,
+}: LimitFailoverDependencies) => {
+  const pluginDirectory = path.join(instanceDir, 'limit-failover', PLUGIN_ID);
+  const sessionAccounts = createSessionAccountStore({ fsPromises, path, dataDir, now });
+
+  /**
+   * Credential id -> family (`*` for the whole account) -> when that limit
+   * lifts. A model-scoped window exhausts only its family on the account, so
+   * an account out of Fable still serves Opus and Sonnet.
+   */
+  const exhaustedUntil = new Map<string, Map<string, number>>();
+
+  /** Provider id -> the plugin's last usage sweep: `{ at, accounts }`. */
+  const accountUsage = new Map<string, UsageSnapshot>();
+  /** Credential id -> when this runtime made it active. */
+  const switchedAt = new Map<string, number>();
+  /**
+   * `session:credential` -> when that session last used its one grace retry
+   * on that account, or caused the switch to it. Only entries newer than the
+   * account's switch count, so a later switch back gets a fresh grace.
+   */
+  const settledAt = new Map<string, number>();
+  /** Ticket id -> a switch the plugin was told to make and has not reported on yet. */
+  const tickets = new Map<string, SwitchTicket & { openedAt: number }>();
+  /**
+   * Session id -> the account a preferred session moved to after its pin hit
+   * a limit. It runs there until the pin's mark lifts for the turn's model.
+   */
+  const sessionMoves = new Map<string, string>();
+  /** Provider id -> the credential the plugin last saw active. */
+  const lastActive = new Map<string, string>();
+
+  const openTicket = (at: number, ticket: SwitchTicket) => {
+    const id = randomUUID();
+    tickets.set(id, { ...ticket, openedAt: at });
+    return id;
+  };
+
+  const forgetOldSettlements = (at: number) => {
+    for (const [credentialID, when] of switchedAt) {
+      if (when <= at - SWITCH_GRACE_MS) switchedAt.delete(credentialID);
+    }
+    for (const [key, when] of settledAt) {
+      if (when <= at - SWITCH_GRACE_MS) settledAt.delete(key);
+    }
+    for (const [id, ticket] of tickets) {
+      if (ticket.openedAt <= at - SWITCH_GRACE_MS) tickets.delete(id);
+    }
+  };
+
+  const materializePlugin = async () => {
+    await fsPromises.mkdir(pluginDirectory, { recursive: true });
+    await fsPromises.writeFile(path.join(pluginDirectory, 'package.json'), PLUGIN_PACKAGE_JSON, { mode: 0o600 });
+    await fsPromises.writeFile(path.join(pluginDirectory, 'index.js'), PLUGIN_SOURCE, { mode: 0o600 });
+    return pluginDirectory;
+  };
+
+  const markExhausted = (credentialID: string, scope: LimitScope, until: number) => {
+    const family = scope.kind === 'account' ? '*' : scope.family;
+    let families = exhaustedUntil.get(credentialID);
+    if (families === undefined) {
+      families = new Map();
+      exhaustedUntil.set(credentialID, families);
+    }
+    families.set(family, Math.max(families.get(family) ?? 0, until));
+  };
+
+  /** The credential's live exhaustion marks, as the account list serves them. */
+  const exhaustionOf = (credentialID: string, at: number) => {
+    const families = exhaustedUntil.get(credentialID);
+    if (families === undefined) return [];
+    const live = [];
+    for (const [family, until] of families) {
+      if (until > at) live.push({ family, until });
+      else families.delete(family);
+    }
+    if (families.size === 0) exhaustedUntil.delete(credentialID);
+    return live;
+  };
+
+  const isExhaustedFor = (credentialID: string, families: readonly string[], at: number) => (
+    exhaustionOf(credentialID, at).some((mark) => mark.family === '*' || families.includes(mark.family))
+  );
+
+  const usageSnapshot = (providerID: string) => accountUsage.get(providerID) ?? null;
+
+  /** The family's weekly window percent, else the account's own weekly one. */
+  const familyWindowPercent = (usage: AccountUsage['usage'], family: string | null) => {
+    if (usage === null || usage === undefined) return null;
+    if (family !== null) {
+      const entry = Object.entries(usage.models ?? {}).find(([name]) => name.toLowerCase() === family);
+      const percent = entry ? entry[1].windows?.['7d']?.usedPercent : undefined;
+      if (percent != null) return percent;
+    }
+    const accountPercent = usage.windows?.['7d']?.usedPercent;
+    return accountPercent != null ? accountPercent : null;
+  };
+
+  /**
+   * The next account after the active one, in the provider's own order, that
+   * has not run out for the failing model's family. With no stored account
+   * active (an environment key, or the active one could not be read) every
+   * stored account is a candidate. A usage sweep reorders the free accounts
+   * by the family's weekly window: the fullest account goes last.
+   */
+  const nextCredential = (report: LimitReport, at: number) => {
+    const { credentials, activeCredentialID } = report;
+    const family = modelFamilyOf(report.modelID);
+    const families = family === null ? [] : [family];
+    const start = credentials.findIndex((credential) => credential.id === activeCredentialID);
+    const order = start === -1
+      ? credentials
+      : [...credentials.slice(start + 1), ...credentials.slice(0, start)];
+    const free = order.filter((candidate) => !isExhaustedFor(candidate.id, families, at));
+    const snapshot = usageSnapshot(report.providerID);
+    if (snapshot === null || family === null) return free[0] ?? null;
+    const percentOf = (candidate: LimitReport['credentials'][number]) => {
+      const account = snapshot.accounts.find((entry) => entry.id === candidate.id);
+      return account ? familyWindowPercent(account.usage, family) : null;
+    };
+    return free
+      .map((candidate, index) => ({ candidate, index, percent: percentOf(candidate) }))
+      .sort((a, b) => {
+        const left = a.percent ?? Number.POSITIVE_INFINITY;
+        const right = b.percent ?? Number.POSITIVE_INFINITY;
+        return left !== right ? left - right : a.index - b.index;
+      })
+      .map((entry) => entry.candidate)[0] ?? null;
+  };
+
+  /**
+   * The session's pin for the reporting provider, or null when the session
+   * follows the global settings or pinned another provider.
+   */
+  const pinFor = async (report: LimitReport) => {
+    const entry = await sessionAccounts.get(report.sessionID);
+    return entry !== null && entry.providerID === report.providerID ? entry : null;
+  };
+
+  /**
+   * What the plugin should do about one reported failure:
+   * `activate-credential`, `switch-model`, `retry` (the active account changed
+   * after this request went out), `fail` (a fixed session on its own account:
+   * the turn ends with the error instead of moving) or `none`.
+   */
+  const decideNow = async (report: LimitReport): Promise<LimitFailoverDecision> => {
+    const at = now();
+    const failure = classifyLimitFailure(report, at);
+    if (!failure) return { action: 'none' };
+
+    forgetOldSettlements(at);
+    const active = report.activeCredentialID;
+    // An unreadable pin file must not look like "no pin": a fixed session would
+    // be switched and the next save would overwrite the file. Decide nothing.
+    const pin = await pinFor(report).catch(() => 'unreadable' as const);
+    if (pin === 'unreadable') return { action: 'none' };
+    const family = failure.scope.kind === 'model' ? failure.scope.family : modelFamilyOf(report.modelID);
+    const families = family ? [family] : [];
+
+    const settings = await Promise.resolve(readSettings()).catch(() => null);
+    if (pin !== null) return decideForPin(report, pin, failure, families, settings, at);
+
+    if (active) {
+      const key = `${report.sessionID}:${active}`;
+      const switched = switchedAt.get(active);
+      // A grace retry covers a request sent before a switch, not a repeat on an
+      // account already out for this model: that one is marked and decided.
+      const alreadyOut = isExhaustedFor(active, families, at);
+      if (!alreadyOut && switched !== undefined && !((settledAt.get(key) ?? -Infinity) >= switched)) {
+        settledAt.set(key, at);
+        return { action: 'retry' };
+      }
+      markExhausted(active, failure.scope, failure.resetAt);
+    }
+
+    if (switchesAccounts(settings, report.providerID)) {
+      const next = nextCredential(report, at);
+      if (next) {
+        settledAt.set(`${report.sessionID}:${next.id}`, at);
+        if (switchedAt.has(next.id)) return { action: 'activate-credential', credentialID: next.id };
+        switchedAt.set(next.id, at);
+        const ticket = openTicket(at, {
+          sessionID: report.sessionID,
+          credentialID: next.id,
+          announcement: {
+            kind: 'account',
+            sessionId: report.sessionID,
+            providerId: report.providerID,
+            fromAccount: report.credentials.find((credential) => credential.id === active)?.label ?? null,
+            toAccount: next.label,
+          },
+        });
+        return { action: 'activate-credential', credentialID: next.id, ticket };
+      }
+    }
+
+    return fallbackOrWait(report, failure, settings, at);
+  };
+
+  const switchesAccounts = (settings: StoredFailoverSettings | null, providerID: string) => (
+    Array.isArray(settings?.accountSwitchProviders) && settings.accountSwitchProviders.includes(providerID)
+  );
+
+  /**
+   * A pinned session's failure. Its request went out on its own account (the
+   * plugin says which), so there is no grace retry and the active credential,
+   * which other sessions run on, never changes. Fixed: the turn ends, or waits
+   * out a named reset. Preferred: the session alone moves to the account with
+   * the most room and returns to its pin once the pin's mark lifts.
+   */
+  const decideForPin = (report: LimitReport, pin: SessionPin, failure: LimitFailure, families: readonly string[], settings: StoredFailoverSettings | null, at: number): LimitFailoverDecision => {
+    const used = report.usedCredentialID ?? report.activeCredentialID;
+    if (used) markExhausted(used, failure.scope, failure.resetAt);
+    // The request ran elsewhere while the pin is free (its mark lifted, or the
+    // plugin could not sign with it): the next attempt goes out on the pin.
+    // Once a minute, so a pin that cannot sign does not retry forever.
+    const backToPin = `${report.sessionID}:pin`;
+    if (used !== pin.credentialID && !isExhaustedFor(pin.credentialID, families, at)) {
+      if (!settledAt.has(backToPin)) {
+        settledAt.set(backToPin, at);
+        sessionMoves.delete(report.sessionID);
+        return { action: 'retry' };
+      }
+      // The retry on the pin went out elsewhere again: the pin cannot take
+      // this session's requests (no token to sign with), so it counts as out
+      // and the session moves instead of retrying on a spent account.
+      markExhausted(pin.credentialID, { kind: 'account' }, at + DEFAULT_EXHAUSTION_MS);
+    }
+    if (pin.mode === 'fixed') return waitForReset(failure, at) ?? { action: 'fail' };
+
+    const next = nextCredential({ ...report, activeCredentialID: used }, at);
+    if (next && next.id !== used) {
+      sessionMoves.set(report.sessionID, next.id);
+      broadcastUiEvent({
+        type: 'openchamber:limit-failover',
+        properties: {
+          kind: 'account',
+          sessionId: report.sessionID,
+          providerId: report.providerID,
+          fromAccount: report.credentials.find((credential) => credential.id === used)?.label ?? null,
+          toAccount: next.label,
+        },
+      });
+      return { action: 'retry' };
+    }
+    return fallbackOrWait(report, failure, settings, at);
+  };
+
+  /** The fallback model when one is set, else a wait for a named reset. */
+  const fallbackOrWait = (report: LimitReport, failure: LimitFailure, settings: StoredFailoverSettings | null, at: number): LimitFailoverDecision => {
+    const fallback = parseModelSetting(
+      isStoredModelSelection(settings?.fallbackModel) ? settings.fallbackModel : undefined,
+      isStoredModelSelection(settings?.fallbackVariant) ? settings.fallbackVariant : undefined,
+    );
+    if (fallback && !(fallback.providerID === report.providerID && fallback.id === report.modelID)) {
+      const ticket = openTicket(at, {
+        sessionID: report.sessionID,
+        credentialID: null,
+        announcement: {
+          kind: 'model',
+          sessionId: report.sessionID,
+          providerId: report.providerID,
+          modelId: report.modelID,
+          toProviderId: fallback.providerID,
+          toModelId: fallback.id,
+        },
+      });
+      return { action: 'switch-model', model: fallback, ticket };
+    }
+    return waitForReset(failure, at) ?? { action: 'none' };
+  };
+
+  /** Retry once the named reset lifts, when nothing else can move the turn. */
+  const waitForReset = (failure: LimitFailure, at: number): Extract<LimitFailoverDecision, { action: 'wait' }> | null => {
+    if (!failure.named) return null;
+    const delay = failure.resetAt - at + WAIT_SLACK_MS;
+    if (delay <= WAIT_SLACK_MS || delay > MAX_WAIT_MS) return null;
+    return { action: 'wait', delay };
+  };
+
+  const settle = (ticketID: string, applied: boolean) => {
+    const ticket = tickets.get(ticketID);
+    if (!ticket) return false;
+    tickets.delete(ticketID);
+    if (applied) {
+      if (ticket.credentialID) lastActive.set(ticket.announcement.providerId, ticket.credentialID);
+      broadcastUiEvent({ type: 'openchamber:limit-failover', properties: ticket.announcement });
+    } else if (ticket.credentialID) {
+      switchedAt.delete(ticket.credentialID);
+      settledAt.delete(`${ticket.sessionID}:${ticket.credentialID}`);
+    }
+    return true;
+  };
+
+  let queue: Promise<void | LimitFailoverDecision> = Promise.resolve();
+  const decide = (report: LimitReport) => {
+    const result = queue.then(() => decideNow(report));
+    queue = result.catch(() => {});
+    return result;
+  };
+
+  // The account list the UI reads: the plugin's last usage sweep merged with
+  // the live exhaustion marks. Marks of accounts the sweep has not seen carry
+  // no usage; the UI joins them with its own credential list by id.
+  const publicAccounts = (providerID: string) => {
+    const at = now();
+    const snapshot = usageSnapshot(providerID);
+    const byId = new Map((snapshot?.accounts ?? []).map((account) => [account.id, account]));
+    for (const credentialID of exhaustedUntil.keys()) {
+      if (!byId.has(credentialID)) byId.set(credentialID, { id: credentialID, label: credentialID, usage: null });
+    }
+    return {
+      providerID,
+      usageAt: snapshot === null ? null : snapshot.at,
+      accounts: [...byId.values()].map((account) => ({
+        id: account.id,
+        label: account.label,
+        usage: account.usage ?? null,
+        exhausted: exhaustionOf(account.id, at).map((mark) => ({ scope: mark.family, resetAt: mark.until })),
+      })),
+    };
+  };
+
+  /**
+   * The account a session's request goes out on, or null for the active one.
+   * A pin of another provider does not apply. Fixed stays on its pin even out
+   * of limit, so the failure ends the turn; preferred runs on the account it
+   * moved to until the pin is free again for the request's model.
+   */
+  const accountFor = async (sessionID: string, providerID: string, modelID: string | undefined) => {
+    const pin = await sessionAccounts.get(sessionID);
+    if (pin === null || pin.providerID !== providerID) return { credentialID: null, strict: false };
+    if (pin.mode === 'fixed') return { credentialID: pin.credentialID, strict: true };
+    const family = modelID ? modelFamilyOf(modelID) : null;
+    const families = family ? [family] : [];
+    const at = now();
+    const moved = sessionMoves.get(sessionID);
+    if (moved === undefined || !isExhaustedFor(pin.credentialID, families, at)) {
+      sessionMoves.delete(sessionID);
+      return { credentialID: pin.credentialID, strict: false };
+    }
+    return { credentialID: moved, strict: false };
+  };
+
+  const registerRoutes = (app: Application, express: Pick<ExpressFactory, 'json'>) => {
+    // The plugin's request hook: which account this request goes out on. An
+    // unreadable pin file answers an error, and the plugin sends the request
+    // on the active account.
+    app.post(`${ROUTE}/request-account`, express.json({ limit: '4kb' }), async (req, res) => {
+      if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+      const body = requestAccountBodySchema.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: 'Invalid request account query' });
+      const { sessionID, providerID, modelID, activeCredentialID } = body.data;
+      if (activeCredentialID !== undefined) lastActive.set(providerID, activeCredentialID);
+      try {
+        return res.json(await accountFor(sessionID, providerID, modelID));
+      } catch {
+        return res.status(500).json({ error: 'Stored session accounts are unreadable' });
+      }
+    });
+    app.post(ROUTE, express.json({ limit: '256kb' }), async (req, res) => {
+      if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+      const report = reportSchema.safeParse(req.body);
+      if (!report.success) return res.status(400).json({ error: 'Invalid limit report' });
+      return res.json(await decide(report.data));
+    });
+    app.post(`${ROUTE}/settle`, express.json({ limit: '16kb' }), (req, res) => {
+      if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+      const outcome = settleSchema.safeParse(req.body);
+      if (!outcome.success) return res.status(400).json({ error: 'Invalid outcome' });
+      return res.json({ settled: settle(outcome.data.ticket, outcome.data.applied) });
+    });
+
+    // The plugin's prompt hook: whether a session following the global
+    // settings starts its turn by returning the provider to its preferred
+    // account. A pinned session never changes the active credential: its
+    // requests carry their own account. Answering `activate` records a switch
+    // like the failover's own, so a report that raced the activation gets one
+    // grace retry instead of blaming the account it just made active.
+    app.post(`${ROUTE}/session-account`, express.json({ limit: '4kb' }), async (req, res) => {
+      if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+      const body = sessionAccountBodySchema.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: 'Invalid session account request' });
+      const { sessionID, providerID, activeCredentialID } = body.data;
+      if (providerID === undefined) return res.json({ activate: null });
+      const settings = await Promise.resolve(readSettings()).catch(() => null);
+      if (!switchesAccounts(settings, providerID)) return res.json({ activate: null });
+      const [pin, preferred] = await Promise.all([
+        sessionAccounts.get(sessionID),
+        sessionAccounts.getPreferred(providerID),
+      ]).catch(() => [null, null]);
+      if (preferred === null || (pin !== null && pin.providerID === providerID)) return res.json({ activate: null });
+      if (activeCredentialID === preferred.credentialID) return res.json({ activate: null });
+      // Skip it while any of its limits is out: activating it for a model it
+      // still serves would put sessions on another family back on a spent
+      // window, and the failover would move them away again on every turn.
+      if (exhaustionOf(preferred.credentialID, now()).length > 0) return res.json({ activate: null });
+      switchedAt.set(preferred.credentialID, now());
+      return res.json({ activate: preferred.credentialID });
+    });
+
+    // The plugin's usage sweep: the raw Anthropic payloads, one per stored
+    // account, transformed here so the plugin stays a reporter.
+    app.post(`${ROUTE}/usage`, express.json({ limit: '512kb' }), (req, res) => {
+      if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+      const body = usageReportSchema.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: 'Invalid usage report' });
+      accountUsage.set(body.data.providerID, {
+        at: now(),
+        accounts: body.data.accounts.map((account) => ({
+          id: account.id,
+          label: account.label || account.id,
+          usage: toClaudeUsage(account.usage),
+        })),
+      });
+      return res.json({ stored: true });
+    });
+  };
+
+  // The account list and the per-session pin, read by the UI. Registered after
+  // the API auth guard, unlike the plugin routes above, which carry their own
+  // token check and answer before that guard.
+  const registerUiRoutes = (app: Application, express: Pick<ExpressFactory, 'json'>) => {
+    app.get(`${ROUTE}/accounts`, (req, res) => {
+      const query = querySchema.safeParse(req.query);
+      const providerID = query.success ? query.data.providerID ?? '' : '';
+      if (providerID !== USAGE_PROVIDER_ID) return res.json({ providerID, usageAt: null, accounts: [] });
+      return res.json(publicAccounts(providerID));
+    });
+    app.get(`${ROUTE}/session-account`, (req, res) => {
+      const query = querySchema.safeParse(req.query);
+      const sessionID = query.success ? query.data.sessionID ?? '' : '';
+      if (!sessionID) return res.status(400).json({ error: 'Missing sessionID' });
+      const { providerID, modelID } = query.success ? query.data : {};
+      sessionAccounts.get(sessionID)
+        // `account`: the one the session's next request on that provider and
+        // model goes out on, as far as this server has seen the active one.
+        .then(async (entry) => {
+          const account = providerID
+            ? (await accountFor(sessionID, providerID, modelID)).credentialID ?? lastActive.get(providerID) ?? null
+            : null;
+          res.json({ config: entry, account });
+        })
+        .catch(() => res.status(500).json({ error: 'Stored session accounts are unreadable' }));
+    });
+    app.get(`${ROUTE}/provider-account`, (req, res) => {
+      const query = querySchema.safeParse(req.query);
+      const providerID = query.success ? query.data.providerID ?? '' : '';
+      if (!providerID) return res.status(400).json({ error: 'Missing providerID' });
+      sessionAccounts.getPreferred(providerID)
+        .then((entry) => res.json({ config: entry }))
+        .catch(() => res.status(500).json({ error: 'Stored session accounts are unreadable' }));
+    });
+    app.put(`${ROUTE}/provider-account`, express.json({ limit: '4kb' }), async (req, res) => {
+      const body = providerAccountPutSchema.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: 'Invalid provider account' });
+      try {
+        return res.json({ config: await sessionAccounts.setPreferred(body.data.providerID, body.data.credentialID) });
+      } catch (error) {
+        return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to store the provider account' });
+      }
+    });
+    app.put(`${ROUTE}/session-account`, express.json({ limit: '4kb' }), async (req, res) => {
+      const body = sessionAccountPutSchema.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: 'Invalid session account' });
+      const { sessionID, providerID, mode, credentialID } = body.data;
+      try {
+        if (mode === 'global') {
+          await sessionAccounts.clear(sessionID);
+          return res.json({ config: null });
+        }
+        if (credentialID === undefined) {
+          return res.status(400).json({ error: 'credentialID is required unless mode is global' });
+        }
+        return res.json({ config: await sessionAccounts.set({ sessionID, providerID, mode, credentialID }) });
+      } catch (error) {
+        return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to store the session account' });
+      }
+    });
+  };
+
+  return { pluginDirectory, materializePlugin, decide, settle, registerRoutes, registerUiRoutes };
+};

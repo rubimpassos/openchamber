@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createBotQuestions } from './questions.js';
-import { questionsFixture } from './questions-test-support.js';
+import { questionsFixture } from './questions.test-support.js';
 
 const fixture = await questionsFixture({ area: null });
 try {

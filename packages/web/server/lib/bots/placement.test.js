@@ -13,7 +13,8 @@ const fixture = async () => {
   const store = createBotStore({ projectsDirPath: path.join(dataDir, 'projects') });
   const journal = createBotExecutionStore({ store });
   let binding = null;
-  const create = () => createBotPlacement({ dataDir, journal, isolated: { readBinding: async () => binding } });
+  const create = (getSpaceArchive) => createBotPlacement({ dataDir, journal, isolated: { readBinding: async () => binding },
+    ...(getSpaceArchive ? { getSpaceArchive } : {}) });
   return { journal, create, bind: (value) => { binding = value; } };
 };
 const request = (isolated) => ({ projectId: 'project', itemId: 'item', directory: '/owned/checkout', bot: { id: 'bot', isolated } });
@@ -94,4 +95,22 @@ it('grants no old-container address when a removed space has no retained archive
     sessions: { fixing: { id: 'ses_removed', stage: 'fixing', directory } } });
   expect(await f.create().sessionDirectories({ projectId: 'project', item: { id: 'item', botId: 'bot',
     worktree: '/owned/checkout', sessions: { fixing: 'ses_removed' } } })).toEqual({});
+});
+
+it('uses the retained archive directory when a removed space still owns its session', async () => {
+  // Given a removed space with a matching recorded session and retained archive.
+  const f = await fixture();
+  const directory = '/spaces/123456abcdef/repo';
+  f.bind({ botId: 'bot', hostDirectory: '/owned/checkout', state: 'removed', spaceId: '123456abcdef', directory,
+    sessions: { fixing: { id: 'ses_removed', stage: 'fixing', directory } } });
+  const archive = { sessionDirectory: (spaceId, sessionId) =>
+    spaceId === '123456abcdef' && sessionId === 'ses_removed' ? '/retained/archive' : null };
+
+  // When the host projects session navigation after removal.
+  const directories = await f.create(() => archive).sessionDirectories({ projectId: 'project', item: {
+    id: 'item', botId: 'bot', worktree: '/owned/checkout', sessions: { fixing: 'ses_removed' },
+  } });
+
+  // Then only the retained archive is exposed, never the old container address.
+  expect(directories).toEqual({ ses_removed: '/retained/archive' });
 });

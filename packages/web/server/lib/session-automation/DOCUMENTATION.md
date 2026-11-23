@@ -45,6 +45,14 @@ A hold checked before an async read can become stale before a model switch or
 prompt. The lease prevents a new automation taking over during that preparation
 and dispatch interval.
 
+### Why admission keys remain strings in the checked implementation
+
+The TypeScript boundary describes existing owner claims and canonical PR inputs.
+It preserves exact session IDs, key formatting, restoration ordering, conflicts
+and lease lifetime. Callers can supply readonly key lists without changing the
+sets retained by admission. Relative imports keep their `.js` specifiers for
+the source resolver and emitted server.
+
 ## Runtimes and proof
 
 Web, Electron, hosted mobile and Capacitor use this server admission. VS Code

@@ -5,8 +5,8 @@ import { createAgentHeadTransfer } from './agent-head-transfer.js';
 import { createApprovalPublication } from './publication.js';
 import { createAgentFixLoopProject } from '../agent-server/fix-loop-project.js';
 import { createAgentFixLoopServices } from '../agent-server/fix-loop-services.js';
-import { cleanupFixLoops, fixLoopServiceFixture, REF } from '../agent-server/fix-loop-test-fixture.js';
-import { cleanupTransfers, ID, transferFixture } from '../agent-server/space-transfer-fixture.js';
+import { cleanupFixLoops, fixLoopServiceFixture, REF } from '../agent-server/fix-loop.fixture.js';
+import { cleanupTransfers, ID, transferFixture } from '../agent-server/space-transfer.fixture.js';
 
 afterEach(async () => { await cleanupFixLoops(); await cleanupTransfers(); });
 async function setup({ otherOwner = false } = {}) {

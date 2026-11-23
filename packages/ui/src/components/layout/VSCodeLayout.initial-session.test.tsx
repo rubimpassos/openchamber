@@ -11,7 +11,7 @@ import type { State } from '@/sync/types';
 
 const browser = new Window({ url: 'http://localhost' });
 const originals = new Map<string, PropertyDescriptor | undefined>();
-for (const [key, value] of Object.entries({ window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, localStorage: browser.localStorage, navigator: browser.navigator, ResizeObserver: browser.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
+for (const [key, value] of Object.entries({ window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, Element: browser.Element, HTMLElement: browser.HTMLElement, localStorage: browser.localStorage, navigator: browser.navigator, ResizeObserver: browser.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }

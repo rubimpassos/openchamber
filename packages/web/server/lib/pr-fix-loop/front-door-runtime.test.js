@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createFixLoopRuntime } from './runtime.js';
 import { destinationOf } from './approval-contract.js';
-import { CONTEXT, FEEDBACK, HEAD, RESULT, TARGET } from '../agent-server/fix-loop-test-fixture.js';
+import { CONTEXT, FEEDBACK, HEAD, RESULT, TARGET } from '../agent-server/fix-loop.fixture.js';
 
 let dataDir;
 let runtime;

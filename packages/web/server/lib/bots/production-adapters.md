@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`discovery.js` owns one read-only source investigation per project, bot and scheduled occurrence, including its cumulative and daily token ledger. `isolated-stages.js` owns the durable item-to-space and session bindings, dispatch through the spaces dispatcher, and proof execution inside that space. `isolated-tools.js` owns the child tool inbox; the host keeps a separate tool receipt journal. `provider-runtime.js` owns outbound Jira polling and Discord Gateway lifecycles. `adapter-state.js` owns their private, schema-checked, atomic records under `<dataDir>/bots/`. It separates short record locks from execution-owner locks. No credentials belong in those records.
+`discovery.ts` owns one read-only source investigation per project, bot and scheduled occurrence, including its cumulative and daily token ledger. `isolated-stages.ts` owns the durable item-to-space and session bindings, dispatch through the spaces dispatcher, and proof execution inside that space. `isolated-tools.js` owns the child tool inbox; the host keeps a separate tool receipt journal. `provider-runtime.ts` owns outbound Jira polling and Discord Gateway lifecycles. `discord-gateway.ts` owns the outbound socket, heartbeat, resume cursor and reconnect pacing. `adapter-state.ts` owns their private, schema-checked, atomic records under `<dataDir>/bots/`. It separates short record locks from execution-owner locks. No credentials belong in those records.
 
 The coordinator owns candidate admission, item transitions, attention, schedules and service writes. The worktree adapter owns adopting a quarantined isolated result into its checkout. Spaces owns container hardening, code transfer, grants and the authenticated dispatcher. The child inbox routes use its server's existing authenticated listener.
 
@@ -100,6 +100,19 @@ Pass `isolated` unchanged to `createBotStageSessions`. It implements `create`, `
 
 Resume failures retain `resuming` or the previous interrupted state and require another explicit Resume. Ordinary create, dispatch, outcome, proof, notice reads and startup never recover an interrupted container implicitly. Resume reads explicit bot access references through `readBotSpaceOptions`; it does not invoke the standalone resolver that can inspect ambient logins or other spaces. Existing version-1 bindings remain readable without conversion.
 
+Stage request types follow the operation's inputs. Dispatch requires the
+captured prompt and complete model selection. Isolated create needs a complete
+selection and retains an optional prompt in its session key; host create needs
+neither. Outcome reads need the
+dispatch time and optional idle cursor, without prompt or model selection.
+Reconciliation retains the optional prompt for the isolated session key, and
+Resume needs the selected provider only when restoring isolated access.
+
+The adapter's selector can return the already-decoded local model, a raw
+separated defaults/config value, or undefined. Discovery retains its existing
+JSON record parser and does not add a selection parser before persistence.
+Separated config fields such as `useDefaults` remain part of captured requests.
+
 Removal records `removing` before the archival journey. A successful receipt records `removed`; repeated Stop of that binding needs no Spaces host. If the journey acknowledgement or binding receipt is lost, Stop and removal reconcile the intent against `manager.listAllSpaces`. Only authoritative absence with every place available confirms removal. Failed reads and unavailable places preserve the intent. A missing space without removal intent cannot confirm Stop. A returned partial-removal failure records `remove-failed`; absence then cannot erase that known failure, which still requires inspection. A remaining space can retry the archival journey. Lifecycle mutations use the same item owner lock so Stop cannot overwrite a concurrent removal receipt.
 
 `executeIsolatedProof(input, { signal })` looks up exactly one binding by the proof runner's recorded host checkout. It sends a fixed Node program and JSON input through `manager.exec` to that space. Git creates separate detached snapshots for the test and fix SHAs. The command runs as an argv, without a shell, with `{files}` expanded from the test commit. Missing commands, signals, output limits and snapshot cleanup failures are inconclusive. The proof never checks out or resets the agent's checkout. The outer container command has a 300-second limit and the host call a 330-second limit. A caller's abort is checked before and after execution; Docker exec currently does not forward that signal to its runner, so it cannot promise immediate cancellation inside the container.
@@ -149,6 +162,62 @@ All provider writes remain owned by `createBotServices`, including enterprise de
 - Provider authorization failure produces attention. A failed read never supplies an authoritative empty candidate or comment list.
 
 ## Decisions
+
+### Why provider types retain the existing owners
+
+`provider-runtime.types.ts` derives dependencies from the config, item, identity,
+service-context, coordinator and provider-event contracts. Discord narrows the
+event store's validated cursor union to its existing resume record. Version-1
+conversation links and event scopes retain their fields and serialization order;
+source imports retain `.js` specifiers for emitted Node modules.
+The default local Gateway requires credential resolution. An injected Gateway
+accepts the separated host's public identity inventory without credential methods.
+
+`provider-failures.ts` recognizes needs-you errors structurally because remote
+agent errors carry the same state without being `BotServiceError` instances.
+Permanent failures still halt or block until explicit recovery; transient errors
+retain their existing reconnect or polling behavior.
+
+### Why the Gateway requests only message intents
+
+Guild snapshots are unused and can exceed the frame limit. The Gateway requests
+server-message and direct-message intents only. Heartbeat acknowledgements bypass
+the durable-delivery queue so a slow save cannot cause a missed acknowledgement.
+Oversized frames halt the owner and clear the resume cursor to avoid replaying
+the same rejected frame after restart.
+
+### Why reconnect pacing requires a stable session
+
+Discord limits session starts. A session resets the failure count only after
+60 seconds established by READY or RESUMED on the current socket. Closing during
+a cursor save does not establish stability. Invalid-sequence and expired-session
+close codes clear the resume cursor before reconnecting. `halted()` reports an
+owner that gave up while started; reconfiguration replaces it even when its
+fingerprint is unchanged.
+
+### Why adapter state types come from the supplied parser
+
+The private record adapter infers its record type from each owner's existing parser. Discovery uses its stored schema for record and ledger types, preserving version 1, parser defaults and dispatch ordering. Source imports retain `.js` specifiers for emitted Node modules.
+
+### Why isolated stage types follow the owning services
+
+`isolated-stages.types.ts` selects the journey, manager and dispatcher operations
+the adapter uses. Stage requests carry the selection returned by the stage-session
+owner's `select`; the adapter does not add a selection parser. Knowledge
+collection keeps its existing owner's return contract. Bindings and tool receipts
+retain their existing schemas and stored versions. A binding lookup establishes
+its allocated space ID and directory before transport use. Stop needs only the
+recorded item, session or host-directory lookup and does not select a model.
+
+Session metadata fields remain unchecked until the existing identity comparisons
+consume them. Required record and array entries preserve nullish failures instead
+of claiming that every disk read or indexed access succeeds. Transport keeps the
+authenticated dispatcher, credential stripping, deadline, byte cap and complete
+response check. The fixed proof program stays byte-for-byte unchanged.
+
+The existing adapter closure is retained for this scoped port (`SIZE_OK`). Its
+operations share the item-owner lock, binding journal and current Spaces host;
+splitting those operations is outside this behavior-preserving type conversion.
 
 ### Why pending discovery is an error with a durable occurrence
 

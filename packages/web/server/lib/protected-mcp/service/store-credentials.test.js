@@ -48,6 +48,25 @@ it('still requires every secret on create', async () => {
   await expect(create).rejects.toMatchObject({ code: 'secret_missing' });
 });
 
+it('keeps a credential written with the pre-port destination fingerprint after reopening', async () => {
+  // Given an existing normalized definition and credential file from the JS service.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pmcp-existing-credentials-'));
+  cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+  const id = 'pmcp_0123456789abcdef';
+  await fs.mkdir(path.join(root, 'credentials'), { mode: 0o700 });
+  await fs.writeFile(path.join(root, 'state.json'), JSON.stringify({ version: 1, connections: [{ ...definition, id, revision: 1, enabled: true, policy: {} }] }));
+  await fs.writeFile(path.join(root, 'credentials', `${id}.json`), JSON.stringify({
+    version: 1, fingerprint: 'b9e08c09c573b540cfffc0c73b6c2222b9445fd8e2e2149b2f6bc79117045f82', secrets: { token: 'synthetic-existing' }, oauth: null,
+  }));
+  // When the typed parsers reopen the stored destination.
+  const store = await openStore({ stateDir: root });
+  cleanups.push(store.close);
+  // Then its credential remains usable and the public view stays redacted.
+  expect(store.adminView(id)).toMatchObject({ credential: 'stored', secrets: { token: { set: true } } });
+  expect(store.credentialsFor(store.get(id))?.secrets.token).toBe('synthetic-existing');
+  expect(JSON.stringify(store.adminView(id))).not.toContain('synthetic-existing');
+});
+
 it.each(['remove', 'revoke-credentials'])('captures removed credentials inside the queue for %s', async (kind) => {
   // Given an OAuth write queued immediately before deletion.
   const { store, id } = await setup();

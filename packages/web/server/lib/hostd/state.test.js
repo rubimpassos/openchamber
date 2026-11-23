@@ -32,6 +32,34 @@ describe('hostd state', () => {
     expect((await fs.stat(paths.metadata)).mode & 0o777).toBe(0o700);
     expect((await fs.stat(path.join(paths.metadata, `${record.id}.json`))).mode & 0o777).toBe(0o600);
   });
+  it('preserves the stored JSON and ignores unrelated filenames when listing', async () => {
+    // Given private metadata with an extra field from another hostd consumer.
+    const paths = layout(await temporary());
+    const state = createState(paths);
+    await state.initialize();
+    const record = { id: '123456abcdef', place: 'host', subnet: 7, lastExit: { result: 'success', code: 'exited', status: '75' }, extra: { retained: true } };
+    await state.save(record);
+    await fs.writeFile(path.join(paths.metadata, 'unrelated.json'), 'invalid json');
+    // When listing the store, then only record filenames are read without dropping fields.
+    expect(await state.list()).toEqual([record]);
+    expect(await fs.readFile(path.join(paths.metadata, `${record.id}.json`), 'utf8')).toBe(`${JSON.stringify(record)}\n`);
+  });
+  it('propagates invalid JSON instead of reporting an absent record', async () => {
+    // Given a corrupt record in a private store.
+    const paths = layout(await temporary());
+    const state = createState(paths);
+    await state.initialize();
+    await fs.writeFile(path.join(paths.metadata, '123456abcdef.json'), '{');
+    // When reading, then the parser error survives.
+    await expect(state.read('123456abcdef')).rejects.toBeInstanceOf(SyntaxError);
+  });
+  it('returns null when a record is absent', async () => {
+    // Given an initialized empty store.
+    const state = createState(layout(await temporary()));
+    await state.initialize();
+    // When reading an absent record, then absence remains explicit.
+    expect(await state.read('123456abcdef')).toBeNull();
+  });
   it('seals executable and plain files without following internal links', async () => {
     const directory = await temporary();
     await fs.mkdir(path.join(directory, 'bin'));

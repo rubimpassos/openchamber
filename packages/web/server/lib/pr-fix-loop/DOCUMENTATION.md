@@ -4,11 +4,13 @@ The server watches one PR for one host session. Auto mode sends feedback through
 
 ## Ownership
 
-- `runtime.js` owns loop state, persistence, feedback cadence, iteration and token limits, worker preparation claims, and approval admission. Its routes have ordinary host UI authentication. No agent-tool action approves or publishes a receipt.
-- `approval-contract.js` parses worker models, host-owned worker identities, GitHub head destinations and immutable receipt fields.
-- `space-worker.js` creates a fresh `purpose: 'pr-fix-loop-approval'` space, verifies its host record and inspected runtime, seeds the exact PR head, creates its session, and addresses its own queue, live status and usage through `dispatcher.requestInside(spaceId, ...)`.
-- `publication.js` captures the exact exported commit under a new host branch and publishes its saved authority. `../source-control/fix-loop-git.js` reuses the existing binding service and managed network executor.
-- `review-actions.js` bounds the worker's suggested replies to the authenticated feedback IDs assigned to one iteration. The host executes the resulting operations through the provider's ordinary bound mutation service after approved publication.
+- `runtime.ts` owns loop state, persistence, feedback cadence, iteration and token limits, worker preparation claims, and approval admission. `routes.ts` registers its ordinary host-authenticated HTTP routes. No agent-tool action approves or publishes a receipt.
+- `approval-contract.ts` parses worker models, host-owned worker identities, GitHub head destinations and immutable receipt fields.
+- `space-worker.ts` creates a fresh `purpose: 'pr-fix-loop-approval'` space, verifies its host record and inspected runtime, seeds the exact PR head, creates its session, and addresses its own queue, live status and usage through `dispatcher.requestInside(spaceId, ...)`. `completed-turn.ts` owns bounded latest-turn history reads.
+- `publication.ts` captures the exact exported commit under a new host branch and publishes its saved authority. `agent-head-transfer.ts` delegates exact-head seeding through a private mirror. `../source-control/fix-loop-git.js` reuses the existing binding service and managed network executor.
+- `review-actions.ts` bounds the worker's suggested replies to the authenticated feedback IDs assigned to one iteration. The host executes the resulting operations through the provider's ordinary bound mutation service after approved publication.
+- `contracts.ts` names runtime dependency and state contracts. `stored-state.ts` parses persisted loop records and private publication authority. `errors.ts` reads provider and transport error fields without assuming an Error instance. `agent-marker.ts` owns agent text markers; `token-usage.ts` owns completed-step accounting.
+- `host-adapters.ts` composes local GitHub clients, credential-free agent handles and Bot handles with their owning feedback readers. Queue, activity and token reads resolve the current Bot host at call time, preserving delayed startup and isolated-stage ownership.
 - `../github/pr-feedback.js` reads complete feedback and the head repository's immutable GitHub node id, owner and repository name. A fork's head destination remains separate from the repository that hosts the PR.
 - `../spaces/` owns the permanent restriction profile and quarantine/code-out checks. This module never interprets an in-space HTTP response as host authentication, a command, a grant or publication authority.
 
@@ -57,6 +59,11 @@ provider-reported PR head into the registered project; the D2a bundle transfer
 seeds that head into the worker. Existing code out checks the result before the
 agent promotes its bundle into the project. The front door never opens the
 project directory.
+
+The worker and publication adapters accept null project Git on the front door.
+Only their local seeding and local receipt-ref branches construct a host Git
+transfer session and require that runner. Worker operations require a captured
+worker before reading its identity, including resume of a persisted loop.
 
 The front door generates each receipt identity and retains publication
 authority. Delegation preserves the existing fresh-provider, binding and
@@ -264,6 +271,10 @@ Preparation has null session fields until the host initializes the first turn. W
 Progress counts host operations, so a thread reply with resolution counts as 2. Older auto records may omit `worker`, `pendingApproval`, `review`, `totalIterations` and `config.watch`. The loop status enum remains `watching`, `working`, `waitingForPush`, `ready`, `stopped`, `closed`, `limitReached`, `budgetReached`, `error`. Approval accepts only `{ receiptId }`; it accepts no replacement commit, destination, action array or credential. Review work has no new HTTP action or button.
 
 ## Runtimes and evidence
+
+### Why source imports retain JavaScript extensions
+
+Production implementations are TypeScript. Existing consumers keep their `.js` specifiers so Bun and Vitest resolve source modules while the server build emits the same JavaScript module paths for Node. Routes remain re-exported from `runtime.ts`, and the latest-turn reader stays private to the worker adapter. This conversion keeps the version-2 state file and the existing version-1 configuration defaults.
 
 Web, Electron, hosted mobile and Capacitor use the host routes, normal auth and shared runtime transport. No new listener, socket or relay protocol exists. VS Code remains unsupported because it has no host loop or Spaces service. GitHub publication is an explicit action toward the user's connected GitHub service; model traffic uses only the explicitly granted session provider.
 

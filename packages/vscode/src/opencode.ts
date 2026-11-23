@@ -1,4 +1,5 @@
 import { installOpenCodeV2, supportsOpenCodeV2Install } from '../../web/server/lib/opencode/v2-install.js';
+import { isRetiredBundledCliSetting } from '../../web/server/lib/opencode/bundled-opencode-server.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion, readOpenCodeInfo, isSupportedOpenCodeVersion, type OpenCodeCompatibility } from '../../web/server/lib/opencode/compatibility.js';
 import * as vscode from 'vscode';
 import * as os from 'os';
@@ -10,7 +11,7 @@ import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { reapOrphanedProcesses } from './opencodeProcessRegistry';
-import { applyProviderEnvAliases } from './provider-env-aliases';
+import { prepareManagedOpenCodeEnv } from '../../web/server/lib/opencode/managed-opencode-env.js';
 import { assignInjectedEnv } from './injected-env';
 import { withLocalMcpPlugin } from './local-mcp-runtime';
 import { checkOpenCodeVersionOutput } from './opencodeVersion';
@@ -25,12 +26,8 @@ import { applyPluginSwitchPolicies } from './plugin-switches';
 const t = vscode.l10n.t;
 
 const READY_CHECK_TIMEOUT_MS = 30000;
-// VS Code gives `deactivate` 5 seconds before the extension host exits. The
-// tree kill after this grace has to fit in what is left.
 const WINDOWS_OPENCODE_STDIN_SHUTDOWN_GRACE_MS = 3000;
 
-// Reuse a single output channel across restarts instead of creating (and
-// leaking) a new one on every waitForReady call.
 let managerOutputChannel: vscode.OutputChannel | null = null;
 
 function getManagerOutputChannel(): vscode.OutputChannel {
@@ -75,7 +72,6 @@ export interface OpenCodeManager {
   start(workdir?: string): Promise<void>;
   stop(): Promise<void>;
   restart(): Promise<void>;
-  /** Re-apply the plugin switch denials to the managed OpenCode's config. */
   refreshPluginSwitches(): Promise<{ updated: boolean; requiresManualRestart: boolean }>;
   upgradeCli(): Promise<void>;
   installV2(): Promise<void>;
@@ -84,7 +80,6 @@ export interface OpenCodeManager {
   getStatus(): ConnectionStatus;
   getApiUrl(): string | null;
   getOpenCodeAuthHeaders(): Record<string, string>;
-  /** The managed server's launch environment; null while none runs (external URL, stopped). */
   getManagedLaunchEnvironment(): NodeJS.ProcessEnv | null;
   getWorkingDirectory(): string;
   isCliAvailable(): boolean;
@@ -100,12 +95,10 @@ function generateSecureOpenCodePassword(): string {
     .replace(/=+$/g, '');
 }
 
-// OpenCode 2 accepts only the `opencode` username; OPENCODE_SERVER_USERNAME is ignored.
 function buildOpenCodeAuthHeader(password: string): string {
   return `Basic ${Buffer.from(`opencode:${password}`, 'utf8').toString('base64')}`;
 }
 
-// Same precedence as OpenCode 2: OPENCODE_PASSWORD, then the legacy name.
 function readEnvOpenCodePassword(): string {
   return (process.env.OPENCODE_PASSWORD || '').trim() || (process.env.OPENCODE_SERVER_PASSWORD || '').trim();
 }
@@ -137,12 +130,6 @@ function resolvePortFromUrl(url: string): number | null {
   }
 }
 
-// Windows launch spec: .cmd/.bat shims (and bare names, which resolve to .cmd
-// shims via PATHEXT) must run under cmd.exe. Spawn cmd.exe DIRECTLY with the
-// shim path as its own argv element (shell:false) — `shell: true` builds an
-// unquoted command line, so a space-containing path like
-// "C:\Program Files\nodejs\opencode.cmd" broke with
-// "'C:\Program' is not recognized as an internal or external command".
 function resolveWindowsLaunchSpec(binary: string, args: string[]): { binary: string; args: string[] } {
   if (process.platform !== 'win32') {
     return { binary, args };
@@ -160,9 +147,6 @@ function resolveWindowsLaunchSpec(binary: string, args: string[]): { binary: str
   };
 }
 
-// Strip a single wrapping quote pair (Windows "Copy as path" and quoted shell
-// snippets) — literal quotes are never part of a real path and break every
-// executable check.
 function stripWrappingQuotes(value: string): string {
   const trimmed = (value || '').trim();
   if (trimmed.length >= 2
@@ -228,12 +212,6 @@ function createConfiguredOpencodeBinaryError(raw: string, normalized: string): E
   }
 }
 
-/**
- * The OpenCode CLI the administrator pinned in the machine policy file, the
- * same `opencodeBinary` the web server honours. It wins over
- * `openchamber.opencodeBinary`, the shared settings and the environment, and
- * an unusable pin never falls back to them. `null` when nothing is pinned.
- */
 function readPinnedOpencodeBinary(): { raw: string; binary: string | null } | null {
   const raw = readEnterprisePolicy().opencodeBinary;
   if (!raw) {
@@ -269,9 +247,7 @@ function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
   try {
     const settings = readOpenChamberSettings();
     const raw = typeof settings.opencodeBinary === 'string' ? settings.opencodeBinary.trim() : '';
-    if (raw) {
-      candidates.push(raw);
-    }
+    if (raw && !isRetiredBundledCliSetting(raw)) candidates.push(raw);
   } catch {
     // ignore
   }
@@ -367,7 +343,6 @@ function getCandidateBaseUrls(serverUrl: string): string[] {
     };
 
     const normalizedPath = parsed.pathname.replace(/\/+$/, '');
-    // Prefer plain origin. Only keep SDK url when already root.
     add(origin);
     if (normalizedPath === '' || normalizedPath === '/') {
       add(normalized);
@@ -461,7 +436,6 @@ function getLoginShellEnvSnapshot(): Record<string, string> | null {
     return cachedLoginShellEnvSnapshot;
   }
 
-  // Avoid interactive POSIX login shells in the extension host.
   if (process.platform !== 'win32') {
     cachedLoginShellEnvSnapshot = null;
     return null;
@@ -530,9 +504,6 @@ async function waitForReady(
       const abort = () => controller.abort();
       signal?.addEventListener('abort', abort, { once: true });
       try {
-        // OpenCode 2.x readiness check: every route lives under /api. 2.0.8
-        // removed `/api/health`; `/api/info` replaces it and a 200 is the whole
-        // readiness answer — the payload has no `healthy` field.
         const url = new URL(`${baseUrl}/api/info`);
         const res = await fetch(url.toString(), {
           method: 'GET',
@@ -558,11 +529,6 @@ async function waitForReady(
   return { ok: false, elapsedMs: Date.now() - start, attempts, version: null };
 }
 
-/**
- * Refuses to start anything but OpenCode 2.x. A 1.x binary serves a different
- * API surface entirely, so letting it boot produces an app that loads and then
- * fails every request with no explanation.
- */
 function assertSupportedOpenCodeBinary(binary: string): void {
   const launch = resolveWindowsLaunchSpec(binary, ['--version']);
   const result = spawnSync(launch.binary, launch.args, {
@@ -594,12 +560,6 @@ function runOpenCodeServiceCommand(binary: string, args: string[]): string | nul
   return (result.stdout || '').trim() || null;
 }
 
-/**
- * The password of OpenCode's own background service (`opencode service
- * start`), which keeps it in its state directory rather than in the
- * environment. Given only when `apiUrl` points at that very service, so the
- * credential is never sent to another server.
- */
 function readOpenCodeServicePassword(apiUrl: string): string | null {
   const binary = resolveOpencodeCliPath();
   if (!binary) return null;
@@ -618,8 +578,6 @@ function spawnManagedOpenCodeServer(
 ) {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   assertSupportedOpenCodeBinary(binary);
-  // Windows has no SIGTERM. OpenCode closes its running turns there only when
-  // the stdin lease of `serve --stdio` ends (see owned-process.ts).
   const stdinLease = process.platform === 'win32';
   const launch = resolveWindowsLaunchSpec(binary, ['serve', ...(stdinLease ? ['--stdio'] : []), '--hostname', '127.0.0.1', '--port', String(port)]);
   return spawnManagedOpenCodeProcess(launch.binary, launch.args, {
@@ -659,8 +617,6 @@ async function allocateManagedOpenCodePort(): Promise<number> {
 
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
   let server: ReturnType<typeof spawnManagedOpenCodeServer> | null = null;
-  // The environment the managed server was launched with: the only place the
-  // values of the variables OpenCode takes provider keys from can be read back.
   let serverEnv: NodeJS.ProcessEnv | null = null;
   let startupAbort: AbortController | null = null;
   let lifecycleRevision = 0;
@@ -668,8 +624,6 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
   let managedApiUrlOverride: string | null = null;
   let managedPassword: string | null = null;
   let managedPasswordSource: 'user-env' | 'generated' | 'rotated' | null = null;
-  // Captured when the child launches: after `applyPluginSwitchPolicies` sets
-  // `OPENCODE_CONFIG` on the child env, that value is ours, not the user's.
   let userOwnsOpenCodeConfig = false;
   let servicePassword: string | null = null;
   const userProvidedEnvPassword = (() => {
@@ -757,7 +711,6 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     const normalized = password.trim();
     managedPassword = normalized;
     managedPasswordSource = source;
-    // The managed server inherits process.env, and OpenCode 2 prefers OPENCODE_PASSWORD.
     assignInjectedEnv(process.env, {
       OPENCODE_PASSWORD: normalized,
       OPENCODE_SERVER_PASSWORD: normalized,
@@ -809,7 +762,6 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       return;
     }
 
-    // If server already running, don't spawn another
     if (server) {
       if (status !== 'connected') {
         setStatus('connected');
@@ -820,9 +772,6 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     const startup = new AbortController();
     startupAbort = startup;
 
-    // Before spawning our own server, reap any OpenCode process WE spawned in a
-    // prior run that was orphaned by a crash/host-kill. Verified + scoped to our
-    // own pids, so it never touches a live instance's or the user's own server.
     if (!reapedOrphansOnce) {
       reapedOrphansOnce = true;
       try {
@@ -851,7 +800,6 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         process.env.OPENCODE_BINARY = configuredCli;
       }
 
-      // Best-effort: locate CLI even when VS Code PATH is stale.
       const resolvedCli = configuredCli || resolveOpencodeCliPath();
       if (resolvedCli) {
         cliPath = resolvedCli;
@@ -863,22 +811,19 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         rotateManaged: options.rotateManaged === true,
       });
 
-      // Match the web runtime: keep the server process in a neutral cwd and pass
-      // the selected workspace through explicit `directory` API parameters.
       const serverCwd = serverWorkingDirectory();
       startup.signal.throwIfAborted();
       fs.mkdirSync(serverCwd, { recursive: true });
       const port = await allocateManagedOpenCodePort();
       startup.signal.throwIfAborted();
       userOwnsOpenCodeConfig = (process.env.OPENCODE_CONFIG ?? '').trim().length > 0;
-      serverEnv = await withLocalMcpPlugin(applyProviderEnvAliases({ ...process.env }));
+      serverEnv = await withLocalMcpPlugin(prepareManagedOpenCodeEnv({ ...process.env }));
       startup.signal.throwIfAborted();
       applyPluginSwitchPolicies(serverEnv, serverWorkingDirectory(), { userOwnsConfig: userOwnsOpenCodeConfig });
       server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal, serverEnv);
       await server.ready;
 
       if (server && server.url) {
-        // Validate readiness for the current workspace context.
         const ready = await waitForReady(server.url, READY_CHECK_TIMEOUT_MS, getOpenCodeAuthHeaders(), startup.signal);
         startup.signal.throwIfAborted();
         lastReadyElapsedMs = ready.elapsedMs;
@@ -903,7 +848,6 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       }
       const message = err instanceof Error ? err.message : String(err);
 
-      // Check for ENOENT or generic spawn failure which implies CLI missing
       if (message.includes('ENOENT') || message.includes('spawn opencode')) {
         cliMissing = true;
         if (!cliPath) {
@@ -1018,7 +962,6 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       }
       const binary = cliPath || resolveOpencodeCliPath();
       const detected = binary ? await readOpenCodeCliVersion(resolveWindowsLaunchSpec(binary, []), { env: process.env }).catch(() => null) : null;
-      // A CLI pinned by the administrator is theirs to replace, never ours.
       return describeOpenCodeCompatibility(detected, 'managed', supportsOpenCodeV2Install() && !readPinnedOpencodeBinary(), binary || null);
     },
     installV2: () => {
@@ -1055,16 +998,11 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       if (useConfiguredUrl) {
         throw new Error('This OpenCode runtime cannot be upgraded by OpenChamber.');
       }
-      // Match capability reporting: the resolver may find the CLI after startup.
-      // Upgrading the binary does not require a live managed server process.
       const binary = cliPath || resolveOpencodeCliPath();
       if (!binary) throw new Error('OpenCode CLI could not be found.');
       const upgrade = () => runOpenCodeCliUpgrade(resolveWindowsLaunchSpec(binary, []), {
         cwd: serverWorkingDirectory(), env: process.env,
       });
-      // Windows cannot replace an executable that is running. npm then leaves
-      // the package without opencode.exe, and the next start fails. The server
-      // stops for the install and comes back on the new version either way.
       if (process.platform !== 'win32' || !server) {
         await upgrade();
         return;

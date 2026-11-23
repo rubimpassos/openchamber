@@ -17,30 +17,53 @@ The protected MCP service and root updater keep their own identities.
 
 - `host.js` runs as root and orchestrates install, update, rollback and removal.
   `host-deploy.js` owns promotion and restoration of code, units and account mode.
-  `host-package.js` owns staging and sealing the release package;
+  `host-package.ts` owns staging and sealing the release package;
   `host-rollback.js` restores a prior package's account mode and units.
-- `accounts.js` owns account provisioning and account-mode compatibility.
-  `host-units.js` owns systemd text; `host-support.js` owns privileged operations
+- `accounts.ts` owns account provisioning and account-mode compatibility.
+  `host-units.ts` owns systemd text; `host-support.ts` owns privileged operations
   injectable into the fake system used by the tests.
-- `migrate-accounts.js` owns first-separation copies and the migration journal.
-  `migration-records.js` validates version-1 migration records using Node alone;
+- `migrate-accounts.ts` emits `migrate-accounts.js` and owns first-separation copies
+  and the migration journal. Its `migration-copy`, `migration-projects`,
+  `migration-queue` and `migration-worktrees` helpers retain the same copy, split
+  and retained-path operations. `migration-types.ts` supplies their type-only
+  contracts, including pending service identities accepted only during dry-run.
+  `migration-records.ts` emits `migration-records.js` and validates version-1 migration records using Node alone;
   it preserves raw records and leaves runtime normalization to the data owner.
-  `bot-migration-access.js` owns the offline, exact-path grants for retained Bot
-  checkouts and their captured Git directories.
-  `root-commands.js` consumes hostd's passkey and project-sharing APIs in-process.
+  `bot-migration-access.ts` emits `bot-migration-access.js` and owns the offline,
+  exact-path grants for retained Bot checkouts and their captured Git directories.
+  `bot-migration-access.types.ts` defines its reviewed mapping, account input and
+  access-report contracts without adding runtime imports.
+   `root-commands.ts` consumes hostd's passkey and project-sharing APIs in-process.
   `backup.js` prepares SQLite snapshots; `agent-link.js` owns token files;
   `agent-docker.js` provisions the agent's optional rootless Docker.
-- `release.js` finds a release's web package on GitHub and downloads it,
+- `host-paths.ts` owns live paths and the injected disk-root layout;
+  `host-files.ts` owns atomic root-file writes, JSON reads and command links.
+  `host-inputs.ts` owns the installer's Node-only input guards and coded errors.
+- `release.ts` finds a release's web package on GitHub and downloads it,
   checked against the SHA-256 digest GitHub records for the asset.
 - `main.js` is the command line `scripts/install.sh --host` and the updater
   unit run.
-- `managed.js` runs as the owner, in the server and the CLI. It tells whether
-  this copy is the host install and asks the root updater for an update.
+- `managed.ts` runs as the owner, in the server and the CLI. It resolves the
+  package root from its manifest so source and emitted layouts identify the
+  same host install. Its update request carries no content; the root updater
+  chooses the repository from the host configuration.
 - `scripts/install.sh --host` bootstraps a host with no OpenChamber: it
   downloads and verifies the package, unpacks it as root and hands it to
   `main.js install`.
 
 ## Layout
+
+Published code runs from `build/bin` and `build/server` inside the installed
+package. Promotion requires the emitted installer, CLI bootstrap and runtime,
+server bootstrap and runtime, hostd entrypoint, OpenCode installer, and protected
+MCP installer, service and relay entrypoints. The front door, agent, hostd,
+updater, OpenCode installer and protected MCP source all use that layout.
+The command link moves between the emitted and legacy layouts on update and
+rollback. Saved units and the legacy protected MCP source remain usable when
+restoring an older deployment; an unrelated command link is never replaced.
+The root wrapper selects an emitted installer from `current` or `previous` before
+falling back to legacy code. The updater uses the physical emitted package path
+and retains that command when restored unit text came from a legacy deployment.
 
 | Path | Owner, mode | What it is |
 | --- | --- | --- |
@@ -71,7 +94,7 @@ The installer refuses root, reused identities and conflicting homes. An existing
 An existing agent account must be a regular account (uid 1000 or more) whose home
 lies outside the human's home, the front door's home and the system folders.
 Neither may be in a group that is root by another name (`ROOT_EQUIVALENT_GROUPS`
-in `accounts.js`: sudo, docker, lxd, disk, shadow and the like); hostd's
+in `accounts.ts`: sudo, docker, lxd, disk, shadow and the like); hostd's
 `separation()` checks the same groups before it allows root spaces.
 The agent has a locked password and bash; missing subordinate IDs are reported.
 
@@ -331,6 +354,14 @@ compare them with runtime readers; the bootstrap test copies the import tree
 outside the repository and runs mapping and mixed-queue migration in plain Node
 with no installed dependencies.
 
+The migration reader's `Check<T>` predicates infer literal choices, readonly
+arrays and required or optional fields without constructing replacement records.
+Refinements run after shape checks and retain their narrowed types. Non-strict
+contracts retain extra JSON fields; strict contracts expose only their checked
+fields. Inputs use the persisted JSON value contract, including absent optional
+fields. No type assertion or runtime dependency is needed to retain the original
+records, and the standalone bootstrap remains independent of package installation.
+
 If promotion fails, the prior package links, unit files, agent env files, account
 mode and update-request ownership are restored before the former server starts.
 New accounts and non-destructive migration copies remain for inspection or a
@@ -426,6 +457,109 @@ account homes require the additional explicit `--purge-accounts`.
     checks even when invoked by the installer.
 
 ## Decisions
+
+### Why root commands retain the existing trusted record reads
+
+`root-commands.ts` describes root-owned host and protected MCP configuration
+without adding schema checks, conversions or field stripping. Reading optional
+text followed by `JSON.parse` retains the former reader's ENOENT, empty-file and
+malformed-JSON behavior. Account authority still comes from `host.json`; command
+arguments cannot substitute account names. Socket group repair retains other
+stored fields and resolves the current groups by name. Type-only imports erase,
+and runtime imports keep `.js` specifiers for the emitted package.
+
+The command system contract requires complete `HostAccount` records, as project
+sharing, account preparation, backup paths and Docker setup already do. The
+default `createSystem().account()` currently exposes possibly missing `home` and
+`shell` fields from passwd. That adapter mismatch is a strict compilation blocker;
+this port neither invents missing account fields nor adds a new refusal policy.
+
+The typed migration entrypoint exports `ownTree`, `requirePhysicalDirectory`
+and `shareSettingsProjects` through the same emitted `migrate-accounts.js` path.
+The root command keeps those implementations and their ordering, rather than
+copying the privileged walk or hiding the import behind a declaration stub.
+The repair result names successful project-share results and per-project refusals.
+The migration's filesystem system contract stays injectable for fake-system tests.
+
+The focused strict check uses `root-commands.ts` as its only compiler root and
+inherits `tsconfig.strict.json`. Its transitive imports also expose existing
+`passkey.ts` assertion `userHandle` exact-optional mismatches and protected MCP
+service index-signature access errors under `noPropertyAccessFromIndexSignature`.
+Those diagnostics must be resolved by their owners before this subset can pass.
+The normal fake-system command suite remains
+`bun run --cwd packages/web test server/lib/host-install/root-commands.test.js`.
+It checks command routing, approval cleanup, backup manifests, permission repair
+and Docker setup without running privileged host commands. Its CLI listing cases
+exercise the real command in human, quiet and JSON modes on a legacy account
+configuration. These fixtures do not prove host privilege enforcement.
+
+### Why the strict subset stops at the system adapter
+
+`host-paths.ts`, `host-files.ts`, `host-inputs.ts`, `host-package.ts`,
+`host-units.ts` and `release.ts` have no runtime imports from the remaining
+JavaScript orchestration. `host-support.ts`, `accounts.ts` and `managed.ts`
+retain their existing exports through these typed owners, so consumers keep
+their `.js` specifiers and emitted paths. The OS adapter's protected MCP imports
+and migration still need their own typed contracts before the rest can be
+checked strictly.
+
+`host-support.ts` exports `HostSystem` from the real adapter and accepts narrow
+system contracts for preparation and toolchain selection. The path-integrity
+checker and the protected MCP installer supply their typed results directly.
+The HTTP adapter returns the release version from a
+successful health response; the agent session must authenticate before its
+health response can confirm readiness. The account lookup preserves the existing passwd
+  split and refuses a malformed passwd entry with missing home or shell fields.
+The Linux root check returns false when `process.getuid` is unavailable.
+
+Run the subset checker from the repository root:
+
+```bash
+bun ./node_modules/typescript/bin/tsc -p packages/web/server/lib/host-install/tsconfig.strict.json
+```
+
+The checker inherits the server's strict options, disallows JavaScript imports
+and enables indexed-access and exact-optional checks. JSON reads return the
+recursive `JsonValue` contract guaranteed by `JSON.parse`; consumers narrow the
+package and release fields before use. Disk paths use the injected root while
+systemd text uses live paths.
+A retained package with a non-string version is treated like unreadable metadata.
+A release asset without a string download URL cannot become a package source.
+These readers use Node alone because the unpacked bootstrap has no dependencies.
+
+`main.js` remains a JavaScript filename bootstrap. It must remain an explicit
+compiler root and be allowed in `scripts/check-server-types.mjs`'s
+`JAVASCRIPT_ENTRIES` when the coordinator integrates the compiler checks.
+The typed subset is reached by imports and needs no additional filename roots.
+
+### Why new installs require emitted entrypoints
+
+Published packages contain `build` without the source tree. Accepting source
+entrypoints can promote a package that neither systemd nor the CLI can start.
+Legacy path selection is limited to existing commands and rollback sources so
+an older deployment remains recoverable.
+
+### Why the updater keeps a physical package path
+
+After a rollback to a source-layout release, that release's installer cannot
+manage the emitted package retained as `previous`. Keeping the emitted
+installer's physical path preserves subsequent rollback and update operations
+without retaining another package version. The updater executes only the trusted
+Node and sealed package; it does not depend on the command wrapper's directory
+permissions.
+
+The server compiler needs explicit roots for `server/lib/host-install/main.js`,
+`server/lib/hostd/main.js` and `server/lib/protected-mcp/service/main.js`, alongside
+the existing protected MCP relay root. These entrypoints are selected by shell
+or systemd paths; ordinary imports do not reach them. `v2-install.ts` is already
+reachable from the OpenCode runtime imports.
+
+`bootstrap-layout.test.js` downloads synthetic archives through a local command
+fixture and checks their real digests before running the emitted installers.
+`emitted-layout.test.js` launches generated unit commands against a source-free
+synthetic runtime and covers update, rollback and failed-health recovery across
+layouts. These checks do not start host services or prove an actual release
+archive contains the compiler output; release integration owns that build check.
 
 ### Why a root updater and not a root OpenChamber server
 

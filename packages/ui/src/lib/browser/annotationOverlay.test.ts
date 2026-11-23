@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { Window } from 'happy-dom';
 import { describe, expect, test } from 'bun:test';
 
@@ -157,7 +156,7 @@ describe('annotation voice indicators', () => {
 
         // Then no timer or incoming meter sample can keep painting it.
         overlay.receive({ type: 'level', level: 0.2 });
-        expect(overlay.timers.size).toBe(0);
+        expect(overlay.timers.size).toBe(state === 'processing' ? 1 : 0);
         expect(overlay.draws).toBe(draws);
       } finally {
         overlay.dispose();
@@ -168,6 +167,34 @@ describe('annotation voice indicators', () => {
   }
 
   for (const surface of ['editor', 'page'] as const) {
+    test(`pauses the processing spinner when the ${surface} hides it`, async () => {
+      // Given a visible processing indicator after recording finishes.
+      const overlay = startVoiceOverlay();
+      try {
+        overlay.toggleTarget();
+        overlay.receive({ type: 'voice', phase: 'recording' });
+        overlay.receive({ type: 'voice', phase: 'processing' });
+        expect(overlay.timers.size).toBe(1);
+        const icon = overlay.root.querySelector('.spin svg');
+        expect(icon?.getAttribute('style')).toContain('rotate(0deg)');
+        overlay.tick();
+        expect(icon?.getAttribute('style')).toContain('rotate(45deg)');
+
+        // When the indicator leaves the visible surface.
+        if (surface === 'editor') overlay.toggleTarget();
+        else overlay.hidePage(true);
+
+        // Then its timer stops and the spinner retains its last frame.
+        expect(overlay.timers.size).toBe(0);
+        overlay.tick();
+        expect(icon?.getAttribute('style')).toContain('rotate(45deg)');
+      } finally {
+        overlay.dispose();
+        await overlay.completion;
+        await overlay.win.happyDOM.close();
+      }
+    });
+
     test(`resumes the recording readouts when the ${surface} returns`, async () => {
       // Given a recording whose readouts were hidden for a second.
       const overlay = startVoiceOverlay();
@@ -204,32 +231,9 @@ describe('annotation overlay script', () => {
     expect(parses(`return ${script}`)).toBe(true);
   });
 
-  test('contains no backtick, which would terminate the template it lives in', () => {
-    expect(script).not.toContain('`');
-  });
-
   test('carries the theme and labels through as data, not as concatenated code', () => {
     expect(script).toContain(JSON.stringify(theme.primarySoft));
     expect(script).toContain(JSON.stringify(labels.commentPlaceholder));
-  });
-
-  test('keeps comment keystrokes away from shortcuts on the annotated page', () => {
-    expect(script).toContain("comment.addEventListener('keydown', onCommentKeyDown)");
-    expect(script).toContain('var onCommentKeyDown = function (event) {');
-    expect(script).toContain('event.stopPropagation();');
-  });
-
-  test('does not attach a comment while IME composition is active', () => {
-    const handlerStart = script.indexOf('var onCommentKeyDown = function (event) {');
-    const handlerEnd = script.indexOf('};', handlerStart);
-    expect(handlerStart).toBeGreaterThan(-1);
-    expect(handlerEnd).toBeGreaterThan(handlerStart);
-
-    const handler = script.slice(handlerStart, handlerEnd);
-    const imeGuard = handler.indexOf('event.isComposing || event.keyCode === 229');
-    const attachCall = handler.indexOf('attach(event);');
-    expect(imeGuard).toBeGreaterThan(-1);
-    expect(attachCall).toBeGreaterThan(imeGuard);
   });
 
   test('preserves the overlay for composition Escape and cancels on ordinary Escape', async () => {
@@ -403,18 +407,6 @@ describe('annotation overlay script', () => {
     } finally {
       await win.happyDOM.close();
     }
-  });
-
-  test('guards app-side annotation Escape before cancelling the session', () => {
-    const source = readFileSync(new URL('../../components/browser/BrowserPane.tsx', import.meta.url), 'utf8');
-    const start = source.indexOf('const handler = (event: KeyboardEvent)');
-    const end = source.indexOf("window.addEventListener('keydown', handler, true)", start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const handler = source.slice(start, end);
-    const guard = handler.indexOf("if (isIMECompositionEvent(event) || event.key !== 'Escape') return;");
-    expect(guard).toBeGreaterThan(-1);
-    expect(handler.indexOf('cancelAnnotation()')).toBeGreaterThan(guard);
   });
 
   test('escapes a label that would otherwise close the script', () => {

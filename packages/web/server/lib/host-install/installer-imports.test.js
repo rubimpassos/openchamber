@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { builtinModules } from 'node:module';
+import { builtinModules, createRequire, stripTypeScriptTypes } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
@@ -9,20 +9,22 @@ import { afterEach, expect, it } from 'vitest';
 // `scripts/install.sh` runs main.js from the unpacked release, before npm installed anything: every
 // module it loads statically must need Node alone. A root command may still import a package
 // dynamically, since those run from the installed tree.
-const installerGraph = () => {
-  const seen = new Set();
+const installerGraph = (entry = './main.js') => {
+  const seen = new Map();
   const packages = [];
   const walk = (file) => {
     if (seen.has(file)) return;
-    seen.add(file);
-    const text = fs.readFileSync(file, 'utf8');
+    const source = fs.existsSync(file) ? file : file.replace(/\.js$/, '.ts');
+    const original = fs.readFileSync(source, 'utf8');
+    const text = source.endsWith('.ts') ? stripTypeScriptTypes(original) : original;
+    seen.set(file, text);
     for (const match of text.matchAll(/^\s*(?:import|export)\s[^'"]*?from\s+['"]([^'"]+)['"]|^\s*import\s+['"]([^'"]+)['"]/gm)) {
       const specifier = match[1] ?? match[2];
       if (specifier.startsWith('.')) walk(path.resolve(path.dirname(file), specifier));
       else if (!specifier.startsWith('node:') && !builtinModules.includes(specifier)) packages.push(`${specifier} <- ${path.basename(file)}`);
     }
   };
-  walk(fileURLToPath(new URL('./main.js', import.meta.url)));
+  walk(fileURLToPath(new URL(entry, import.meta.url)));
   return { seen, packages };
 };
 
@@ -38,12 +40,12 @@ afterEach(async () => { for (const directory of scratch.splice(0)) await fs.prom
 it.each([true, false])('runs explicit mapping input and mixed legacy queue migration without installed dependencies, dryRun=%s', async (dryRun) => {
   const directory = await fs.promises.mkdtemp('/tmp/opencode/installer-bootstrap-');
   scratch.push(directory);
-  const unpacked = path.join(directory, 'package/server');
+  const unpacked = path.join(directory, 'package/build/server');
   const originalServer = fileURLToPath(new URL('../../', import.meta.url));
   const write = async (file, value) => { await fs.promises.mkdir(path.dirname(file), { recursive: true }); await fs.promises.writeFile(file, value); };
   await write(path.join(directory, 'package/package.json'), '{"type":"module"}');
-  for (const file of installerGraph().seen) {
-    await write(path.join(unpacked, path.relative(originalServer, file)), await fs.promises.readFile(file));
+  for (const [file, code] of installerGraph().seen) {
+    await write(path.join(unpacked, path.relative(originalServer, file)), code);
   }
   const root = path.join(directory, 'root');
   const source = path.join(root, 'home/human/.config/openchamber');
@@ -91,4 +93,29 @@ it.each([true, false])('runs explicit mapping input and mixed legacy queue migra
       .toEqual({ version: 1, revision: 77, sessions: { ses_fixed: { directory: mapping.directory, items: [bot] } } });
     expect(JSON.parse(await fs.promises.readFile(path.join(root, 'home/agent/.config/openchamber/message-queue.json'), 'utf8')).sessions.ses_fixed.items).toEqual([ordinary]);
   }
+});
+
+it.skipIf(process.getuid() === 0)('loads emitted hostd with installed runtime dependencies and retains its root-only entrypoint', async () => {
+  // Given
+  const directory = await fs.promises.mkdtemp('/tmp/opencode/hostd-bootstrap-');
+  scratch.push(directory);
+  const unpacked = path.join(directory, 'package/build/server');
+  const originalServer = fileURLToPath(new URL('../../', import.meta.url));
+  const { seen } = installerGraph('../hostd/main.js');
+  const write = async (file, code) => { await fs.promises.mkdir(path.dirname(file), { recursive: true }); await fs.promises.writeFile(file, code); };
+  await write(path.join(directory, 'package/package.json'), JSON.stringify({
+    name: '@openchamber/web', type: 'module', main: './build/server/index.js', bin: { openchamber: './build/bin/cli.js' },
+  }));
+  const modules = path.join(directory, 'package/node_modules');
+  await fs.promises.mkdir(modules);
+  await fs.promises.symlink(path.dirname(createRequire(import.meta.url).resolve('zod/package.json')), path.join(modules, 'zod'));
+  for (const [file, code] of seen) await write(path.join(unpacked, path.relative(originalServer, file)), code);
+  await write(path.join(unpacked, 'lib/spaces/gatekeeper-program.cjs'), await fs.promises.readFile(path.join(originalServer, 'lib/spaces/gatekeeper-program.cjs')));
+  // When
+  const result = spawnSync(process.execPath, [path.join(unpacked, 'lib/hostd/main.js')], {
+    cwd: directory, env: { PATH: process.env.PATH, HOME: directory }, encoding: 'utf8', timeout: 10_000,
+  });
+  // Then
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('hostd must run as root from the root-owned installed tree');
 });

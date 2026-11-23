@@ -31,7 +31,7 @@ const createDriver = ({ windows = [], focused = false, packaged = false } = {}) 
   }
   return vm.runInNewContext(`
     ${section('const activeNotifications =', 'const mapUpdaterProgressEvent =')}
-    ${section('const SESSION_ROUTE_ID_RE =', '// The configured desktop host')}
+    ${section('const SESSION_ROUTE_ID_RE =', 'const findConfiguredHostForUrl =')}
     ${section('const openHostWindow =', 'const createAdditionalWindow =')}
     ({ notifications, emitted, created, navigated, hosts,
       notify: maybeShowNativeNotification,

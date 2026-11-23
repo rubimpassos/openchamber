@@ -4,9 +4,9 @@
 Reports resource usage of the machine this OpenChamber server runs on, for the "Machine" block and header status in the desktop instance menu.
 
 ## Entrypoints and structure
-- `collect.js`: `createSystemStatsCollector({ os, fsPromises, process, diskPath? })` returns `{ collect() }`, a point-in-time sample. Dependencies are injected so tests can fake the host.
-- `routes.js`: `registerSystemStatsRoutes(app, { collector, openchamberVersion, isOpenCodeRunning })` registers `GET /api/system/stats`.
-- Wired from `../opencode/feature-routes-runtime.js`, after the `/api` auth gate.
+- `collect.ts`: `createSystemStatsCollector({ os, fsPromises, process, diskPath? })` returns `{ collect() }`, a point-in-time sample. Dependencies are injected so tests can fake the host.
+- `routes.ts`: `registerSystemStatsRoutes(app, { collector, openchamberVersion, isOpenCodeRunning })` registers `GET /api/system/stats`.
+- Wired from `../server-frame/feature-routes-runtime.ts`, after the `/api` auth gate.
 
 ## Contract
 `GET /api/system/stats` requires the same auth as every other `/api` route (UI session, client bearer, or tunnel session). It is deliberately not part of the public `/health`: hostname, uptime and usage are not for anyone who can merely reach the server. Responses are `Cache-Control: no-store`; collection failure answers 500.

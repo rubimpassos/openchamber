@@ -30,6 +30,23 @@ test('stable uploads preserve prerelease status and attach both server packages'
   assert.deepEqual(packages, ['packages/web/*.tgz', 'packages/sdk/*.tgz']);
 });
 
+test('a dry run performs no release writes while tag builds retain publication', () => {
+  // Given every release-writing action and the reusable mobile publisher.
+  const writes = Object.values(workflow.jobs).flatMap((job) => job.steps ?? [])
+    .filter((step) => step.uses?.startsWith('softprops/action-gh-release@'));
+  const conditions = [...writes, workflow.jobs['mobile-release']];
+  const active = (inputs) => conditions.filter((step) => {
+    const expression = step.if?.replace(/^\$\{\{\s*|\s*\}\}$/g, '') ?? 'true';
+    return vm.runInNewContext(expression, { github: { event: { inputs } } });
+  });
+  // When GitHub evaluates a dry run and an ordinary tag event.
+  const dry = active({ dry_run: 'true' });
+  const tag = active({});
+  // Then only the tag event can create, upload or publish release files.
+  assert.equal(dry.length, 0);
+  assert.equal(tag.length, conditions.length);
+});
+
 test('the stable inventory rejects missing, duplicate, empty assets and API errors', async () => {
   // Given all assets required by the fork's supported platforms.
   const version = '2.7.3';

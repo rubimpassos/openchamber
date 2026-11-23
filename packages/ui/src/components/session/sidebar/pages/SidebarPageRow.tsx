@@ -16,11 +16,6 @@ function SuggestedTasksLabel({ visible }: { readonly visible: boolean }) {
   return <>{count > 0 ? t('suggestedTasks.sidebar.openWithCount', { count }) : t('suggestedTasks.sidebar.open')}</>;
 }
 
-/**
- * One page under the Pages caption, drawn as a one-line session row: the icon
- * in the tree's slot, so the label starts where session titles do. Pressing it
- * opens the page, or closes it while it is open (the selected fill).
- */
 export const SidebarPageRow: React.FC<{ page: SidebarPage; visible: boolean }> = ({ page, visible }) => {
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const shortcut = page.shortcut ? formatShortcutForDisplay(getEffectiveShortcutCombo(page.shortcut, shortcutOverrides), '') : '';

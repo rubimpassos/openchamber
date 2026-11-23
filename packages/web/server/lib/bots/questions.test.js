@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { createBotQuestions } from './questions.js';
-import { questionsFixture, questionArea, questionPeople, questionCommit } from './questions-test-support.js';
+import { questionsFixture, questionArea, questionPeople, questionCommit } from './questions.test-support.js';
 import { enterprisePolicy } from './services/http.test-support.js';
 import { botGit } from './production-git.js';
 

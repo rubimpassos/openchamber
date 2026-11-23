@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { Readable } from 'node:stream';
+import { stripTypeScriptTypes } from 'node:module';
 import { afterEach, expect, it } from 'vitest';
 import { createBotIsolatedStages } from './isolated-stages.js';
 import { botDefinitionSchema } from './config.js';
@@ -251,8 +252,8 @@ it('does not repeat a host action whose dispatching receipt survived a crash', a
 });
 
 it('exposes only the recorded current session owner, with a sensitive metadata identity check', async () => {
-  const sourceUrl = new URL('./isolated-stages.js', import.meta.url);
-  const source = await fs.readFile(sourceUrl, 'utf8');
+  const sourceUrl = new URL('./isolated-stages.ts', import.meta.url);
+  const source = stripTypeScriptTypes(await fs.readFile(sourceUrl, 'utf8'));
   const protection = /if \(info\.id !== sessionId[\s\S]+?refuse\('BOT_ISOLATED_SESSION_MISMATCH'\);/;
   expect(protection.test(source)).toBe(true);
   const mutant = source.replace(protection, "if (false) refuse('BOT_ISOLATED_SESSION_MISMATCH');")

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { createHostFixture } from './host-test-support.js';
+import { createHostFixture } from './host.test-support.js';
 import { createBotStore } from './store.js';
 import { createBotExecutionStore } from './execution-store.js';
 import { createBotItem } from './schema.js';

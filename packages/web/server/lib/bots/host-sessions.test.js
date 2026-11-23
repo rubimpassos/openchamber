@@ -11,6 +11,28 @@ import { botDefinitionSchema } from './config.js';
 const fixtures = [];
 afterEach(async () => { for (const close of fixtures.splice(0)) await close(); });
 
+it.each([
+  { enveloped: false, archivedAt: undefined, archived: true },
+  { enveloped: true, archivedAt: 10, archived: false },
+])('reads the captured host placement and archive state when enveloped=$enveloped', async ({ enveloped, archivedAt, archived }) => {
+  // Given a captured host item whose bot now requests isolation.
+  const bot = botDefinitionSchema.parse({ id: 'bot', name: 'Bot', mission: 'Fix', isolated: true });
+  const item = { ...createBotItem({ id: 'item', botId: bot.id, title: 'Bug', source: { kind: 'manual', id: 'one' } }),
+    worktree: '/captured/checkout', sessions: { fixing: 'ses_captured' } };
+  const metadata = { openchamber: { automation: { source: 'bot', projectId: 'project', botId: bot.id, itemId: item.id, stage: 'fixing' } } };
+  const sessions = createBotHostSessions({ resolvePlacement: async () => ({ isolated: false }),
+    clientFor: (directory) => ({ session: { get: async ({ sessionID }) => {
+      const info = { id: sessionID, location: { directory }, time: { archived: archivedAt }, metadata };
+      return enveloped ? { data: info } : info;
+    } } }), isSessionArchived: async () => archived });
+
+  // When the notice owner reads the recorded session.
+  const session = await sessions.readSession({ projectId: 'project', item, bot, sessionId: 'ses_captured' });
+
+  // Then it retains host routing, metadata and both archive sources.
+  expect(session).toEqual({ id: 'ses_captured', directory: item.worktree, isolated: false, archived: true, metadata });
+});
+
 it('owns isolated queue transport, persistence, trusted events and cache-inclusive usage without host fallback', async () => {
   const root = await fs.mkdtemp('/tmp/opencode/bot-host-session-');
   const directory = '/spaces/a1b2c3d4e5f6/repo';

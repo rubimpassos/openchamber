@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createSettingsRuntime } from './settings-runtime.js';
+import { createSettingsRuntime } from '../settings/settings-runtime.js';
 
 it('allows managed-config refresh to read settings after an agent settings write', async () => {
   // Given the real callback shape: refreshing managed config re-reads migrated settings.

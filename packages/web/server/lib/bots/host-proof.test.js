@@ -3,7 +3,7 @@ import path from 'node:path';
 import { watch } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
 import { expect, it } from 'vitest';
-import { createHostFixture } from './host-test-support.js';
+import { createHostFixture } from './host.test-support.js';
 import { createBotStore } from './store.js';
 import { createBotItem } from './schema.js';
 import { createBotExecutionStore } from './execution-store.js';

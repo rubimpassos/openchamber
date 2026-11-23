@@ -6,20 +6,11 @@ export type BotsRouteTarget = { readonly projectId: string; readonly itemId: str
 const linkId = z.string().refine(isLinkIdentifier);
 export const botsRouteTargetSchema = z.object({ projectId: linkId, itemId: linkId }).strict();
 
-/**
- * Represents the current route state derived from URL parameters.
- * All fields are nullable - null means "not specified in URL" (use app defaults).
- */
 export interface RouteState {
-  /** Session ID to navigate to */
   sessionId: string | null;
-  /** Message to show in that session (a message link); only with a session */
   messageId: string | null;
-  /** View selected through the legacy `tab` URL parameter. */
   tab: RouteTab | null;
-  /** Settings section - when non-null, settings dialog should be open */
   settingsPath: string | null;
-  /** File path for diff view */
   diffFile: string | null;
   /** Guest id whose panel to reveal, from a `browser.requestHelp` push deep link */
   guestPanelId: string | null;
@@ -27,16 +18,9 @@ export interface RouteState {
   readonly botsTarget: BotsRouteTarget | null;
 }
 
-/**
- * Valid values for the legacy `tab` URL parameter. Non-chat tabs open the
- * matching context-panel surface; the chat always owns the main area.
- */
 export type RouteTab = 'chat' | 'git' | 'diff' | 'terminal' | 'files';
 export const VALID_TABS: readonly RouteTab[] = ['chat', 'git', 'diff', 'terminal', 'files'] as const;
 
-/**
- * Valid settings section values for URL routing.
- */
 export const VALID_SETTINGS_SECTIONS: readonly SidebarSection[] = [
   'settings',
   'agents',
@@ -47,9 +31,6 @@ export const VALID_SETTINGS_SECTIONS: readonly SidebarSection[] = [
   'git-identities',
 ] as const;
 
-/**
- * URL parameter names used for routing.
- */
 export const ROUTE_PARAMS = {
   SESSION: 'session',
   MESSAGE: 'message',

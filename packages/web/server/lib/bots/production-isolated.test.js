@@ -3,8 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { botGit, advanceBotCheckout } from './production-git.js';
 import { readBotGitSnapshot } from './services/git.js';
-import { commitFiles } from './production-test-support.js';
-import { isolatedProductionFixture } from './production-isolated-test-support.js';
+import { commitFiles } from './production.test-support.js';
+import { isolatedProductionFixture } from './production-isolated.test-support.js';
 
 let fixture;
 afterEach(async () => { await fixture?.close(); fixture = null; });

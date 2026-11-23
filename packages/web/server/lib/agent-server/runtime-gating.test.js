@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { FRONT_DOOR_DISABLED_RUNTIMES, AGENT_DISABLED_FEATURES } from './mode.js';
-import { createStartupPipelineRuntime } from '../opencode/startup-pipeline-runtime.js';
+import { createStartupPipelineRuntime } from '../server-frame/startup-pipeline-runtime.js';
 
-const source = fs.readFileSync(new URL('../../index.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../../runtime.ts', import.meta.url), 'utf8');
 
 describe('front door composition contract', () => {
   it('constructs no owner terminal and passes agent transport to local message sockets', async () => {
@@ -45,7 +45,28 @@ describe('front door composition contract', () => {
     for (const name of names) {
       const variable = ['browserControlBroker', 'browserControlRouter', 'workflowAgentSessions', 'extensionServiceLifetime', 'memoryDreaming', 'scheduledTaskService'].includes(name) ? name : `${name}Runtime`;
       // Then removing a construction gate fails this contract, even if forwarding still works.
-      expect(source).toMatch(new RegExp(`${variable} = FRONT_DOOR \\? null : create`));
+      if (name === 'scheduledTasks') {
+        expect(source).toMatch(/const projectConfigRuntime[^\n]*= FRONT_DOOR \? null : createProjectConfigRuntime/);
+        expect(source).toMatch(/const scheduledTasksRuntime[^\n]*= projectConfigRuntime \? createScheduledTasksRuntime/);
+      } else if (name === 'sessionKnowledge') {
+        expect(source).toMatch(/const projectContextRuntime[^\n]*= FRONT_DOOR \? null : createProjectContextRuntime/);
+        expect(source).toMatch(/const agentMemoryRuntime = FRONT_DOOR \? null : createAgentMemoryRuntime/);
+        expect(source).toMatch(/const sessionKnowledgeRuntime[^\n]*= projectContextRuntime && agentMemoryRuntime \? createManagedSessionKnowledgeRuntime/);
+      } else if (name === 'prStackRestack') {
+        expect(source).toMatch(/const messageQueueRuntime[^\n]*= FRONT_DOOR \? null : createMessageQueueRuntime/);
+        expect(source).toMatch(/const prStackRestackRuntime = messageQueueRuntime \? createRestackRuntime/);
+      } else if (name === 'suggestedTasks') {
+        expect(source).toMatch(/const projectConfigRuntime[^\n]*= FRONT_DOOR \? null : createProjectConfigRuntime/);
+        expect(source).toMatch(/const suggestedTasksRuntime = projectConfigRuntime &&[^?]*\? createSuggestedTasksRuntime/);
+      } else if (name === 'memoryDreaming') {
+        expect(source).toMatch(/const agentMemoryRuntime = FRONT_DOOR \? null : createAgentMemoryRuntime/);
+        expect(source).toMatch(/const memoryDreaming = agentMemoryRuntime \? createMemoryDreaming/);
+      } else if (name === 'scheduledTaskService') {
+        expect(source).toMatch(/const projectConfigRuntime[^\n]*= FRONT_DOOR \? null : createProjectConfigRuntime/);
+        expect(source).toMatch(/const scheduledTaskService[^\n]*= projectConfigRuntime && scheduledTasksRuntime \? createScheduledTaskService/);
+      } else {
+        expect(source).toMatch(new RegExp(`${variable} = FRONT_DOOR \\? null : create`));
+      }
       expect(FRONT_DOOR_DISABLED_RUNTIMES).toContain(name);
     }
     expect(source).toContain('shouldSkipOpenCodeStop: () => FRONT_DOOR ||');
@@ -60,7 +81,8 @@ describe('front door composition contract', () => {
     // Given the agent-mode feature boundary. When enumerated, then every owner capability has a gate.
     expect(AGENT_DISABLED_FEATURES).toEqual(['pushDelivery', 'relayHost', 'tunnels', 'spaces', 'protectedMcpAdmin', 'updateInstall', 'botCoordinator']);
     expect(source).toMatch(/else if \(AGENT_SERVER\) \{\s*botExecutionServices = createBotExecutionServices/);
-    expect(source).toMatch(/ownerBotScheduledTasksRuntime = FRONT_DOOR \? createScheduledTasksRuntime\(\{ mode: 'bots-only'/);
+    expect(source).toMatch(/const ownerBotConfig = FRONT_DOOR \? createOwnerBotConfig/);
+    expect(source).toMatch(/ownerBotScheduledTasksRuntime = ownerBotConfig \? createScheduledTasksRuntime\(\{ mode: 'bots-only'/);
     expect(source).toContain('const relayService = AGENT_SERVER ? null :');
     expect(source).toContain('AGENT_SERVER ? createAgentTunnelContext() :');
     expect(source).toContain('if (!AGENT_SERVER && startupSettings?.isolatedSpacesEnabled');

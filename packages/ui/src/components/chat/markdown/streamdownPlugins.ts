@@ -11,7 +11,7 @@ import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdo
 import { rehypeTextDirection } from './rehypeTextDirection';
 import { isInvisibleText } from '@/lib/invisibleText';
 
-// Micromark merges GFM and CJK registrations, so both must disable single tildes.
+// external: https://github.com/micromark/micromark#syntax-extensions GFM and CJK registrations merge, so both must disable single tildes.
 const strictTildes = { singleTilde: false } as const;
 // SAFETY: Pinned Streamdown 2.7.1 exports GFM as a plugin/options tuple despite its Pluggable annotation.
 const gfmEntry = defaultRemarkPlugins.gfm as [Plugin, Record<string, unknown>];
@@ -20,7 +20,7 @@ const defaultRemarkPluginList: Pluggable[] = [
   ...Object.values(defaultRemarkPlugins).filter((plugin) => plugin !== defaultRemarkPlugins.gfm),
 ];
 
-// SAFETY: Pinned @streamdown/cjk 1.0.4 always ends remarkPluginsAfter with its strikethrough plugin.
+// external: https://www.npmjs.com/package/@streamdown/cjk/v/1.0.4 The pinned CJK plugin appends strikethrough last.
 const cjkStrikethrough = cjk.remarkPluginsAfter.at(-1) as Plugin;
 const markdownCjk: CjkPlugin = {
   ...cjk,
@@ -32,8 +32,7 @@ export function getMarkdownCjk(singleTilde = false): CjkPlugin {
 }
 
 const officialMath = createMathPlugin({ singleDollarTextMath: false });
-// Streamdown appends math's remark plugin after the configured remark plugins.
-// Keeping the compatibility transformer here makes it run after remark-math.
+// external: https://github.com/vercel/streamdown Streamdown appends the math remark plugin after configured remark plugins; compatibility runs inside it after remark-math.
 export const markdownMath: MathPlugin = {
   ...officialMath,
   remarkPlugin: function markdownMathSyntax(this: Processor) {
@@ -48,7 +47,7 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   attributes: {
     '*': ['align', 'alt', 'checked', 'colSpan', 'height', 'media', 'open', 'rowSpan', 'start', 'title', 'width'],
     a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference', 'dataOcGuestLink'],
-    // `:` for GitLab's suggestion fences (`suggestion:-0+2`).
+    // external: https://docs.gitlab.com/user/project/merge_requests/reviews/suggestions/ Suggestion fence languages can include colon-delimited line ranges.
     code: [['className', /^language-[\w#+.:-]+$/, 'math-inline', 'math-display'], 'metastring'],
     img: ['src', 'srcSet', 'alt', 'dataOcMediaSource'],
     source: ['src', 'srcSet', 'type', 'media', 'dataOcMediaSource'],
@@ -61,8 +60,6 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
     h2: ['id', ['className', 'sr-only']],
     blockquote: [['dataOcAlert', ...MARKDOWN_ALERT_KINDS]],
   },
-  // href has already passed the application URL classifier. Media still only
-  // uses HTTP(S)/relative src; local files travel as validated source metadata.
   protocols: { src: ['http', 'https'] },
   clobberPrefix: '',
   required: { input: { type: 'checkbox', disabled: true } },
@@ -94,23 +91,14 @@ function remarkSessionLinks() {
   };
 }
 
-/**
- * Text a person typed reads as typed: `<b>` and `&amp;` stay those characters
- * instead of becoming HTML or `&`. The parser never sees them as HTML or
- * character references, so inline code and formulas keep their characters
- * too, which escaping the source cannot give: an entity there is shown
- * literally (`a&lt;b` in code, a broken formula).
- */
 export function remarkLiteralText(this: Processor) {
   const data = this.data();
   (data.micromarkExtensions ??= []).push({ disable: { null: ['htmlFlow', 'htmlText', 'characterReference'] } });
 }
 
-// Static mode parses the whole document without the streaming BlockComponent.
-// Match the original top-level source policy without stripping inline joiners.
 function remarkVisibleBlocks() {
   return (tree: Root, file: { value: string | Uint8Array }) => {
-    // Micromark omits a leading BOM before assigning source offsets.
+    // external: https://github.com/micromark/micromark/blob/main/packages/micromark/dev/lib/preprocess.js Micromark omits the initial BOM from source offsets.
     const source = String(file.value).replace(/^\uFEFF/, '');
     tree.children = tree.children.filter((node) => {
       const start = node.position?.start.offset;
@@ -129,7 +117,6 @@ function createOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde: bo
       [rehypeSanitize, schema],
       defaultRehypePlugins.harden,
       rehypeRestoreMarkdownLinks,
-      // After sanitation, which drops `dir` from raw HTML.
       rehypeTextDirection,
     ],
   };

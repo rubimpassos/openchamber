@@ -44,6 +44,29 @@ it('keeps bot attribution and exact provider identity through durable replay wit
   expect(await store.list()).toMatchObject([{ target: { botAuthority: authority }, state: 'succeeded' }]);
 });
 
+it('replays a bot publication mapping after restart with its original Git-ref audit target', async () => {
+  // Given an exact reserved branch and a compact provider publication receipt.
+  const { store, auditStore, executor } = await setup();
+  const record = { ...mutation, kind: 'bot-git-push', target: { ...mutation.target, head: 'task/BUG-1',
+    botAuthority: { ...authority, publicationBranch: 'task/BUG-1' } } };
+  const result = { head: 'task/BUG-1', headSha: 'b'.repeat(40), sourceHeadSha: 'a'.repeat(40),
+    commitMap: [{ sourceSha: 'a'.repeat(40), publishedSha: 'b'.repeat(40) }] };
+  let writes = 0;
+  const input = { record, providerAccountId: 'github.com#42', perform: async () => { writes += 1; return result; } };
+  await executor.execute(input);
+  const restarted = createMutationExecutor({ store, auditStore, runtimeIdentity: { id: 'runtime-two', platform: 'web' } });
+
+  // When the new runtime receives the same durable publication key.
+  const replay = await restarted.execute(input);
+
+  // Then publication is not repeated and the receipt and attribution survive the snapshot read.
+  expect(replay).toMatchObject({ replayed: true, record: { state: 'succeeded', result } });
+  expect(writes).toBe(1);
+  expect(await auditStore.read(`provider:${record.key}`)).toMatchObject({ initiator: 'bot',
+    runtime: { id: 'runtime-one' }, transportReference: null, providerAccountId: 'github.com#42',
+    target: { kind: 'git-ref', operation: 'bot-git-push', head: 'task/BUG-1' } });
+});
+
 it('rejects mixed binding and bot authority and incomplete identity revisions', async () => {
   const { store } = await setup();
   await expect(store.claim({ ...mutation, target: { ...mutation.target, bindingRevision: 0, primaryRemote: 'origin' } })).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_MUTATIONS' });

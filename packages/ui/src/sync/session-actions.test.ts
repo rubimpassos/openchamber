@@ -44,7 +44,19 @@ const sessionRecords = new Map<string, Session>()
 // shape the cache-miss read without the lookup chain finding the record.
 const fetchedSessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
+// Stages that reach the server and then reject, as when the response is lost.
+const lostStageResponseSessionIds = new Set<string>()
+let sessionReadErrorOnce: Error | null = null
+let stageRevertGate: Promise<void> | null = null
+const stageRevertGates = new Map<string, Promise<void>>()
+let messageReadGate: Promise<void> | null = null
+let refreshGate: Promise<void> | null = null
+let refreshStarted = false
+let sessionReadGate: Promise<void> | null = null
+let gatedSessionReadStarted = false
 let commitRevertError: Error | null = null
+let commitRevertCalls = 0
+let commitRevertGate: Promise<void> | null = null
 let sessionDeleteError: unknown | null = null
 let sessionForkResult: Session | null = null
 let sessionForkError: Error | null = null
@@ -110,7 +122,18 @@ mock.module("@/lib/opencode/client", () => ({
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
       beforeSessionGetResolve?.()
+      const readError = sessionReadErrorOnce
+      if (readError) {
+        sessionReadErrorOnce = null
+        throw readError
+      }
       const record = sessionRecords.get(sessionId) ?? fetchedSessionRecords.get(sessionId)
+      const gate = sessionReadGate
+      if (gate) {
+        sessionReadGate = null
+        gatedSessionReadStarted = true
+        await gate
+      }
       if (!record) throw notFound("Session")
       return record
     }),
@@ -125,6 +148,7 @@ mock.module("@/lib/opencode/client", () => ({
       directory?: string | null,
     ) => {
       replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory, limit: options?.limit, cursor: options?.cursor } })
+      await messageReadGate
       const page = cursorMessagePages ? cursorMessagePages[Number(options?.cursor ?? "0")] : undefined
       if (page) return page
       return { items: sessionMessageRecords.get(sessionId) ?? [], cursor: {} }
@@ -177,14 +201,21 @@ mock.module("@/lib/opencode/client", () => ({
         method: "session.revert.stage",
         params: { sessionID: sessionId, messageID: messageId, directory: options?.directory },
       })
+      await stageRevertGate
+      await stageRevertGates.get(sessionId)
       if (failingRevertSessionIds.has(sessionId)) throw new Error("session.revert.stage failed (500): rejected")
       // Mirror the server: staging records the marker on the session, which is
       // what the action re-reads through `getSession` afterwards.
       const record = sessionRecords.get(sessionId)
       sessionRecords.set(sessionId, { ...(record ?? sessionFixture(sessionId)), revert: { messageID: messageId } })
+      if (lostStageResponseSessionIds.has(sessionId)) throw new Error("session.revert.stage: network error")
       return { messageID: messageId }
     }),
-    commitRevert: mock(async () => { if (commitRevertError) throw commitRevertError }),
+    commitRevert: mock(async () => { commitRevertCalls++; await commitRevertGate; if (commitRevertError) throw commitRevertError }),
+    clearRevert: mock(async (sessionId: string) => {
+      const record = sessionRecords.get(sessionId)
+      if (record) sessionRecords.set(sessionId, { ...record, revert: undefined })
+    }),
     forkSession: mock(async (
       sessionId: string,
       options?: { before?: string; directory?: string | null },
@@ -237,8 +268,8 @@ mock.module("@/lib/opencode/client", () => ({
         replyCalls.push({ method: "selection.apply", params: { sessionID: sessionId, selection, directory } })
       }
     }),
-    cancelForm: mock(async (sessionId: string, formId: string, directory?: string | null) => {
-      replyCalls.push({ method: "form.cancel", params: { sessionID: sessionId, formID: formId, directory } })
+    cancelForm: mock(async (sessionId: string, formId: string, directory?: string | null, message?: string) => {
+      replyCalls.push({ method: "form.cancel", params: { sessionID: sessionId, formID: formId, directory, message } })
       if (formCancelError) throw formCancelError
       return true
     }),
@@ -297,6 +328,7 @@ type RecordedSend = {
   variant?: string | null
   queuedGoal?: null
   target?: { runtimeKey: string; sessionId: string; directory: string }
+  metadata?: Metadata
 }
 const sendMessageCalls: RecordedSend[] = []
 let sendMessageBehavior: () => Promise<void> = async () => {}
@@ -331,9 +363,9 @@ mock.module("./session-ui-store", () => ({
         additionalParts?: void,
         variant?: string | null,
         inputMode?: void,
-        options?: { userInitiated?: boolean; queuedGoal?: null; target?: { runtimeKey: string; sessionId: string; directory: string } },
+        options?: { userInitiated?: boolean; queuedGoal?: null; target?: { runtimeKey: string; sessionId: string; directory: string }; metadata?: Metadata },
       ) => {
-        sendMessageCalls.push({ content, providerID, modelID, agent, variant, queuedGoal: options?.queuedGoal, target: options?.target })
+        sendMessageCalls.push({ content, providerID, modelID, agent, variant, queuedGoal: options?.queuedGoal, target: options?.target, metadata: options?.metadata })
         await sendMessageBehavior()
       },
     }),
@@ -527,7 +559,7 @@ mock.module("./session-message-loader", () => ({
   getImperativeSessionMessageLoader: () => ({
     invalidateSession: () => {},
     ensure: async () => {},
-    refreshTail: async () => {},
+    refreshTail: async () => { refreshStarted = true; await refreshGate },
     initializeCreatedSession: () => {},
     getSnapshot: () => ({ status: "ready" as const }),
   }),
@@ -627,7 +659,7 @@ import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, Part, Session, SessionStatus, ToolPart } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
-import { noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
+import { DEFERRED_ANSWER_LEAD_IN, DEFERRED_QUESTION_NOTE, noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { buildFormAnswer, type FormValues } from "../components/chat/formCardState"
 import { serializeFormAnswerAsMarkdown } from "../components/chat/formSerializers"
 
@@ -1830,21 +1862,6 @@ describe("session restore (unarchive)", () => {
   })
 })
 
-describe("fetchMessagesForSession startup race", () => {
-  test("does not reject before sync action refs are initialized", async () => {
-    const { fetchMessagesForSession } = await import("./session-actions")
-
-    let error: unknown = null
-    try {
-      await fetchMessagesForSession("session-a", "/test/project")
-    } catch (err) {
-      error = err
-    }
-
-    expect(error).toBe(null)
-  })
-})
-
 describe("updateSessionTitle live state", () => {
   beforeEach(() => {
     replyCalls.length = 0
@@ -2233,6 +2250,46 @@ describe("optimisticSend target directory", () => {
     finishWrite()
     await sending
     expect(sent).toEqual({ messageID: added[1].id, texts: ["quoted"] })
+  })
+
+  test("keeps a confirmed prompt before an answer received during send recovery", async () => {
+    const targetStore = createStore({})
+    const sessionId = "session-confirmation-order"
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/target/project", targetStore]]), () => "/target/project")
+    setOptimisticRefs(
+      ({ message, parts }) => {
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [...(state.message[sessionId] ?? []), message] },
+          part: { ...state.part, [message.id]: parts },
+        }))
+      },
+      () => {},
+      () => {},
+    )
+    let sentID = ""
+    await optimisticSend({
+      sessionId,
+      directory: "/target/project",
+      content: "hello",
+      send: async (messageID) => {
+        sentID = messageID
+        sessionMessageRecords.set(sessionId, [{
+          info: { id: messageID, role: "user", sessionID: sessionId, time: { created: 1 } },
+          parts: [{ id: "confirmed-part", sessionID: sessionId, messageID, type: "text", text: "hello" }],
+        }])
+        targetStore.setState((state) => ({
+          message: { ...state.message, [sessionId]: [
+            ...(state.message[sessionId] ?? []),
+            { id: "live-answer", role: "assistant", sessionID: sessionId, time: { created: 2 }, agent: "build", providerID: "test", modelID: "test" },
+          ] },
+        }))
+        throw Object.assign(new Error("gateway timeout"), { status: 504 })
+      },
+    })
+    expect(targetStore.getState().message[sessionId]?.map((message) => message.id)).toEqual([sentID, "live-answer"])
+    expect(targetStore.getState().message[sessionId]?.[0]?.time.created).toBe(1)
+    expect(targetStore.getState().part[sentID]?.[0]?.id).toBe("confirmed-part")
   })
 
   test("runs appendSubmissions once for an ambiguous confirmation", async () => {
@@ -2889,6 +2946,128 @@ describe("forkAfterMessage", () => {
     }])
   })
 
+  test("opens a fork with inherited pins only after the pin repair", async () => {
+    const pins = [{ id: "msg-user-1", createdAt: 1, role: "user", sessionID: sourceSession.id }]
+    sessionForkResult = { ...forkedSession, metadata: { openchamber: { context_obligatory_messages: pins } } }
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+    let releaseRead = () => {}
+    messageReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    try {
+      const forking = forkAfterMessage(sourceSession.id, "msg-answer-1")
+      while (!replyCalls.some((call) => call.method === "session.messages")) await Promise.resolve()
+      expect(selectedSessions).toEqual([])
+      releaseRead()
+      await forking
+      expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+    } finally {
+      messageReadGate = null
+    }
+  })
+
+  test("does not repeat a pin edit on a runtime chosen while it was pending", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    beforeArchiveRouteResolve = () => {
+      runtimeKey = "another-runtime"
+      archiveBatchResponse = { status: 200, body: { conflict: true, metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      expect(await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)).toBeNull()
+      expect(openchamberRouteRequests).toHaveLength(1)
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("retries a pin edit against the record a concurrent edit left", async () => {
+    const concurrent = { openchamber: { context_obligatory_messages: [{ id: "other", createdAt: 1, role: "user", sessionID: sourceSession.id }] } }
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    let calls = 0
+    beforeArchiveRouteResolve = (path) => {
+      if (!path.endsWith("/metadata/compare-and-set")) return
+      calls += 1
+      archiveBatchResponse = { status: 200, body: calls === 1 ? { conflict: true, metadata: concurrent } : { conflict: false, metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)
+      const requests = openchamberRouteRequests.filter((entry) => entry.path.endsWith("/metadata/compare-and-set"))
+      expect(requests).toHaveLength(2)
+      expect(requests[1]?.body).toMatchObject({ expected: concurrent, patch: { openchamber: { context_obligatory_messages: [
+        { id: "other", createdAt: 1, role: "user", sessionID: sourceSession.id },
+        { id: "mine", createdAt: 2, role: "user", sessionID: sourceSession.id },
+      ] } } })
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("pins through the plain route on a server without the conditional one", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    beforeArchiveRouteResolve = (path) => {
+      archiveBatchResponse = path.endsWith("/compare-and-set")
+        ? { status: 404, body: { error: "not found" } }
+        : { status: 200, body: { metadata: {} } }
+    }
+    openchamberRouteRequests.length = 0
+    try {
+      const { setContextObligatoryMessage } = await import("./session-actions")
+      await setContextObligatoryMessage(sourceSession.id, sourceSession.directory, { id: "mine", createdAt: 2, role: "user" }, true)
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([
+        `/api/openchamber/sessions/${sourceSession.id}/metadata/compare-and-set`,
+        `/api/openchamber/sessions/${sourceSession.id}/metadata`,
+      ])
+    } finally {
+      beforeArchiveRouteResolve = null
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("never repairs fork pins through the plain route", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    archiveBatchResponse = { status: 404, body: { error: "not found" } }
+    openchamberRouteRequests.length = 0
+    try {
+      const { patchSessionMetadata } = await import("./session-actions")
+      await expect(patchSessionMetadata(sourceSession.id, sourceSession.directory, () => ({ pinned: true }), undefined, "required")).rejects.toThrow()
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([
+        `/api/openchamber/sessions/${sourceSession.id}/metadata/compare-and-set`,
+      ])
+    } finally {
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
+  test("keeps every other metadata edit on the plain route", async () => {
+    sessionRecords.set(sourceSession.id, { ...sourceSession, metadata: {} })
+    const previousResponse = archiveBatchResponse
+    archiveBatchResponse = { status: 200, body: { metadata: { pinned: true } } }
+    openchamberRouteRequests.length = 0
+    try {
+      const { patchSessionMetadata } = await import("./session-actions")
+      await patchSessionMetadata(sourceSession.id, sourceSession.directory, () => ({ pinned: true }))
+      expect(openchamberRouteRequests.map((entry) => entry.path)).toEqual([`/api/openchamber/sessions/${sourceSession.id}/metadata`])
+      expect(openchamberRouteRequests[0]?.body).toEqual({ patch: { pinned: true } })
+    } finally {
+      archiveBatchResponse = previousResponse
+      sessionRecords.delete(sourceSession.id)
+    }
+  })
+
   test("leaves a workflow report that followed the answer out of the fork", async () => {
     const workflowReport: Message = {
       id: "msg-workflow-report",
@@ -3004,14 +3183,16 @@ describe("forkAfterMessage", () => {
         try {
           const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
           setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          const switched = outcome === "runtime-switch" || outcome === "write-failure-after-switch"
           if (forkPoint === "answer") {
-            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(inheritedFork)
+            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(switched ? null : inheritedFork)
           } else {
             await forkFromMessage(sourceSession.id, "msg-user-2")
           }
           expect(permissionPolicy.get(forkedSession.id)).toBeUndefined()
           expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe("ask")
-          expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+          // The fork opens after inheritance, so a server switch meanwhile keeps the new server's view.
+          expect(selectedSessions).toEqual(switched ? [] : [{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
           const metadataRequest = openchamberRouteRequests.find((entry) => entry.path.endsWith(`/${forkedSession.id}/metadata`))
           const objectiveRequests = openchamberRouteRequests.filter((entry) => entry.path.startsWith("/api/goals/objective/"))
           if (outcome === "runtime-switch" || outcome === "write-failure-after-switch") {
@@ -3242,6 +3423,17 @@ describe("revertToMessage passes session directory", () => {
     sessionMessageRecords.clear()
     sessionRecords.clear()
     failingRevertSessionIds.clear()
+    lostStageResponseSessionIds.clear()
+    sessionReadErrorOnce = null
+    stageRevertGate = null
+    stageRevertGates.clear()
+    messageReadGate = null
+    refreshGate = null
+    refreshStarted = false
+    sessionReadGate = null
+    gatedSessionReadStarted = false
+    commitRevertCalls = 0
+    commitRevertGate = null
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "replace",
@@ -3249,6 +3441,381 @@ describe("revertToMessage passes session directory", () => {
       pendingSessionRestores: new Map(),
       attachedFiles: [],
     })
+  })
+
+  test("waits for the pending revert before sending a new prompt", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+
+    const reverting = revertToMessage(session.id, message.id)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({
+      sessionId: session.id,
+      directory: "/test/project",
+      content: "new branch",
+      send: async () => { sent = true },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeStage = sent
+    releaseStage()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeStage).toBe(false)
+    expect(sent).toBe(true)
+  })
+
+  test("waits before committing a revert for non-prompt input", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, revertToMessage, commitStagedRevert } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const reverting = revertToMessage(session.id, message.id)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let committed = false
+    const committing = commitStagedRevert(session.id, "/test/project").then(() => { committed = true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const committedBeforeStage = committed
+    releaseStage()
+    await Promise.all([reverting, committing])
+    expect(committedBeforeStage).toBe(false)
+    expect(committed).toBe(true)
+    expect(commitRevertCalls).toBe(1)
+  })
+
+  test("does not send when the pending revert fails", async () => {
+    const session = sessionFixture("session-a")
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    failingRevertSessionIds.add(session.id)
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const reverting = revertToMessage(session.id, message.id)
+    const revertResult = reverting.catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new branch", send: async () => { sent = true } })
+    const sendResult = sending.catch((error: Error) => error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    releaseStage()
+    expect(await revertResult).toBeInstanceOf(Error)
+    expect(await sendResult).toBeInstanceOf(Error)
+    expect(sent).toBe(false)
+  })
+
+  test("waits for history refresh before sending", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseRead = () => {}
+    refreshGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const reverting = revertToMessage(session.id, message.id, { refresh: true })
+    while (!refreshStarted) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new branch", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeRefresh = sent
+    releaseRead()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeRefresh).toBe(false)
+    expect(sent).toBe(true)
+  })
+
+  test("holds descendant input during a parent revert", async () => {
+    const parent = sessionFixture("parent")
+    const child: Session = { ...sessionFixture("child"), parentID: parent.id }
+    sessionRecords.set(parent.id, parent)
+    sessionRecords.set(child.id, child)
+    const message: Message = { id: "msg_2", sessionID: parent.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [parent, child], message: { [parent.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseRead = () => {}
+    messageReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const reverting = revertToMessage(parent.id, message.id)
+    while (!replyCalls.some((call) => call.method === "session.messages" && call.params.sessionID === child.id)) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: child.id, directory: "/test/project", content: "child prompt", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeCascade = sent
+    releaseRead()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeCascade).toBe(false)
+    expect(sent).toBe(true)
+  })
+
+  test("includes a child created during history refresh and holds its input", async () => {
+    const parent = sessionFixture("parent")
+    const child: Session = { ...sessionFixture("child"), parentID: parent.id }
+    const parentMessage: Message = { id: "parent-message", sessionID: parent.id, role: "user", time: { created: 2 } }
+    const childMessage: Message = { id: "child-message", sessionID: child.id, role: "user", time: { created: 3 } }
+    sessionRecords.set(parent.id, parent)
+    sessionRecords.set(child.id, child)
+    sessionMessageRecords.set(child.id, [{ info: childMessage, parts: [] }])
+    const store = createStore({}, { session: [parent], message: { [parent.id]: [parentMessage], [child.id]: [childMessage] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseRead = () => {}
+    refreshGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const reverting = revertToMessage(parent.id, parentMessage.id, { refresh: true })
+    while (!refreshStarted) await Promise.resolve()
+    store.setState({ session: [parent, child] })
+    let sent = false
+    const sending = optimisticSend({ sessionId: child.id, directory: "/test/project", content: "child prompt", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeRefresh = sent
+    releaseRead()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeRefresh).toBe(false)
+    expect(replyCalls.some((call) => call.method === "session.revert.stage" && call.params.sessionID === child.id)).toBe(true)
+    expect(sent).toBe(true)
+  })
+
+  test("waits for an issued revert after a runtime round trip", async () => {
+    const session = sessionFixture("runtime-session")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const reverting = revertToMessage(session.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    inputState.setPendingSessionRestore(session.id, "newer draft")
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new runtime", send: async () => { sent = true } }).catch((error: Error) => error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeOldStage = sent
+    releaseStage()
+    expect(await reverting).toBeInstanceOf(Error)
+    expect(await sending).toBeInstanceOf(Error)
+    expect(sentBeforeOldStage).toBe(false)
+    expect(sent).toBe(false)
+    expect(store.getState().session[0].revert?.messageID).toBe(message.id)
+    expect(inputState.pendingSessionRestores.get(session.id)).toBe("newer draft")
+  })
+
+  test("does not apply a stale reconciliation over a newer revert", async () => {
+    const session = sessionFixture("reconcile-session")
+    sessionRecords.set(session.id, session)
+    const first: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const second: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [first, second] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const stale = revertToMessage(session.id, first.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    let releaseRead = () => {}
+    sessionReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new prompt", send: async () => { sent = true } }).catch((error: Error) => error)
+    releaseStage()
+    await stale
+    while (!gatedSessionReadStarted) await Promise.resolve()
+    const newer = revertToMessage(session.id, second.id)
+    await newer
+    releaseRead()
+    expect(await sending).toBeInstanceOf(Error)
+    expect(sent).toBe(false)
+    expect(store.getState().session[0].revert?.messageID).toBe(second.id)
+  })
+
+  test("does not restore a cleared revert from an older reconciliation read", async () => {
+    const session = sessionFixture("clear-session")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, clearStagedRevert, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const stale = revertToMessage(session.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    let releaseRead = () => {}
+    sessionReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new prompt", send: async () => {} }).catch((error: Error) => error)
+    releaseStage()
+    await stale
+    while (!gatedSessionReadStarted) await Promise.resolve()
+    await clearStagedRevert(session.id)
+    releaseRead()
+    expect(await sending).toBeInstanceOf(Error)
+    expect(store.getState().session[0].revert).toBeUndefined()
+  })
+
+  test("reconciles and commits a stage whose response was lost before admitting non-prompt input", async () => {
+    const session = sessionFixture("lost-stage")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, revertToMessage, commitStagedRevert } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    lostStageResponseSessionIds.add(session.id)
+
+    expect(await revertToMessage(session.id, message.id).catch((error: Error) => error)).toBeInstanceOf(Error)
+    // The rollback hides the marker the server now holds.
+    expect(store.getState().session[0].revert).toBeUndefined()
+    expect(sessionRecords.get(session.id)?.revert?.messageID).toBe(message.id)
+
+    await commitStagedRevert(session.id, "/test/project")
+    expect(replyCalls.filter((call) => call.method === "session.get" && call.params.sessionID === session.id)).toHaveLength(1)
+    expect(store.getState().session[0].revert?.messageID).toBe(message.id)
+    expect(commitRevertCalls).toBe(1)
+  })
+
+  test("keeps input blocked and the reconciliation pending when the read after a lost stage fails", async () => {
+    const session = sessionFixture("lost-stage-read")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, revertToMessage, commitStagedRevert } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    lostStageResponseSessionIds.add(session.id)
+    await revertToMessage(session.id, message.id).catch(() => undefined)
+
+    sessionReadErrorOnce = new Error("session.get: network error")
+    expect(await commitStagedRevert(session.id, "/test/project").catch((error: Error) => error)).toBeInstanceOf(Error)
+    expect(commitRevertCalls).toBe(0)
+    expect(store.getState().session[0].revert).toBeUndefined()
+
+    await commitStagedRevert(session.id, "/test/project")
+    expect(store.getState().session[0].revert?.messageID).toBe(message.id)
+    expect(commitRevertCalls).toBe(1)
+  })
+
+  test("shares an in-flight reconciliation read between concurrent sends", async () => {
+    const session = sessionFixture("shared-read")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const stale = revertToMessage(session.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    let releaseRead = () => {}
+    sessionReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const send = () => optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new prompt", send: async () => {} }).catch((error: Error) => error)
+    const first = send()
+    releaseStage()
+    await stale
+    while (!gatedSessionReadStarted) await Promise.resolve()
+    const second = send()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const readsBeforeRelease = replyCalls.filter((call) => call.method === "session.get").length
+    releaseRead()
+    await Promise.all([first, second])
+    expect(readsBeforeRelease).toBe(1)
+  })
+
+  test("a parent commit does not wait for a child's independent revert", async () => {
+    const parent: Session = { ...sessionFixture("parent"), revert: { messageID: "parent-message" } }
+    // A failed stage leaves its session for the next input to reconcile, so
+    // this child keeps an id of its own.
+    const child: Session = { ...sessionFixture("independent-child"), parentID: parent.id }
+    const message: Message = { id: "child-message", sessionID: child.id, role: "user", time: { created: 2 } }
+    sessionRecords.set(child.id, child)
+    const store = createStore({}, { session: [parent, child], message: { [child.id]: [message] } })
+    const { setActionRefs, revertToMessage, commitSessionRevert } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    let releaseChild = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseChild = resolve })
+    failingRevertSessionIds.add(child.id)
+    const reverting = revertToMessage(child.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let committed = false
+    const committing = commitSessionRevert(parent.id, "/test/project").then(() => { committed = true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const committedBeforeChild = committed
+    releaseChild()
+    await Promise.all([reverting, committing])
+    expect(committedBeforeChild).toBe(true)
+    expect(commitRevertCalls).toBe(1)
+  })
+
+  test("a parent-only commit does not hold a child's input", async () => {
+    const parent = sessionFixture("parent")
+    const child: Session = { ...sessionFixture("child"), parentID: parent.id }
+    const store = createStore({}, { session: [parent, child] })
+    const { setActionRefs, setOptimisticRefs, commitSessionRevert, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseCommit = () => {}
+    commitRevertGate = new Promise<void>((resolve) => { releaseCommit = resolve })
+    const committing = commitSessionRevert(parent.id, "/test/project")
+    while (commitRevertCalls === 0) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: child.id, directory: "/test/project", content: "child prompt", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeCommit = sent
+    releaseCommit()
+    await Promise.all([committing, sending])
+    expect(sentBeforeCommit).toBe(true)
+  })
+
+  test("keeps sibling input waiting until every earlier revert settles", async () => {
+    const parent = sessionFixture("parent")
+    const a: Session = { ...sessionFixture("a"), parentID: parent.id }
+    const b: Session = { ...sessionFixture("b"), parentID: parent.id }
+    const message = (id: string): Message => ({ id: `msg-${id}`, sessionID: id, role: "user", time: { created: 2 } })
+    for (const session of [parent, a, b]) sessionRecords.set(session.id, session)
+    const store = createStore({}, { session: [parent, a, b], message: { parent: [message("parent")], a: [message("a")], b: [message("b")] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseA = () => {}
+    let releaseB = () => {}
+    stageRevertGates.set("a", new Promise<void>((resolve) => { releaseA = resolve }))
+    stageRevertGates.set("b", new Promise<void>((resolve) => { releaseB = resolve }))
+    failingRevertSessionIds.add("a")
+    const first = revertToMessage("a", "msg-a").catch((error: Error) => error)
+    const second = revertToMessage("b", "msg-b")
+    while (replyCalls.filter((call) => call.method === "session.revert.stage").length < 2) await Promise.resolve()
+    const parentRevert = revertToMessage("parent", "msg-parent").catch((error: Error) => error)
+    releaseA()
+    expect(await first).toBeInstanceOf(Error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    let sent = false
+    const sending = optimisticSend({ sessionId: "b", directory: "/test/project", content: "child prompt", send: async () => { sent = true } }).catch((error: Error) => error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeB = sent
+    releaseB()
+    await second
+    expect(await parentRevert).toBeInstanceOf(Error)
+    expect(await sending).toBeInstanceOf(Error)
+    expect(sentBeforeB).toBe(false)
+    expect(sent).toBe(false)
   })
 
   test("routes revert through the session directory instead of the current directory", async () => {
@@ -4212,7 +4779,7 @@ describe("form dismissal clears pending state without the SSE echo (issues #2911
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     // The optimistic clear already removed it before the round-trip; the
@@ -4463,7 +5030,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
@@ -4489,7 +5056,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     const rejectCalls = replyCalls.filter((call) => call.method === "form.cancel")
@@ -4514,7 +5081,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     const cancelCalls = replyCalls.filter((call) => call.method === "form.cancel")
@@ -4542,7 +5109,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     // The agent is still waiting on both forms, so each goes back to the store it came from.
@@ -4565,7 +5132,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
       expect(store.getState().form["session-a"]).toEqual([form])
       expect(replyCalls.filter((call) => call.method === "form.cancel" || call.method === "session.message")).toHaveLength(0)
     }
@@ -4584,7 +5151,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
       expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-wait"])
       expect(store.getState().form["session-a"]).toBe(undefined)
     }
@@ -4602,7 +5169,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
     expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-wait"])
     expect(store.getState().form["session-a"]).toEqual([released])
   })
@@ -4618,7 +5185,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
     expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-bad"])
     expect(replyCalls.filter((call) => call.method === "session.message")).toHaveLength(0)
   })
@@ -4633,7 +5200,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(store.getState().form["session-child"]).toEqual([childForm])
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
   })
@@ -4649,7 +5216,7 @@ describe("dismissOpenFormsForSession", () => {
     const { formTurnHold } = await import("./recoverable-questions")
     expect(formTurnHold(form, store.getState().part, useRecoverableQuestionsStore.getState().releasedForms)).toBe("unknown")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "session.message")).toEqual([
       { method: "session.message", params: { sessionID: "session-a", messageID: "msg-tool", directory: "/test/project" } },
     ])
@@ -4660,7 +5227,7 @@ describe("dismissOpenFormsForSession", () => {
 
     // A second send needs no second read.
     replyCalls.length = 0
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls).toHaveLength(0)
   })
 
@@ -4680,7 +5247,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
       expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-old"])
       expect(store.getState().form["session-a"]).toBe(undefined)
       expect(useRecoverableQuestionsStore.getState().releasedForms.size).toBe(0)
@@ -4702,7 +5269,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", stale], ["/test/project/wt", fresh]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "form.cancel" || call.method === "session.message")).toHaveLength(0)
     expect(fresh.getState().form["session-a"]).toEqual([form])
     expect(stale.getState().form["session-a"]).toEqual([form])
@@ -4721,7 +5288,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", first], ["/test/project/wt", second]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(reads).toBe(1)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(first.getState().form["session-a"]).toEqual([form])
@@ -4745,8 +5312,8 @@ describe("dismissOpenFormsForSession", () => {
     const sendB = dismissOpenFormsForSession("session-a")
     await new Promise((resolve) => setTimeout(resolve, 0))
     answer(messageWithParts("session-a", "msg-tool", [buildToolPart("q-race", "session-a", "completed")]))
-    expect(await sendA).toBe(false)
-    expect(await sendB).toBe(false)
+    expect((await sendA).dismissed).toBe(false)
+    expect((await sendB).dismissed).toBe(false)
     expect(reads).toBe(1)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(store.getState().form["session-a"]).toEqual([form])
@@ -4765,7 +5332,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", unloaded], ["/test/project/wt", other]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(unloaded.getState().form["session-a"]).toEqual([form])
   })
@@ -4793,7 +5360,7 @@ describe("dismissOpenFormsForSession", () => {
         return messageWithParts(sessionID, messageID, [buildToolPart("q-old", sessionID, "completed")])
       }
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
       expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
       expect(oldStore.getState().form["session-a"]).toEqual([unloaded, holding])
       expect(newStore.getState().form["session-a"]).toEqual([unloaded, holding])
@@ -4825,7 +5392,7 @@ describe("dismissOpenFormsForSession", () => {
     // Both reads find the call completed; only the send's own read may count.
     const completed = messageWithParts("session-a", "msg-tool", [buildToolPart("q-aba", "session-a", "completed")])
     for (const answer of answers) answer(completed)
-    expect(await send).toBe(false)
+    expect((await send).dismissed).toBe(false)
     expect(answers).toHaveLength(2)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(reloadedStore.getState().form["session-a"]).toEqual([form])
@@ -4869,7 +5436,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", parentStore], ["/test/project/child", childStore]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession(parent.id)).toBe(true)
+      expect((await dismissOpenFormsForSession(parent.id)).dismissed).toBe(true)
       const cancelled = replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.sessionID)
       expect(parentStore.getState().form[parent.id]).toBeUndefined()
       if (childStatus === "running") {
@@ -4898,11 +5465,163 @@ describe("dismissOpenFormsForSession", () => {
     // A send while that read is out waits for it instead of reading again.
     const send = dismissOpenFormsForSession("session-a")
     answer(messageWithParts("session-a", "msg-tool", [buildToolPart("q-first", "session-a", "completed")]))
-    expect(await send).toBe(false)
+    expect((await send).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "session.message")).toHaveLength(1)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     const { formTurnHold } = await import("./recoverable-questions")
     expect(formTurnHold(form, store.getState().part, useRecoverableQuestionsStore.getState().releasedForms)).toBe("released")
+  })
+
+  // #5391: the session's own waiting question gives way to the message and stays open until the send resolves.
+  test("with deferQuestions, leaves the session's own waiting question in place and returns it", async () => {
+    const question = buildLinkedForm("q-ask", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      form: { "session-a": [question] },
+      part: { "msg-tool": [{ ...buildToolPart("q-ask", "session-a", "running"), tool: "question" }] },
+    })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: false, deferred: [question] })
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+
+    // Without the option (a shell command) the same question is cancelled as before.
+    expect(await dismissOpenFormsForSession("session-a")).toEqual({ dismissed: true, deferred: [] })
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-ask"])
+  })
+
+  test("with deferQuestions, a question whose call only a server read shows waiting is deferred too", async () => {
+    const question = buildLinkedForm("q-ask", "session-a")
+    // Forms can load before the message history: no part in the store.
+    const store = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [question] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    sessionMessageRead = (sessionID, messageID) => messageWithParts(sessionID, messageID, [{ ...buildToolPart("q-ask", sessionID, "running"), tool: "question" }])
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: false, deferred: [question] })
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+
+    // A running call of another tool is no question to defer: cancelled as before.
+    sessionMessageRead = (sessionID, messageID) => messageWithParts(sessionID, messageID, [buildToolPart("q-ask", sessionID, "running")])
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: true, deferred: [] })
+  })
+
+  test("with deferQuestions, a subagent's question and a form without a question call are cancelled as before", async () => {
+    const question = buildLinkedForm("q-ask", "session-a")
+    const childQuestion = buildLinkedForm("q-child", "session-child", "msg-child")
+    const consent: FormRequest = { ...buildForm("q-consent", "session-a"), metadata: { kind: "websearch.provider" } }
+    const store = createStore({}, {
+      session: [sessionFixture("session-a"), { ...sessionFixture("session-child"), parentID: "session-a" }],
+      form: { "session-a": [question, consent], "session-child": [childQuestion] },
+      part: {
+        "msg-tool": [{ ...buildToolPart("q-ask", "session-a", "running"), tool: "question" }],
+        "msg-child": [{ ...buildToolPart("q-child", "session-child", "running", "msg-child"), tool: "question" }],
+      },
+    })
+    for (const session of store.getState().session) sessionRecords.set(session.id, session)
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: true, deferred: [question] })
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID).sort()).toEqual(["q-child", "q-consent"])
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(store.getState().form["session-child"]).toBe(undefined)
+  })
+})
+
+describe("deferQuestionsAfterSend", () => {
+  const question = buildLinkedForm("q-ask", "session-a")
+  const promptToSessionA = { route: "prompt", sessionId: "session-a" } as const
+  const questionStore = () => createStore({}, {
+    session: [sessionFixture("session-a")],
+    form: { "session-a": [question] },
+  })
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    formCancelError = null
+    resetRecoverableQuestions()
+    noteQuestionFormSnapshot("/test/project", [question])
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+  })
+
+  test("cancels with the note and keeps the question recoverable", async () => {
+    const store = questionStore()
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await deferQuestionsAfterSend([question], promptToSessionA)
+
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params)).toEqual([
+      { sessionID: "session-a", formID: "q-ask", directory: "/test/project", message: DEFERRED_QUESTION_NOTE },
+    ])
+    expect(store.getState().form["session-a"]).toBe(undefined)
+    // A local dismissal would veto the card; a deferral must not.
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000q-ask")).toBe(false)
+  })
+
+  test("a failed cancel leaves the question pending", async () => {
+    const store = questionStore()
+    formCancelError = Object.assign(new Error("session.form.cancel failed (500): unexpected status"), { status: 500 })
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await deferQuestionsAfterSend([question], promptToSessionA)
+
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000q-ask")).toBe(false)
+  })
+
+  // Only a plain prompt to the question's own session is the message the note announces.
+  test("after a command, a shell command or a send elsewhere the question stays pending", async () => {
+    const store = questionStore()
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    for (const sent of [
+      { route: "command", sessionId: "session-a" },
+      { route: "shell", sessionId: "session-a" },
+      { route: "prompt", sessionId: "session-b" },
+      undefined,
+    ] as const) {
+      await deferQuestionsAfterSend([question], sent)
+    }
+
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(store.getState().form["session-a"]).toEqual([question])
+  })
+
+  test("a question another page answered meanwhile (409 FormAlreadySettledError) is removed; another 409 leaves it", async () => {
+    const store = questionStore()
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    // Shaped as client.ts normalizeOpencodeError builds it from OpenCode 2.3.0's tagged body.
+    formCancelError = Object.assign(new Error("session.form.cancel failed (409): SessionBusyError"), { status: 409, tag: "SessionBusyError" })
+    await deferQuestionsAfterSend([question], promptToSessionA)
+    expect(store.getState().form["session-a"]).toEqual([question])
+
+    formCancelError = Object.assign(new Error("session.form.cancel failed (409): Form already settled: q-ask"), {
+      status: 409, tag: "FormAlreadySettledError", detail: "Form already settled: q-ask",
+    })
+    await deferQuestionsAfterSend([question], promptToSessionA)
+    expect(store.getState().form["session-a"]).toBe(undefined)
+  })
+
+  test("a question that settled meanwhile is removed without an error", async () => {
+    const store = questionStore()
+    formCancelError = Object.assign(new Error("form.cancel failed (404): FormNotFoundError"), { status: 404 })
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await deferQuestionsAfterSend([question], promptToSessionA)
+
+    expect(store.getState().form["session-a"]).toBe(undefined)
   })
 })
 
@@ -5444,7 +6163,7 @@ describe("sendRecoveredFormAnswer", () => {
       target: { runtimeKey: "default-runtime", sessionId: "session-a", directory: "/test/project" },
     }])
     // The card is done only after the send was accepted.
-    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("session-a\u0000frm_recovered")).toBe("answered")
   })
 
   test("the new turn carries the serialized answer payload", async () => {
@@ -5462,6 +6181,18 @@ describe("sendRecoveredFormAnswer", () => {
     expect(sendMessageCalls[0]?.content).toContain('{"q0":"Red"}')
   })
 
+  test("a deferred question's answer opens with the lead-in and carries the marker", async () => {
+    const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
+
+    await sendRecoveredFormAnswer({ ...question, evidence: "deferred-on-send" }, "the answer")
+
+    expect(sendMessageCalls.map((call) => [call.content, call.metadata])).toEqual([
+      [`${DEFERRED_ANSWER_LEAD_IN}\n\nthe answer`, { openchamber: { deferredAnswer: { formID: "frm_recovered" } } }],
+    ])
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("session-a\u0000frm_recovered")).toBe("answered")
+  })
+
   test("a rejected send keeps the question recoverable", async () => {
     const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
@@ -5472,7 +6203,7 @@ describe("sendRecoveredFormAnswer", () => {
     await expect(sendRecoveredFormAnswer(question, "the answer")).rejects.toThrow("send failed")
 
     // No tombstone: the card and the draft the surface keeps stay for a retry.
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000frm_recovered")).toBe(false)
   })
 
   test("a duplicate submission reuses the first send", async () => {
@@ -5505,7 +6236,7 @@ describe("sendRecoveredFormAnswer", () => {
     await sendRecoveredFormAnswer(question, "the answer")
 
     expect(sendMessageCalls).toHaveLength(1)
-    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("session-a\u0000frm_recovered")).toBe(false)
   })
 })
 

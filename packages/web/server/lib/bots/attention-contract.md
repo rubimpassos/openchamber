@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`createBotAttention({ center, notify })` from `bots/attention.js` implements
+`createBotAttention({ center, notify })` from `bots/attention.ts` implements
 `attention.sync({ projectId, item, critical? })` for the coordinator. Construct
 `center` using `createNotificationCenterRuntime` and the data-directory
 `createNotificationCenterPersistence`, then pass this adapter as `attention`

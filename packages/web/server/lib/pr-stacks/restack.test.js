@@ -190,6 +190,10 @@ describe('restack runtime', () => {
     let failSigning = true;
     const runtime = createRestackRuntime({ dataDir, runGit: async (cwd, args) => {
       calls.push(args);
+      // Git persists signing options at rebase start and restores them on continue.
+      if (failSigning && args[0] === 'rebase' && args[1] === '--continue') {
+        fs.writeFileSync(path.resolve(cwd, sh(cwd, 'rev-parse', '--git-path', 'rebase-merge/gpg_sign_opt')), '-S\n');
+      }
       return runGit(cwd, failSigning && args[0] === 'rebase' && args[1] === '--continue'
         ? ['-c', 'commit.gpgsign=true', '-c', 'gpg.format=openpgp', '-c', 'gpg.program=/nonexistent-restack-signer', ...args]
         : args);
@@ -209,6 +213,7 @@ describe('restack runtime', () => {
     expect(fs.existsSync(path.resolve(worktree, sh(worktree, 'rev-parse', '--git-path', 'rebase-merge')))).toBe(true);
 
     failSigning = false;
+    fs.rmSync(path.resolve(worktree, sh(worktree, 'rev-parse', '--git-path', 'rebase-merge/gpg_sign_opt')));
     expect((await runtime.continue(run.id)).status).toBe('done');
     expect(sh(repo, 'show', 'one:clash.txt')).toBe('resolved content');
   });
@@ -311,10 +316,58 @@ describe('restack runtime', () => {
     sh(worktree, 'add', 'clash.txt');
     runtime.noteSessionIdle('ses_1');
     await timers[0]();
-    await new Promise((resolve) => setTimeout(resolve, 300));
     const latest = await runtime.latest(repo);
     expect(latest.status).toBe('done');
     expect(latest.steps.map((step) => step.status)).toEqual(['done', 'done']);
+  });
+
+  for (const action of ['continue', 'abort']) {
+    test(`a paused run can ${action} after a runtime restart`, async () => {
+      // Given a completed lower branch and a persisted conflict above it.
+      sh(repo, 'checkout', '-q', 'two');
+      commit(repo, 'clash.txt', 'two side\n', 'clash');
+      sh(repo, 'checkout', '-q', 'main');
+      advanceTrunk('clash.txt', 'trunk side\n');
+      const runtime = createRestackRuntime({ runGit, dataDir });
+      const run = await runtime.start({ directory: repo, remote: 'origin', trunk: 'main', branches: ['one', 'two'] });
+      const lowerHead = sh(repo, 'rev-parse', 'one');
+      const restarted = createRestackRuntime({ runGit, dataDir });
+      expect(await restarted.latest(repo)).toEqual(run);
+      await expect(restarted.start({ directory: repo, remote: 'origin', trunk: 'main', branches: ['one'] })).rejects.toMatchObject({ statusCode: 409 });
+      if (action === 'continue') {
+        fs.writeFileSync(path.join(run.steps[1].worktree, 'clash.txt'), 'resolved\n');
+        sh(run.steps[1].worktree, 'add', 'clash.txt');
+      }
+
+      // When the new runtime controls Git's existing rebase.
+      const result = await restarted[action](run.id);
+
+      // Then earlier work stays fixed and the terminal result survives another load.
+      expect(result.status).toBe(action === 'continue' ? 'done' : 'aborted');
+      expect(result.steps.map((step) => step.status)).toEqual(['done', action === 'continue' ? 'done' : 'skipped']);
+      expect(sh(repo, 'rev-parse', 'one')).toBe(lowerHead);
+      expect(await createRestackRuntime({ runGit, dataDir }).latest(repo)).toEqual(result);
+    });
+  }
+
+  test('malformed persisted steps do not replace a valid resumable run', async () => {
+    // Given a paused run beside an entry without its conflict worktree.
+    sh(repo, 'checkout', '-q', 'one');
+    commit(repo, 'clash.txt', 'one side\n', 'clash');
+    sh(repo, 'checkout', '-q', 'main');
+    advanceTrunk('clash.txt', 'trunk side\n');
+    const run = await createRestackRuntime({ runGit, dataDir }).start({ directory: repo, remote: 'origin', trunk: 'main', branches: ['one'] });
+    fs.writeFileSync(path.join(dataDir, 'pr-stack-restacks.json'), JSON.stringify({ runs: [
+      run,
+      { ...run, id: 'malformed', createdAt: run.createdAt + 1, steps: [{ branch: 'one', onto: 'origin/main', status: 'conflict' }] },
+    ] }));
+
+    // When the stored snapshot crosses the runtime boundary.
+    const restarted = createRestackRuntime({ runGit, dataDir });
+
+    // Then the valid run remains controllable and reserves its repository.
+    expect(await restarted.latest(repo)).toEqual(run);
+    expect((await restarted.abort(run.id)).status).toBe('aborted');
   });
 
   test('abort restores the conflicted branch and skips the rest', async () => {

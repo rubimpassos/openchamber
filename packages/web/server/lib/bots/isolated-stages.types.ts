@@ -1,0 +1,59 @@
+import type { z } from 'zod';
+import type { OpenCodeClient } from '@opencode/client';
+import type { createSpaceJourney, InternalCreation } from '../spaces/journey.js';
+import type { createSpaceManager } from '../spaces/manager.js';
+import type { InsideRequest, InsideResponse } from '../spaces/dispatcher.js';
+import type { KnowledgeCollector } from '../session-knowledge/contracts.js';
+import type { createBotStageSessions } from './stage-sessions.js';
+import type { isolatedBotToolPageSchema, isolatedBotToolReceiptSchema } from './isolated-tools.js';
+import type { JsonValue } from '../shared/json-values.js';
+import type { readBotSpaceOptions } from './space-options.js';
+
+type Journey = ReturnType<typeof createSpaceJourney>;
+type Manager = ReturnType<typeof createSpaceManager>;
+export type IsolatedSpacesHost = {
+  readonly journey: Pick<Journey, 'readHostCustomProviders' | 'readHostLogins' | 'listSpaces' | 'createBotSpace' | 'grantAccess' | 'startSpace' | 'stopSpace' | 'previewApply' | 'removeSpace'>;
+  readonly manager: Pick<Manager, 'verify' | 'listAllSpaces' | 'exec'>;
+  readonly dispatcher: { requestInside(spaceId: string, request: InsideRequest): Promise<InsideResponse> };
+};
+type StageSessions = ReturnType<typeof createBotStageSessions>;
+type IsolatedStages = Parameters<typeof createBotStageSessions>[0]['isolated'];
+export type StageSelection = Awaited<ReturnType<StageSessions['select']>>;
+type SwitchModel = Parameters<OpenCodeClient['session']['switchModel']>[0]['model'];
+export type StageModel = { -readonly [Key in keyof SwitchModel]: SwitchModel[Key] };
+export type StageRequest = Parameters<IsolatedStages['create']>[0];
+export type DispatchRequest = Parameters<IsolatedStages['dispatch']>[0];
+export type RunningRequest = Parameters<NonNullable<IsolatedStages['resume']>>[0];
+export type OutcomeRequest = Parameters<StageSessions['outcome']>[0];
+export type ReconcileRequest = Parameters<StageSessions['reconcile']>[1];
+export type BindingQuery = {
+  readonly projectId?: string | undefined;
+  readonly itemId?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly directory?: string | undefined;
+};
+export type ItemKey = { readonly projectId: string; readonly itemId: string };
+export type Project = { readonly id: string; readonly path: string };
+export type SpaceOptionsRequest = Pick<StageRequest, 'bot' | 'selection' | 'stage'> & { readonly project: Project };
+export type CreationTransfer = { -readonly [Key in keyof InternalCreation]: InternalCreation[Key] };
+export type OnCreated = Parameters<StageSessions['create']>[1];
+export type Reconciliation = Awaited<ReturnType<StageSessions['reconcile']>>;
+export type ToolRequest = z.output<typeof isolatedBotToolPageSchema>['requests'][number]['request'];
+export type ToolReply = Extract<z.output<typeof isolatedBotToolReceiptSchema>, { state: 'settled' }>['reply'];
+export type IsolatedStagesOptions = {
+  readonly dataDir: string;
+  readonly getSpacesHost: () => IsolatedSpacesHost | null;
+  readonly resolveProject: (projectId: string) => Promise<Project>;
+  readonly resolveSpaceOptions?: ((request: SpaceOptionsRequest) => SpaceOptions | Promise<SpaceOptions>) | undefined;
+  readonly sessionKnowledgeRuntime: KnowledgeCollector;
+  readonly handleTool?: (request: Pick<ToolRequest, 'sessionId' | 'action' | 'input'>) => Promise<JsonValue>;
+  readonly readToolOutcome?: (request: ToolRequest) => Promise<{ readonly state: string; readonly result?: JsonValue } | null>;
+  readonly separated?: boolean;
+};
+type ResolvedOptions = ReturnType<typeof readBotSpaceOptions>;
+export type SpaceOptions = Pick<ResolvedOptions, 'grants'> & Partial<Omit<ResolvedOptions, 'grants'>>;
+export type ProofInput = {
+  readonly directory: string; readonly testSha: string; readonly fixSha: string;
+  readonly command: string; readonly args: readonly string[]; readonly isolated?: boolean;
+};
+export type ProofCancellation = { readonly signal?: AbortSignal | undefined };

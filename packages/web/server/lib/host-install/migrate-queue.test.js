@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, expect, it } from 'vitest';
-import { AGENT, fakeSystem, FRONT, hostRoot, OWNER } from './fake-system.js';
+import { AGENT, fakeSystem, FRONT, hostRoot, OWNER } from './fake-system.test-support.js';
 import { migrateAccounts } from './migrate-accounts.js';
 import { createBotItem } from '../bots/schema.js';
 import { botNoticeIds } from '../message-queue/bot-notice.js';

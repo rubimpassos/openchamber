@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { useGuestScopeSync } from '@/hooks/useGuestScopeSync';
 import { useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { useGuestResolveHostStore } from '@/lib/guests/run-command';
 import { useGuestActionHostStore } from '@/lib/guests/run-action';
@@ -7,15 +8,14 @@ import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { useAutomaticBackgrounds } from '@/lib/guests/automatic-backgrounds';
 import { useGuestPlanFrameStore } from '@/lib/guests/plans/frames';
 
-// Only explicitly automatic backgrounds load before an action or command.
 const GuestAttachDialog = React.lazy(() => import('./GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
 
-/**
- * Frames that belong to no particular column: attach dialogs, temporary
- * background actions, the hidden pane used by slash commands, and the hidden
- * frames that describe extension plans for a worktree.
- */
+const GuestScopeSync: React.FC = () => {
+  useGuestScopeSync();
+  return null;
+};
+
 export const GuestHosts: React.FC = () => {
   const dialogRequest = useGuestDialogStore((state) => state.request);
   const closeDialog = useGuestDialogStore((state) => state.close);
@@ -26,6 +26,7 @@ export const GuestHosts: React.FC = () => {
 
   return (
     <>
+      <GuestScopeSync />
       {backgrounds.map((background) => (
         <div key={background.key} aria-hidden="true" inert className="pointer-events-none fixed top-0 -inset-s-[9999px] h-px w-px overflow-hidden">
           <React.Suspense fallback={null}>

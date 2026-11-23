@@ -18,13 +18,13 @@ limits describes the consequences.
 ## Ownership
 
 - `service/` is the protected service. The installer copies it, with
-  `../shared/guards.js`, into a root-owned install directory,
+  `../shared/guards.js` and `../shared/object-guards.js`, into a root-owned install directory,
   `/usr/lib/openchamber-protected-mcp/<version>/`, and runs it as the service
   account. Files under `service/` import only Node built-ins, each other and
-  that guards file, which they name `../../shared/guards.js`;
+  those guards, which they reach through `../../shared/guards.js`;
   `service/closure.test.js` enforces it. The service never loads code, packages
   or configuration from a location the engine can write.
-- `service/admin-socket.js` is the service's only administration entry point,
+- `service/admin-socket.ts`, emitted as `service/admin-socket.js`, is the service's only administration entry point,
   and the service process opens no TCP listener. `service/oauth.js`,
   `service/oauth-authorization.js` and `service/oauth-redirect.js` run OAuth
   sign-in inside the service.
@@ -264,6 +264,13 @@ now has an administrator of its own, leaves both groups, and the installer says
 so. Existing processes keep their supplementary groups until they exit, so
 restart the previous account's processes when changing accounts.
 
+`service/install.ts` exports the install, uninstall and rollback contracts;
+`service/preflight.ts` owns the typed boundary findings. Both emit to their
+existing `.js` paths. A reinstall reads only `engineUser`, `adminUser`,
+`engineUnit` and `subjectsDir` from the old service configuration. Missing or
+null fields keep their existing defaults; a non-string retained field refuses
+the reinstall with `invalid_config` before changing accounts or installed files.
+
 `install.sh --protected-mcp-uninstall` runs the installed copy of
 `service/install.js uninstall` with its other flags. It stops and disables the
 unit and removes the unit file, the installed code, `client.json`,
@@ -290,7 +297,7 @@ so a change applies to running sessions without restarting them:
 
 `MIGRATION.md` is the cutover, step by step, with how to go back.
 
-`service/dev-server-manifest.js` reads dev-server's non-secret workspace
+`service/dev-server-manifest.ts`, emitted as `service/dev-server-manifest.js`, reads dev-server's non-secret workspace
 catalog and, optionally, the broker list it renders, and writes a manifest.
 With the broker list, a provider the service cannot take over yet becomes a
 credential-free connection to its running loopback broker, which keeps its
@@ -300,7 +307,7 @@ whose broker address is not plain `http` on `127.0.0.1` or `[::1]` is left out
 and reported as `check`, and a provider with no running broker is left out and
 reported as `skip`. Every other `check` is a provider migrated with a caveat.
 
-`service/migrate.js` applies the manifest as root with the service stopped. It
+`service/migrate.ts`, emitted as `service/migrate.js`, applies the manifest as root with the service stopped. It
 reads credentials from the files the manifest names and writes them into
 protected state. Each connection's journal entry goes from `pending` to
 `created` to `done`. A rerun finishes every entry that is not `done`, state
@@ -312,6 +319,20 @@ A dry run reads the definitions with `readDefinitions` and opens no store, so
 it takes no lock, creates no directory and deletes nothing. Run as root, the
 command line gives the state tree back to its owner after a real run and leaves
 it alone after a dry run.
+
+### Why migration manifest parsing has its own module
+
+`service/migrate-manifest.ts` owns the typed plan boundary, including credential
+sources, state-file destinations and selections. Keeping it separate from the
+journal and CLI avoids coupling manifest validation to migration execution;
+`migrate.js` retains the same public exports and installed command path.
+
+Credentials are read in manifest order before opening the store. Environment
+files use the first matching `KEY=value` line, decode JSON double quotes and
+strip matching single quotes. A credential file loses exactly one trailing
+newline. Reports contain slot names and short SHA-256 fingerprints, never
+credential values. Failed state-file copies leave the journal resumable;
+rollback keeps the journal until every recorded removal succeeds.
 
 ## Engine socket
 
@@ -368,6 +389,11 @@ of `openchamber-mcp-admins` have both through the group, and root passes every
 permission check. The kernel refuses every other account with `EACCES` before
 the service sees a byte. The service sets the mode and the group after it
 starts listening.
+
+`AdminSocketOptions` defines the listener's store, redacted views, status,
+subject listeners and OAuth dependencies. `AdminOAuth` describes only the
+administration operations consumed here; OAuth retains ownership of discovery,
+tokens and sign-in state. Both contracts are erased from the installed JavaScript.
 
 The protocol is one request per connection:
 
@@ -430,9 +456,10 @@ occupies it. When the service stops, it ends open connections, destroys any
 still open after 2 seconds, and waits for requests already accepted, so a write
 in flight finishes before the store unlocks.
 
-The OpenChamber side is `requestAdmin` in `service-client.js`. It reads
-`client.json` on every call, sends one frame and validates the answer against a
-schema. Because it reads the file every time, a reinstall needs no restart.
+The OpenChamber side is `requestAdmin` in `service-client.ts`. It reads
+`client.json` on every call, sends one frame and checks the answer's schema and
+its type against the requested operation. An `applied` reply remains nullable.
+Because it reads the file every time, a reinstall needs no restart.
 Failures reach the routes as:
 
 | Cause | Status and code |
@@ -684,6 +711,18 @@ the agent restarts, so the socket the service creates shows inside the agent.
 
 ## Tests
 
+- `service/socket-lifecycle.test.js` drives `engine-socket.ts` and
+  `subject-listeners.ts` through temporary Unix sockets with the real store and
+  an in-process fallback MCP backend. It covers pipelined hello bytes,
+  ready-before-MCP ordering, unfinished-client shutdown, ordered subject work
+  draining on close and queue recovery after a refused grant. These fixtures
+  establish protocol and lifecycle parity, not host isolation.
+- Typed service sources emit to the same `.js` paths in the published server.
+  The installer consumes that emitted directory and copies JavaScript only.
+  `test-support/emitted-service.ts` strips types into a disposable fixture for
+  installer, closure and relay tests without building the application. The
+  closure test traverses the copied guards too and runs the installed entry
+  paths with plain Node and no package dependencies.
 - `service/*.test.js` and `routes.test.js` run the service over temporary state
   with synthetic credentials: admin socket authority and frames, relay, OAuth
   against local fixtures, installer in a temporary root, integrity,
@@ -717,6 +756,26 @@ the agent restarts, so the socket the service creates shows inside the agent.
   server its own `HOME` so its OpenCode does not attach to another one.
 
 ## Decisions
+
+### Why OAuth reads the store's original JSON objects
+
+Refresh and sign-in compare the exact token object captured before the request
+with the queued store value. Reconstructing a typed copy would invalidate that
+identity check. OAuth uses dependency-free views of the stored JSON, preserving
+optional token metadata and extra fields. Sign-in captures and compares the
+same numeric-generation interpretation even for older incomplete records.
+
+`service.ts` composes these contracts before any listener starts. The installed
+`main.js` is emitted from TypeScript and loads with Node alone, as do the
+installer and relay. Tests and source-loader compatibility entries stay outside
+the installed closure.
+
+### Why the catalog generator emits draft definitions
+
+The generator preserves catalog projections, including GitLab's configured API
+URL, without authorizing them. `migrate.parseManifest` validates the emitted
+definitions before applying them, so typing the generator does not add a second
+validation policy or change which catalog values it projects.
 
 ### Why selections are mirrored across accounts
 
@@ -851,9 +910,18 @@ parser.
 
 ### Why the service duplicates no guards
 
-It imports `../../shared/guards.js`, and the installer copies that file into the
-installed tree at the same relative path, so the installed tree has the same
-layout as the repository.
+It imports `../../shared/guards.js`, and the installer copies that facade and
+its `object-guards.js` implementation into the installed tree at the same
+relative paths. The installed tree keeps the emitted package layout and needs
+no package resolver or engine-writable dependency.
+
+### Why service parsers keep dependency-free validation
+
+Typed parsers accept `unknown` and return normalized transport unions, branded
+connection and subject identifiers, and parsed store operations. Their existing
+validation stays in the service so its installed closure still needs only Node.
+A schema package would become another privileged runtime dependency. Text fields
+reject non-string JSON values before regex checks, which otherwise coerce them.
 
 ## Known limits
 

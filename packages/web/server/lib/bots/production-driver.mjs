@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { productionFixture, commitFiles } from './production-test-support.js';
+import { productionFixture, commitFiles } from './production.test-support.js';
 import { createProductionBotPullRequests } from './production-pull-requests.js';
 import { createFixLoopRuntime } from '../pr-fix-loop/runtime.js';
 import { readPullFeedback, readFeedbackAuthorPermission, readFailedChecks } from '../github/pr-feedback.js';

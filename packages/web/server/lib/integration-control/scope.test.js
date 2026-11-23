@@ -4,8 +4,8 @@ import { realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createOpenChamberControlService } from '../openchamber-control/service.js';
-import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
-import { createSettingsNormalizationRuntime } from '../opencode/settings-normalization-runtime.js';
+import { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
+import { createSettingsNormalizationRuntime } from '../settings/settings-normalization-runtime.js';
 import { ACTIONS, ERROR_DEFINITIONS } from './contract.js';
 import { createIntegrationScope, IntegrationScopeError } from './scope.js';
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { layout as protectedMcpLayout } from '../protected-mcp/service/install.js';
 import { APP_UNIT, install, layout, rollback, status, uninstall, update, UPDATER_PATH, UPDATER_TIMER, UPDATER_UNIT } from './host.js';
-import { fakeSystem, hostRoot as fixtureRoot, linked, installOptions as optionsForInstall } from './fake-system.js';
+import { fakeSystem, hostRoot as fixtureRoot, linked, installOptions as optionsForInstall } from './fake-system.test-support.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -25,20 +25,21 @@ describe('host install', () => {
     const paths = layout(root);
     expect(result.protectedMcp).toEqual({ status: 'installed', boundary: 'protected' });
     expect(await linked(root, 'current')).toBe('2.6.0');
-    expect((await fs.stat(path.join(paths.installDir, 'current/node_modules/@openchamber/web/bin/cli.js'))).mode & 0o777).toBe(0o755);
+    expect((await fs.stat(path.join(paths.installDir, 'current/node_modules/@openchamber/web/build/bin/cli.js'))).mode & 0o777).toBe(0o755);
     expect(JSON.parse(await fs.readFile(paths.configFile, 'utf8'))).toEqual({
       version: 1, owner: 'alice', repo: 'example/openchamber', port: 4000, host: '127.0.0.1', autoUpdate: true, protectedMcp: true, acceptUnprotected: false, separation: null,
     });
     const unit = (await fs.readFile(paths.unit(APP_UNIT), 'utf8')).split('\n');
     for (const line of ['User=alice', 'NoNewPrivileges=yes', 'Environment=OPENCHAMBER_UPDATE_REPO=example/openchamber',
-      'ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/bin/cli.js serve --foreground --port 4000 --host "127.0.0.1"']) {
+      'ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/build/bin/cli.js serve --foreground --port 4000 --host "127.0.0.1"']) {
       expect(unit).toContain(line);
     }
-    expect(await fs.readFile(paths.unit(UPDATER_UNIT), 'utf8')).toContain('ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/server/lib/host-install/main.js update');
+    const installed = await fs.readlink(path.join(paths.installDir, 'current'));
+    expect(await fs.readFile(paths.unit(UPDATER_UNIT), 'utf8')).toContain(`ExecStart=/usr/bin/node /usr/lib/openchamber/${installed}/node_modules/@openchamber/web/build/server/lib/host-install/main.js update`);
     expect(await fs.readFile(paths.unit(UPDATER_PATH), 'utf8')).toContain('PathChanged=/var/lib/openchamber-host/requests/update');
     expect((await fs.stat(paths.requestDir)).mode & 0o777).toBe(0o700);
     expect((await fs.stat(paths.envFile)).mode & 0o777).toBe(0o600);
-    expect(await fs.readlink(paths.binLink)).toBe('/usr/lib/openchamber/current/node_modules/@openchamber/web/bin/cli.js');
+    expect(await fs.readlink(paths.binLink)).toBe('/usr/lib/openchamber/current/node_modules/@openchamber/web/build/bin/cli.js');
     // The protected service is in place before OpenChamber starts with its groups.
     const order = system.calls.map((call) => call.flat().join(' '));
     expect(order.indexOf('protectedMcp.install 2.6.0 alice openchamber.service')).toBeLessThan(order.indexOf(`systemctl restart ${APP_UNIT}`));

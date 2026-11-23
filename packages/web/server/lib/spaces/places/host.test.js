@@ -5,7 +5,7 @@ import { createRegistryToolsSource, toolsContentKey } from '../tools.js';
 
 const source = createRegistryToolsSource({ webVersion: '2.6.3', openCodeVersion: '2.2.5' });
 const spec = { id: '123456abcdef', name: 'test', project: '1234567890abcdef', created: '2026-11-06T00:00:00.000Z', memoryBytes: 1024 ** 3 };
-const available = { available: true, nodeVersion: 'v24.21.0', arch: 'x64' };
+const available = { available: true, nodeVersion: 'v24.21.0', version: '252', os: 'linux', arch: 'x64', hostIsolation: true };
 
 function fake() {
   let spaces = [];
@@ -14,11 +14,14 @@ function fake() {
       switch (request.op) {
         case 'check': return available;
         case 'list': return spaces;
-        case 'create': spaces = [{ ...request.spec, state: 'running' }]; return null;
+        case 'create': spaces = [{ ...request.spec, state: 'running', stoppedIdle: false, gatekeeperRunning: true, orphans: [], damaged: false, missing: [] }]; return null;
         case 'stop': spaces = spaces.map((entry) => ({ ...entry, state: 'exited' })); return null;
         case 'remove': spaces = []; return { removed: [], failed: [] };
         case 'verify': return [];
-        default: return { key: request.key };
+        case 'start': return null;
+        case 'root-activation-options': return { challenge: 'fixture-challenge', expiresAt: 42, credentials: [] };
+        case 'tools-ensure': return { key: request.key, filled: false };
+        default: throw new Error(`Unexpected request: ${request.op}`);
       }
     }),
     exec: vi.fn(async () => ({ code: 7, stdout: 'output', stderr: 'error' })),
@@ -63,6 +66,11 @@ describe('host place adapter', () => {
     const place = createHostPlace({ hostd, toolsSource: source, clientScript: '/opt/root-owned/attach-client.js' });
     await place.create(spec);
     expect(await place.execArgv(spec.id)).toEqual([process.execPath, '/opt/root-owned/attach-client.js', 'attach', 'host', spec.id]);
+    const stream = await place.connect(spec.id);
+    expect(stream.bridge).toBe(true);
+    expect(hostd.attach).toHaveBeenCalledWith({ op: 'attach', place: 'host', id: spec.id });
+    stream.destroy();
+    hostd.attach.mockClear();
     await place.stop(spec.id);
     await expect(place.connect(spec.id)).rejects.toMatchObject({ code: 'space_not_running' });
     await expect(place.execArgv(spec.id)).rejects.toMatchObject({ code: 'space_not_running' });
@@ -89,6 +97,57 @@ describe('host place adapter', () => {
     hostd.request.mockRejectedValue(Object.assign(new Error('install hostd'), { code }));
     const place = createHostPlace({ hostd, toolsSource: source });
     expect(await place.check()).toEqual({ available: false, code, message: 'install hostd' });
+  });
+  it('keeps a daemon requirement failure unavailable when preparing tools', async () => {
+    // Given a daemon that answers but cannot run spaces.
+    const hostd = fake();
+    const unavailable = { available: false, code: 'systemd_version', message: 'Upgrade systemd', extra: 'retained' };
+    hostd.request.mockResolvedValue(unavailable);
+    const place = createHostPlace({ hostd, toolsSource: source });
+    // When tools preparation asks for availability.
+    const preparation = place.pullImage();
+    // Then the original requirement failure reaches the caller, without filling tools.
+    await expect(preparation).rejects.toMatchObject({ code: unavailable.code, message: unavailable.message });
+    expect(hostd.request.mock.calls.map(([request]) => request.op)).toEqual(['check']);
+  });
+  it.each([
+    ['check', { available: 'yes', nodeVersion: 'v24.21.0', arch: 'x64' }],
+    ['list', [{ ...spec, state: 'unknown' }]],
+    ['readDisk', { toolsBytes: '100' }],
+    ['verify', [{ check: 'unit' }]],
+    ['remove', { removed: [], failed: null }],
+  ])('rejects malformed %s answers at the adapter boundary', async (operation, answer) => {
+    // Given an operation-specific malformed response in a successful envelope.
+    const hostd = fake();
+    hostd.request.mockResolvedValue(answer);
+    const place = createHostPlace({ hostd, toolsSource: source });
+    // When the public place operation consumes it.
+    const result = place[operation](spec.id);
+    // Then it fails explicitly rather than supplying authoritative place data.
+    await expect(result).rejects.toMatchObject({ name: 'ZodError' });
+  });
+  it('reports reclaimed tools bytes after successful pruning', async () => {
+    // Given two disk snapshots around a successful tools prune.
+    const hostd = fake();
+    const disk = { imageBytes: 0, toolsBytes: 100, spacesBytes: 20, bytesBySpace: { [spec.id]: 20 }, freeBytes: 60, freesImage: false, extra: 'retained' };
+    hostd.request.mockResolvedValueOnce(disk).mockResolvedValueOnce({ removed: [{ kind: 'tools', name: '1234567890abcdef' }], failed: [] }).mockResolvedValueOnce({ ...disk, toolsBytes: 40 });
+    const place = createHostPlace({ hostd, toolsSource: source });
+    // When disk cleanup prunes unused tools.
+    const result = await place.cleanUpDisk();
+    // Then reclaimed bytes and failed removals keep the existing contract.
+    expect(result).toEqual({ freedBytes: 60, kept: [], machine: { state: 'skipped' } });
+    expect(hostd.request.mock.calls[1][0]).toEqual({ op: 'tools-prune', keep: [] });
+  });
+  it('preserves additional disk fields while overlaying adapter preparation state', async () => {
+    // Given a complete disk answer with an additional daemon field.
+    const hostd = fake();
+    const disk = { imageBytes: 0, toolsBytes: 100, spacesBytes: 20, bytesBySpace: {}, freeBytes: 60, freesImage: false, extra: 'retained', imagePulling: true };
+    hostd.request.mockResolvedValue(disk);
+    const place = createHostPlace({ hostd, toolsSource: source });
+    // When the place reads disk usage.
+    const result = await place.readDisk();
+    // Then daemon fields survive and local preparation state wins.
+    expect(result).toEqual({ ...disk, imagePulling: false, imageFailure: null });
   });
   it.each(['http://localhost:11434/', 'http://127.1/', 'http://2130706433/', 'http://[::1]:9000/', 'http://[::ffff:127.0.0.1]:9000/', 'http://host.docker.internal:9000/'])('refuses an unavailable loopback window %s after URL normalization', (upstream) => {
     const place = createHostPlace({ hostd: fake(), toolsSource: source });

@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { afterEach, expect, it } from 'vitest';
 import { createBotProviderRuntime } from './provider-runtime.js';
-import { createBotDriver } from './runtime-test-support.js';
+import { createBotDriver } from './runtime.test-support.js';
 import { BotServiceError } from './services/contracts.js';
 import { readRepositoryPolicy } from './repository-policy.js';
 import { createBotServiceContext } from './service-context.js';

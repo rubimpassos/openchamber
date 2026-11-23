@@ -1,9 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanupTransfers, ID, transferFixture } from './space-transfer-fixture.js';
+import { cleanupTransfers, ID, transferFixture } from './space-transfer.fixture.js';
 import { readBoundedBody } from './agent-upstream.js';
 import { createCodeIn } from '../spaces/code-in.js';
 import { createCodeOut } from '../spaces/code-out.js';
@@ -12,19 +11,16 @@ import { readTrustedBotMigrationPaths } from '../bots/production-worktrees.js';
 import { createBotExecutionServices } from '../bots/agent-execution.js';
 import { botDefinitionSchema } from '../bots/config.js';
 import { trustMigratedBotCheckout } from './git-trust.js';
+import { loadCheckoutModules } from '../bots/production-worktree-module.test-support.js';
 
 afterEach(cleanupTransfers);
 const answer = async (response) => ({ status: response.statusCode, body: JSON.parse(await readBoundedBody(response, 65536)) });
 const mutantWorktrees = async (f, name, before, after) => {
-  const ownerModule = new URL('../bots/production-worktrees.js', import.meta.url);
-  const original = fs.readFileSync(ownerModule, 'utf8');
-  expect(original.includes(before)).toBe(true);
   const directory = fs.mkdtempSync(path.join(f.host.root, `mutation-${name}-`));
-  const source = original.replace(before, after).replace(/from (['"])([^'"]+)\1/g, (_match, _quote, specifier) =>
-    `from ${JSON.stringify(specifier.startsWith('.') ? new URL(specifier, ownerModule).href : import.meta.resolve(specifier))}`);
-  const file = path.join(directory, 'owner.mjs');
-  fs.writeFileSync(file, source);
-  const { createProductionBotWorktrees } = await import(/* @vite-ignore */ pathToFileURL(file).href);
+  const module = name === 'migration' ? 'production-worktree-owner' : name === 'association' ? 'production-worktree-adoption' : 'production-worktrees';
+  const { worktrees: { createProductionBotWorktrees } } = await loadCheckoutModules(directory, {
+    [module]: (source) => { expect(source.includes(before)).toBe(true); return source.replace(before, after); },
+  });
   return createProductionBotWorktrees({ dataDir: f.dataDir, context: f.production.context, readItem: async () => f.production.item });
 };
 
@@ -220,8 +216,8 @@ describe('captured bot checkout transfer', () => {
 
   it('turns ownership and exact-space adoption assertions red in disposable module copies, then restores green', async () => {
     const f = await transferFixture({ botCheckout: true });
-    const unprotectedOwner = await mutantWorktrees(f, 'ownership', 'const record = await read(request);\n        await verifyCheckout(request, record);\n        if (record.state !== \'ready\')',
-      'const record = await read(request);\n        await validateRecord(request, record);\n        if (record.state !== \'ready\')');
+    const unprotectedOwner = await mutantWorktrees(f, 'ownership', 'const record = await requireRecord(request);\n        await verifyCheckout(request, record);\n        if (record.state !== \'ready\')',
+      'const record = await requireRecord(request);\n        await validateRecord(request, record);\n        if (record.state !== \'ready\')');
     expect(await f.production.makeWorktrees().resolveTransferSource(f.source)).toBe(f.repo);
     fs.renameSync(f.repo, `${f.repo}.original`);
     fs.cpSync(`${f.repo}.original`, f.repo, { recursive: true });
@@ -237,7 +233,7 @@ describe('captured bot checkout transfer', () => {
     const result = await f.codeOut.bringCodeOut({ ...f.input, spacePath: arrived.spacePath });
     const wrongSpace = { ...f.production.request, resultSha: result.result, spaceId: 'f'.repeat(12) };
     await expect(f.production.makeWorktrees().adoptIsolated(wrongSpace)).rejects.toBeDefined();
-    const unprotectedAdoption = await mutantWorktrees(f, 'association', 'const associatedRef = association && await verifyAssociation(record, association, resultSha, request.trustedMigrationPath);', 'const associatedRef = undefined;');
+    const unprotectedAdoption = await mutantWorktrees(f, 'association', 'const associatedRef = association && await verifyAssociation(record, association, { resultSha, trustedMigrationPath: request.trustedMigrationPath });', 'const associatedRef = undefined;');
     await expect(assert.rejects(() => unprotectedAdoption.adoptIsolated(wrongSpace)))
       .rejects.toMatchObject({ code: 'ERR_ASSERTION', message: expect.stringContaining('Missing expected rejection') });
     await expect(f.production.makeWorktrees().adoptIsolated(wrongSpace)).rejects.toBeDefined();

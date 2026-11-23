@@ -1,12 +1,19 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createAdminSocketClient } from '../test-support/admin-socket-client.js';
+import { emitServiceFixture } from '../test-support/emitted-service.js';
 import { SENTINEL, installStdioFixture, sha256, startService, trustedFixtureDirectory } from '../test-support/fixtures.js';
 
-const relay = fileURLToPath(new URL('./relay.js', import.meta.url));
+let relay;
+let sourceScratch;
+beforeAll(async () => {
+  sourceScratch = await trustedFixtureDirectory();
+  await emitServiceFixture(sourceScratch.directory);
+  relay = path.join(sourceScratch.directory, 'lib/protected-mcp/service/relay.js');
+});
+afterAll(async () => { await sourceScratch?.remove(); });
 const cleanups = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();

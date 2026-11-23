@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`production-worktrees.js` owns the private bot checkout, its filesystem/repository attribution, immutable publication branch reservation, snapshots, adoption and cleanup. `production-git.js` owns bounded Git plumbing and exact-account object fetching through the existing credential broker. `service-context.js` resolves the selected server identity and repository. `production-pull-requests.js` supplies private bot authority to the existing PR loop. Provider content writes remain in `services.js`.
+`production-worktrees.ts` owns the private bot checkout lifecycle through the emitted `production-worktrees.js` API. Its direct TypeScript modules own persisted checkout contracts, filesystem/repository attribution, immutable publication branch reservations, snapshots and adoption. `production-git.ts` owns bounded Git plumbing and exact-account object fetching through the emitted `production-git.js` path and existing credential broker. `service-context.ts` resolves the selected server identity and repository through the emitted `service-context.js` path. `production-pull-requests.ts` supplies private bot authority to the existing PR loop through the unchanged `production-pull-requests.js` import. Provider content writes remain in `services.js`.
 
 Local Bot Git uses the existing private bundle Git wrapper with an operation-local
 global config trusting exactly the checked directory. It loads no ambient global
@@ -67,6 +67,33 @@ The optional constructor dependency `advanceCheckout` defaults to `advanceBotChe
 
 `readItem` returns the complete authoritative item for cleanup admission. Account selections require exactly one registered matching `github-account` identity. App selections name an exact private identity ID. Missing or ambiguous identities refuse. Selected Discord identities require server-owned captured routing through `resolveDiscordTarget`.
 
+### Why context types reuse provider contracts
+
+The context uses the credential resolver's identity fields and GitHub-specific
+credential result, and the existing schemas own destination shapes. The context
+parses transition responses and captured Discord destinations at their existing
+boundaries. It does not add a second identity store or provider validation path.
+Captured GitHub bindings retain their identity revision when the current Bot
+selection changes, while repository resolution still checks the current remote.
+Discord routing receives the original project, Bot and item objects.
+
+### Why bot feedback uses a narrow reader contract
+
+The GitHub feedback owner accepts GraphQL and only the 4 REST reads it calls,
+with unknown payloads parsed by that owner. The bot adapter implements those
+reads through its selected credential; requiring the complete Octokit client
+would claim mutation capabilities and SDK methods the adapter does not expose.
+PR service reads derive their results from the existing GitHub adapter, while
+watch authority and admission retain the fix-loop contracts. Captured GitHub
+bindings may resolve without a current Bot selection.
+
+`createBotServiceContext` returns `serviceContext`, `github`, `repository` and
+`author`. The runtime receives `serviceContext`; both production adapters receive
+the context object. GitHub credentials stay server-private. Service slots are
+assembled locally and only the requested service is resolved. Destination parsing
+retains the existing GitHub URL checks beyond the shared remote display parser,
+including credential and extra-path refusal.
+
 ### Publication reservation
 
 `bindPublication({ project, bot, item, branch })` returns exactly `{ publicationBranch }`. The caller selects a repository-compliant remote name after investigation. The owned local branch remains the literal `bot/<itemId>`. The same name can serve both roles, but it still requires a reservation. This server-internal method has no route or tool entrypoint.
@@ -119,6 +146,23 @@ fixLoopRuntime = createFixLoopRuntime({ ...existingFixLoopDependencies, botWatch
 - The private lock excludes cooperating bot owners. It is not a filesystem transaction against external editors modifying files during a native Git command. Git's native refusal, CAS and final dirty checks bound that remaining race; ambiguous work is retained for attention. Records support process restart, with no power-loss durability claim.
 
 ## Decisions
+
+### Why checkout mechanics have separate typed owners
+
+The lifecycle composes a private descriptor store, publication reservation owner,
+snapshot verifier and adoption owner. Each owns its existing checks and operation
+ordering; none replaces the Git, transfer or credential contracts it consumes.
+Stored schemas retain version 1 and their original field order. Reservation
+projection preserves that order when comparing the captured fixed owner fields.
+The descriptor schema guarantees an adoption intent in the adopting state; its
+typed accessor exposes that invariant without weakening the stored schema.
+Imports and public re-exports retain `.js` paths for source loading and Node output.
+
+The disposable-module test loader strips the actual TypeScript owners and links
+their emitted copies together. Mutation consumers select the module owning each
+check, so a moved check is still exercised through the production constructor.
+`production-worktree-module.test.js` also creates a checkout through this emitted
+graph without removing any protection.
 
 ### Why publication reservations precede the private owner projection
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildRestartNotification } from './restart-notification.js';
+import { buildRestartNotification } from '../notifications/restart-notification.js';
 import { createSessionRuntime, RESTART_RESUME_GRACE_MS } from './session-runtime.js';
 import { restartInterruptedNotification } from '../session-interruption/restart.js';
 import { createAutomationAdmission, sessionKey } from '../session-automation/runtime.js';

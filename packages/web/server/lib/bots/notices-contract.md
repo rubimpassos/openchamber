@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`createBotNotices({ store, config, readSession, queueFor })` in `notices.js`
+`createBotNotices({ store, config, readSession, queueFor })` in `notices.ts`
 adapts bot answers and provider feedback to the existing message queue. It exposes
 `deliver({ projectId, item, eventId, text })` and `assertDispatch(input)`.
 The coordinator owns recording feedback and its receipt. The queue owns durable

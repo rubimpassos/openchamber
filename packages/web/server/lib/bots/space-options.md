@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`space-options.js` owns the persisted bot isolation schema and its pure projection
+`space-options.ts` owns the persisted bot isolation schema and its pure projection
 into the isolated-stage adapter's request. It reads no host environment, login,
 provider catalog, running space or credential. Spaces owns resolving and delivering
 the selected references, container enforcement and rollback.

@@ -4,9 +4,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createSettingsHelpers } from '../opencode/settings-helpers.js';
-import { createSettingsNormalizationRuntime } from '../opencode/settings-normalization-runtime.js';
-import { createSettingsRuntime } from '../opencode/settings-runtime.js';
+import { createSettingsHelpers } from '../settings/settings-helpers.js';
+import { createSettingsNormalizationRuntime } from '../settings/settings-normalization-runtime.js';
+import { createSettingsRuntime } from '../settings/settings-runtime.js';
 import {
   AGENT_SETTINGS_MIRROR_KEYS_V1, AGENT_SETTINGS_MIRROR_VERSION, createSettingsMirror, pickAgentSettings,
 } from './settings-mirror.js';
@@ -26,7 +26,7 @@ const createAgentRuntime = (settingsFilePath) => {
 
 describe('agent settings mirror', () => {
   it('uses an explicit versioned allowlist without registry secrets or front-door state', () => {
-    const registry = createRequire(import.meta.url)('../opencode/settings-registry.json');
+    const registry = createRequire(import.meta.url)('../settings/settings-registry.json');
     expect(AGENT_SETTINGS_MIRROR_VERSION).toBe(1);
     expect(Object.isFrozen(AGENT_SETTINGS_MIRROR_KEYS_V1)).toBe(true);
     expect(new Set(AGENT_SETTINGS_MIRROR_KEYS_V1).size).toBe(AGENT_SETTINGS_MIRROR_KEYS_V1.length);

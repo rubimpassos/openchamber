@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createHostProviders, headerOfPackage, isLoopbackUrl, windowUpstreamOf } from './host-providers.js';
+import { createHostProviders, headerOfPackage, headerOfProvider, isLoopbackUrl, windowUpstreamOf } from './host-providers.js';
 
 const OLLAMA = {
   name: 'Ollama (local)',
@@ -78,8 +78,37 @@ describe('the host\'s custom providers', () => {
     expect(headerOfPackage('aisdk:@ai-sdk/openai-compatible')).toBe('authorization');
     expect(headerOfPackage('aisdk:@ai-sdk/openai')).toBe('authorization');
     expect(headerOfPackage('aisdk:@ai-sdk/anthropic')).toBe('x-api-key');
+    for (const packageName of [
+      '@opencode/ai/providers/openai-compatible',
+      '@opencode/ai/providers/openai-compatible/responses',
+      '@opencode/ai/providers/openai-compatible-responses',
+      '@opencode/ai/providers/openai',
+      '@opencode/ai/providers/openai/chat',
+      '@opencode/ai/providers/openai/responses',
+    ]) expect(headerOfPackage(packageName)).toBe('authorization');
+    expect(headerOfPackage('@opencode/ai/providers/anthropic')).toBe('x-api-key');
+    expect(headerOfPackage('@opencode/ai/providers/anthropic-compatible')).toBe('x-api-key');
+    expect(headerOfPackage('@opencode/ai/providers/amazon-bedrock')).toBeNull();
     expect(headerOfPackage('aisdk:@ai-sdk/amazon-bedrock')).toBeNull();
     expect(headerOfPackage(undefined)).toBeNull();
+  });
+
+  it('refuses a provider whose model needs its key in another header than the provider', async () => {
+    const mixed = {
+      name: 'Mixed',
+      package: '@opencode/ai/providers/openai-compatible',
+      settings: { baseURL: 'https://gw.example.dev/v1' },
+      models: {
+        'gpt-5.5': { modelID: 'gpt-5.5', name: 'GPT', package: '@opencode/ai/providers/openai/responses' },
+        claude: { modelID: 'claude', name: 'Claude', package: '@opencode/ai/providers/anthropic-compatible' },
+      },
+    };
+    const providers = createHostProviders({ readLayers: layers({ user: { providers: { mixed } } }), hostEnvironment: {} });
+    const definition = await providers.read('mixed', '/p');
+    expect(headerOfProvider(definition)).toBeNull();
+    expect((await providers.list('/p'))[0].supported).toBe(false);
+    const { claude: _claude, ...sameHeader } = mixed.models;
+    expect(headerOfProvider({ package: mixed.package, models: sameHeader })).toBe('authorization');
   });
 
   it('sends "this machine" to the Docker host and leaves every other address as written', () => {
@@ -96,5 +125,40 @@ describe('the host\'s custom providers', () => {
     expect(isLoopbackUrl('http://localhost:11434/v1')).toBe(true);
     expect(isLoopbackUrl('http://192.168.1.23:11434/v1')).toBe(false);
     expect(isLoopbackUrl('ftp://localhost/')).toBe(false);
+  });
+
+  it.each([null, false, 0, 'model', [], { settings: { baseURL: 42 } }])('keeps the provider header for an unchecked model without a package: %j', (model) => {
+    // Given a model value retained by the credential wire schema.
+    const provider = { package: 'aisdk:@ai-sdk/openai', models: { model } };
+    // When the window checks package compatibility, then absent packages inherit the provider header.
+    expect(headerOfProvider(provider)).toBe('authorization');
+  });
+
+  it('reads inherited model packages with the original getter receiver', () => {
+    // Given an unchecked model whose inherited package getter needs its receiver.
+    const prototype = { get package() { return this.adapter; } };
+    const model = Object.assign(Object.create(prototype), { adapter: 'aisdk:@ai-sdk/anthropic' });
+    // When the window checks the model, then the conflicting inherited package refuses it.
+    expect(headerOfProvider({ package: 'aisdk:@ai-sdk/openai', models: { model } })).toBeNull();
+  });
+
+  it.each([42, true, {}, ['aisdk:@ai-sdk/openai']])('refuses an unchecked truthy model package: %j', (packageName) => {
+    // Given a package value that is not an exact supported package string.
+    const provider = { package: 'aisdk:@ai-sdk/openai', models: { model: { package: packageName } } };
+    // When the window checks the model, then the package lookup refuses the provider.
+    expect(headerOfProvider(provider)).toBeNull();
+  });
+
+  it('keeps URL string coercion for unchecked provider settings', () => {
+    const hints = [];
+    const value = { [Symbol.toPrimitive]: (hint) => { hints.push(hint); return 'http://localhost:11434/v1'; } };
+    expect(windowUpstreamOf(value)).toBe('http://host.docker.internal:11434/v1');
+    expect(isLoopbackUrl(value)).toBe(true);
+    expect(hints).toEqual(['string', 'string']);
+    expect(windowUpstreamOf(Symbol('url'))).toBeNull();
+    expect(windowUpstreamOf({ toString: () => { throw new Error('unreadable'); } })).toBeNull();
+    const url = new URL('https://example.com');
+    url.toString = () => 'http://localhost:11434/v1';
+    expect(windowUpstreamOf(url)).toBe('http://host.docker.internal:11434/v1');
   });
 });

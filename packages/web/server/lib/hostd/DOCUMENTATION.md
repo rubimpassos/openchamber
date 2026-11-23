@@ -4,7 +4,7 @@
 
 hostd is the root process behind the Linux `host` and `host-root` places. It owns systemd units, namespace pins, per-space network accounts, private metadata and sealed tools. `spaces/places/host.js` owns the unprivileged place adapter; the Spaces manager, journey, gatekeeper program and code-transfer rules remain in `../spaces/`.
 
-The installed code and its ancestors must be root-owned and unwritable by the owner or a space. The service uses `/usr/bin/node` and Node built-ins. Socket activation supplies one Unix listener at `/run/openchamber-hostd/hostd.sock`, owned by the OpenChamber owner with mode 0600. Its parent must permit that owner to traverse it. Namespace pins have a separate root-only parent. The optional `--socket <absolute path>` listener is root-owned mode 0600 and is for disposable fixtures or root callers.
+The installed code and its ancestors must be root-owned and unwritable by the owner or a space. The service runs `build/server/lib/hostd/main.js` with the trusted system Node and the package's installed runtime dependencies. The host installer validates that emitted entrypoint before promotion. Socket activation supplies one Unix listener at `/run/openchamber-hostd/hostd.sock`, owned by the OpenChamber owner with mode 0600. Its parent must permit that owner to traverse it. Namespace pins have a separate root-only parent. The optional `--socket <absolute path>` listener is root-owned mode 0600 and is for disposable fixtures or root callers.
 
 The installation and password requirement belong to the host installer and front door. This module neither installs itself nor changes a VPS service. The socket owner may run arbitrary commands in a user space. It must never be reachable by the space agent.
 
@@ -14,9 +14,9 @@ The installation and password requirement belong to the host installer and front
 - Every `host-root` create and start reaches the root activation check of `root-ops.js` before side effects; the lifecycle cannot be built without it. The check passes only when `/etc/openchamber/host.json` names separate human, front-door and agent accounts that exist and are not root, the spec is not an approval worker, and the request carries a fresh passkey assertion made for exactly this operation on exactly this space. Root execution makes no isolation promise. Exec and attach into a running root space need the same separation: after a rollback or a reinstall onto one account the human's agents hold hostd's socket, and the space they would reach runs as root.
 - hostd parses requests on its one event loop, as root, before any other connection is served. Each field check costs what a comparison costs, and a size limit is checked before the elements it bounds, so a large request is refused at once.
 - Before a host space starts, hostd makes the folder of its protected MCP subject (`space-<id>` under the service's subjects folder), owned as the service's other subject folders. The unit's bind of that folder is optional and systemd skips a missing source, so without the folder a grant made later never reaches the space.
-- Root activation, in `passkey.js`: a person with root approves a passkey in three steps. The root command prints a code; the person proves one of their OpenChamber sign-in passkeys with that code; the root command shows that passkey's label, origin and fingerprint, and approves it only after the person confirms on that terminal. Each activation then needs a one-time challenge bound to `{ op, id, specHash }`, where the hash covers place, id, name, project, purpose and memory and never the creation time. The challenge is consumed before the signature is checked, the assertion must come from the exact origin and RP ID the passkey was approved at, user verification is required, and a counter that does not grow is refused. Challenges live in hostd's memory only.
-- Project sharing, in `share-project.js`: hostd gives the agent account ACLs on one of the human's projects, and takes them back. It refuses the human's home and private folders, symbolic links on the way, projects holding the human's own configuration links, other filesystems and mounts inside, and never follows or changes a link in the walk. It needs the separated accounts, read by name from the system at each request.
-- Root-only metadata lives in `/var/lib/openchamber-hostd/spaces/<id>.json`. Agent state lives under systemd's private `StateDirectory`, with separate work and home binds. A root space has no DynamicUser, so systemd would make its `StateDirectory` a plain empty folder; its unit has none and binds hostd's private work and home folders directly (`stateSource` in `units.js`). A new id must have no existing unit, state path, interface, network pin or account. Only an existing root-owned record permits restart and deletion of its resources.
+- Root activation, in `passkey.ts`: a person with root approves a passkey in three steps. The root command prints a code; the person proves one of their OpenChamber sign-in passkeys with that code; the root command shows that passkey's label, origin and fingerprint, and approves it only after the person confirms on that terminal. Each activation then needs a one-time challenge bound to `{ op, id, specHash }`, where the hash covers place, id, name, project, purpose and memory and never the creation time. The challenge is consumed before the signature is checked, the assertion must come from the exact origin and RP ID the passkey was approved at, user verification is required, and a counter that does not grow is refused. Challenges live in hostd's memory only.
+- Project sharing, in `share-project.ts`: hostd gives the agent account ACLs on one of the human's projects, and takes them back. It refuses the human's home and private folders, symbolic links on the way, projects holding the human's own configuration links, other filesystems and mounts inside, and never follows or changes a link in the walk. It needs the separated accounts, read by name from the system at each request.
+- Root-only metadata lives in `/var/lib/openchamber-hostd/spaces/<id>.json`. Agent state lives under systemd's private `StateDirectory`, with separate work and home binds. A root space has no DynamicUser, so systemd would make its `StateDirectory` a plain empty folder; its unit has none and binds hostd's private work and home folders directly (`stateSource` in `units.ts`). A new id must have no existing unit, state path, interface, network pin or account. Only an existing root-owned record permits restart and deletion of its resources.
 - Each ordinary space and gatekeeper has its own DynamicUser. Every transient exec uses the target's complete property list, identity and network namespace, joins its private tmp, and shares its limited slice. Requisite and ordering prevent an exec from starting after its target stops; PartOf stops an existing exec with its target. The main unit, gatekeeper, slirp and exec descendants count toward the space's memory and task limits.
 - Both aliases of the backing state directory are read-only in every ordinary main and exec unit. Work and home remain writable through their separate permitted binds. The agent cannot rename those backing entries into symlinks before a later root-created exec resolves them. Exec refuses a main unit that lacks this restriction and requires a restart.
 - The space has only loopback and one veth on a private `10.233.0.0/16` /30, with no default route. Its peer is in a gatekeeper network namespace owned by a dedicated non-root static account's user namespace. No interface in that pair is addressed on the host.
@@ -95,3 +95,68 @@ slirp itself runs in the host network namespace. A compromised slirp is a local 
 While a root space runs, the account that owns hostd's socket can run anything as root through `exec` and `attach`. Root spaces exist for the work that needs it and are never offered as an equivalent of the isolated places.
 
 The focused unit suites cover framing, parsing, state, sealing, generated properties, adapter wiring, the root operations with a software authenticator, and the lifecycle's root check. The disposable harness runs the shared contract and escape suites plus kernel boundary and idle-stop lifecycle tests. Kernel controls and mutations use a separate unrestricted root fixture that is never part of the product protocol. Executed results, environment and deviations belong in the task evidence.
+
+### Why the typed boundary keeps unchecked results unknown
+
+`passkey.ts` and `share-project.ts` describe their root-owned JSON records without
+adding schema checks, migrations or stripping stored fields. Request assertions
+use the existing hostd assertion contract, while the injected verifier consumes
+SimpleWebAuthn's options and returns only the verification fields the store uses.
+Types preserve file modes, temporary names, lock ownership, challenge consumption,
+ACL order and device/inode comparisons. Imports keep `.js` for emitted Node code.
+Their synthetic suites use temporary files and an injected ACL runner; they do
+not establish privileged filesystem or kernel isolation guarantees.
+
+`state.ts` describes hostd's root-owned record format, including the fixed exit
+recorder's fields. Reading it retains JSON parsing, ENOENT handling and unknown
+stored fields without adding a schema check or conversion. `list()` can still
+include null when a file disappears between directory enumeration and reading;
+callers must account for that absence. Atomic writes retain their exclusive
+0600 temporary file, rename and finally cleanup.
+
+`network.ts` consumes only the record's id and subnet and the system runner/spawn
+contract. Its types do not change account checks, command order, namespace-holder
+cleanup, resolver files or the refusal to remove pins after failed cleanup.
+
+`units.ts` types ordered systemd property pairs and the record/path fields its
+builders consume. `verify.ts` retains the interpreted-property checks and their
+order. Its network JSON types describe output from hostd's fixed `ip` commands;
+they add no runtime validation or new authority. The source modules retain `.js`
+import specifiers for the emitted Node files.
+
+`contracts.ts` separates caller intent from the parser's normalized requests, with
+distinct checked space ids and tools keys. `validation.ts` retains the bounded
+field comparisons and exact allowlists. Framing and client transport use
+TypeScript with `.js` import specifiers; `main.js` and `attach-client.js` remain
+JavaScript because Node and the git transport execute those files by name.
+
+`parseControl` establishes JSON syntax only. The client checks success envelopes,
+remote errors and command exits, but `request()` returns an operation-specific
+result as `unknown`. Giving that result a success type from the operation name
+alone would claim a shape the socket reader never checked. Consumers narrow
+those results at their own boundary. Stream collection and socket-like HTTP
+methods live in separate modules so handshake ownership remains explicit.
+
+`exec.ts` consumes normalized exec/attach requests and binary stream callbacks.
+`tools.ts` consumes the system runner, lchown and state-list contracts. Their
+types preserve the fixed command argv, unit properties, filesystem operations
+and cleanup order. A disappearing record still aborts tools usage checks with
+TypeError before filling or pruning; its error message is now explicit. Missing
+markers still mean not ready only for ENOENT. Concurrent fills return the same
+pending promise, which is removed after settlement.
+
+`exec.test.js` exercises output bytes, startup-marker removal, exit selection
+and attach defaults with an injected runner that never executes systemd.
+The ordinary file-sealing case in `state.test.js` uses temporary files and an
+injected ownership callback. These tests establish local behavior only; the
+privileged lifecycle, cgroup cancellation and actual ownership enforcement
+still require the separate host harness.
+
+`lifecycle.ts` derives its dependency types from the state, system, tools,
+network and executor owners. Root authorization stays ahead of inspection and
+side effects, and fresh creation authorizes once before its internal start.
+The current-tools pointer retains hostd's trusted JSON format. A disappearing
+record still fails with TypeError instead of being skipped or permitting exec.
+The lifecycle tests use injected runners and disposable paths to check root
+activation, ownership refusals, stop ordering, tools adoption and failure cleanup;
+they do not establish kernel isolation or actual systemd behavior.

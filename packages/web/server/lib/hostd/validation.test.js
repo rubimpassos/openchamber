@@ -11,6 +11,15 @@ describe('hostd request boundary', () => {
     expect(result).toEqual(create);
     expect(result.spec).not.toBe(spec);
   });
+  it('supplies exec limits when the caller omits them', () => {
+    // Given the ordinary command intent without optional execution policy.
+    const request = { op: 'exec', place: 'host', id, target: 'space', argv: ['id'] };
+    // When the daemon parses it.
+    const result = parseRequest(request);
+    // Then execution receives the bounded defaults, including a fresh argv.
+    expect(result).toEqual({ ...request, timeoutMs: 60_000, maxOutputBytes: 4 * 1024 * 1024, keepTail: false });
+    expect(result.argv).not.toBe(request.argv);
+  });
   it.each(['unit', 'uid', 'mounts', 'namespace', 'path', '__proto__'])('rejects caller-selected %s', (field) => {
     const request = JSON.parse(JSON.stringify(create).slice(0, -1) + `,"${field}":"root"}`);
     expect(() => parseRequest(request)).toThrow(expect.objectContaining({ code: 'invalid_request' }));
@@ -20,6 +29,18 @@ describe('hostd request boundary', () => {
     { created: 'yesterday' }, { purpose: 'root' }, { project: '/home/dev' }, { name: 'hello\nUser=root' }, { extra: true },
   ])('rejects a malformed immutable spec %j', (change) => {
     expect(() => parseRequest({ ...create, spec: { ...spec, ...change } })).toThrow();
+  });
+  it.each([0, 31, 127, 133, 8232, 8233])('rejects a name containing forbidden control U+%i', (code) => {
+    // Given a name containing one of the forbidden control classes.
+    const request = { ...create, spec: { ...spec, name: `x${String.fromCodePoint(code)}` } };
+    // When parsed, then the request is refused before it can reach unit generation.
+    expect(() => parseRequest(request)).toThrow(expect.objectContaining({ code: 'invalid_request' }));
+  });
+  it.each([32, 126, 128, 132, 134, 159])('preserves an allowed name character U+%i', (code) => {
+    // Given an ordinary character or a C1 control other than NEL.
+    const name = `x${String.fromCodePoint(code)}`;
+    // When parsed, then the existing name contract preserves the character.
+    expect(parseRequest({ ...create, spec: { ...spec, name } }).spec.name).toBe(name);
   });
   it.each([[], [''], ['id', 'a\0b'], ['id', 5], Array(257).fill('x')])('rejects malformed argv %j', (argv) => {
     expect(() => parseRequest({ op: 'exec', place: 'host', id, target: 'space', argv })).toThrow();

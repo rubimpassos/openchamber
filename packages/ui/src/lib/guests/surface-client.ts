@@ -1,19 +1,3 @@
-/**
- * Viewer side of an extension's shared surface: one socket per open panel,
- * frames in, input out, control state mirrored.
- *
- * The host sends a `frame` text message followed by one binary message with
- * the image; the client pairs them, hands the bytes to the pane, and
- * acknowledges the sequence once the pane has drawn it. The host keeps up to
- * `FRAMES_IN_FLIGHT` frames unacknowledged, so frames keep coming during a
- * round trip; the pane gets one frame at a time, the newest that arrived
- * while it drew the previous one, and the ack for it covers the frames
- * skipped. A pane that draws slowly sees fewer frames rather than a growing
- * queue. The socket goes through the runtime
- * transport so it works over the relay too, and reconnects with backoff
- * while the pane is open.
- */
-
 import type { SurfaceHostMessage, SurfaceViewerMessage } from '@openchamber/sdk/schemas';
 import { surfaceHostMessageSchema } from '@openchamber/sdk/schemas';
 import type { SurfaceController, SurfaceInputEvent } from '@openchamber/sdk';
@@ -51,7 +35,6 @@ export type SurfaceClientHandlers = {
   onResized?: (size: { width: number; height: number }) => void;
   onClipboard?: (id: string, text: string) => void;
   onError?: (code: string, message: string) => void;
-  /** The host-issued id of this connection; a new one after every reconnect. */
   onViewer?: (viewerId: string) => void;
   /** Sound while it is on; see `setAudio`. */
   onAudio?: (audio: SurfaceAudioBatch) => void;
@@ -63,9 +46,7 @@ type SurfaceClientDependencies = {
   refreshAuth: () => Promise<string>;
   clearUrlAuthToken: () => void;
   openSocket: (guestId: string) => RelayTunnelWebSocket;
-  /** Hidden tab or offline: back off for longer and wait to be woken. */
   isPaused: () => boolean;
-  /** Calls `wake` when the tab shows or the network returns; returns the cleanup. */
   onWake: (wake: () => void) => () => void;
 };
 
@@ -134,7 +115,6 @@ export class SurfaceClient {
     }
   }
 
-  /** Called by the pane once a frame is on screen; hands it the next one. */
   ack(seq: number): void {
     // A frame of an earlier connection: its ack means nothing to this one.
     if (seq !== this.drawingSeq) return;
@@ -241,8 +221,6 @@ export class SurfaceClient {
       this.socket = null;
       this.resetFrames();
       if (this.disposed || this.ended) return;
-      // A refusal before open is most often an expired URL token: mint a
-      // fresh one on the next attempt instead of retrying the same refusal.
       if (!opened) this.dependencies.clearUrlAuthToken();
       this.scheduleReconnect();
     };
@@ -303,8 +281,6 @@ export class SurfaceClient {
         this.handlers.onError?.(message.code, message.message);
         return;
       case 'ended':
-        // The host closed on purpose; reconnecting would only get the same
-        // answer. The pane shows why and offers a retry.
         this.ended = true;
         this.cancelReconnect();
         this.handlers.onConnection({ status: 'ended', reason: message.reason });
@@ -312,7 +288,6 @@ export class SurfaceClient {
     }
   }
 
-  /** After an `ended`, a user-initiated attempt to attach again. */
   retry(): void {
     if (this.disposed) return;
     this.ended = false;

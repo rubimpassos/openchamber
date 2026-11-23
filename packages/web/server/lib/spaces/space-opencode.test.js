@@ -31,6 +31,28 @@ describe('the provider configuration inside a space', () => {
     expect(JSON.stringify(buildProviderConfig(GRANTS))).not.toContain('api.anthropic.com');
   });
 
+  it('sends a catalog provider and every model with an address of its own through the window, under the same path', () => {
+    const grant = { kind: 'model', id: 'opencode-go', provider: 'opencode-go', upstream: 'https://opencode.ai/inference/go/', header: 'authorization', source: { kind: 'stored', integration: 'opencode' } };
+    const catalog = new Map([['opencode-go', { baseURL: 'https://opencode.ai/inference/go/openai/v1', models: [
+      { id: 'deepseek-v4.1-flash', baseURL: 'https://opencode.ai/inference/go/openai/v1' },
+      { id: 'minimax-m3', baseURL: 'https://opencode.ai/inference/go/anthropic/v1' },
+    ] }]]);
+    expect(buildProviderConfig([grant], new Map(), catalog)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      provider: {},
+      providers: {
+        'opencode-go': {
+          settings: { apiKey: WINDOW_PLACEHOLDER_KEY, baseURL: 'http://gatekeeper:8080/model/opencode-go/openai/v1' },
+          models: {
+            'deepseek-v4.1-flash': { settings: { baseURL: 'http://gatekeeper:8080/model/opencode-go/openai/v1' } },
+            'minimax-m3': { settings: { baseURL: 'http://gatekeeper:8080/model/opencode-go/anthropic/v1' } },
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(buildProviderConfig([grant], new Map(), catalog))).not.toContain('opencode.ai/inference');
+  });
+
   it('writes the whole file over exec, as JSON on stdin, through a temporary name, beside the project and not in the home directory', async () => {
     const calls = [];
     const opencode = createSpaceOpenCode({ exec: async (spaceId, argv, options) => { calls.push({ spaceId, argv, options }); return { code: 0, stdout: '', stderr: '' }; } });
@@ -68,6 +90,20 @@ describe('the provider configuration inside a space', () => {
     expect(buildProviderConfig([{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]).provider).toEqual({});
     expect(buildProviderConfig([{ kind: 'login', id: 'openai', provider: 'openai', method: 'some-new-method' }]).provider).toEqual({});
   });
+
+  it('retains unchecked custom model data in the serialized space configuration', () => {
+    // Given model JSON whose fields have no provider-model validation contract.
+    const models = { missing: null, alias: 'raw-model', configured: { settings: { baseURL: 42, extra: [false, null] }, capabilities: 'unchecked' } };
+    const custom = new Map([['gateway', { name: 'Gateway', package: 'aisdk:@ai-sdk/openai', models }]]);
+    // When a custom grant builds the configuration that is sent inside the space.
+    const config = buildProviderConfig([{ kind: 'custom', id: 'gateway', provider: 'gateway' }], custom);
+    // Then serialization preserves every model value without changing the window-owned settings.
+    expect(JSON.parse(JSON.stringify(config))).toEqual({
+      $schema: 'https://opencode.ai/config.json', provider: {}, providers: {
+        gateway: { name: 'Gateway', package: 'aisdk:@ai-sdk/openai', settings: { baseURL: 'http://gatekeeper:8080/model/gateway', apiKey: WINDOW_PLACEHOLDER_KEY }, models },
+      },
+    });
+  });
 });
 
 describe('protected MCP connections inside a space', () => {
@@ -76,7 +112,7 @@ describe('protected MCP connections inside a space', () => {
     expect(buildMcpConfig([GRANTS[0], MCP])).toEqual({ $schema: 'https://opencode.ai/config.json', mcp: {
       jira: {
         type: 'local',
-        command: ['/usr/local/bin/node', '/opt/openchamber-tools/node_modules/@openchamber/web/server/lib/protected-mcp/service/relay.js', '--socket', '/run/openchamber-mcp/engine.sock', 'pmcp_0123456789abcdef'],
+        command: ['/usr/local/bin/node', '/opt/openchamber-tools/node_modules/@openchamber/web/build/server/lib/protected-mcp/service/relay.js', '--socket', '/run/openchamber-mcp/engine.sock', 'pmcp_0123456789abcdef'],
       },
     } });
     expect(buildMcpConfig([GRANTS[0]])).toBeNull();
@@ -187,6 +223,10 @@ describe('the login row inside a space', () => {
     expect(JSON.stringify(row)).not.toContain(ACCESS);
     expect(buildLoginRow('openai', { ...LOGIN, methodID: 'chatgpt-browser', metadata: { accountID: 'acct_1' } }).value.metadata).toEqual({ accountID: 'acct_1' });
     expect(buildLoginRow('openai', { ...LOGIN, metadata: {} }).value).not.toHaveProperty('metadata');
+  });
+
+  it('keeps the method property failure for a missing login', () => {
+    expect(() => buildLoginRow('openai', null)).toThrow("Cannot read properties of null (reading 'methodID')");
   });
 
   const answering = (statuses) => {
@@ -300,5 +340,22 @@ describe('a chat taken out of a space for the archive', () => {
       location: { directory: '/data/spaces/archive/a1b2c3d4e5f6' },
     });
     expect(archivedChatOf(exported, { directory: '/d', archivedAt: 99, keepParent: false }).info).not.toHaveProperty('parentID');
+    const unchecked = {
+      info: { id: 42, projectID: null, cost: 'cost', tokens: [], parentID: 7, outcome: 'other', title: 0, time: { created: 'then', updated: null, idle: false } },
+      messages: { unchecked: true },
+    };
+    expect(archivedChatOf(unchecked, { directory: '/d', archivedAt: 99, keepParent: true })).toEqual({
+      info: {
+        ...unchecked.info,
+        time: { ...unchecked.info.time, archived: 99 },
+        location: { directory: '/d' },
+        permissions: [{ action: '*', resource: '*', effect: 'deny' }],
+      },
+      messages: unchecked.messages,
+      location: { directory: '/d' },
+    });
+    for (const malformed of [null, { info: null }, { info: { time: null } }]) {
+      expect(() => archivedChatOf(malformed, { directory: '/d', archivedAt: 99, keepParent: false })).toThrow(TypeError);
+    }
   });
 });

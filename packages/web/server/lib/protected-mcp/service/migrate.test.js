@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,7 +69,23 @@ describe('migration into the protected service', () => {
   it('reads dev-server environment files the way systemd does', () => {
     expect(readEnvironmentValue(`A=1\nTOKEN=${JSON.stringify('va"lue$x')}\n`, 'TOKEN')).toBe('va"lue$x');
     expect(readEnvironmentValue('TOKEN=plain\n', 'TOKEN')).toBe('plain');
+    expect(readEnvironmentValue("TOKEN='quoted value'\n", 'TOKEN')).toBe('quoted value');
+    expect(readEnvironmentValue('TOKEN=first\nTOKEN=second\n', 'TOKEN')).toBe('first');
+    expect(() => readEnvironmentValue('TOKEN="unfinished\n', 'TOKEN')).toThrow(expect.objectContaining({ code: 'credential_unreadable' }));
     expect(readEnvironmentValue('OTHER=1\n', 'TOKEN')).toBeNull();
+  });
+
+  it('reads a named credential file while removing only its final newline', async () => {
+    // Given
+    const { root, stateDir, manifest } = await fixture();
+    const file = path.join(root, 'token.txt');
+    await fs.writeFile(file, `${SECRET}\r\n\r\n`);
+    manifest.connections[0].credentials = { token: { file } };
+    // When
+    const result = await migrate({ stateDir, manifest: parseManifest(manifest), dryRun: true });
+    // Then
+    expect(result.report[0].fingerprints.token).toBe(createHash('sha256').update(`${SECRET}\r\n`).digest('hex').slice(0, 12));
+    expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 
   it('dry-runs without writing, then creates connections with their policies and credentials', async () => {

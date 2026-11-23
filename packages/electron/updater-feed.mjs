@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 // This fork publishes its own releases and installs beside the official app
-// (appId dev.openchamber.turbo). Pointing the feed at `openchamber/openchamber`
+// (appId dev.openchamber.turbo2). Pointing the feed at `openchamber/openchamber`
 // would download the official release and install it over this build, so the
 // owner must stay this fork's. Keep it in step with `build.publish` in
 // package.json, and re-check it after every upstream sync.
@@ -11,10 +11,6 @@ export const PRODUCTION_UPDATER_FEED = Object.freeze({
   repo: 'openchamber',
 });
 
-// Canary builds replace the files of one pre-release, tagged `canary`, every
-// night. The GitHub provider reads only the latest full release, so the
-// Canary channel reads that pre-release's files directly, and the Stable
-// channel never sees them.
 export const CANARY_UPDATER_FEED = Object.freeze({
   provider: 'generic',
   url: 'https://github.com/rubimpassos/openchamber/releases/download/canary/',
@@ -28,8 +24,6 @@ export const CANARY_UPDATER_FEED = Object.freeze({
 // an update nobody asked for.
 export const isUpdateChannel = (value) => value === 'stable' || value === 'canary';
 
-// A Canary build's version is the release it leads to with a `canary`
-// pre-release part: 2.5.4-canary.20261030.123.
 export const isCanaryVersion = (version) => /-canary\./.test(String(version ?? ''));
 
 export const normalizeUpdateChannel = (value, appVersion) => {

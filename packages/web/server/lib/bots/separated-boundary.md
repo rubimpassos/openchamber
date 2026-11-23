@@ -9,7 +9,7 @@ tool receipts. Project addresses are opaque strings there. The owner never
 constructs the project config runtime or runs Git against a project.
 
 The authenticated agent server supplies the operation-specific execution
-contract in `../agent-server/bot-service-contract.js`. It retains identity
+contract in `../agent-server/bot-service-contract.ts`. It retains identity
 secrets, credential resolution, mutation and audit journals, checkout ownership,
 host sessions, knowledge and host proof. It constructs no Bot coordinator,
 discovery worker or schedule admission. A space server retains its child inbox.

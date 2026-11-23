@@ -1,6 +1,6 @@
 # Project-local MCP storage
 
-`../mcp-local.js` owns private MCP persistence. `../mcp-local-plugin.js` materializes
+`../mcp-local.ts` owns private MCP persistence. `../mcp-local-plugin.ts` materializes
 the managed OpenCode plugin. They do not register routes or managed config entries.
 
 ## Public APIs
@@ -64,6 +64,12 @@ The generated plugin uses Node built-ins only. The host serializes the shared
 reader, the canonical JSON value guards from `shared/guards.js`, and plugin setup
 with explicit dependency arguments. The generated
 directory needs no installed packages and does not import the host's source files.
+
+The host implementations are TypeScript and consumers retain `.js` import
+specifiers for emitted Node modules. Reader and setup contracts are type-only;
+their serialized functions keep all runtime validation and dependencies inside
+the generated source. The reader's validator preserves unknown extension fields
+while narrowing known fields, without adding a package dependency to the plugin.
 
 Each setup resolves only `ctx.location.directory`, watches the containing storage
 directory before its initial read, and filters events to its exact hashed filename.

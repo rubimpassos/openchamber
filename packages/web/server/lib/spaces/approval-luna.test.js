@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { requireApprovalModel } from './approval-profile.js';
-import { startApprovalGatekeeper } from './approval-test-support.js';
+import { startApprovalGatekeeper } from './approval.test-support.js';
 
 const MODEL = { providerID: 'openai', modelID: 'gpt-6-luna' };
 const KEY = 'disposable-luna-window-control';

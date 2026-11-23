@@ -4,7 +4,7 @@ import net from 'node:net';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTestApp, requestBody } from './test-app.js';
+import { createTestApp, requestBody } from './test-app.test-support.js';
 
 // The shipped server runs on Node. Bun 1.3's HTTP shim drops rejected upgrades
 // and does not emit ServerResponse.close on disconnect. Run these real socket

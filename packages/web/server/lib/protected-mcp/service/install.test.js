@@ -2,60 +2,29 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { emitServiceFixture } from '../test-support/emitted-service.js';
 import { trustedFixtureDirectory } from '../test-support/fixtures.js';
+import { createHostRoot, ENGINE, recordingSystem } from '../test-support/install-fixtures.js';
 import { install, layout, rollback, uninstall } from './install.js';
 
-const serverSource = fileURLToPath(new URL('../../../', import.meta.url));
+let serverSource;
+let sourceScratch;
+beforeAll(async () => {
+  sourceScratch = await trustedFixtureDirectory();
+  serverSource = path.join(sourceScratch.directory, 'emitted');
+  await emitServiceFixture(serverSource);
+});
+afterAll(async () => { await sourceScratch?.remove(); });
 const cleanups = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-const ENGINE = { uid: 2_000_000_001, gids: [2_000_000_001] };
-
-/** The privileged operations, recorded instead of run, over a temporary root. */
-function recordingSystem(overrides = {}) {
-  const calls = [];
-  const record = (name) => async (...args) => {
-    calls.push([name, ...args]);
-  };
-  return {
-    calls,
-    trustedOwners: [0, process.getuid()],
-    isRoot: () => true,
-    hasSystemd: async () => true,
-    identity: async () => ENGINE,
-    ensureGroup: async (name) => {
-      calls.push(['ensureGroup', name]);
-      return name === 'openchamber-mcp-clients' ? 990 : name === 'openchamber-mcp-admins' ? 992 : 991;
-    },
-    ensureUser: async (name) => {
-      calls.push(['ensureUser', name]);
-      return 991;
-    },
-    addToGroup: record('addToGroup'),
-    removeFromGroup: record('removeFromGroup'),
-    removeUser: record('removeUser'),
-    removeGroup: record('removeGroup'),
-    chown: async () => {},
-    systemctl: record('systemctl'),
-    createTmpfiles: record('createTmpfiles'),
-    nodeVersion: async () => 'v24.21.0\n',
-    connect: async () => ({ protocol: 1, enforcement: { status: 'protected' } }),
-    sockets: [],
-    ...overrides,
-  };
-}
-
 async function hostRoot() {
-  const scratch = await trustedFixtureDirectory();
-  cleanups.push(scratch.remove);
-  const root = path.join(scratch.directory, 'root');
-  await fs.mkdir(path.join(root, 'usr/bin'), { recursive: true });
-  await fs.symlink('/usr/bin/node', path.join(root, 'usr/bin/node'));
-  return { root, scratch };
+  const result = await createHostRoot();
+  cleanups.push(result.scratch.remove);
+  return result;
 }
 
 const options = (root, system, extra = {}) => ({
@@ -260,7 +229,7 @@ describe('protected MCP installer', () => {
     const { root, scratch } = await hostRoot();
     const copy = path.join(scratch.directory, 'source');
     await fs.cp(path.join(serverSource, 'lib/protected-mcp/service'), path.join(copy, 'lib/protected-mcp/service'), { recursive: true });
-    await fs.cp(path.join(serverSource, 'lib/shared/guards.js'), path.join(copy, 'lib/shared/guards.js'));
+    await fs.cp(path.join(serverSource, 'lib/shared'), path.join(copy, 'lib/shared'), { recursive: true });
     await fs.chmod(path.join(copy, 'lib/protected-mcp/service'), 0o777);
     await expect(install(options(root, recordingSystem(), { source: copy }))).rejects.toMatchObject({ code: 'untrusted_source' });
 

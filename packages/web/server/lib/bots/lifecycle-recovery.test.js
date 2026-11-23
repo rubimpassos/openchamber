@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { afterEach, expect, it } from 'vitest';
-import { createBotDriver } from './runtime-test-support.js';
+import { createBotDriver } from './runtime.test-support.js';
 
 const roots = [];
 afterEach(async () => {

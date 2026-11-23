@@ -15,7 +15,7 @@ export type {
   LoopbackUrlResult, LoopbackRequest, LoopbackRequestResult,
 } from './loopback.ts';
 export type { LoopbackWatchEvent, LoopbackWatchRuntime, LoopbackEventSource } from './loopback-watch.ts';
-export type { GuestLoadState, GuestProject, GuestWorktree, GuestSessionActivity, GuestSessionRecord, GuestSessionLink, GuestDirectoryCoverage, GuestProjectsSnapshot, GuestWorktreesSnapshot, GuestSessionsSnapshot, GuestWorkspaceSnapshot, GuestWorkspaceQuery, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestStorageRequest, GuestStorageResult, GuestStorageOptions, GuestStorageScope, GuestSessionWorktree } from './workspace.ts';
+export type { GuestLoadState, GuestProject, GuestWorktree, GuestSessionActivity, GuestSessionRecord, GuestSessionLink, GuestSessionContext, GuestSessionTokenTotals, GuestDirectoryCoverage, GuestProjectsSnapshot, GuestWorktreesSnapshot, GuestSessionsSnapshot, GuestWorkspaceSnapshot, GuestWorkspaceQuery, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestStorageRequest, GuestStorageResult, GuestStorageOptions, GuestStorageScope, GuestSessionWorktree } from './workspace.ts';
 export { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_TOTAL_BYTES, GUEST_DEVICE_STORAGE_TOTAL_BYTES } from './workspace.ts';
 export type {
   GuestRunningShell,
@@ -428,12 +428,12 @@ export {
   isGuestPopoverRequest,
 } from './popover.ts';
 export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide, GuestTooltipRequest } from './popover.ts';
+export { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX, isGuestCommitSha } from './navigation.ts';
+export type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
 export {
   clampAttachRequest,
   clampBadgeCount,
   clampFrameHeight,
-  isGuestCommitSha,
-  GUEST_COMMIT_SHA,
   clampPromptRequest,
   clampStartSessionRequest,
   guestFileScope,
@@ -477,12 +477,12 @@ export type {
   GuestBadgeMessage,
   GuestResizeMessage,
   GuestOpenCommitMessage,
+  GuestOpenWalkthroughMessage,
   GuestStatusControlsMessage,
   GuestStatusSummaryMessage,
   GuestPopoverAnchorMessage,
   GuestPopoverCloseMessage,
   GuestPopoverOpenMessage,
-  OpenCommitRequest,
   ResizeRequest,
   GuestItem,
   GuestItemRole,
@@ -779,7 +779,7 @@ export type {
   BrowserTypeParameters,
   BrowserViewportMode,
   BrowserViewportSummary,
-  SourceControlChangeRequestHead,
+  SourceControlChangeRequestContext, SourceControlChangeRequestHead,
   SourceControlChangeRequestSource,
   SourceControlForge,
   SourceControlForgeUser,
@@ -803,7 +803,7 @@ export type {
   SourceControlProviderResult,
   SourceControlProviderSession,
   SourceControlProviderUser,
-  SourceControlReconcileData,
+  SourceControlReconcileData, SourceControlReviewerState,
   SourceControlResourceMethod,
   SourceControlVerifyData,
   SourceControlStatusData,

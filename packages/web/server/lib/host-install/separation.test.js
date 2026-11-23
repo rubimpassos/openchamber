@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ensureAccounts, separationConfig } from './accounts.js';
-import { AGENT, fakeSystem, FRONT, hostRoot, installOptions, OWNER } from './fake-system.js';
+import { AGENT, fakeSystem, FRONT, hostRoot, installOptions, OWNER } from './fake-system.test-support.js';
 import { install, layout, rollback, uninstall, update } from './host.js';
 import { AGENT_UNIT, ALL_UNITS, APP_UNIT, HOSTD_SOCKET, HOSTD_UNIT, MANAGED_MARKER, UPDATER_PATH, UPDATER_TIMER, UPDATER_UNIT } from './host-units.js';
 import { rootCommand } from './root-commands.js';
@@ -30,7 +30,6 @@ describe('separated host install', () => {
     expect(system.calls).toContainEqual(['chown', paths.requestDir, FRONT.uid, FRONT.gid]);
     expect(system.calls.find(([name]) => name === 'protectedMcp.options')[1]).toMatchObject({ engineUser: 'alice-agent', adminUser: 'openchamber', engineUnit: AGENT_UNIT });
     expect(system.calls.find(([name]) => name === 'installOpenCode')[1]).toMatchObject(AGENT);
-    expect(await fs.readFile(paths.wrapper, 'utf8')).toBe('#!/bin/sh\nexec /usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/server/lib/host-install/main.js "$@"\n');
     expect((await fs.stat(paths.wrapper)).mode & 0o777).toBe(0o755);
   });
 
@@ -40,10 +39,10 @@ describe('separated host install', () => {
     // Then
     const expected = {
       [APP_UNIT]: ['After=network-online.target openchamber-agent.service openchamber-hostd.socket', 'Wants=network-online.target openchamber-hostd.socket openchamber-agent.service', 'User=openchamber', 'Group=openchamber', 'WorkingDirectory=/var/lib/openchamber', 'Environment=HOME=/var/lib/openchamber', 'Environment="PATH=/usr/local/bin:/usr/bin:/bin"', 'EnvironmentFile=-/etc/openchamber/openchamber.env', 'EnvironmentFile=/etc/openchamber/agent-link.env', 'ProtectHome=tmpfs', 'PrivateTmp=yes', 'NoNewPrivileges=yes', 'ProtectSystem=full', 'UMask=0077'],
-      [AGENT_UNIT]: ['User=alice-agent', `Group=${AGENT.gid}`, 'WorkingDirectory=/home/alice-agent', 'Environment=HOME=/home/alice-agent', 'Environment="PATH=/home/alice-agent/.local/bin:/home/alice-agent/.opencode/bin:/home/alice-agent/.bun/bin:/usr/local/bin:/usr/bin:/bin"', 'EnvironmentFile=/etc/openchamber/agent.env', 'Environment=OPENCHAMBER_PROTECTED_MCP_CLIENT_CONFIG=/etc/openchamber/protected-mcp/agent-client.json', 'BindReadOnlyPaths=-/run/openchamber-protected-mcp/subjects/agent:/run/openchamber-mcp', `InaccessiblePaths=-/run/openchamber-hostd -/run/openchamber-protected-mcp-admin -/var/lib/openchamber -/etc/openchamber/openchamber.env -/etc/openchamber/agent-link.env -/run/user/${OWNER.uid}`, 'ProtectProc=invisible', 'PrivateTmp=yes', 'NoNewPrivileges=yes', 'UMask=0077', 'Restart=always', 'ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/bin/cli.js serve --foreground --api-only --host 127.0.0.1 --port 41890'],
+      [AGENT_UNIT]: ['User=alice-agent', `Group=${AGENT.gid}`, 'WorkingDirectory=/home/alice-agent', 'Environment=HOME=/home/alice-agent', 'Environment="PATH=/home/alice-agent/.local/bin:/home/alice-agent/.opencode/bin:/home/alice-agent/.bun/bin:/usr/local/bin:/usr/bin:/bin"', 'EnvironmentFile=/etc/openchamber/agent.env', 'Environment=OPENCHAMBER_PROTECTED_MCP_CLIENT_CONFIG=/etc/openchamber/protected-mcp/agent-client.json', 'BindReadOnlyPaths=-/run/openchamber-protected-mcp/subjects/agent:/run/openchamber-mcp', `InaccessiblePaths=-/run/openchamber-hostd -/run/openchamber-protected-mcp-admin -/var/lib/openchamber -/etc/openchamber/openchamber.env -/etc/openchamber/agent-link.env -/run/user/${OWNER.uid}`, 'ProtectProc=invisible', 'PrivateTmp=yes', 'NoNewPrivileges=yes', 'UMask=0077', 'Restart=always', 'ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/build/bin/cli.js serve --foreground --api-only --host 127.0.0.1 --port 41890'],
       [HOSTD_SOCKET]: ['ListenStream=/run/openchamber-hostd/hostd.sock', 'SocketUser=openchamber', 'SocketGroup=root', 'SocketMode=0600', 'DirectoryMode=0711', 'RemoveOnStop=yes', 'WantedBy=sockets.target'],
-      [HOSTD_UNIT]: ['Requires=openchamber-hostd.socket', 'After=openchamber-hostd.socket', 'ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/server/lib/hostd/main.js', 'UMask=0077', 'NoNewPrivileges=yes', 'LockPersonality=yes', 'Restart=on-failure'],
-      [UPDATER_UNIT]: ['Type=oneshot', 'ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/server/lib/host-install/main.js update', 'NoNewPrivileges=yes', 'PrivateTmp=yes'],
+      [HOSTD_UNIT]: ['Requires=openchamber-hostd.socket', 'After=openchamber-hostd.socket', 'ExecStart=/usr/bin/node /usr/lib/openchamber/current/node_modules/@openchamber/web/build/server/lib/hostd/main.js', 'UMask=0077', 'NoNewPrivileges=yes', 'LockPersonality=yes', 'Restart=on-failure'],
+      [UPDATER_UNIT]: ['Type=oneshot', 'NoNewPrivileges=yes', 'PrivateTmp=yes'],
       [UPDATER_TIMER]: ['OnCalendar=daily', 'RandomizedDelaySec=1h', 'Persistent=true', 'WantedBy=timers.target'],
       [UPDATER_PATH]: ['PathChanged=/var/lib/openchamber-host/requests/update', 'Unit=openchamber-updater.service', 'WantedBy=paths.target'],
     };

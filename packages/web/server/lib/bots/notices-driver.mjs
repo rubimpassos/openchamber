@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { createNoticeDriver } from './notices-test-support.js';
+import { createNoticeDriver } from './notices.test-support.js';
 
 const root = await fs.mkdtemp('/tmp/opencode/bot-notices-driver-');
 const driver = await createNoticeDriver(root);

@@ -37,7 +37,14 @@ const setup = ({ label = 'Project', primaryRoot = null, chatRoots = [] } = {}) =
   const readSettings = vi.fn(async () => ({ projects: [{ path: project, label }] }));
   const resolvePrimaryWorktreeRoot = vi.fn(async () => ({ root: primaryRoot ?? project }));
   const app = express();
-  registerDisplayMetadataRoute(app, { readSettings, resolveGitBinaryForSpawn: () => git.binary, resolvePrimaryWorktreeRoot, chatRoots });
+  registerDisplayMetadataRoute(app, {
+    readSettingsFromDisk: readSettings,
+    buildOpenCodeUrl: () => { throw new Error('Display metadata must not query OpenCode'); },
+    getOpenCodeAuthHeaders: () => { throw new Error('Display metadata must not read OpenCode credentials'); },
+    resolveGitBinaryForSpawn: () => git.binary,
+    resolvePrimaryWorktreeRoot,
+    chatRoots,
+  });
   return { app, readSettings, resolvePrimaryWorktreeRoot, git, project, linked };
 };
 

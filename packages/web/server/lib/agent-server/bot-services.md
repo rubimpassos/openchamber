@@ -54,6 +54,7 @@ before these service calls. The agent constructs its provider executor with
 `ownerAuthorityChecked: true` only in the separated authenticated composition.
 The client recomputes the prepared input digest using the existing service
 descriptor fields and parsed operation input before preflight or either callback.
+It matches the service's payload digest, so persisted descriptors keep their value.
 Prepared replies also retain the selected identity's credential revision.
 Reconciliation retains the descriptor's original selected identity after a Bot
 default changes. It never substitutes that new default or rewrites the digest.
@@ -85,7 +86,7 @@ an exact checkout in the owner's item store. An unknown directory refuses.
 `registerBotServiceRoutes(app, { services })` mounts their private typed routes
 after API authentication, only when the composition explicitly constructs these
 agent services. The front-door gate must refuse the entire private namespace.
-The factory is also re-exported from `bot-service-routes.js`. Agent execution
+The factory is also re-exported from `bot-service-routes.ts`. Agent execution
 exposes `handleTool(request, options)`, `stop()` and an internal
 `worktrees.resolveTransferSource(source, { trustedMigrationPath })` for the existing
 Spaces transfer owner.
@@ -150,12 +151,38 @@ leaves its frame unacknowledged and recovery drains the journal before resuming.
 - Proof cancellation aborts the agent's existing proof runner. It never creates
   an arbitrary command endpoint; its command and arguments must equal the captured
   Bot proof configuration and its commits belong to the exact checkout.
+- Provider rule parameters are the only extensible provider field on the wire
+  and are bounded JSON. Every other provider field has a named schema.
 - Policy responses carry bounded raw bytes and explicit missing/unreadable states.
   The owner computes fingerprints and approval authority.
 - The agent retains execution receipts and protocol connections only. It runs no
   Bot coordinator, discovery, provider polling or reconnect timers.
 
 ## Decisions
+
+### Why wire contracts use checked TypeScript
+
+The schemas and private routes compile as TypeScript while retaining emitted
+`.js` import specifiers for existing consumers. Operation inputs and replies derive
+from the bounded schemas. Semantic reply checks live in
+`bot-service-reply-contract.ts` and use operation-correlated argument tuples, so
+the compiler checks each operation's association rules. The wire registry remains
+together because provider operations share schema construction and bounds.
+Authentication still belongs to the server composition before route registration.
+
+The owner client and agent executor also use checked TypeScript. The client keeps
+owner registry and migration resolution in `bot-owner-scope.ts`; bindings expose
+no credential methods. The executor separates local credential owners, operation
+handlers, allocation recovery and shutdown without changing wire schemas or
+journal versions. `bot-service-codec.ts` preserves operation-specific input/reply
+types through the shared semantic checks, including exact association checks.
+
+Checkout consumers accept item identity and the captured checkout fields, rather
+than a complete coordinator snapshot. Read-only transfer lookup may carry identity
+alone. Publication admission and removal require the real effects ledger and
+refuse its absence; they never invent an empty ledger. PR options distinguish a
+credential-bearing local context from a binding-only context with required
+delegated execution. Local GitHub operations stay behind the credential owner.
 
 ### Why callbacks remain in the owner
 

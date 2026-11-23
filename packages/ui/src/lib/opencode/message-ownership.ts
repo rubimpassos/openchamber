@@ -4,7 +4,6 @@ type AncestorMessageSource<T> = {
   readMessage: (sessionID: string) => Promise<T>
   readParentID: (sessionID: string) => Promise<string | undefined>
   isNotFound: typeof isOpencodeNotFound
-  /** False once the runtime the lookup started on is no longer current. */
   isCurrent: () => boolean
 }
 

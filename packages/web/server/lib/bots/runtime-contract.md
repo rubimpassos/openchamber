@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns item admission and transitions. `effects.js` owns dispatch safety. `execution-store.js` persists immutable effect requests and stage reports beside the item snapshot. The item store remains the authority for item state and effect settlement. A descriptor is durable before its item effect exists; an orphan descriptor grants no permission to send.
+`runtime.js` owns item admission and transitions. `effects.ts` owns dispatch safety. `execution-store.ts` persists immutable effect requests and stage reports beside the item snapshot. The item store remains the authority for item state and effect settlement. A descriptor is durable before its item effect exists; an orphan descriptor grants no permission to send.
 
 ## Runtime dependencies
 
@@ -98,6 +98,15 @@
 | VS Code | Unsupported; no bot runtime is constructed. |
 
 ## Decisions
+
+### Why effect and prompt types reuse the existing schemas
+
+`effects.ts` derives effect identities and compact receipts from the item schema and uses the execution journal's JSON request contract. The existing effect parser still validates receipts and error codes at settlement. `prompts.ts` derives report types from each stage parser, preserving extra-field stripping, defaults and evidence URL handling. `events.ts` types local delivery and scheduler projection without changing their synchronous lifecycle.
+
+Effect recovery requires only its original key and a reconciler. It verifies the
+captured request digest before returning a terminal receipt or reconciling an
+uncertain dispatch. It cannot admit a prepared effect or invoke an executor;
+explicit execution remains the responsibility of `run`.
 
 ### Why local tools queue before taking project ownership
 

@@ -40,6 +40,17 @@ describe('requestAdmin', () => {
     // Then the refusal remains distinct from a transport failure.
     expect(result).toEqual({ ok: false, status: 409, code: 'revision_conflict', message: 'revision_conflict' });
   });
+  it('distinguishes a reply for a different request from a successful reply', async () => {
+    const fixture = await peer((socket) => socket.end('{"type":"subjects","subjects":[]}\n'));
+    const result = await requestAdmin({ clientConfigPath: fixture.clientConfigPath, frame: { type: 'list' } });
+    expect(result).toEqual({ ok: false, status: 502, code: 'invalid_response', message: 'invalid_response' });
+  });
+  it('preserves the empty connection view after removal', async () => {
+    const fixture = await peer((socket) => socket.end('{"type":"applied","connection":null}\n'));
+    const result = await requestAdmin({ clientConfigPath: fixture.clientConfigPath,
+      frame: { type: 'apply', operation: { kind: 'remove', id: 'pmcp_0000000000000001', expectedRevision: 1 } } });
+    expect(result).toEqual({ ok: true, answer: { type: 'applied', connection: null } });
+  });
   it.each(['not json\n', '{}\n', '{"type":"oauth-attempt","status":"pending"}', `${'x'.repeat(1024 * 1024 + 1)}\n`])('refuses malformed, incomplete or oversized socket answers', async (answer) => {
     // Given bytes outside the answer contract.
     const fixture = await peer((socket) => socket.end(answer));

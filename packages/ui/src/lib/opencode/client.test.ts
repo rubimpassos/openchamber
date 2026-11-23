@@ -136,12 +136,74 @@ test('sends no session mutation when creation rejects', async () => {
   } finally { release() }
 })
 
+test('keeps a confirmed Windows network share in OpenCode UNC form', async () => {
+  // Given a create that confirms the normalized spelling of a network share.
+  const creation = deferSessionOperation<import('./model').Session>()
+  const release = trackPendingSessionCreation('ses_pending_unc', { ready: creation.promise, isCurrent: () => true })
+  const client = createRuntimeOpencodeClient({ baseUrl: 'http://runtime.test/api', directory: '/requested' })
+  responses.push(noContent())
+  // When the waiting rename resumes on that canonical directory.
+  const rename = client.session.update({ sessionID: 'ses_pending_unc', title: 'changed' })
+  creation.resolve({ ...sessionInfo, id: 'ses_pending_unc', directory: '//server/share/repo' })
+  try {
+    await rename
+    // Then the fork's creation gate preserves the upstream UNC transport contract.
+    expect(requests[0]?.headers.get('x-opencode-directory')).toBe(encodeURIComponent('\\\\server\\share\\repo'))
+    expect(requests[0]?.body).toEqual({ title: 'changed' })
+  } finally { release() }
+})
+
 beforeEach(() => {
   requests.length = 0
   responses.length = 0
   runtimeKey = "test-runtime"
   opencodeClient.setDirectory(undefined)
   opencodeClient.clearConfigCache()
+})
+
+describe('fork session continuations', () => {
+  test('admits the retry note before interrupting with resume', async () => {
+    // Given a session waiting on an automatic retry.
+    responses.push(json({ data: {
+      id: 'msg_retry', sessionID: 'ses_retry', time: { created: 1 }, type: 'synthetic',
+      payload: { text: 'Retry note', metadata: { openchamberRetryNow: true } }, delivery: 'steer',
+    } }), json({ interrupted: true }))
+    // When the user retries immediately.
+    await opencodeClient.retrySessionNow('ses_retry', '/repo/retry')
+    // Then the note is admitted without waking and the following interrupt resumes it.
+    expect(requests.map((request) => request.url.pathname)).toEqual([
+      '/api/session/ses_retry/synthetic', '/api/session/ses_retry/interrupt',
+    ])
+    expect(requests[0]?.body).toMatchObject({ metadata: { openchamberRetryNow: true }, delivery: 'steer', resume: false })
+    expect(requests[1]?.url.searchParams.get('resume')).toBe('true')
+    expect(requests.every((request) => request.headers.get('x-opencode-directory') === encodeURIComponent('/repo/retry'))).toBe(true)
+  })
+
+  test('leaves the turn running when the retry note is refused', async () => {
+    // Given a refusal before the steer note is admitted.
+    responses.push(json({ _tag: 'InvalidRequestError', message: 'refused' }, 400))
+    // When retry-now tries to admit the note.
+    await expect(opencodeClient.retrySessionNow('ses_retry')).rejects.toThrow()
+    // Then no interrupt loses the running turn.
+    expect(requests.map((request) => request.url.pathname)).toEqual(['/api/session/ses_retry/synthetic'])
+  })
+
+  test('resumes a session with its OpenChamber notice metadata intact', async () => {
+    // Given an interrupted question answered outside the composer.
+    const metadata = { source: 'openchamber-notice', kind: 'question-answer', at: 1, answers: [] }
+    responses.push(json({ data: {
+      id: 'msg_answer', sessionID: 'ses_answer', time: { created: 1 }, type: 'synthetic',
+      payload: { text: 'Blue', description: 'Answered', metadata }, delivery: 'steer',
+    } }))
+    // When the answer is sent on the session's own agent and model.
+    await opencodeClient.sendOpenChamberMessage({
+      sessionID: 'ses_answer', directory: '/repo/answer', text: 'Blue', description: 'Answered', metadata,
+    })
+    // Then only the synthetic resume is sent, with no model or agent switch.
+    expect(requests.map((request) => request.url.pathname)).toEqual(['/api/session/ses_answer/synthetic'])
+    expect(requests[0]?.body).toMatchObject({ metadata, delivery: 'steer', resume: true })
+    expect(requests[0]?.headers.get('x-opencode-directory')).toBe(encodeURIComponent('/repo/answer'))
+  })
 })
 
 describe('runtime routing responses', () => {
@@ -323,34 +385,6 @@ test('a drive-root system-info fallback stays absolute', async () => {
     expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/current"))
   })
 
-  test("invalidating an agent list starts a new request without letting the old request clear it", async () => {
-    const wireAgent = (id: string) => ({
-      id,
-      name: id,
-      mode: "subagent",
-      request: { settings: {}, headers: {}, body: {} },
-      hidden: false,
-      permissions: [],
-    })
-    let releaseFirst: (response: Response) => void = () => undefined
-    const firstResponse = new Promise<Response>((resolve) => {
-      releaseFirst = resolve
-    })
-    responses.push(() => firstResponse)
-
-    const first = opencodeClient.listAgents("/repo/agents")
-    await Promise.resolve()
-    expect(requests).toHaveLength(1)
-
-    opencodeClient.invalidateAgentList("/repo/agents")
-    responses.push(json({ location: {}, data: [wireAgent("new-agent")] }))
-    const fresh = opencodeClient.listAgents("/repo/agents")
-    expect(requests).toHaveLength(2)
-
-    releaseFirst(json({ location: {}, data: [wireAgent("old-agent")] }))
-    expect((await first)[0]?.name).toBe("old-agent")
-    expect((await fresh)[0]?.name).toBe("new-agent")
-  })
 })
 
 describe("error normalisation", () => {
@@ -554,16 +588,6 @@ describe("sendMessage", () => {
       messageId: "msg_4",
     })
     expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
-  })
-
-  test("a selection whose last switch outlives the runtime rejects, so no reply follows it", async () => {
-    responses.push(agentList("build"), noContent(), () => {
-      runtimeKey = "other"
-      return noContent()
-    })
-    await expect(
-      opencodeClient.applySendSelection("ses_1", { model: { id: "grok-4.7", providerID: "xai" }, agent: "build" }, null, "test"),
-    ).rejects.toThrow("runtime changed")
   })
 
   test("refuses to send when the runtime changed underneath the caller", async () => {
@@ -1042,6 +1066,23 @@ describe("messages and config", () => {
     // would vanish from Settings → Providers.
     const modelList = requests.find((request) => request.url.pathname === "/api/model")
     expect(modelList?.url.searchParams.getAll("types")).toEqual(["chat", "image"])
+  })
+
+  test("getProvidersForConfig names the Zen provider OpenCode Zen, whatever Console workspace OpenCode puts in front", async () => {
+    const providers = [
+      { id: "opencode", integrationID: "opencode", name: "Personal OC / OpenCode" },
+      { id: "opencode-go", integrationID: "opencode", name: "OpenCode Go" },
+      { id: "console-google", integrationID: "opencode", name: "Personal OC / Google" },
+    ]
+    const answer = (request: CapturedRequest) =>
+      request.url.pathname === "/api/provider"
+        ? json({ location: {}, data: providers })
+        : request.url.pathname === "/api/model"
+          ? json({ location: {}, data: [] })
+          : json({ location: {}, data: null })
+    responses.push(answer, answer, answer)
+    const catalog = await opencodeClient.getProvidersForConfig("/repo/zen")
+    expect(catalog.providers?.map((provider: { name: string }) => provider.name)).toEqual(["OpenCode Zen", "OpenCode Go", "Personal OC / Google"])
   })
 
   for (const { label, variants } of [

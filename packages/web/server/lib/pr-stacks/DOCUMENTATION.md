@@ -4,8 +4,9 @@ Rebases a stack of branches after a lower one changed. Detection, native stack r
 
 ## Files
 
-- `restack.js`: `createRestackRuntime(...)` and `registerRestackRoutes(app, runtime)`.
-- `own-commits.js`: `listOwnCommits(runGit, directory, { branch, remote, trunk, limit })`, a branch's commits past `refs/remotes/<remote>/<trunk>` nearest first (`null` when either ref is missing, throws when rev-list fails), for the create form's stack parent detection in `../github/pr-stacks.js`; `normalizeCreatedFrom` turns a reflog source into a branch of that remote.
+- `restack.ts`: `createRestackRuntime(...)` and `registerRestackRoutes(app, runtime)`. Source imports keep the `.js` extension for the emitted server.
+- `restack-contracts.ts`: start and persisted-run schemas, runtime dependencies, events and public run/step contracts. Public types are re-exported from `restack.ts`.
+- `own-commits.ts`: `listOwnCommits(runGit, directory, { branch, remote, trunk, limit })`, a branch's commits past `refs/remotes/<remote>/<trunk>` nearest first (`null` when either ref is missing, throws when rev-list fails), for the create form's stack parent detection in `../github/pr-stacks.js`; `normalizeCreatedFrom` turns a reflog source into a branch of that remote.
 - `restack.test.js`: real Git repositories: a clean cascade, a conflict paused and continued, the session resolving a conflict, abort, and a dirty worktree.
 
 Wiring: created in `server/index.js` after the message queue, routes registered in `opencode/feature-routes-runtime.js`, JSON bodies through `opencode/core-routes.js` (`/api/pr-stacks`).
@@ -40,6 +41,18 @@ Start admission reserves the repository directory before reading asynchronous se
 Start, Continue, Abort, session handoff and automatic continuation share a per-run execution reservation through Git operations and persistence. Overlapping manual controls receive 409 without changing the run or worktree. An idle notification skips a run already executing. Every success or failure releases the reservation.
 
 Execution also reserves the repository independently of run history. A new start receives 409 until terminal cleanup and final persistence finish, even when the executing run already reports `done` or `aborted` or is evicted from retained history.
+
+## Type and persistence boundaries
+
+`RestackRuntimeOptions` reuses `RunGit` from `own-commits.ts`. Session delivery and broadcast callbacks may return their adapter's result; the runtime only awaits delivery. `RestackRuntime` exposes start, latest, continue, abort, askSession and noteSessionIdle. Run identity and repository directory are readonly; step progress remains mutable because callers observe the same live run through continuation.
+
+### Why persisted runs are parsed completely
+
+The JSON file is untrusted input. Each entry must supply the run fields and typed steps; a conflict step requires its worktree so Continue and Abort cannot act in an undefined directory. Malformed entries are skipped independently, preserving valid neighbours. Existing valid snapshots need no conversion, and unknown extension fields survive round trips.
+
+### Why reservations capture their keys
+
+Execution acquires and releases the same captured run ID and repository directory through final persistence. Reading those keys again from a live run during cleanup could release a different reservation if an untyped callback changed the record.
 
 ## Routes
 

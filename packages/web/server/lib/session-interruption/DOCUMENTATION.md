@@ -16,15 +16,15 @@ stores `interrupted` and nothing more.
 
 ## Files
 
-- `runtime.js` — `createSessionInterruptionRuntime({ persistMetadata, updateMetadata, buildOpenCodeUrl, getOpenCodeAuthHeaders })`,
+- `runtime.ts` — `createSessionInterruptionRuntime({ persistMetadata, updateMetadata, buildOpenCodeUrl, getOpenCodeAuthHeaders })`,
   fed by the global hub subscriber in `server/index.js`; `recordRestartInterruptions` is called by its `onOpenCodeRestarted`.
-- `restart.js` — the restart record patch, `findInterruptedTool`,
+- `restart.ts` — the restart record patch, `findInterruptedTool`,
   `findOpenAssistantMessageID` and the `opencode-restart-interrupted`
   notification payload.
-- `auto-resume.js` — the resume message and the notice's Continue
+- `auto-resume.ts` — the resume message and the notice's Continue
   (`continueManually`). The server's automatic recovery belongs to
   `../opencode/session-runtime.js`.
-- `routes.js` — `POST /api/openchamber/sessions/:sessionId/restart-resume`
+- `routes.ts` — `POST /api/openchamber/sessions/:sessionId/restart-resume`
   with `{ at, directory? }`: 200 sent, 409 the record changed or was already
   resumed, 502 OpenCode did not take the message.
 
@@ -187,6 +187,23 @@ message yet: that needs the execution queue (stage 2).
   left as an error.
 
 ## Testing
+
+### Why the checked modules retain their existing parsers
+
+Metadata and tool records retain their Zod acceptance rules. The metadata store
+owns the queued decider contract; `contracts.ts` imports it and defines this
+module's recovery inputs. Partial session reads still support both directory
+locations. Message scans keep the newest-turn boundary and preserve omitted
+tool fields; persisted patches write nulls to clear fields from earlier records.
+Mutable recovery generations and the manual selection cell retain changes made
+inside queued callbacks across awaits. The resume parser keeps loose resume
+fields so a failed Continue restores the previous state whole.
+
+The priority resume helper retains its memory gate: 15-second polls for at most
+10 minutes, `fullAvg60` below 2 and unchanged high/max counters. It claims every
+eligible session before waiting, waits once for the batch, and sends serially.
+The server's automatic restart recovery still has its separate upstream owner.
+Relative imports retain `.js` for source-hook resolution and emitted consumers.
 
 `bunx vitest run server/lib/session-interruption` from `packages/web`. The UI
 side: `bun test src/lib/questions src/lib/opencode/openchamber-resume.test.ts

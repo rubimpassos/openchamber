@@ -55,13 +55,9 @@ export const SURFACE_SEQ_HEADER = 'x-surface-seq';
 export const SURFACE_WIDTH_HEADER = 'x-surface-width';
 export const SURFACE_HEIGHT_HEADER = 'x-surface-height';
 export const SURFACE_TITLE_HEADER = 'x-surface-title';
-/** `1` while the service's own automation (an agent) is driving the surface. */
 export const SURFACE_AGENT_ACTIVE_HEADER = 'x-surface-agent-active';
-/** Host → service: the host-issued id of the viewer a request comes from. */
 export const SURFACE_VIEWER_HEADER = 'x-surface-viewer';
-/** Host → service: the service's sequence number of the frame that viewer last drew; `0` before its first. */
 export const SURFACE_FRAME_SEQ_HEADER = 'x-surface-frame-seq';
-/** Host → service, on page `serviceRequest`s only: `1` while that viewer holds control, else `0`. */
 export const SURFACE_VIEWER_CONTROLS_HEADER = 'x-surface-viewer-controls';
 export const SURFACE_AUDIO_CODEC_HEADER = 'x-surface-audio-codec';
 export const SURFACE_AUDIO_SAMPLE_RATE_HEADER = 'x-surface-audio-sample-rate';
@@ -77,14 +73,12 @@ export const SURFACE_AUDIO_CHANNELS_MAX = 2;
 export const SURFACE_FRAME_MIMES = ['image/jpeg', 'image/png'] as const;
 export type SurfaceFrameMime = (typeof SURFACE_FRAME_MIMES)[number];
 
-/** How long the host lets one frame request wait before asking again. */
 export const SURFACE_FRAME_WAIT_MS = 25_000;
 export const SURFACE_FRAME_MAX_BYTES = 8_000_000;
 export const SURFACE_INPUT_BATCH_MAX = 256;
 export const SURFACE_TEXT_MAX = 64_000;
 export const SURFACE_TITLE_MAX = 200;
 export const SURFACE_DIMENSION_MAX = 16_384;
-/** After an agent action the agent counts as controlling for this long. */
 export const SURFACE_AGENT_HOLD_MS = 30_000;
 
 export type SurfaceModifiers = { alt: boolean; ctrl: boolean; meta: boolean; shift: boolean };
@@ -94,9 +88,7 @@ export type SurfacePointerEvent = {
   action: 'down' | 'up' | 'move';
   x: number;
   y: number;
-  /** 0 left, 1 middle, 2 right; `-1` for a move without a button change. */
   button: number;
-  /** Bitmask of buttons held, as `MouseEvent.buttons`. */
   buttons: number;
   modifiers: SurfaceModifiers;
 };
@@ -113,19 +105,12 @@ export type SurfaceWheelEvent = {
 export type SurfaceKeyEvent = {
   type: 'key';
   action: 'down' | 'up';
-  /** `KeyboardEvent.key`. */
   key: string;
-  /** `KeyboardEvent.code`. */
   code: string;
-  /**
-   * `KeyboardEvent.keyCode` as the viewer's browser computed it for the user's
-   * keyboard layout, 0 to 255. Older hosts omit it.
-   */
   keyCode?: number;
   modifiers: SurfaceModifiers;
 };
 
-/** Text the user pasted or composed; type it as is. */
 export type SurfaceTextEvent = { type: 'text'; text: string };
 
 export type SurfaceInputEvent = SurfacePointerEvent | SurfaceWheelEvent | SurfaceKeyEvent | SurfaceTextEvent;
@@ -137,7 +122,6 @@ export type SurfaceController = (typeof SURFACE_CONTROLLERS)[number];
 
 export type SurfaceControlNotice = {
   controller: SurfaceController;
-  /** The controlling viewer's id (`x-surface-viewer`), present only when `controller` is `user`. */
   viewer?: string;
 };
 
@@ -203,11 +187,6 @@ const readEvent = (value: SurfaceWire): SurfaceInputEvent | null => {
   return null;
 };
 
-/**
- * A service's read of the `POST /surface/input` body. Every event is checked
- * field by field; one bad event refuses the whole batch (`null`), which the
- * service answers with HTTP 400. No schema library needed.
- */
 export const readSurfaceInputBatch = (body: string): SurfaceInputBatch | null => {
   let parsed: { events?: unknown } | null;
   try {
@@ -230,7 +209,6 @@ export const readSurfaceInputBatch = (body: string): SurfaceInputBatch | null =>
 
 const CONTROLLERS: ReadonlySet<string> = new Set(SURFACE_CONTROLLERS);
 
-/** A service's read of the `POST /surface/control` body. */
 export const readSurfaceControlNotice = (body: string): SurfaceControlNotice | null => {
   let parsed: { controller?: unknown; viewer?: unknown } | null;
   try {
@@ -247,7 +225,6 @@ export const readSurfaceControlNotice = (body: string): SurfaceControlNotice | n
   return notice;
 };
 
-/** A service's read of the `POST /surface/resize` body. */
 export const readSurfaceResizeRequest = (body: string): SurfaceResizeRequest | null => {
   let parsed: { width?: unknown; height?: unknown } | null;
   try {

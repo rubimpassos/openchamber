@@ -3,7 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createNoticeDriver } from './notices-test-support.js';
+import { createNoticeDriver } from './notices.test-support.js';
 import { createBotNotices } from './notices.js';
 import { registerMessageQueueRoutes, parseQueuedItemInput } from '../message-queue/runtime.js';
 

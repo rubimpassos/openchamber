@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { readTrustedBotWorktrees } from './bot-migration-access.js';
-import { fakeSystem, FRONT, hostRoot, installOptions, OWNER } from './fake-system.js';
+import { fakeSystem, FRONT, hostRoot, installOptions, OWNER } from './fake-system.test-support.js';
 import { install, layout } from './host.js';
 import { cli } from './main.js';
 import * as migration from './migrate-accounts.js';
@@ -151,7 +151,7 @@ it.each([false, true])('preserves the mapping filename through install.sh --host
   const f = await setup();
   const workdir = path.join(f.root, 'bootstrap');
   const captured = path.join(f.root, 'forwarded.json');
-  await write(path.join(workdir, 'package/server/lib/host-install/main.js'), 'import fs from "node:fs"; fs.writeFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)));');
+  await write(path.join(workdir, 'package/build/server/lib/host-install/main.js'), 'import fs from "node:fs"; fs.writeFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)));');
   const script = fileURLToPath(new URL('../../../../../scripts/install.sh', import.meta.url));
   const digest = 'a'.repeat(64);
   const program = [

@@ -6,7 +6,7 @@ import { frontDoorRequestGate } from './front-door.js';
 import { classify } from './ownership.js';
 import { registerFrontDoorFixLoopRoutes } from './front-door-fix-loops.js';
 import { FIX_LOOP_BYTES, FIX_LOOP_ROUTE, FIX_LOOP_SERVICE_ROUTE } from './fix-loop-contract.js';
-import { autoLoop, CONTEXT, PULL, TARGET } from './fix-loop-test-fixture.js';
+import { autoLoop, CONTEXT, PULL, TARGET } from './fix-loop.fixture.js';
 
 const rawResponse = (text, statusCode = 200) => Object.assign(Readable.from([Buffer.from(text)]), { statusCode });
 const response = (body, statusCode = 200) => rawResponse(JSON.stringify(body), statusCode);

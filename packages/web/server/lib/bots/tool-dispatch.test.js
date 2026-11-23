@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { afterEach, expect, it } from 'vitest';
-import { createToolDispatchDriver } from './tool-dispatch-test-support.js';
+import { createToolDispatchDriver } from './tool-dispatch.test-support.js';
 import { createBotEffects } from './effects.js';
 
 const cleanups = [];

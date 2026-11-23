@@ -13,10 +13,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type ProjectIconSource = Pick<ProjectEntry, 'id' | 'icon' | 'color' | 'iconImage' | 'iconBackground'>;
 
-/**
- * A project's icon drawn the way the sidebar draws it: the project's image,
- * its chosen icon in its colour, or a folder.
- */
 export function ProjectIcon({ project, className }: { project: ProjectIconSource; className?: string }): React.ReactNode {
   const { currentTheme } = useThemeSystem();
   const iconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
@@ -49,18 +45,11 @@ export function ProjectIcon({ project, className }: { project: ProjectIconSource
   );
 }
 
-/**
- * The icon of the project a session belongs to (`ProjectIcon`). A managed
- * chat has no project and gets the chat icon. Nothing renders when the
- * directory matches no known project.
- */
 export function SessionProjectIcon({ directory, className }: { directory: string | null; className?: string }): React.ReactNode {
   const projects = useProjectsStore((state) => state.projects);
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
-  // A space's session belongs to the project the space was made from, known once the space is;
-  // subscribed here so the icon appears when the space list arrives after the tabs.
   const spaceProject = useSpaceProjectDirectory(directory);
   const isChat = isChatDirectoryForHome(directory, homeDirectory);
   const project = React.useMemo(

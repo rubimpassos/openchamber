@@ -6,6 +6,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { Readable } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import { pathToFileURL } from 'node:url';
+import { stripTypeScriptTypes } from 'node:module';
 import { botDefinitionSchema } from '../bots/config.js';
 import { createBotExecutionServices } from '../bots/agent-execution.js';
 import { createAgentUpstream, readBoundedBody } from './agent-upstream.js';
@@ -18,6 +19,7 @@ import { createOwnerBotGateway } from './bot-owner-gateway.js';
 import { createBotServices } from '../bots/services.js';
 import { createBotItem } from '../bots/schema.js';
 import { botToolReplySchema } from './bot-service-contract.js';
+import { createSessionKnowledgeRuntime } from '../session-knowledge/runtime.js';
 
 const HEAD = 'a'.repeat(40); const BASE = 'b'.repeat(40);
 const cleanups = [];
@@ -96,6 +98,21 @@ async function fixture() {
   return { ...deps, root, origin, project, bot, item, scope, binding, effect, push, checkout, snapshot, info,
     session, message, provider, execution, client, send, upstream };
 }
+
+test('forwards actual collected knowledge through the owner and agent protocol', async () => {
+  const f = await fixture();
+  const knowledge = createSessionKnowledgeRuntime({
+    projectContextRuntime: { readContext: async () => ({ notes: [], plans: [] }) },
+    agentMemoryRuntime: { readAll: async () => ({ global: [], project: [] }) },
+    resolveProjectId: async () => f.project.id,
+  });
+  const expected = await knowledge.collect(f.item.worktree);
+  f.sessionKnowledgeRuntime.collect.mockImplementation(knowledge.collect);
+
+  const received = await f.client.sessionKnowledgeRuntime.collect(f.scope);
+
+  expect(received).toEqual(expected);
+});
 
 test('private operations require authentication and explicitly separated agent composition', async () => {
   const f = await fixture();
@@ -304,7 +321,7 @@ test('removing the checkout reply ownership guard admits the substituted path in
   const f = await fixture();
   const input = { scope: { ...f.scope, item: { ...f.item, worktree: f.project.path } } };
   await expect(f.execution.execute('worktree-inspect', input)).rejects.toMatchObject({ code: 'BOT_EXECUTION_CHECKOUT_MISMATCH' });
-  const original = new URL('../bots/agent-execution.js', import.meta.url);
+  const original = new URL('../bots/agent-execution-owner.ts', import.meta.url);
   const source = await fs.readFile(original, 'utf8');
   const guard = 'scope.item.worktree && directory !== scope.item.worktree';
   expect(source.split(guard)).toHaveLength(2);
@@ -313,7 +330,14 @@ test('removing the checkout reply ownership guard admits the substituted path in
       : specifier.startsWith('node:') ? specifier : import.meta.resolve(specifier);
     return `from '${resolved}'`;
   });
-  const copy = path.join(f.root, 'ownership-mutation.mjs'); await fs.writeFile(copy, mutated);
+  const ownerCopy = path.join(f.root, 'ownership-owner-mutation.mjs'); await fs.writeFile(ownerCopy, stripTypeScriptTypes(mutated));
+  const entry = new URL('../bots/agent-execution.ts', import.meta.url);
+  const entrySource = (await fs.readFile(entry, 'utf8')).replace(/from '([^']+)'/g, (_match, specifier) => {
+    const resolved = specifier === './agent-execution-owner.js' ? pathToFileURL(ownerCopy).href
+      : specifier.startsWith('.') ? new URL(specifier, entry).href : specifier;
+    return `from '${resolved}'`;
+  });
+  const copy = path.join(f.root, 'ownership-mutation.mjs'); await fs.writeFile(copy, stripTypeScriptTypes(entrySource));
   const { createBotExecutionServices: createMutated } = await import(pathToFileURL(copy).href);
   const changed = createMutated(f);
   expect(await changed.execute('worktree-inspect', input)).toEqual(f.snapshot);

@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { test } from 'vitest';
 
 const execute = promisify(execFile);
+const sourceLoader = fileURLToPath(new URL('../../../scripts/register-server-sources.mjs', import.meta.url));
 const drivers = [
   new URL('./adapter-mutation.driver.mjs', import.meta.url),
   new URL('./adapters.driver.mjs', import.meta.url),
@@ -24,6 +25,6 @@ const drivers = [
 for (const driver of drivers) {
   test(`bot driver ${fileURLToPath(driver).split('/').at(-1)}`, async () => {
     // execFile rejects on nonzero exit, including any driver assertion failure.
-    await execute(process.execPath, [fileURLToPath(driver)], { timeout: 170_000, maxBuffer: 4 * 1024 * 1024 });
+    await execute(process.execPath, ['--conditions=openchamber-source', '--import', sourceLoader, fileURLToPath(driver)], { timeout: 170_000, maxBuffer: 4 * 1024 * 1024 });
   }, 180_000);
 }

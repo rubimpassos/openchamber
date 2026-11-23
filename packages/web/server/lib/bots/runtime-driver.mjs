@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { createBotDriver } from './runtime-test-support.js';
+import { createBotDriver } from './runtime.test-support.js';
 
 const directory = await fs.mkdtemp('/tmp/opencode/bot-owner-driver-');
 try {

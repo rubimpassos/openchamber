@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { startApprovalGatekeeper } from './approval-test-support.js';
+import { startApprovalGatekeeper } from './approval.test-support.js';
 
 const KEY = 'disposable-key-held-only-by-the-gatekeeper';
 const OPENAI = { id: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', secret: KEY, model: { providerID: 'openai', modelID: 'gpt-4.1' } };

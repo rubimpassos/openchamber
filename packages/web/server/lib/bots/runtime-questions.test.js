@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { createBotDriver } from './runtime-test-support.js';
+import { createBotDriver } from './runtime.test-support.js';
 import { createBotExecutionStore } from './execution-store.js';
 import { readRepositoryPolicy } from './repository-policy.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';

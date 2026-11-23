@@ -29,6 +29,7 @@ const setup = async (maxItems = 4) => {
         const files = await fs.readdir(path.join(dataDir, 'bots/discovery'));
         const record = JSON.parse(await fs.readFile(path.join(dataDir, 'bots/discovery', files.find((file) => file.endsWith('.json'))), 'utf8'));
         expect(record).toMatchObject({ state: 'dispatching', key: expect.stringMatching(/^discovery:/), run: { sessionId: 'ses_discovery' } });
+        expect(record.run.selection).toEqual({ providerID: 'chosen', modelID: 'investigate' });
         calls.push(['send', value]); if (lost) throw new Error('response lost'); return { promptDispatched: true };
       },
     }, clientFor: () => client, permissionAutoAcceptRuntime: { setSessionPolicy: async (...args) => calls.push(['mode', ...args]) },

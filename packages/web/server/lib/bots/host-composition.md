@@ -2,7 +2,20 @@
 
 ## Ownership
 
-`host.js` constructs the production coordinator, config and item stores, identity and service owners, checkout and PR adapters, stages, source discovery, proof, notices, attention, provider lifecycle and scheduler projection. `host-sessions.js` owns the live bot-session index and dedicated notice queues. The root server supplies existing runtime dependencies and registers this composition through `feature-routes-runtime.js`.
+`host.ts` constructs the production coordinator and its adapters. `host-owners.ts`
+selects local credential owners or separated execution services;
+`host-authority.ts` retains current question and Discord recipient authority.
+`host-checkouts.ts` owns the composition's isolated adoption and signed-proof
+mapping. `host-stages.ts` routes stages through captured placement.
+`host-lifecycle.ts` owns readiness, recovery, observed work and shutdown;
+`host-events.ts` owns event filtering and coalesced token accounting.
+`host-child.ts` constructs the child-only inbox, re-exported by `host.ts`.
+`host-api.ts` owns public mutation gates and placement-enriched responses.
+`host-sessions.ts` owns the live bot-session index and dedicated notice queues.
+`host-contracts.ts` derives the private composition inputs from those owners.
+The root server supplies existing runtime dependencies and registers this
+composition through `feature-routes-runtime.js`. Source imports keep emitted
+`.js` paths for source resolution and packaged execution.
 
 In separated mode the owner injects typed agent execution services into the same
 coordinator. Secrets, Git, host sessions, knowledge and host proof stay on the
@@ -41,13 +54,48 @@ contract. Single-account installations retain local execution adapters.
 
 ## Decisions
 
+### Why separated selection keeps its raw result
+
+Local stages decode the selected model at their existing selection boundary.
+Separated stages return the selected config or defaults unchanged, including
+`useDefaults`, explicit undefined values and omitted fields. The shared adapter
+contract represents both results. Captures serialize that result as JSON;
+neither host composition nor discovery inserts a model or rewrites the selector
+output to satisfy a narrower local type.
+
+Isolated creation and Resume consume only the selected provider when restoring
+grants. Their decoded view preserves the remaining selection fields. Dispatch
+decodes the complete model when execution consumes it. Host creation and outcome
+reads do not acquire those requirements.
+
 ### Why composition has one server owner
 
 The production adapters have dependency cycles around feedback, tool dispatch and provider targets. Late-bound closures resolve those owners after construction; the root entrypoint only supplies its existing capabilities.
 
+Lifecycle owns readiness and shutdown flags. Composition callbacks read those
+flags at call time; creating the owners does not start recovery or provider work.
+Shutdown cancels the coordinator before joining startup, then drains observed
+work and queues while the captured transports remain available. Each cleanup
+failure is retained without preventing later cleanup owners from running.
+
+### Why public mutation gates have explicit method signatures
+
+The owner API derives each method's argument tuple from the coordinator contract.
+Explicit wrappers preserve readiness checks and placement-enriched responses
+without indexing a heterogeneous method table. The child composition imports
+only its inbox and route owner, so it cannot construct owner execution services.
+
 ### Why isolated queues live on the host
 
 The host must recheck current item, bot and session authority before inference dispatch. A dedicated queue retains that authority and durable IDs while sending through the recorded space's authenticated dispatcher.
+
+`host-sessions.ts` types captured entries, placement, execution, token readers and
+queue dependencies without changing queue paths or stored versions. Session reads
+normalize raw and enveloped OpenCode responses; notice admission still validates
+the automation marker. Queue events carry the global hub contract after checking
+the captured session and space. Knowledge is collected on the host and written
+through the current isolated owner. Shutdown waits for tracked host transfers
+and settled queue writes before clearing the dedicated queues.
 
 ### Why metadata wakes the child tool inbox
 

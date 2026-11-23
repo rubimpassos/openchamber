@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanupTransfers, transferFixture } from '../agent-server/space-transfer-fixture.js';
+import { cleanupTransfers, transferFixture } from '../agent-server/space-transfer.fixture.js';
 import { readBoundedBody } from '../agent-server/agent-upstream.js';
 import { createCodeIn } from './code-in.js';
 import { checkBundleHeader, checkSnapshotChain, importBundle, parseSnapshotMetadata, transferCaps, withBundleDirectory } from './transfer-bundle.js';

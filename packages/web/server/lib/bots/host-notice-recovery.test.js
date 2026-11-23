@@ -78,3 +78,29 @@ it('drains an active typed host send and its settled queue write before session 
   expect(stored.sessions[entry.sessionId]?.items ?? []).toEqual([]);
   expect(queue.sessionSnapshot(entry.sessionId).items).toEqual([]);
 });
+
+it.each([
+  { spaceId: undefined, remaining: 0 },
+  { spaceId: 'a1b2c3d4e5f6', remaining: 1 },
+])('routes a captured host queue event only from its own runtime when spaceId=$spaceId', async ({ spaceId, remaining }) => {
+  // Given a pending notice in a started host-owned queue.
+  const dataDir = await fs.mkdtemp('/tmp/opencode/bot-host-notice-event-');
+  cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
+  vi.useFakeTimers();
+  const sessions = createBotHostSessions({ dataDir, broadcast: () => {}, assertDispatch: async () => ({ includeMemorySaveRule: true }),
+    hostExecution: { isWorking: async () => true, syncKnowledge: async () => {}, deliverNotice: async () => {} } });
+  cleanups.push(() => sessions.stop());
+  const entry = { projectId: 'project', botId: 'bot', itemId: 'item', sessionId: 'ses_fixed', directory: '/captured/checkout', isolated: false, stage: 'fixing' };
+  sessions.track(entry);
+  await sessions.restore((_entry, cause) => { throw cause; });
+  const queue = await sessions.queueFor(entry);
+  const notice = { source: 'openchamber-notice', kind: 'bot', projectId: 'project', itemId: 'item', eventId: 'reply' };
+  const ids = botNoticeIds(notice);
+  await queue.enqueue(entry.sessionId, entry.directory, { id: ids.itemId, messageId: ids.messageId, content: 'Reply', text: 'Reply', notice, origin: { kind: 'bot', id: 'item' } });
+
+  // When a deletion event names the session from the selected runtime.
+  sessions.processPayload({ type: 'session.deleted', properties: { info: { id: entry.sessionId } } }, { spaceId });
+
+  // Then only an authoritative host event removes the pending notice.
+  expect(queue.sessionSnapshot(entry.sessionId).items).toHaveLength(remaining);
+});

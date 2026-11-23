@@ -197,6 +197,19 @@ describe('notification center runtime', () => {
     });
     expect(await center.list()).toEqual([]);
   });
+
+  it.each([null, 'unavailable'])('refuses to replace a snapshot when loading rejects with %s', async (failure) => {
+    // Given a storage adapter whose failure is not an Error object.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const save = vi.fn(async () => {});
+    const center = createNotificationCenterRuntime({ persistence: { load: async () => { throw failure; }, save } });
+    try {
+      // When the owner tries to persist new Bot attention.
+      await expect(center.upsertBot({ projectId: 'project', itemId: 'item', title: 'Question', body: 'Choose' })).rejects.toThrow();
+      // Then unread storage cannot be replaced by an empty startup state.
+      expect(save).not.toHaveBeenCalled();
+    } finally { await center.stop(); }
+  });
 });
 
 describe('notification center persistence', () => {

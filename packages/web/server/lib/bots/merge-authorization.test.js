@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { createMergeAuthorizationDriver } from './merge-authorization-test-support.js';
+import { createMergeAuthorizationDriver } from './merge-authorization.test-support.js';
 
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });

@@ -37,7 +37,8 @@ describe('resolveConfigApiKey', () => {
     expect(resolveConfigApiKey(' plain-key ', options)).toBe('plain-key');
   });
 
-  it('resolves default runtime options without an explicit home directory', () => {
+  it('resolves a key when the caller omits the directories, as provider config reads do', () => {
     expect(resolveConfigApiKey(' plain-key ')).toBe('plain-key');
+    expect(resolveConfigApiKey('{env:ZHIPU_KEY}', { env: options.env })).toBe('env-token');
   });
 });

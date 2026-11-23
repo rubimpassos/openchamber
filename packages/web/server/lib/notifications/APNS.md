@@ -2,22 +2,29 @@
 
 Native iOS background push (notifications even when the app is **suspended or killed**) is
 delivered via APNs through a **central relay**, so no user configures an Apple key. Each server
-signs its relay requests with an auto-generated keypair, and tokens are bound to the server that
-registered them — so a leaked device token alone can't be used to push.
+signs its relay requests with an auto-generated keypair, and tokens are bound to the servers
+that registered them — so a leaked device token alone can't be used to push.
 
 ## How it works
 
-1. The app registers its APNs device token with **its own server** (`POST /api/push/apns-token`,
-   `useNativePushRegistration`). PWA/desktop never register — only the native Capacitor app.
-2. The server **binds the token on the relay**: it POSTs `{ token, publicKeyJwk, ts, sig }` to
+1. The app registers its APNs device token with **every saved instance**, not only the one it
+   is connected to (`useNativePushRegistration`). PWA/desktop never register — only the native
+   Capacitor app. A server the phone is paired with for the home network only answers
+   `localOnly: true` and neither stores nor binds the token; the other saved servers still do.
+2. Each server **binds the token on the relay**: it POSTs `{ token, publicKeyJwk, ts, sig }` to
    `POST /v1/push/register-token`, signed with its auto-generated ECDSA P-256 key
    (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
-   `token → serverId` where `serverId = SHA-256(publicKey)`.
+   `token → serverId` where `serverId = SHA-256(publicKey)`, one row per `(token, serverId)`
+   (`migrations/0012_push_token_servers.sql`), so a registration never takes the token from
+   another server. `DELETE /api/push/apns-token` removes this server's row through
+   `POST /v1/push/unregister-token`, signed over `unregister.ts.token`, when this server held
+   the token and no UI session on it holds it any more; the other servers keep theirs. A token
+   the server never stored (a home-network-only phone) never goes to the relay.
 3. On a trigger (ready/error/question/permission/browser-help), the server composes **generic, content-free**
    clear text (a phone with a push key also gets the real text sealed, see *Data confidentiality*) — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
    needs permission" / "Agent hit an error" / "Agent needs you in the browser") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
-   badge, env, data:{sessionId, url?}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
+   badge, env, data:{sessionId, serverId, url?}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
    (`apns-runtime.js` → `sendViaRelay`). `url` is
    the same-shape deep link the web push `data.url` carries (`/?session=…`, `&panel=…` for
    browser-help); it is forwarded whenever the trigger payload has one, generic path shape only,
@@ -25,9 +32,14 @@ registered them — so a leaked device token alone can't be used to push.
 4. The **relay** (`openchamber-website/apps/api`, Cloudflare Worker) verifies the signature +
    `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
    the single project APNs `.p8` key, signs an ES256 JWT with `crypto.subtle`, and sends each
-   token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
-   (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
-5. Tapping a push deep-links to its session via the forwarded `url` (preferred) or `sessionId`.
+   token to APNs over HTTP/2, returning per-token results. A token the provider rejects is
+   flagged `drop` and the server drops it locally. On the relay, a token the provider reports
+   gone (APNs 410, FCM UNREGISTERED) loses every binding last refreshed before APNs saw it gone;
+   any other rejection (BadDeviceToken from a wrong environment, a bad payload) is about the
+   sender's request, so only the sender's binding goes. The relay stores no secret — only
+   `token → serverId` hashes.
+5. Tapping a push reads `data.serverId`, switches to that saved instance, and then opens the
+   forwarded `data.url` when present, otherwise the session named by `data.sessionId`.
 
 ## When the relay cannot be reached
 
@@ -112,8 +124,10 @@ Server (`apns-runtime.js`):
   (or `_P8_PATH`), `OPENCHAMBER_APNS_BUNDLE_ID`, `OPENCHAMBER_PUSH_RELAY_DISABLED=true`.
 
 Relay (Cloudflare Worker secrets via `wrangler secret put` / GitHub Actions): `APNS_P8`,
-`APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The `push_tokens`
-binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy).
+`APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The binding table
+is `push_token_servers`, one row per token and server, created by
+`migrations/0012_push_token_servers.sql` with the bindings of the older one-server
+`push_tokens` table (`0002`), which stays until a later migration drops it (applied on deploy).
 
 ## Apple setup (one-time)
 
@@ -126,13 +140,15 @@ binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy
 ## Security posture
 
 - The device token is a per-install secret, but no longer the *only* defence: every relay request
-  is signed by the server's private key, and the relay only delivers to a token from its bound
-  `serverId`. A leaked token alone is useless — an attacker has neither the private key nor a
+  is signed by the server's private key, and the relay only delivers to a token from a server
+  bound to it. A leaked token alone is useless — an attacker has neither the private key nor a
   matching binding.
 - `serverId` self-certifies (`SHA-256(publicKey)`), so the relay holds no secret; a D1 leak
   exposes only `token → serverId` hashes. The signed `ts` (±5 min window) blocks replay.
-- Residual: trust-on-first-bind (whoever registers a token first owns it) — acceptable, since
-  registering already requires possessing the token. Cloudflare rate limiting is defence-in-depth.
+- Residual: any server that knows a token can add its own binding; registering already requires
+  possessing the token. A binding only lets that server push; it cannot use, take or remove
+  another server's binding. Registering with every saved instance gives each of them one, so
+  every saved server can push to this phone. Cloudflare rate limiting is defence-in-depth.
 
 ## Data confidentiality (what the relay / Apple / Google can see)
 
@@ -148,8 +164,8 @@ Notification Service Extension and Android's `SealedPushMessagingService` open i
 Who can read what:
 
 - **Network hops:** nothing (TLS).
-- **The relay (Cloudflare):** the generic title, the device token, `sessionId`, `url` when the trigger has one and the sealed
-  blob. It stores only `token → serverId` hashes (no text, no payload).
+- **The relay (Cloudflare):** the generic title, the device token, `sessionId`, `serverId`, `url` when the trigger has one and the
+  sealed blob. It stores only `token → serverId` hashes (no text, no payload).
 - **Apple APNs / Google FCM:** the same as the relay.
 - **The device:** opens the blob and shows the real text.
 

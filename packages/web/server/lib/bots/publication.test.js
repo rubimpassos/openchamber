@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { createBotDriver, TEST_HEAD } from './runtime-test-support.js';
+import { createBotDriver, TEST_HEAD } from './runtime.test-support.js';
 import { createBotExecutionStore } from './execution-store.js';
 
 const directories = [];
