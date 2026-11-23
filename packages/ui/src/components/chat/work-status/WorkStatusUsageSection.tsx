@@ -36,15 +36,15 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean; sessionId?: s
   const sessionAccount = useSessionAccountUsage(visible ? sessionId : null, currentProviderId, currentModelId, quotaResults);
   // A session on one of several stored accounts shows that account's usage
   // in its provider's group, in place of the active sign-in's.
+  const sessionGroupId = sessionAccount ? resolveQuotaProviderId(currentProviderId) : null;
   const groups = React.useMemo<UsageProviderGroup[]>(() => {
-    const quotaProviderId = resolveQuotaProviderId(currentProviderId);
-    if (!sessionAccount || !quotaProviderId) return providerGroups;
+    if (!sessionAccount || !sessionGroupId) return providerGroups;
     return providerGroups.map((group) => {
-      if (group.providerId !== quotaProviderId) return group;
+      if (group.providerId !== sessionGroupId) return group;
       const rows = buildUsageRows(group.providerId, sessionAccount.usage, selectedQuotaModels[group.providerId] ?? []);
-      return rows.length > 0 ? { ...group, accountLabel: sessionAccount.label, rows, status: null } : group;
+      return { ...group, accountLabel: sessionAccount.label, rows, status: rows.length > 0 ? null : t('header.services.noRateLimitsReported') };
     });
-  }, [currentProviderId, providerGroups, selectedQuotaModels, sessionAccount]);
+  }, [providerGroups, selectedQuotaModels, sessionAccount, sessionGroupId, t]);
 
   useQuotaAutoRefresh(visible && (groups.length > 0 || loadedRuntimeKey === null));
 
@@ -113,6 +113,9 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean; sessionId?: s
             label={group.status && group.rows.length === 0 ? (
               <span className="flex min-w-0 items-center gap-2">
                 <span className="min-w-0 truncate text-foreground">{group.providerName}</span>
+                {group.providerId === sessionGroupId && group.accountLabel ? (
+                  <span className="min-w-0 truncate" title={group.accountLabel}>{group.accountLabel}</span>
+                ) : null}
                 <span dir="auto" className="ms-auto max-w-[calc(100%-2rem)] shrink-0 truncate">{group.status}</span>
               </span>
             ) : (

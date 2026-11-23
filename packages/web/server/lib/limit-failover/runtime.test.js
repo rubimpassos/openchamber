@@ -671,6 +671,39 @@ describe('limit failover route', () => {
     await request(app).get('/api/openchamber/limit-failover/accounts?providerID=openai')
       .expect(200, { providerID: 'openai', usageAt: null, accounts: [] });
   });
+
+  it('keeps an account last usage, minus lapsed windows, when a sweep could not read it', async () => {
+    const app = createApp();
+    const sweep = (accounts) => request(app).post('/api/openchamber/limit-failover/usage')
+      .set('authorization', 'Bearer token')
+      .send({ providerID: 'anthropic', accounts })
+      .expect(200);
+    await sweep([
+      {
+        id: ACCOUNT_A.id,
+        label: ACCOUNT_A.label,
+        usage: {
+          five_hour: { utilization: 95, resets_at: new Date(NOW - 60_000).toISOString() },
+          seven_day: { utilization: 12, resets_at: new Date(NOW + 86_400_000).toISOString() },
+        },
+      },
+      { id: ACCOUNT_B.id, label: ACCOUNT_B.label, usage: { five_hour: { utilization: 37, resets_at: null } } },
+      { id: ACCOUNT_C.id, label: ACCOUNT_C.label, usage: { five_hour: { utilization: 50, resets_at: null } } },
+    ]);
+    await sweep([
+      { id: ACCOUNT_A.id, label: ACCOUNT_A.label, usage: null },
+      { id: ACCOUNT_B.id, label: ACCOUNT_B.label, usage: { five_hour: { utilization: 40, resets_at: null } } },
+      { id: 'cred_new', label: 'New', usage: null },
+    ]);
+    const list = await request(app).get('/api/openchamber/limit-failover/accounts?providerID=anthropic').expect(200);
+    const byId = Object.fromEntries(list.body.accounts.map((account) => [account.id, account]));
+    // The kept usage drops the window that reset since it was read.
+    expect(byId[ACCOUNT_A.id].usage.windows['5h']).toBeUndefined();
+    expect(byId[ACCOUNT_A.id].usage.windows['7d'].usedPercent).toBe(12);
+    expect(byId[ACCOUNT_B.id].usage.windows['5h'].usedPercent).toBe(40);
+    expect(byId.cred_new).toMatchObject({ label: 'New', usage: null });
+    expect(byId[ACCOUNT_C.id]).toBeUndefined();
+  });
 });
 
 describe('limit failover plugin', () => {
@@ -971,6 +1004,8 @@ describe('limit failover plugin', () => {
     await withCallbackEnv(async () => {
       const fetchMock = vi.fn(async (url, init) => {
         if (String(url) === 'https://api.anthropic.com/api/oauth/usage') {
+          // Anthropic rate-limits the usage read per account.
+          if (init.headers.authorization === `Bearer token-${ACCOUNT_B.id}`) return new Response('{}', { status: 429 });
           return new Response(JSON.stringify({ five_hour: { utilization: 7, resets_at: null } }));
         }
         const body = init?.body ? JSON.parse(init.body) : {};
@@ -988,7 +1023,10 @@ describe('limit failover plugin', () => {
         if (post === undefined) await new Promise((resolve) => { setTimeout(resolve, 10); });
       }
       expect(post).toBeDefined();
-      expect(JSON.parse(post[1].body).accounts).toHaveLength(2);
+      expect(JSON.parse(post[1].body).accounts).toEqual([
+        { ...ACCOUNT_A, usage: { five_hour: { utilization: 7, resets_at: null } } },
+        { ...ACCOUNT_B, usage: null },
+      ]);
       expect(post[1].headers.authorization).toBe('Bearer token');
       // Each account's token reads only its own usage and is sent nowhere else.
       expect(JSON.stringify(JSON.parse(post[1].body))).not.toContain('token-');
