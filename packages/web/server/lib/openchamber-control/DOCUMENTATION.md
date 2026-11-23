@@ -757,6 +757,13 @@ constructor retains its existing `Object.assign` behavior.
   and takes an optional `promptText` of at most 10,000 characters for a
   prompt; anything else is a 400 the agent can correct, before any browser
   is reached.
+- `browser.requestHelp` requires a `reason` of at most 300 characters, takes
+  `timeoutSeconds` from 30 to 900 (default 300), `kind` `login`, `page`
+  (default) or `profile`, and `profileName` only with `kind: 'profile'`
+  (`browser-inputs.ts`). The host waits `timeoutSeconds` plus 15 s, so the
+  provider answers `timeout` itself. The `openchamber_web` tool sends this
+  action with `timeout: false` on its fetch: Bun ends a request after about
+  six minutes, and a person may take up to fifteen.
 - `browser.capture` writes its image on the server, into
   `.openchamber/screenshots/` under the scoped project directory, and returns
   the project-relative path rather than the image bytes. The client that took
@@ -911,7 +918,7 @@ clock, and model parsing preserves slashes inside the model id.
 ### Why browser validation and timeouts belong in the service
 
 Invalid calls return correctable usage errors before waking a renderer or waiting
-for a round trip. Navigation and upload get a longer budget than quick actions;
+for a round trip. Navigation, upload and saving a profile get a longer budget than quick actions;
 navigation's budget exceeds the client's own wait so a slow page can be
 distinguished from an unreachable browser. Upload scope comes from the calling
 session, and provider context comes from the plugin, so model-supplied directories

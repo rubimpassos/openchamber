@@ -76,8 +76,14 @@ export const startService = async ({
     if (config.chromePath) throw error;
   }
   const installer = systemChrome ? null : createChromeInstaller({ directory: path.join(defaults.root, 'chrome') });
-  if (installer) void installer.ensure().catch(() => {});
+  const startInstall = () => {
+    if (installer?.state.status === 'idle') void installer.ensure().catch(() => {});
+  };
   const chromePath = systemChrome ?? (async () => {
+    if (installer.state.status === 'idle' && !(await installer.installed())) {
+      startInstall();
+      throw new Error('Downloading Chrome for the shared browser; this happens once after installing the extension. Retry in a minute.');
+    }
     if (installer.state.status === 'installing') {
       throw new Error(`${installer.state.message}; this happens once after installing the extension. Retry in a minute.`);
     }
@@ -87,7 +93,11 @@ export const startService = async ({
   });
   // `GET /chrome` and the dock's `chrome` state field share this: a Chrome
   // the host found on the machine needs no install state of its own.
-  const chromeStatus = () => (installer ? installer.state : { status: 'system', message: '', path: systemChrome, version: null });
+  const chromeStatus = () => {
+    if (!installer) return { status: 'system', message: '', path: systemChrome, version: null };
+    startInstall();
+    return installer.state;
+  };
   // `/profiles/sites` and `/profiles/sites/clear` act on the saved profile
   // directly, with no live chat scope; they need only checkout/checkin,
   // not the `{ id, name }` the manager keeps per scope.
@@ -102,6 +112,8 @@ export const startService = async ({
   const browserRuntime = runtime ?? createBrowserManager({
     profiles,
     chromeStatus,
+    maxScopes: config.maxBrowsers ?? undefined,
+    idleMs: config.closeIdleBrowsersAfterMinutes ? config.closeIdleBrowsersAfterMinutes * 60_000 : null,
     createRuntime: (context, profile) => createBrowserRuntime({
       ...config,
       chromePath,

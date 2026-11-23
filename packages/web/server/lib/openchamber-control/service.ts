@@ -42,6 +42,7 @@ import type { createBrowserControlRouter } from '../browser-control/provider.js'
 import type { createUploadStore } from '../browser-control/uploads.js';
 import type { ListedSessionRecord } from './listed-session.js';
 import type { BrowserControlParameters } from '../browser-control/broker.js';
+import { addBrowserActionInputs, BROWSER_DIALOG_PROMPT_TEXT_MAX } from './browser-inputs.js';
 import type { BrowserDialogParameters } from '@openchamber/sdk';
 import type { createAgentMemoryActions } from '../agent-memory/actions.js';
 import type { createWorkflowRuntime } from '../workflows/runtime.js';
@@ -190,7 +191,6 @@ const dialogAnswerSchema = z.object({ accept: z.boolean(), value: z.string().opt
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
 const WAIT_POLL_INTERVAL_MS = 500;
-const BROWSER_DIALOG_PROMPT_TEXT_MAX = 10_000;
 const CONTROL_ACTIONS = new Set(OPENCHAMBER_ALL_ACTIONS);
 const PREFERENCE_BY_RANK: RankPreferences = { 2: 'favorite', 1: 'recent' };
 const SCHEDULE_TASK_ID_ACTIONS = new Set([
@@ -1161,7 +1161,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       parameters.upload = browserUploads.put(files);
     }
 
-    const timeoutMs = action === 'browser.open' || action === 'browser.upload' ? 45_000 : 20_000;
+    const timeoutMs = addBrowserActionInputs(action, input, parameters);
     const context = {
       directory: asNonEmptyString(contextDirectory),
       sessionId: asNonEmptyString(contextSessionId),

@@ -106,6 +106,11 @@ export const parseConfig = (value) => {
       throw new Error(`config.${name} must be an absolute path when provided`);
     }
   }
+  for (const name of ['maxBrowsers', 'closeIdleBrowsersAfterMinutes']) {
+    if (value[name] !== undefined && (!Number.isInteger(value[name]) || value[name] < 1)) {
+      throw new Error(`config.${name} must be a positive whole number when provided`);
+    }
+  }
   const allowedOrigins = (value.allowedOrigins ?? []).map(parseAllowedOrigin);
   return Object.freeze({
     chromePath: chromePath?.trim() ?? null,
@@ -117,6 +122,8 @@ export const parseConfig = (value) => {
     allowPrivateNetwork: typeof value.allowPrivateNetwork === 'boolean' ? value.allowPrivateNetwork : null,
     profileStore: value.profileStore?.trim() ?? null,
     profileKeyFile: value.profileKeyFile?.trim() ?? null,
+    maxBrowsers: value.maxBrowsers ?? null,
+    closeIdleBrowsersAfterMinutes: value.closeIdleBrowsersAfterMinutes ?? null,
   });
 };
 

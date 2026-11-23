@@ -619,14 +619,61 @@ test('hands the viewer theme to surface input and reports a pending copy from th
   assert.deepEqual(manager.state().copy, { id: 'copy-1', text: 'hello' });
 });
 
-test('expires idle scopes and makes room by evicting the least recently active idle scope', async () => {
-  // Given a two-scope bound, a controllable clock, and a captured sweep timer.
+test('keeps a chat\'s browser open however long it is left alone', async () => {
+  // Given the default manager, a controllable clock, and any timer it arms.
+  let clock = 0;
+  const timers = [];
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({
+    createRuntime: factory,
+    now: () => clock,
+    setTimer: (callback) => timers.push(callback),
+    clearTimer: () => {},
+  });
+  await manager.perform('browser.open', { url: 'https://waiting.test' }, undefined, context('/repo', 'ses_one'));
+
+  // When a day passes with nobody acting, then nothing was armed to close it and it is still open.
+  clock = 24 * 60 * 60_000;
+  for (const callback of timers.splice(0)) callback();
+  await manager.surfaceControl('none');
+  assert.deepEqual(manager.state().scopes.map((scope) => scope.sessionId), ['ses_one']);
+  assert.equal(runtimes.get('ses_one').calls.some(([kind]) => kind === 'close'), false);
+});
+
+test('tells the panel when a browser closed in the background, and never evicts one waiting for the user', async () => {
+  // Given a one-scope bound and a chat whose agent waits on the user for help.
+  let clock = 0;
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory, maxScopes: 1, now: () => clock });
+  await manager.perform('browser.open', { url: 'https://login.test' }, undefined, context('/repo', 'ses_one'));
+  runtimes.get('ses_one').tabs = [{ id: 'tab-1', url: 'https://login.test', active: true }];
+  const help = manager.requestHelp({ reason: 'Sign in', timeoutSeconds: 900, kind: 'page' }, undefined, context('/repo', 'ses_one'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // When another chat needs a browser long after, then the waiting one is kept and the new one is refused.
+  clock = 10 * 60_000;
+  await assert.rejects(manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_two')), /waiting for the user/);
+  assert.deepEqual(manager.state().emptiedSessions, []);
+
+  // When the person helps and hands back, and the other chat asks again, then the first browser makes room and its chat is reported emptied.
+  await manager.surfaceControl('user', 'viewer-a');
+  await manager.surfaceControl('none');
+  assert.equal((await help).outcome, 'handed-back');
+  clock += 2 * 60_000;
+  await manager.perform('browser.snapshot', {}, undefined, context('/repo', 'ses_two'));
+  assert.deepEqual(manager.state().scopes.map((scope) => scope.sessionId), ['ses_two']);
+  assert.deepEqual(manager.state().emptiedSessions, ['ses_one']);
+});
+
+test('closes idle scopes when configured to, and makes room by evicting the least recently active idle scope', async () => {
+  // Given a two-scope bound, a five-minute idle close, a controllable clock, and a captured sweep timer.
   let clock = 0;
   const timers = [];
   const { factory, runtimes } = createRuntimeFactory();
   const manager = createBrowserManager({
     createRuntime: factory,
     maxScopes: 2,
+    idleMs: 5 * 60_000,
     now: () => clock,
     setTimer: (callback) => timers.push(callback),
     clearTimer: () => {},
@@ -654,6 +701,7 @@ test('expires idle scopes and makes room by evicting the least recently active i
   await manager.surfaceControl('none');
   assert.deepEqual(manager.state().scopes.map((scope) => scope.sessionId), ['ses_three']);
   assert.deepEqual(runtimes.get('ses_two').calls.at(-1), ['close']);
+  assert.deepEqual(manager.state().emptiedSessions, ['ses_one', 'ses_two']);
 });
 
 test('opens the viewed chat\'s browser from the dock without waiting for an agent action', async () => {

@@ -28,7 +28,8 @@
             "ps",
             "ldd"
           ]
-        }
+        },
+        "keepRunning": true
       }
     }
   }
