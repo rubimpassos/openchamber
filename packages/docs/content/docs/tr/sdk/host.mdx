@@ -5,6 +5,14 @@ description: Bir eklentinin çağırabileceği her connectHost metodu, OpenChamb
 
 # Host API
 
+## Model seçici ve OpenCode'u yeniden başlatma
+
+`ready.features.modelPicker` true olduğunda `host.pickModel({ anchor, value, none?, recommended? })` çağrısını kullanın. `anchor`, `getBoundingClientRect()` ile alınan `{ x, y, width, height }` değerlerini iframe'in CSS piksellerinde taşır; popover çapasıyla aynı sınırları kullanır. Zorunlu `value`, `providerID/modelID` biçiminde bir kimlik veya `null` olur. `none: { label: 'Varsayılan' }` 1 ile 120 karakterlik bir seçenek ekler; `recommended` bir model kimliğini işaretler. Çağrı en fazla 30 dakika bekler ve seçimde `{ picked: true, model: string | null }`, kapatılınca `{ picked: false }` döndürür. Değeri yalnızca `picked` true ise değiştirin.
+
+Alt düzey `listModels { id }` iletisinin payload'u yoktur ve onaylanmış `model` yeteneğini gerektirir. `GuestModelCatalog`, `{ id, name, provider?: string, variants: string[] }` içerir. `provider` sağlayıcının görünen adıdır ve eski hostlarda bulunmaz; varyantlar kimliktir. Yüklenmiş boş katalog `[]`, yüklenmemiş katalog `HOST_UNAVAILABLE` döndürür. Arama, gruplama ve model ayrıntıları için host seçicisini kullanın.
+
+`ready.features.restartOpenCode` varsa odaklanmış sayfanızdaki bir tıklamadan `host.restartOpenCode()` çağırın. Yetenek izni gerekmez; en fazla 2 dakika bekler. `host.toast({ kind: 'info', message: 'Değişiklikleri uygulamak için yeniden başlatın', action: 'restart-opencode' })` iframe kapandıktan sonra da çalışan, hosta ait çevrilmiş bir düğme sunar. Doğrudan çağrı iframe içinde kullanıcı etkinleştirmesi gerektirir; odaklanmış tıklama yoksa `HOST_REJECTED` ile reddedilir. Bildirim düğmesi etkinleştirmeyi kendi tıklamasından alır. Yalnızca `restart-opencode` kabul edilir. Eksik özellikler veya desteklenmeyen hostlar ve çalışma ortamları `UNSUPPORTED` döndürür. Host sonucu bildirimlerle gösterir; harici sunucuların elle yeniden başlatılması için uyarı, işlem hataları için hata bildirimi verir. Promise bu geri bildirimden sonra çözümlenir; OpenCode'un yeniden başladığını garanti etmez. Web, masaüstü, mobil web ve Capacitor bu sözleşmeyi paylaşır; VS Code eklenti yüklemez.
+
 Bu sayfayı `connectHost` metodlarını, sınırları ve hata kodlarını tam olarak bilmeniz gerektiğinde kullanın. Klasör düzeni, manifest ve kurulum için [Eklenti oluşturma](/sdk/) sayfasından başlayın.
 
 ```ts

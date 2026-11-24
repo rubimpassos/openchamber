@@ -5,6 +5,14 @@ description: 扩展可以调用的每个 connectHost 方法、OpenChamber 推送
 
 # Host API
 
+## 模型选择器与 OpenCode 重启
+
+当 `ready.features.modelPicker` 为 true 时，调用 `host.pickModel({ anchor, value, none?, recommended? })` 打开应用的模型选择器。`anchor` 是 `getBoundingClientRect()` 返回的 `{ x, y, width, height }`，单位为 iframe 的 CSS 像素，范围与弹出卡片锚点相同。`value` 必填，值为 `providerID/modelID` 格式的模型 ID 或 `null`。`none: { label: '默认' }` 添加标签长度为 1 至 120 个字符的选项；`recommended` 标记一个模型 ID。调用最多等待 30 分钟，选择后返回 `{ picked: true, model: string | null }`，关闭而未选择则返回 `{ picked: false }`。仅在 `picked` 为 true 时更新值。
+
+底层消息 `listModels { id }` 没有 payload，需要已批准的 `model` 能力。`GuestModelCatalog` 结果包含 `{ id, name, provider?: string, variants: string[] }`。`provider` 是提供商显示名称，旧版宿主会省略；变体是机器 ID。已加载但为空的目录返回 `[]`，尚未加载的目录返回 `HOST_UNAVAILABLE`。搜索、分组和模型详情由宿主选择器处理。
+
+当 `ready.features.restartOpenCode` 为 true 时，从获得焦点的页面中的用户点击调用 `host.restartOpenCode()`。无需能力授权，最多等待 2 分钟。也可使用 `host.toast({ kind: 'info', message: '重启以应用更改', action: 'restart-opencode' })`，显示宿主管理的本地化重启按钮，iframe 关闭后仍可使用。页面调用要求调用 iframe 内的用户激活；没有获得焦点的点击时，以 `HOST_REJECTED` 拒绝。通知按钮通过自身点击获得激活。仅接受 `restart-opencode`。功能缺失或宿主及运行环境不支持时返回 `UNSUPPORTED`。宿主通过通知显示结果，包括提示手动重启外部服务器的警告，以及操作失败时的错误。Promise 在显示这些反馈后兑现，不保证 OpenCode 已重启。网页、桌面、移动网页和 Capacitor 使用同一契约；VS Code 不加载扩展。
+
 当你需要准确了解 `connectHost` 的方法、限制和错误码时，使用本页。关于文件夹结构、清单和安装，请从[构建扩展](/sdk/)开始。
 
 ```ts

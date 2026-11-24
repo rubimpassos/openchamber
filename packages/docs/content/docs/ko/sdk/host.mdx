@@ -5,6 +5,14 @@ description: 확장이 호출할 수 있는 모든 connectHost 메서드, OpenCh
 
 # Host API
 
+## 모델 선택기와 OpenCode 재시작
+
+`ready.features.modelPicker`가 true이면 `host.pickModel({ anchor, value, none?, recommended? })`로 앱의 모델 선택기를 엽니다. `anchor`는 `getBoundingClientRect()`의 `{ x, y, width, height }`이며 iframe의 CSS 픽셀을 사용하고 팝오버 앵커와 같은 제한을 따릅니다. 필수 `value`는 `providerID/modelID` 형식의 ID 또는 `null`입니다. `none: { label: '기본값' }`은 1~120자 레이블의 항목을 추가하고, `recommended`는 모델 ID를 표시합니다. 최대 30분 기다리며 선택하면 `{ picked: true, model: string | null }`, 선택 없이 닫으면 `{ picked: false }`를 반환합니다. `picked`가 true일 때만 값을 갱신하세요.
+
+하위 수준 메시지 `listModels { id }`에는 payload가 없으며 승인된 `model` 기능이 필요합니다. 결과 `GuestModelCatalog`에는 `{ id, name, provider?: string, variants: string[] }`가 있습니다. `provider`는 제공자 표시 이름이며 이전 호스트에서는 생략됩니다. 변형은 기계용 ID입니다. 로드된 빈 카탈로그는 `[]`, 아직 로드되지 않은 카탈로그는 `HOST_UNAVAILABLE`을 반환합니다. 검색, 그룹화, 모델 세부 정보는 호스트 선택기를 사용하세요.
+
+`ready.features.restartOpenCode`가 있으면 포커스가 있는 페이지의 사용자 클릭에서 `host.restartOpenCode()`를 호출하세요. 기능 권한 승인은 필요 없으며 최대 2분 기다립니다. `host.toast({ kind: 'info', message: '변경 사항을 적용하려면 다시 시작하세요', action: 'restart-opencode' })`는 iframe이 닫힌 뒤에도 작동하는 번역된 호스트 재시작 버튼을 표시합니다. 직접 호출은 호출한 iframe 안의 사용자 활성화가 필요하며, 포커스가 있는 클릭이 없으면 `HOST_REJECTED`로 거부됩니다. 토스트 버튼은 자신의 클릭으로 활성화됩니다. `restart-opencode`만 허용됩니다. 기능이 없거나 호스트 또는 실행 환경이 지원하지 않으면 `UNSUPPORTED`를 반환합니다. 호스트는 결과를 토스트로 표시하며, 외부 서버는 수동 재시작 안내 경고를, 운영상 실패는 오류를 표시합니다. Promise는 이 안내가 표시된 후 이행되므로 OpenCode의 재시작 성공을 보장하지 않습니다. 웹, 데스크톱, 모바일 웹, Capacitor는 같은 계약을 사용하며 VS Code는 확장을 로드하지 않습니다.
+
 `connectHost`의 정확한 메서드, 제한, 오류 코드가 필요할 때 이 페이지를 사용하세요. 폴더 구조, 매니페스트, 설치는 [확장 만들기](/sdk/)에서 시작하세요.
 
 ```ts

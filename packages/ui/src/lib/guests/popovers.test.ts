@@ -129,4 +129,22 @@ describe('guestPopoverOwnerBlocked', () => {
     expect(blocked).toBe(1);
     stop();
   }));
+
+  test('a host menu stays open under Base UI accessibility hiding and closes when its frame becomes inert', () => withDocument(async (doc) => {
+    const parent = doc.createElement('div');
+    const frame = doc.createElement('iframe');
+    parent.append(frame);
+    doc.body.append(parent);
+    let reportClosed = () => {};
+    const closed = new Promise<void>((resolve) => { reportClosed = resolve; });
+    const stop = watchGuestPopoverOwner(frame, reportClosed, true);
+    try {
+      parent.setAttribute('data-base-ui-inert', '');
+      expect(guestPopoverOwnerBlocked(frame, true)).toBe(false);
+      expect(guestPopoverOwnerBlocked(frame)).toBe(true);
+      parent.setAttribute('inert', '');
+      await closed;
+      expect(guestPopoverOwnerBlocked(frame, true)).toBe(true);
+    } finally { stop(); }
+  }));
 });

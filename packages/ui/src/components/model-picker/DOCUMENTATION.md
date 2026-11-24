@@ -4,7 +4,8 @@
 
 `ModelPickerList` is the searchable model list every model picker draws: the
 composer's model menu and its phone sheet, the multi-run model chooser and the
-agent model selector in Settings. It owns the rows (Auto, the leading action, Favorites,
+agent model selector in Settings, including model requests from extensions.
+`useModelPickerLabels` supplies the settings and extension labels. It owns the rows (Auto, the leading action, Favorites,
 Recent, one section per provider), keyboard navigation from the search field,
 the details card, starring, collapsing and reordering. Callers own the menu
 around it, the footer's text and what a pick does.

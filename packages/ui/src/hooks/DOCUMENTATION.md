@@ -8,6 +8,13 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 
 ## Invariants
 
+### Extension model selection
+
+`useGuestModelPicker` owns each frame's pending selection, directory-scoped
+catalog load and DOM subscriptions. Its anchored menu settles on an outside
+press even though the trigger belongs to an opaque iframe. Hiding, replacing
+or navigating the owner releases the same selection.
+
 ### Session activity and queued sends
 
 - A pending permission or a form that still holds the turn makes a session idle, so the send button stays a send and the user can supersede the prompt. A form whose tool call has ended holds nothing, and the turn keeps Stop and Queue.

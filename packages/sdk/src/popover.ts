@@ -1,4 +1,5 @@
 import type { JsonValue } from './contract.ts';
+import { readGuestPopoverAnchor } from './popover-boundary.ts';
 
 export const GUEST_POPOVER_ID = /^[A-Za-z0-9_-]{1,80}$/;
 export const GUEST_POPOVER_COORDINATE_MAX = 100_000;
@@ -49,11 +50,7 @@ const isFiniteJson = (value: JsonValue): boolean => {
 export const isGuestPopoverRequest = (request: GuestPopoverRequest): boolean => {
   try {
     if (String(request.id) !== request.id || !GUEST_POPOVER_ID.test(request.id)
-    || !Number.isFinite(request.anchor.x) || Math.abs(request.anchor.x) > GUEST_POPOVER_COORDINATE_MAX
-    || !Number.isFinite(request.anchor.y) || Math.abs(request.anchor.y) > GUEST_POPOVER_COORDINATE_MAX
-    || !Number.isFinite(request.anchor.width) || !Number.isFinite(request.anchor.height)
-    || request.anchor.width <= 0 || request.anchor.height <= 0
-    || request.anchor.width > GUEST_POPOVER_COORDINATE_MAX || request.anchor.height > GUEST_POPOVER_COORDINATE_MAX
+    || readGuestPopoverAnchor(request.anchor) === null
     || !Number.isInteger(request.width) || request.width < GUEST_POPOVER_WIDTH_MIN || request.width > GUEST_POPOVER_WIDTH_MAX
     || !Number.isInteger(request.height) || request.height < GUEST_POPOVER_HEIGHT_MIN || request.height > GUEST_POPOVER_HEIGHT_MAX
     || (request.side !== undefined && !GUEST_POPOVER_SIDES.includes(request.side))

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import { connectHost, HostRequestError, type HostFrame } from './host.ts';
@@ -103,6 +103,72 @@ const demoItem = {
 };
 
 describe('connectHost', () => {
+  test.each([
+    { picked: true, model: 'provider/model' },
+    { picked: true, model: null },
+    { picked: false },
+  ])('returns the model picker outcome without confusing cancellation and None: %j', async (result) => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true, requestTimeoutMs: 1 });
+    frame.dispatch(new MessageEvent('message', { data: { ...ready, payload: { ...ready.payload, features: { modelPicker: true } } } }));
+    const timeout = spyOn(globalThis, 'setTimeout');
+    try {
+      const payload = { anchor: { x: -10, y: 20, width: 100, height: 24 }, value: 'old/model', none: { label: 'Default' }, recommended: 'provider/model' };
+      const pending = host.pickModel(payload);
+      const call = frame.posted.at(-1);
+      if (!call || call.type !== 'model-pick') throw new Error('Expected model picker request');
+      expect(call.payload).toEqual(payload);
+      const deadline = timeout.mock.calls.at(-1)?.[1];
+      frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: call.id, ok: true, payload: result } }));
+      await expect(pending).resolves.toEqual(result);
+      expect(deadline).toBe(1_800_000);
+    } finally {
+      timeout.mockRestore();
+      host.dispose();
+    }
+  });
+
+  test('refuses picker and restart calls until their features are advertised', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    await expect(host.pickModel({ anchor: { x: 0, y: 0, width: 1, height: 1 }, value: null })).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    await expect(host.restartOpenCode()).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    expect(frame.posted.map((message) => message.type)).toEqual(['hello']);
+    host.dispose();
+  });
+
+  test.each([{ picked: true }, { picked: true, model: 'bare' }, { picked: false, model: null }, {}])('rejects malformed model picker answers: %j', async (payload) => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    frame.dispatch(new MessageEvent('message', { data: { ...ready, payload: { ...ready.payload, features: { modelPicker: true } } } }));
+    const pending = host.pickModel({ anchor: { x: 0, y: 0, width: 1, height: 1 }, value: null });
+    const call = frame.posted.at(-1);
+    if (!call || call.type !== 'model-pick') throw new Error('Expected model picker request');
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: call.id, ok: true, payload } }));
+    await expect(pending).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    host.dispose();
+  });
+
+  test('restart sends an empty payload and waits up to 2 minutes for acknowledgement', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true, requestTimeoutMs: 1 });
+    frame.dispatch(new MessageEvent('message', { data: { ...ready, payload: { ...ready.payload, features: { restartOpenCode: true } } } }));
+    const timeout = spyOn(globalThis, 'setTimeout');
+    try {
+      const pending = host.restartOpenCode();
+      const call = frame.posted.at(-1);
+      if (!call || call.type !== 'opencode-restart') throw new Error('Expected restart request');
+      expect(call.payload).toEqual({});
+      const deadline = timeout.mock.calls.at(-1)?.[1];
+      frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: call.id, ok: true } }));
+      await expect(pending).resolves.toBeUndefined();
+      expect(deadline).toBe(120_000);
+    } finally {
+      timeout.mockRestore();
+      host.dispose();
+    }
+  });
+
   test('a popover child reports only its own pointer and window focus transitions', async () => {
     const frame = createFrame();
     const host = connectHost({ target: frame, acceptSource: () => true });
@@ -143,10 +209,10 @@ describe('connectHost', () => {
   test('toast options are sent as data and resolve on display acknowledgement', async () => {
     const frame = createFrame();
     const host = connectHost({ target: frame, acceptSource: () => true });
-    const pending = host.toast({ kind: 'success', message: '  Result  ', copy: { text: '  original\n' }, dismiss: true, persistent: true });
+    const pending = host.toast({ kind: 'success', message: '  Result  ', copy: { text: '  original\n' }, dismiss: true, persistent: true, action: 'restart-opencode' });
     const request = frame.posted.at(-1);
     if (!request || request.type !== 'toast') throw new Error('Expected toast');
-    expect(request.payload).toEqual({ kind: 'success', message: 'Result', copy: { text: '  original\n' }, dismiss: true, persistent: true });
+    expect(request.payload).toEqual({ kind: 'success', message: 'Result', copy: { text: '  original\n' }, dismiss: true, persistent: true, action: 'restart-opencode' });
     frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: request.id, ok: true } }));
     await pending;
     host.dispose();

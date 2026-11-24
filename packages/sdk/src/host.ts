@@ -20,6 +20,8 @@ import { isGuestStatusSummary, type GuestStatusSummaryItem } from './status-summ
 import type { GuestBlockCall, JsonValue } from './contract.ts';
 import { GUEST_TOOLTIP_TEXT_MAX, isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest, type GuestTooltipRequest } from './popover.ts';
 import { guestNavigationCalls, type GuestNavigationClient } from './navigation.ts';
+import { guestModelPickerCalls, type ModelPickerClient } from './model-picker.ts';
+import { guestToastCalls, type GuestToastClient } from './toast.ts';
 import {
   GUEST_FILE_EDITOR_CONTENT_MAX,
   GUEST_FILE_EDITOR_VERSION_MAX,
@@ -33,8 +35,6 @@ import {
 } from './file-editor.ts';
 import {
   GUEST_FILE_CONTENT_MAX,
-  GUEST_CLIPBOARD_TEXT_MAX,
-  GUEST_TOAST_MAX,
   GUEST_FILE_PATH_MAX,
   GUEST_GENERATE_OUTPUT_TOKENS_MAX,
   GUEST_GENERATE_PROMPT_MAX,
@@ -73,7 +73,6 @@ import {
   type ResolveResultPayload,
   type SessionSnapshot,
   type StartSessionResult,
-  type ToastRequest,
   type ServiceStatusResult,
   type FileListResult,
   type FileReadResult,
@@ -185,7 +184,6 @@ export type HostClient = LoopbackClient & {
   readPlan: (provider: string, path: string) => Promise<PlanReadResult>;
   /** Tell the host a provider's plans changed (added, removed, progress) so it lists them again. */
   plansChanged: (provider: string) => Promise<void>;
-  toast: (request: ToastRequest) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
   openSurface: (surfaceId: string) => Promise<void>;
   writeClipboard: (text: string) => Promise<void>;
@@ -224,7 +222,7 @@ export type HostClient = LoopbackClient & {
   requestFileSave: () => void;
   reportFileUnsupported: () => void;
   dispose: () => void;
-} & GuestNavigationClient;
+} & GuestNavigationClient & ModelPickerClient & GuestToastClient;
 
 // external: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/instanceof#instanceof_and_multiple_realms Event constructors belong to their realm; non-browser runtimes may have none.
 const isKeyEvent = (event: Event): event is KeyboardEvent => 'key' in event && 'metaKey' in event && 'ctrlKey' in event;
@@ -1010,22 +1008,8 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         if (resolveHandler === handler) resolveHandler = null;
       };
     },
-    toast: (payload) => {
-      const message = payload.message.trim();
-      if (!message || message.length > GUEST_TOAST_MAX) {
-        return Promise.reject(new HostRequestError('HOST_REJECTED', `Toast message must contain 1 to ${GUEST_TOAST_MAX} characters.`));
-      }
-      if (payload.copy && payload.copy !== true && (!payload.copy.text.length || payload.copy.text.length > GUEST_CLIPBOARD_TEXT_MAX)) {
-        return Promise.reject(new HostRequestError('HOST_REJECTED', `Toast copy text must contain 1 to ${GUEST_CLIPBOARD_TEXT_MAX} characters.`));
-      }
-      return request({
-        channel: OPENCHAMBER_SDK_CHANNEL,
-        v: OPENCHAMBER_SDK_API_VERSION,
-        type: 'toast',
-        id: nextId(ids),
-        payload: { ...payload, message },
-      });
-    },
+    ...guestModelPickerCalls(send, () => nextId(ids), () => lastReady?.features),
+    ...guestToastCalls(request, () => nextId(ids)),
     openUrl: (url) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,

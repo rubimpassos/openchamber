@@ -2,6 +2,29 @@ import { expect, test } from 'bun:test';
 import { connectHost } from './host.ts';
 import { isGuestPopoverRequest } from './popover.ts';
 
+test('JavaScript picker and toast callers reject malformed requests before posting', async () => {
+  const posted = [];
+  const frame = new EventTarget();
+  frame.parent = { postMessage(message) { posted.push(message); } };
+  const host = connectHost({ target: frame, acceptSource: () => true, requestTimeoutMs: 5 });
+  frame.dispatchEvent(new MessageEvent('message', { data: {
+    channel: 'openchamber.sdk', v: 1, type: 'ready',
+    payload: { session: null, features: { modelPicker: true } },
+  } }));
+  const base = { anchor: { x: 0, y: 0, width: 1, height: 1 }, value: null };
+  try {
+    for (const payload of [null, {}, { ...base, anchor: null }, { ...base, anchor: { ...base.anchor, x: Infinity } },
+      { ...base, anchor: { ...base.anchor, width: 0 } }, { ...base, value: 'model' }, { ...base, recommended: '' },
+      { ...base, none: null }, { ...base, none: { label: '' } }, { ...base, none: { label: 'x'.repeat(121) } }]) {
+      await expect(host.pickModel(payload)).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    }
+    for (const action of ['restart', '', true, {}]) {
+      await expect(host.toast({ kind: 'info', message: 'Restart', action })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    }
+    expect(posted.map((message) => message.type)).toEqual(['hello']);
+  } finally { host.dispose(); }
+});
+
 // Exercise a JavaScript consumer directly, without casting invalid options into TS types.
 test('JavaScript storage callers cannot silently fall back after misspelling a scope', async () => {
   const posted = [];

@@ -1,4 +1,4 @@
-import type { GuestPopoverRequest, GuestPopoverSide } from '@openchamber/sdk';
+import type { GuestPopoverAnchor, GuestPopoverRequest, GuestPopoverSide } from '@openchamber/sdk';
 
 type GuestPopoverFrameBounds = {
   left: number;
@@ -28,8 +28,8 @@ const GUEST_POPOVER_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"], [role=
 const GUEST_POPOVER_OVERLAY_SELECTOR = '[data-guest-popover-overlay]';
 const HIDDEN_SELECTOR = '[inert],[aria-hidden="true"],[data-base-ui-inert]';
 
-export const guestPopoverOwnerBlocked = (frame: HTMLIFrameElement): boolean => (
-  !frame.isConnected || frame.closest(HIDDEN_SELECTOR) !== null
+export const guestPopoverOwnerBlocked = (frame: HTMLIFrameElement, allowMenuOwner = false): boolean => (
+  !frame.isConnected || frame.closest(allowMenuOwner ? '[inert],[aria-hidden="true"]' : HIDDEN_SELECTOR) !== null
   || frame.ownerDocument.documentElement.classList.contains('oc-dialog-open')
   || Array.from(frame.ownerDocument.querySelectorAll(GUEST_POPOVER_MODAL_SELECTOR)).some((element) => (
     element.getClientRects().length > 0 && element.closest(HIDDEN_SELECTOR) === null
@@ -37,7 +37,7 @@ export const guestPopoverOwnerBlocked = (frame: HTMLIFrameElement): boolean => (
   ))
 );
 
-export const watchGuestPopoverOwner = (ownerFrame: HTMLIFrameElement, onBlocked: () => void): (() => void) => {
+export const watchGuestPopoverOwner = (ownerFrame: HTMLIFrameElement, onBlocked: () => void, allowMenuOwner = false): (() => void) => {
   const view = ownerFrame.ownerDocument.defaultView;
   if (!view) return () => {};
   const observer = new view.MutationObserver((records) => {
@@ -47,7 +47,7 @@ export const watchGuestPopoverOwner = (ownerFrame: HTMLIFrameElement, onBlocked:
       return candidates.some((node) => node instanceof view.Element
         && (node.matches(GUEST_POPOVER_MODAL_SELECTOR) || node.querySelector(GUEST_POPOVER_MODAL_SELECTOR)));
     });
-    if (modalChanged && guestPopoverOwnerBlocked(ownerFrame)) onBlocked();
+    if (modalChanged && guestPopoverOwnerBlocked(ownerFrame, allowMenuOwner)) onBlocked();
   });
   observer.observe(ownerFrame.ownerDocument.body, { childList: true, subtree: true, attributes: true,
     attributeFilter: ['aria-modal', 'aria-hidden', 'inert', 'data-base-ui-inert'] });
@@ -102,7 +102,11 @@ export const getGuestPopoverController = (ownerDocument: Document): GuestPopover
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
-export const positionGuestPopover = (request: PopoverPositionRequest): GuestPopoverPosition | null => {
+export const guestAnchorRect = (request: {
+  readonly anchor: GuestPopoverAnchor;
+  readonly frame: GuestPopoverFrameBounds;
+  readonly viewport: { readonly width: number; readonly height: number };
+}): { left: number; top: number; right: number; bottom: number; width: number; height: number } | null => {
   const { anchor, frame, viewport } = request;
   if (frame.clientWidth <= 0 || frame.clientHeight <= 0 || viewport.width <= GUTTER * 2 || viewport.height <= GUTTER * 2) return null;
 
@@ -117,6 +121,15 @@ export const positionGuestPopover = (request: PopoverPositionRequest): GuestPopo
   const visibleRight = Math.min(anchorRight, frame.left + frame.width, viewport.width);
   const visibleBottom = Math.min(anchorBottom, frame.top + frame.height, viewport.height);
   if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return null;
+  return { left: visibleLeft, top: visibleTop, right: visibleRight, bottom: visibleBottom,
+    width: visibleRight - visibleLeft, height: visibleBottom - visibleTop };
+};
+
+export const positionGuestPopover = (request: PopoverPositionRequest): GuestPopoverPosition | null => {
+  const anchor = guestAnchorRect(request);
+  if (!anchor) return null;
+  const { viewport } = request;
+  const { left: visibleLeft, top: visibleTop, right: visibleRight, bottom: visibleBottom } = anchor;
 
   const width = Math.min(request.width, viewport.width - GUTTER * 2);
   const height = Math.min(request.height, viewport.height - GUTTER * 2);

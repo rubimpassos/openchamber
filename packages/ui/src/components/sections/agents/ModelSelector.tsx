@@ -18,6 +18,7 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import { useModelPickerLabels } from '@/components/model-picker/useModelPickerLabels';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 
@@ -99,24 +100,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         closePicker();
     }, [closePicker, onChange]);
 
-    const labels = React.useMemo(() => ({
-        searchPlaceholder: t('settings.agents.modelSelector.searchPlaceholder'),
-        list: t('chat.modelControls.modelListAria'),
-        noResults: t('settings.agents.modelSelector.state.noModelsFound'),
-        favorites: t('settings.agents.modelSelector.section.favorites'),
-        recent: t('settings.agents.modelSelector.section.recent'),
-        keyboardHint: t('settings.agents.modelSelector.keyboardHints'),
-        notSelected: placeholder || t('settings.agents.modelSelector.notSelected'),
-        favorite: t('settings.agents.modelSelector.actions.favorite'),
-        unfavorite: t('settings.agents.modelSelector.actions.unfavorite'),
-        provider: t('chat.modelControls.provider'),
-        capabilities: t('chat.modelControls.capabilities'),
-        capabilityToolCalling: t('chat.modelControls.capability.toolCalling'),
-        capabilityReasoning: t('chat.modelControls.capability.reasoning'),
-        input: t('chat.modelControls.input'),
-        output: t('chat.modelControls.output'),
-        costPerMillion: t('chat.modelControls.costPerMillion'),
-    }), [placeholder, t]);
+    const labels = useModelPickerLabels(placeholder);
 
     const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
     const displayReady = isReady || Boolean(selectedModel);
