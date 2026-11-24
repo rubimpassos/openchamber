@@ -26,7 +26,7 @@ export const useSessionAccountUsage = (
   refreshKey: readonly object[],
 ): SessionAccountUsage | null => {
   const enabled = Boolean(sessionId) && providerId === ACCOUNT_PROVIDER;
-  const [state, setState] = React.useState<SessionAccountUsage | null>(null);
+  const [state, setState] = React.useState<{ sessionId: string; usage: SessionAccountUsage | null } | null>(null);
   const [revision, setRevision] = React.useState(0);
 
   React.useEffect(() => {
@@ -43,10 +43,7 @@ export const useSessionAccountUsage = (
   }, [enabled]);
 
   React.useEffect(() => {
-    if (!enabled || !sessionId) {
-      setState(null);
-      return undefined;
-    }
+    if (!enabled || !sessionId) return undefined;
     let active = true;
     void Promise.all([
       fetchSessionAccount({ sessionId, providerId: ACCOUNT_PROVIDER, modelId }),
@@ -55,15 +52,13 @@ export const useSessionAccountUsage = (
       .then(([{ pin, accountId }, accounts]) => {
         if (!active) return;
         const account = accounts.find((candidate) => candidate.id === accountId);
-        setState(account && (account.usage !== null || pin !== null) ? { label: account.label, usage: account.usage } : null);
+        setState({ sessionId, usage: account && (account.usage !== null || pin !== null) ? { label: account.label, usage: account.usage } : null });
       })
-      .catch(() => {
-        if (active) setState(null);
-      });
+      .catch(() => undefined);
     return () => {
       active = false;
     };
   }, [enabled, sessionId, modelId, refreshKey, revision]);
 
-  return enabled ? state : null;
+  return enabled && state?.sessionId === sessionId ? state.usage : null;
 };

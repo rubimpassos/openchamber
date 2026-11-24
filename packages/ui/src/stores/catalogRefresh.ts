@@ -104,7 +104,7 @@ export function catalogRefreshTasks(
       return [refreshPlugins];
     case "provider":
     case "model":
-      return [refreshProviders];
+      return [refreshProviders, refreshCredentialReaders];
     case "credential":
       return [
         refreshProvidersAfterCredentialChange,

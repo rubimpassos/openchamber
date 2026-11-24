@@ -85,7 +85,7 @@ export const useProviderAccountMode = (providerId: string, enabled: boolean): Pr
 
 /** Each stored account's swept usage and live limit marks, by credential id. */
 export const useAccountLimits = (providerId: string, enabled: boolean): ReadonlyMap<string, LimitAccount> => {
-  const [accounts, setAccounts] = React.useState<LimitAccount[]>([]);
+  const [read, setRead] = React.useState<{ providerId: string; accounts: LimitAccount[] } | null>(null);
   const [revision, setRevision] = React.useState(0);
 
   React.useEffect(() => {
@@ -102,12 +102,11 @@ export const useAccountLimits = (providerId: string, enabled: boolean): Readonly
   }, [enabled]);
 
   React.useEffect(() => {
-    setAccounts([]);
     if (!enabled) return undefined;
     let active = true;
     void fetchLimitAccounts(providerId)
       .then((next) => {
-        if (active) setAccounts(next);
+        if (active) setRead({ providerId, accounts: next });
       })
       .catch(() => undefined);
     return () => {
@@ -115,6 +114,7 @@ export const useAccountLimits = (providerId: string, enabled: boolean): Readonly
     };
   }, [enabled, providerId, revision]);
 
-  return React.useMemo(() => new Map(accounts.map((account) => [account.id, account])), [accounts]);
+  const accounts = enabled && read?.providerId === providerId ? read.accounts : null;
+  return React.useMemo(() => new Map((accounts ?? []).map((account) => [account.id, account])), [accounts]);
 };
 
