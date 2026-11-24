@@ -155,3 +155,37 @@ test('on open the card describes the current model, not the first row', async ()
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
   expect(cardText()).toBe('ProviderLab Router');
 });
+
+test('an extension recommendation disappears when the model becomes hidden while open', async () => {
+  const { GuestModelPicker } = await import('../layout/GuestModelPicker');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { useConfigStore } = await import('@/stores/useConfigStore');
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const config = useConfigStore.getState();
+  const ui = useUIStore.getState();
+  const model = {
+    id: 'ds-flash', modelID: 'ds-flash', providerID: 'labcloud', name: 'DeepSeek V4.1 Flash',
+    capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [],
+    time: { released: 0 }, cost: [], status: 'active', enabled: true, limit: { context: 0, output: 0 },
+  } satisfies import('@/lib/opencode/model').Model;
+  useConfigStore.setState({ providers: [{ id: 'labcloud', name: 'Lab Cloud', activation: 'enabled',
+    package: 'fixture', settings: {}, models: [model] }] });
+  useUIStore.setState({ hiddenModels: [] });
+  const frame = document.createElement('iframe');
+  document.body.append(frame);
+  const anchor = new dom.DOMRect(10, 20, 80, 28);
+  try {
+    await act(async () => root.render(<I18nProvider><GuestModelPicker opening={{
+      id: 1, frame, directory: '', anchor, resolve: () => {},
+      request: { anchor: { x: 10, y: 20, width: 80, height: 28 }, value: null, recommended: 'labcloud/ds-flash' },
+    }} onResult={() => {}} /></I18nProvider>));
+    expect(rows().some((row) => row.textContent === 'Recommended: DeepSeek V4.1 Flash')).toBe(true);
+    await act(async () => useUIStore.setState({ hiddenModels: [{ providerID: 'labcloud', modelID: 'ds-flash' }] }));
+    expect(rows().some((row) => row.textContent === 'Recommended: DeepSeek V4.1 Flash')).toBe(false);
+  } finally {
+    await act(async () => root.render(null));
+    frame.remove();
+    useConfigStore.setState(config);
+    useUIStore.setState(ui);
+  }
+});

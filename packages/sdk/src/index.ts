@@ -510,7 +510,7 @@ export type {
   FileWriteResult,
   GenerateRequest,
   GenerateResult,
-  GuestModelCatalog,
+  GuestModelCatalog, ModelPickRequest, ModelPickResult,
   LateGenerateResult,
   GuestFileEntryKind,
   GuestFileListMessage,

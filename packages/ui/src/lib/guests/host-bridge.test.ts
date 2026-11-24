@@ -23,6 +23,8 @@ const toast: GuestMessage = {
 type BridgeEffects = Parameters<typeof answerGuestMessage>[1];
 const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   listModels: overrides.listModels ?? (() => []),
+  pickModel: overrides.pickModel ?? (async () => ({ picked: false })),
+  restartOpenCode: overrides.restartOpenCode ?? (async () => {}),
   loopbackUrl: overrides.loopbackUrl ?? (async () => { throw new HostRequestError('UNSUPPORTED', 'No loopback URL transport.'); }),
   loopbackRequest: overrides.loopbackRequest ?? (async () => { throw new HostRequestError('UNSUPPORTED', 'No loopback request transport.'); }),
   workspaceRead: overrides.workspaceRead ?? (() => ({ kind: 'projects', state: 'ready', projects: [] })),
@@ -73,6 +75,32 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
 });
 
 describe('answerGuestMessage', () => {
+  for (const selection of [
+    { picked: true, model: 'fixture/model-fast' },
+    { picked: true, model: null },
+    { picked: false },
+  ] as const) test(`returns the correlated model selection ${JSON.stringify(selection)}`, async () => {
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'model-pick', id: 'pick-1',
+      payload: { anchor: { x: 10, y: 20, width: 80, height: 28 }, value: null },
+    }, effects({ pickModel: async () => selection }));
+    expect(reply).toEqual({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result',
+      id: 'pick-1', ok: true, payload: selection });
+  });
+
+  test('settles restart only after the operation finishes', async () => {
+    let complete = () => {};
+    const completion = new Promise<void>((resolve) => { complete = resolve; });
+    let settled = false;
+    const reply = answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'opencode-restart', id: 'restart-1', payload: {},
+    }, effects({ restartOpenCode: () => completion })).then((result) => { settled = true; return result; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    complete();
+    expect(await reply).toMatchObject({ type: 'result', id: 'restart-1', ok: true });
+  });
+
   test('publishes status controls through the frame owner and reports unsupported owners', async () => {
     const controls: GuestStatusControl[] = [{ kind: 'button', id: 'refresh', label: 'Refresh' }];
     const seen: GuestStatusControl[][] = [];
@@ -121,7 +149,7 @@ describe('answerGuestMessage', () => {
   });
 
   test('forwards toast buttons and persistence to the host without awaiting a click', async () => {
-    const request: ToastRequest = { kind: 'info', message: 'Summary', copy: { text: 'Source' }, dismiss: true, persistent: true };
+    const request: ToastRequest = { kind: 'info', message: 'Summary', copy: { text: 'Source' }, dismiss: true, persistent: true, action: 'restart-opencode' };
     const seen: ToastRequest[] = [];
     const reply = await answerGuestMessage({ ...toast, payload: request }, effects({
       toast: (payload) => { seen.push(payload); },

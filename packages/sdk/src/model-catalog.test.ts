@@ -20,17 +20,22 @@ test.each([{}, { directory: '/other' }, null])('refuses listModels when a payloa
 test('preserves catalog entries when a model list crosses the result wire', () => {
   // Given
   const reply = { channel: 'openchamber.sdk', v: 1, type: 'result', id: request.id, ok: true,
-    payload: [{ id: 'provider/model-fast', name: 'Model Fast', variants: ['low', 'high'] }] };
+    payload: [{ id: 'provider/model-fast', name: 'Model Fast', provider: 'Provider display name', variants: ['low', 'high'] },
+      { id: 'legacy/model', name: 'Legacy', variants: [] }] };
   // When
   const parsed = hostMessageSchema.safeParse(reply);
   // Then
   expect(parsed.success && parsed.data).toEqual(reply);
 });
 
-test('refuses a model list result when variants are not IDs', () => {
+test.each([
+  { id: 'provider/model', name: 'Model', variants: [{ id: 'high', settings: {} }] },
+  { id: 'provider/model', name: 'Model', variants: [], provider: 42 },
+  { id: 'bare-model', name: 'Model', variants: [] },
+])('refuses malformed model catalog rows: %j', (row) => {
   // Given
   const reply = { channel: 'openchamber.sdk', v: 1, type: 'result', id: request.id, ok: true,
-    payload: [{ id: 'provider/model', name: 'Model', variants: [{ id: 'high', settings: {} }] }] };
+    payload: [row] };
   // When
   const parsed = hostMessageSchema.safeParse(reply);
   // Then

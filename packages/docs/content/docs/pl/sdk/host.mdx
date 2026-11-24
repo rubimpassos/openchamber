@@ -5,6 +5,14 @@ description: Każda metoda connectHost, którą rozszerzenie może wywołać, to
 
 # API hosta
 
+## Wybór modelu i ponowne uruchomienie OpenCode
+
+Gdy `ready.features.modelPicker` jest true, wywołaj `host.pickModel({ anchor, value, none?, recommended? })`. `anchor` zawiera `{ x, y, width, height }` z `getBoundingClientRect()`, w pikselach CSS ramki, z tymi samymi limitami co kotwica popovera. `value` jest wymagane i przyjmuje ID `providerID/modelID` lub `null`. `none: { label: 'Domyślny' }` dodaje opcję z etykietą o długości od 1 do 120 znaków; `recommended` wyróżnia ID. Wywołanie czeka do 30 minut i zwraca `{ picked: true, model: string | null }` lub `{ picked: false }` po zamknięciu bez wyboru. Zmień wartość tylko przy `picked: true`.
+
+Komunikat `listModels { id }` nie ma payloadu i wymaga zatwierdzonej zdolności `model`. `GuestModelCatalog` zawiera `{ id, name, provider?: string, variants: string[] }`. `provider` to nazwa wyświetlana dostawcy, pomijana przez starsze hosty; warianty są identyfikatorami. Załadowany pusty katalog zwraca `[]`, niezaładowany `HOST_UNAVAILABLE`. Wyszukiwanie, grupowanie i szczegóły modeli obsługuje selektor hosta.
+
+Przy `ready.features.restartOpenCode` wywołaj `host.restartOpenCode()` z kliknięcia na stronie mającej fokus. Nie wymaga uprawnienia zdolności i czeka do 2 minut. `host.toast({ kind: 'info', message: 'Uruchom ponownie, aby zastosować zmiany', action: 'restart-opencode' })` oferuje przetłumaczony przycisk hosta działający po zamknięciu ramki. Bezpośrednie wywołanie wymaga aktywacji użytkownika w ramce; bez kliknięcia z fokusem zostaje odrzucone jako `HOST_REJECTED`. Przycisk powiadomienia otrzymuje aktywację ze swojego kliknięcia. Dozwolone jest tylko `restart-opencode`. Brak funkcji lub nieobsługiwany host albo środowisko zwraca `UNSUPPORTED`. Host pokazuje wynik w powiadomieniach, w tym ostrzeżenie o konieczności ręcznego restartu zewnętrznego serwera i błędy przy awariach operacyjnych. Obietnica rozwiązuje się po tych komunikatach i nie gwarantuje ponownego uruchomienia OpenCode. Kontrakt obejmuje web, desktop, mobilny web i Capacitor; VS Code nie ładuje rozszerzeń.
+
 Użyj tej strony, gdy potrzebujesz dokładnych metod `connectHost`, limitów i kodów błędów. Układ folderu, manifest i instalację opisuje [Tworzenie rozszerzenia](/sdk/).
 
 ```ts

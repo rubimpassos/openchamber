@@ -228,6 +228,11 @@ so it survives the sidebar closing and reopening. A folder change remounts the t
   contentWindow. Payloads cannot choose another guest, overlay entry or directory;
   overlay children inherit their owner's actual directory. Paused or unapproved
   guests keep frames and effects down, including teardown toasts.
+- `GuestModelPicker` draws the shared model list outside the extension frame.
+  `hooks/useGuestModelPicker` owns the outstanding RPC and settles a replaced or
+  dismissed opening once. Frame-relative anchors share the clipped viewport
+  translation in `lib/guests/popovers.ts`; the host's dropdown owns collision
+  placement, search focus, Escape and outside presses.
 - Only the rail panel consumes parked items and clears badges. Strict Mode's
   second mount effect preserves the first consumption; off-screen execution
   neither consumes items nor clears badges, retains generation answers or

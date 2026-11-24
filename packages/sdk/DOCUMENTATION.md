@@ -14,6 +14,12 @@ Public author pages live in `packages/docs/content/docs/sdk.mdx`, `sdk/host.mdx`
 - `src/protocol.ts`: envelope parse for host and guest messages.
 - `src/plan-provider-schemas.ts` owns plan annotation, read and change-notice payload admission. `protocol.ts` composes these payloads into the existing message unions and retains the bidirectional wire-type proofs.
 - `src/host.ts`: iframe client. Posts to `parent`. Ignores messages whose `source` is not `parent`. In-flight RPCs time out at `GUEST_REQUEST_TIMEOUT_MS` (20s) as `HOST_TIMEOUT`. `onDirectory` / `onSession` / `onSessionLifecycle` / `onItem` replay and stay current after later pushes, same as connection and settings. `onResolve` holds one handler for host `resolve` requests and answers each with `resolve-result` (the clamped chip, `null`, or the thrown error's message; no handler answers with an error). `setBadge` posts `badge` with the count clamped to 0..`GUEST_BADGE_MAX`.
+- `src/model-picker.ts` owns catalog and model-selection types and the picker/restart client calls. Catalog IDs include the provider; provider names are display text and variants are machine IDs. `src/model-picker-boundary.ts` parses guest picker requests and host answers without Zod so the guest bundle stays small. `src/popover-boundary.ts` owns their shared finite anchor admission. `src/model-picker-schemas.ts` owns host-side catalog and picker payload admission; `protocol.ts` composes those schemas and retains the bidirectional wire-type proofs. `src/toast.ts` owns toast types and guest validation/calls. `host.ts` supplies the shared request lifetime, ID sequence and current feature snapshot to these clients, following `guestNavigationCalls`; `contract.ts` and `index.ts` retain their public type exports.
+
+The two guest boundary modules use the lint configuration's exported-parser
+recognition: one unknown input becomes a domain value or `null`. The exact file
+paths are registered in `oxlint.anti-slop.config.ts`; ordinary helpers and
+unparsed forwarding remain subject to both rules. Host admission still uses Zod.
 - Install links: `openchamber://extensions/install?url=` from anywhere (https only, the desktop shell passes it on, the add dialog asks first), and `?path=` from chat content only, drawn as a button there.
 - `scripts/check-guest.ts`: the `openchamber-guest-check` bin. Reads a package folder and names what the host would refuse: the manifest, pages and scripts that are not built, a service that was not bundled.
 - `scripts/bundle-guest.ts`: official IIFE build, exposed as the `openchamber-guest-bundle` bin. Run `bunx openchamber-guest-bundle panel/main.ts panel/main.js` from the guest folder; paths resolve against the current directory. Needs Bun. Any bundler with an IIFE target is an equivalent substitute.
@@ -33,11 +39,21 @@ Plan payloads share path, progress and annotation limits from `plan-providers.ts
 
 ## Model catalog
 
-Guest `listModels` has an `id` and no payload. Its id-correlated `result.payload` is a `GuestModelCatalog` array of `{ id: 'provider/model', name, variants: string[] }`, under the existing approved `model` capability. `PluginPane` handles it on every guest surface, including a page-only extension; `lib/guests/models.ts` projects the frame directory's loaded chat catalog and hidden-model choices using the same variant-ID helper as the session picker. Reads perform no network calls or model generation. An unloaded catalog is `HOST_UNAVAILABLE`; a successfully loaded empty catalog is `[]`. The SDK defines this wire contract; the iframe client helper is independent.
+Guest `listModels` has an `id` and no payload. Its id-correlated `result.payload` is a `GuestModelCatalog` array of `{ id: 'provider/model', name, provider?: string, variants: string[] }`, under the existing approved `model` capability. `provider` is a display name and is optional for older hosts. `PluginPane` handles it on every guest surface, including a page-only extension; `lib/guests/models.ts` projects the frame directory's loaded chat catalog and hidden-model choices using the same variant-ID helper as the session picker. Reads perform no network calls or model generation. An unloaded catalog is `HOST_UNAVAILABLE`; a successfully loaded empty catalog is `[]`. The SDK defines this wire contract; the iframe client helper is independent.
+
+`pickModel` sends `model-pick { id, payload: { anchor, value, none?, recommended? } }` only after `ready.features.modelPicker`. Anchors reuse popover validation and bounds. `value` is required and nullable; `none.label` is 1 to 120 characters. IDs use `providerID/modelID`. An id-correlated `ModelPickResult` is `{ picked: true, model: string | null }` or `{ picked: false }`; dismissal must preserve the caller's value. The guest validates requests before posting and answers before resolving, with a 30-minute send timeout.
 
 ### Why catalog reads use the existing model approval
 
 The catalog exposes only picker IDs, display names and variant IDs. Reusing `model` keeps this read inside an existing explicit approval without another grant or a provider/configuration endpoint. Provider objects, credentials, headers, endpoints and variant settings never cross the frame boundary. The frame's current directory and runtime select the snapshot at call time.
+
+### Why model selection uses the host picker
+
+The host owns model search, grouping and model details. Sharing its picker keeps extensions consistent with those choices without expanding the catalog into a second rich metadata contract that every extension must render and keep current.
+
+### Why page restart calls require activation and toast restart buttons need no grant
+
+`restartOpenCode` sends `opencode-restart { id, payload: {} }` only after `ready.features.restartOpenCode`, with a 2-minute timeout. The host requires user activation in the calling frame because a page could otherwise restart OpenCode on its own. `ToastRequest.action: 'restart-opencode'` only offers a host-owned button, so the user's click authorizes the restart even after the frame is removed; neither operation needs a standing capability grant. Both guest validation and host admission reject every other action literal.
 
 ## Invariants
 

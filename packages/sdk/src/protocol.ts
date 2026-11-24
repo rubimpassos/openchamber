@@ -4,6 +4,7 @@ import { loopbackRequestSchema, loopbackRequestResultSchema, loopbackUrlRequestS
 import { guestSessionContextSchema, guestSessionTokenTotalsSchema, guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema, guestStatusSummarySchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema, guestTooltipRequestSchema } from './popover-schemas.ts';
+import { guestModelCatalogSchema, modelPickRequestSchema, modelPickResultSchema } from './model-picker-schemas.ts';
 import { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX } from './navigation.ts';
 import { GUEST_MICROPHONE_END_REASONS, GUEST_MICROPHONE_FRAME_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MIN } from './microphone.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
@@ -205,11 +206,8 @@ const microphoneOpenResultPayloadSchema = z.object({
 });
 
 const hostResultPayloadSchema = z.union([
-  z.array(z.object({
-    id: z.string().min(1),
-    name: z.string(),
-    variants: z.array(z.string().min(1)).readonly(),
-  }).strict().readonly()).readonly(),
+  modelPickResultSchema,
+  guestModelCatalogSchema,
   loopbackUrlResultSchema,
   loopbackRequestResultSchema,
   guestStorageResultSchema,
@@ -336,6 +334,8 @@ const readyPayloadSchema = z.object({
     statusControls: z.literal(true).optional(),
     statusSummary: z.literal(true).optional(),
     popovers: z.literal(true).optional(),
+    modelPicker: z.literal(true).optional(),
+    restartOpenCode: z.literal(true).optional(),
     lateGenerateResults: z.literal(true).optional(),
     microphone: z.literal(true).optional(),
     tooltips: z.literal(true).optional(),
@@ -353,23 +353,15 @@ const hostResultSchema = z.object({
   payload: hostResultPayloadSchema.optional(),
 }).transform((message, ctx) => {
   if (message.ok) {
-    if (message.payload) {
-      return {
-        channel: message.channel,
-        v: message.v,
-        type: 'result' as const,
-        id: message.id,
-        ok: true as const,
-        payload: message.payload,
-      };
-    }
-    return {
+    const result: Pick<typeof message, 'channel' | 'v' | 'id' | 'payload'> & { type: 'result'; ok: true } = {
       channel: message.channel,
       v: message.v,
-      type: 'result' as const,
+      type: 'result',
       id: message.id,
-      ok: true as const,
+      ok: true,
     };
+    if (message.payload !== undefined) result.payload = message.payload;
+    return result;
   }
   if (!message.error) {
     ctx.addIssue({ code: 'custom', message: 'Failed result needs an error string.' });
@@ -542,6 +534,8 @@ export const hostMessageSchema = z.union([
 const filePathSchema = z.string().min(1).max(GUEST_FILE_PATH_MAX).refine(isGuestFilePath);
 
 export const guestMessageSchema = z.discriminatedUnion('type', [
+  z.object({ ...envelope, type: z.literal('model-pick'), id: z.string().min(1), payload: modelPickRequestSchema }).strict(),
+  z.object({ ...envelope, type: z.literal('opencode-restart'), id: z.string().min(1), payload: z.object({}).strict() }).strict(),
   z.object({ ...envelope, type: z.literal('listModels'), id: z.string().min(1) }).strict(),
   z.object({ ...envelope, type: z.literal('loopback-url'), id: z.string().min(1), payload: loopbackUrlRequestSchema }).strict(),
   z.object({ ...envelope, type: z.literal('loopback-request'), id: z.string().min(1), payload: loopbackRequestSchema }).strict(),
@@ -596,6 +590,7 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
       copy: z.union([z.boolean(), z.object({ text: z.string().min(1).max(GUEST_CLIPBOARD_TEXT_MAX) })]).optional(),
       dismiss: z.boolean().optional(),
       persistent: z.boolean().optional(),
+      action: z.literal('restart-opencode').optional(),
     }),
   }),
   z.object({

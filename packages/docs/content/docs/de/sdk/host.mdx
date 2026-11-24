@@ -5,6 +5,14 @@ description: Jede connectHost-Methode, die eine Erweiterung aufrufen kann, was O
 
 # Host API
 
+## Modellauswahl und OpenCode-Neustart
+
+Mit `ready.features.modelPicker` öffnet `host.pickModel({ anchor, value, none?, recommended? })` die Modellauswahl der App. `anchor` enthält `{ x, y, width, height }` aus `getBoundingClientRect()` in CSS-Pixeln des Iframes und hat dieselben Grenzen wie ein Popover-Anker. `value` ist erforderlich und enthält eine ID im Format `providerID/modelID` oder `null`. `none: { label: 'Standard' }` ergänzt eine Option mit 1 bis 120 Zeichen; `recommended` markiert eine Modell-ID. Nach höchstens 30 Minuten liefert der Aufruf `{ picked: true, model: string | null }` oder beim Schließen `{ picked: false }`. Ändern Sie den Wert nur bei `picked: true`.
+
+Die Nachricht `listModels { id }` hat keinen Payload und benötigt die genehmigte Fähigkeit `model`. Das Ergebnis `GuestModelCatalog` enthält `{ id, name, provider?: string, variants: string[] }`. `provider` ist der Anzeigename des Anbieters und fehlt bei älteren Hosts; Varianten sind IDs. Ein geladener leerer Katalog liefert `[]`, ein ungeladener `HOST_UNAVAILABLE`. Suche, Gruppierung und Modelldetails übernimmt die Modellauswahl des Hosts.
+
+Mit `ready.features.restartOpenCode` rufen Sie `host.restartOpenCode()` durch einen Klick in der fokussierten Seite auf. Keine zusätzliche Berechtigung, höchstens 2 Minuten Wartezeit. `host.toast({ kind: 'info', message: 'Zum Übernehmen neu starten', action: 'restart-opencode' })` bietet einen übersetzten Host-Button, der auch nach dem Schließen des Iframes funktioniert. Der direkte Aufruf benötigt eine Nutzeraktivierung im Iframe; ohne fokussierten Klick wird er mit `HOST_REJECTED` abgelehnt. Der Toast-Button erhält die Aktivierung durch seinen eigenen Klick. Nur `restart-opencode` ist zulässig. Fehlende Funktionen oder nicht unterstützte Hosts und Laufzeitumgebungen liefern `UNSUPPORTED`. Der Host zeigt das Ergebnis in Toasts an, darunter eine Warnung zum manuellen Neustart externer Server und Fehler bei Betriebsproblemen. Das Promise wird nach dieser Rückmeldung aufgelöst und garantiert keinen erfolgreichen Neustart von OpenCode. Der Vertrag gilt für Web, Desktop, mobiles Web und Capacitor; VS Code lädt keine Erweiterungen.
+
 Diese Seite ist für dich, wenn du die genauen `connectHost`-Methoden, Grenzen und Fehlercodes brauchst. Für Ordneraufbau, Manifest und Installation fang bei [Eine Erweiterung bauen](/sdk/) an.
 
 ```ts

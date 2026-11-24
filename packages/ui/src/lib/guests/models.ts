@@ -16,6 +16,7 @@ export const readGuestModels = (directory?: string): GuestModelCatalog => {
     .map((model) => ({
       id: `${provider.id}/${model.id}`,
       name: getModelDisplayName(model),
+      provider: provider.name,
       variants: listModelVariantIds(model.variants),
     })));
 };

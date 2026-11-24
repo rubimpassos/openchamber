@@ -59,6 +59,12 @@ export default defineConfig({
     "openchamber/no-wire-client-imports": "error",
   },
   overrides: [{
+    files: ["packages/sdk/src/model-picker-boundary.ts", "packages/sdk/src/popover-boundary.ts"],
+    rules: {
+      "anti-slop/no-runtime-typeof": ["error", { allowInParsers: ["(?:^|/)packages/sdk/src/(?:model-picker|popover)-boundary\\.ts$"] }],
+      "anti-slop/no-unknown-parameters": ["error", { allowInParsers: ["(?:^|/)packages/sdk/src/(?:model-picker|popover)-boundary\\.ts$"] }],
+    },
+  }, {
     files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
     rules: {
       "anti-slop/no-runtime-typeof": ["error", { allowInTypeGuards: true, allowInParsers: ["(?:^|/)packages/web/server/lib/shared/[^/]+\\.ts$"] }],

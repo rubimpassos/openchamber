@@ -20,14 +20,14 @@ export const showGuestToast = (request: ToastRequest, guestId: string): void => 
   if (!allowGuestToast(guestId, Date.now())) return;
   const copyText = request.copy === true ? request.message : request.copy ? request.copy.text : undefined;
   const dismiss = request.dismiss === true || request.persistent === true;
-  if (copyText === undefined && !dismiss) {
+  if (copyText === undefined && !dismiss && !request.action) {
     toast[request.kind](request.message);
     return;
   }
   const id = generateUuid();
   const options: ExternalToast = {
     id,
-    action: <GuestToastActions copyText={copyText} dismiss={dismiss} onDismiss={() => toast.dismiss(id)} />,
+    action: <GuestToastActions copyText={copyText} dismiss={dismiss} action={request.action} onDismiss={() => toast.dismiss(id)} />,
   };
   if (request.persistent) options.duration = Infinity;
   toast[request.kind](request.message, options);

@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { OpenCode } from '@opencode/client';
 import { Window } from 'happy-dom';
 import { hostMessageSchema } from '@openchamber/sdk/schemas';
-import type { HostMessage } from '@openchamber/sdk';
+import type { GuestMessage, HostMessage } from '@openchamber/sdk';
 
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -17,6 +17,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { SyncProvider } from '@/sync/sync-context';
 import { PluginPane } from './PluginPane';
+import { useGuestModelPicker } from '@/hooks/useGuestModelPicker';
 
 const model: Model = {
   id: 'model-fast', modelID: 'model', providerID: 'fixture', name: 'Model Fast',
@@ -36,7 +37,7 @@ const guest: InstalledGuest = {
 };
 const request = { channel: 'openchamber.sdk', v: 1, type: 'listModels', id: 'models-1' } as const;
 
-let send: () => Promise<void>;
+let send: (data?: GuestMessage) => Promise<void>;
 let received: HostMessage[];
 let cleanup: () => Promise<void>;
 
@@ -45,7 +46,9 @@ const mountPage = async (installed: InstalledGuest = guest) => {
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [key, value] of Object.entries({ window: dom, document: dom.document, navigator: dom.navigator,
     localStorage: dom.localStorage, getComputedStyle: dom.getComputedStyle.bind(dom), Event: dom.Event,
-    MessageEvent: dom.MessageEvent, IS_REACT_ACT_ENVIRONMENT: true })) {
+    MessageEvent: dom.MessageEvent, DOMRect: dom.DOMRect, ResizeObserver: dom.ResizeObserver,
+    Element: dom.Element,
+    IS_REACT_ACT_ENVIRONMENT: true })) {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
@@ -100,6 +103,11 @@ const mountPage = async (installed: InstalledGuest = guest) => {
   ));
   const frame = container.querySelector<HTMLIFrameElement>('iframe');
   if (!frame) throw new Error('Page iframe did not mount');
+  Object.defineProperties(frame, {
+    clientWidth: { configurable: true, value: 800 }, clientHeight: { configurable: true, value: 600 },
+    getBoundingClientRect: { configurable: true, value: () => new DOMRect(100, 50, 800, 600) },
+    getClientRects: { configurable: true, value: () => [new DOMRect(100, 50, 800, 600)] },
+  });
   const guestWindow = new Window();
   Object.defineProperty(frame, 'contentWindow', { configurable: true, value: guestWindow });
   const frameWindow = frame.contentWindow;
@@ -107,9 +115,10 @@ const mountPage = async (installed: InstalledGuest = guest) => {
   received = [];
   const post = spyOn(frameWindow, 'postMessage').mockImplementation((data) => { received.push(hostMessageSchema.parse(data)); });
   restoreFrame = () => { post.mockRestore(); void guestWindow.happyDOM.close(); };
-  send = async () => {
-    await act(async () => { window.dispatchEvent(new MessageEvent('message', { source: frameWindow, data: request })); });
+  send = async (data = request) => {
+    await act(async () => { window.dispatchEvent(new MessageEvent('message', { source: frameWindow, data })); });
   };
+  return frame;
 };
 
 afterEach(async () => { await cleanup(); });
@@ -122,8 +131,8 @@ test('returns only visible catalog IDs and variant IDs when a page has model app
   await send();
   // Then
   expect(reply()).toEqual({ channel: 'openchamber.sdk', v: 1, type: 'result', id: request.id, ok: true, payload: [
-    { id: 'fixture/model-fast', name: 'Model Fast', variants: ['low', 'high'] },
-    { id: 'fixture/plain', name: 'Plain', variants: [] },
+    { id: 'fixture/model-fast', name: 'Model Fast', provider: 'Fixture', variants: ['low', 'high'] },
+    { id: 'fixture/plain', name: 'Plain', provider: 'Fixture', variants: [] },
   ] });
 });
 
@@ -167,7 +176,43 @@ test('reads the page directory when the active session uses another catalog', as
   await send();
   // Then
   expect(reply()).toMatchObject({ ok: true, payload: [
-    { id: 'fixture/model-fast', name: 'Model Fast', variants: ['low', 'high'] },
-    { id: 'fixture/plain', name: 'Plain', variants: [] },
+    { id: 'fixture/model-fast', name: 'Model Fast', provider: 'Fixture', variants: ['low', 'high'] },
+    { id: 'fixture/plain', name: 'Plain', provider: 'Fixture', variants: [] },
   ] });
+});
+
+test('refuses a model picker without model approval before drawing any host controls', async () => {
+  await mountPage({ ...guest, capabilities: { requested: [], granted: [] } });
+  await send({ ...request, type: 'model-pick',
+    payload: { anchor: { x: 10, y: 20, width: 80, height: 28 }, value: null } });
+  expect(reply()).toMatchObject({ ok: false, code: 'NOT_GRANTED' });
+});
+
+test('refuses a page restart without focused user activation', async () => {
+  await mountPage();
+  await send({ ...request, type: 'opencode-restart', payload: {} });
+  expect(reply()).toMatchObject({ ok: false, code: 'HOST_REJECTED' });
+});
+
+test('settles a replaced picker under its menu accessibility marker and its replacement on an outside press', async () => {
+  const frame = await mountPage();
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  let picker: ReturnType<typeof useGuestModelPicker> | undefined;
+  const Picker = () => { picker = useGuestModelPicker({ directory: '/visible', panelOpen: true }); return null; };
+  await act(async () => root.render(<Picker />));
+  const api = picker;
+  if (!api) throw new Error('Picker did not mount');
+  const payload = { anchor: { x: 10, y: 20, width: 80, height: 28 }, value: null };
+  try {
+    let first: Promise<import('@openchamber/sdk').ModelPickResult> | undefined;
+    let second: typeof first;
+    await act(async () => { first = api.open(payload, { frame, directory: '/visible' }); });
+    frame.setAttribute('data-base-ui-inert', '');
+    await act(async () => { second = api.open(payload, { frame, directory: '/visible' }); });
+    expect(await first).toEqual({ picked: false });
+    await act(async () => { document.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true })); });
+    expect(await second).toEqual({ picked: false });
+  } finally { await act(async () => root.unmount()); }
 });

@@ -9,15 +9,9 @@ import {
   GUEST_POPOVER_HEIGHT_MIN,
   GUEST_POPOVER_HEIGHT_MAX,
   guestFileScope,
-  type AttachIssueRequest,
-  type GuestBlockCall,
-  type GuestHostSurface,
-  type GuestItem,
   type GuestMicrophoneEndReason,
   type GuestPopoverClosedEvent,
-  type GuestPopoverContext,
   type GuestPopoverRequest,
-  type GuestStatusSummaryItem,
   type GuestMessage,
   type HostMessage,
   type HostReadyContext,
@@ -69,10 +63,9 @@ import { registerGuestResolver, type GuestResolveOutcome } from '@/lib/guests/re
 import { registerGuestPlanAnnotator, type GuestPlanAnnotateOutcome } from '@/lib/guests/plans/frames';
 import { findGuestPlanProvider, invalidateGuestPlans } from '@/lib/guests/plans/catalog';
 import { readGuestPlanFile } from '@/lib/guests/plans/api';
-import type { GuestBackgroundAction } from '@/lib/guests/run-action';
 import { useGuestFrameUrl } from '@/lib/guests/useGuestFrameUrl';
 import { usePanelItem } from './usePanelItem';
-import { isGuestFileMessage, type GuestFileChannel } from '@/lib/guests/file-editor-channel';
+import { isGuestFileMessage } from '@/lib/guests/file-editor-channel';
 import { GuestFrameTooltip } from './GuestFrameTooltip';
 import { placeGuestTooltip, type GuestFrameTooltipState } from '@/lib/guests/tooltip';
 import { fetchHostLinearIssueGet } from '@/lib/guests/host-linear-request';
@@ -97,13 +90,13 @@ import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
 import { canCaptureGuestMicrophone, markGuestListening, startGuestMicrophone, type GuestMicrophoneCapture } from '@/lib/guests/microphone';
 import { guestStorageOperation } from '@/lib/guests/storage';
 import { getGuestPopoverController, guestPopoverOwnerBlocked, positionGuestPopover, type GuestPopoverActivation, type GuestPopoverPosition } from '@/lib/guests/popovers';
-import { createGuestStatusControls, type GuestStatusControlBinding } from '@/lib/guests/status-controls';
+import { createGuestStatusControls } from '@/lib/guests/status-controls';
 import { showGuestToast } from '@/lib/guests/toast';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { closeGuestTabsEverywhere } from '@/lib/guests/tabs';
-import { pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
+import { pluginIdFromMode } from '@/lib/surfaces/modes';
 import { useInputStore } from '@/sync/input-store';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -115,37 +108,11 @@ import { useSessionMessagesSelector, useSessionSelector, useSessionStatus } from
 import { frameContext, frameContextLimit, frameSessionFields, sameFrameContextReading, sameFrameSessionFields, selectFrameContextReading } from '@/lib/guests/session-usage';
 import { GuestPopover } from './GuestPopover';
 import { GuestPopoverSheet } from './GuestPopoverSheet';
+import { GuestModelPicker } from './GuestModelPicker';
+import { useGuestModelPicker } from '@/hooks/useGuestModelPicker';
+import type { PluginPaneProps } from './PluginPane.types';
+import { restartOpenCodeWithFeedback } from '@/lib/restartOpenCode';
 import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors';
-
-type PluginPaneProps = {
-  mode: PluginContextPanelMode;
-  surface?: GuestHostSurface;
-  item?: GuestItem | null;
-  panelOpen?: boolean;
-  headless?: boolean;
-  backgroundAction?: GuestBackgroundAction;
-  onDismiss?: () => void;
-  onAttach?: (issue: AttachIssueRequest) => void;
-  onSessionStarted?: () => void;
-  block?: { call: GuestBlockCall; entry: string; answer: (text: string) => Promise<void> };
-  onResize?: (height: number) => void;
-  onStatusControls?: (binding: GuestStatusControlBinding | null) => void;
-  onStatusSummary?: (items: GuestStatusSummaryItem[]) => void;
-  statusDirectory?: string | null;
-  fileEditor?: { editorId: string; channel: GuestFileChannel };
-  pinnedDirectory?: string;
-  popover?: GuestPopoverContext;
-  popoverHost?: { entry: string; directory: string; context: GuestPopoverContext; activation: GuestPopoverActivation; focus: boolean };
-  isActive?: () => boolean;
-  onPopoverClosed?: (event: GuestPopoverClosedEvent) => void;
-  onPopoverActivity?: (active: boolean) => void;
-  /**
-   * Hidden frame that describes this extension's plans in one worktree
-   * (`contributes.plans`): pinned to that directory, attached to no session,
-   * and the only frame that answers `plans-annotate` for it.
-   */
-  planHostDirectory?: string;
-};
 
 // external: https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage Opaque-origin frames require a wildcard target and receive-side contentWindow identity checks.
 const OPAQUE_FRAME_TARGET_ORIGIN = '*';
@@ -209,6 +176,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const contextLimit = useConfigStore((state) => frameContextLimit(contextReading, selectProvidersForDirectory(state, directory || undefined)));
   const context = React.useMemo(() => frameContext(contextReading, contextLimit), [contextReading, contextLimit]);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const { opening: modelPicker, open: pickModel, finish: finishModelPick, dismiss: dismissModelPicker } = useGuestModelPicker({ directory, panelOpen });
   const [activePopover, setActivePopover] = React.useState<{ request: GuestPopoverRequest; position: GuestPopoverPosition; entry: string; directory: string; activation: GuestPopoverActivation } | null>(null);
   const activePopoverRef = React.useRef<typeof activePopover>(null);
   const [guestTooltip, setGuestTooltip] = React.useState<GuestFrameTooltipState | null>(null);
@@ -268,6 +236,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
     if (!headless) features.lateGenerateResults = true;
     if (!headless && canCaptureGuestMicrophone()) features.microphone = true;
+    if (!isVSCodeRuntime()) {
+      features.restartOpenCode = true;
+      if (!headless && (surface === 'page' || surface === 'panel' || surface === 'status')) features.modelPicker = true;
+    }
     return {
     theme: {
       mode: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
@@ -665,6 +637,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       if (!ownsFrame()) return;
 
       if (message.type === 'hello') {
+        dismissModelPicker();
         frameDocumentRef.current += 1;
         stopLateGenerateListening();
         acknowledgeHandshake();
@@ -709,6 +682,19 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         listModels: () => {
           if (!guestMay(currentGuest(), 'model')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
           return readGuestModels(directoryRef.current || undefined);
+        },
+        pickModel: (request) => {
+          if (!guestMay(currentGuest(), 'model')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
+          if (!readyRef.current.features?.modelPicker) throw new HostRequestError('UNSUPPORTED', 'This frame cannot open the model picker.');
+          return pickModel(request, { frame, directory: directoryRef.current });
+        },
+        restartOpenCode: () => {
+          if (isVSCodeRuntime()) throw new HostRequestError('UNSUPPORTED', 'This runtime cannot restart OpenCode.');
+          const clicked = !navigator.userActivation || navigator.userActivation.isActive;
+          if (!clicked || document.activeElement !== iframeRef.current) {
+            throw new HostRequestError('HOST_REJECTED', 'restartOpenCode works only from a click.');
+          }
+          return restartOpenCodeWithFeedback(translateRef.current);
         },
         ...createGuestLoopback({
           guestId: requestingGuestId, currentGuest, signal: lifetime.signal,
@@ -832,6 +818,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         openSession: (id) => { requireSessions(); openGuestSession(id); },
         toast: (request) => {
           if (!guestEnabledRef.current) return;
+          if (request.action && isVSCodeRuntime()) throw new HostRequestError('UNSUPPORTED', 'This runtime cannot restart OpenCode.');
           showGuestToast(request, guestIdRef.current);
         },
         openUrl: (url) => openGuestUrl(
@@ -1145,6 +1132,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     window.addEventListener('message', onMessage);
     return () => {
       disposed = true;
+      dismissModelPicker();
       if (!childPopover) closeActivePopover('owner');
       statusControls.dispose();
       if (statusControlsRef.current === statusControls) statusControlsRef.current = null;
@@ -1156,7 +1144,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
-  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerAnnotator, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
+  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, dismissModelPicker, frameKey, guestEnabled, guestEntry, headless, pickModel, popover, postToGuest, pushHostState, refreshOauth, registerAnnotator, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
 
   React.useLayoutEffect(() => {
     statusControlsRef.current?.retire();
@@ -1334,6 +1322,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       // skip that, so the host drops it too.
       onPointerLeave={() => setGuestTooltip(null)}
       onLoad={() => {
+        dismissModelPicker();
         setGuestTooltip(null);
         if (!popoverHost && !popover) closeActivePopover('owner');
         if (popoverHost?.focus && isActiveRef.current?.()) iframeRef.current?.focus();
@@ -1346,6 +1335,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       }}
       />
       {popoverOverlay}
+      {modelPicker ? <GuestModelPicker key={modelPicker.id} opening={modelPicker} onResult={finishModelPick} /> : null}
       {guestTooltip ? <GuestFrameTooltip tooltip={guestTooltip} /> : null}
     </>
   );

@@ -55,14 +55,16 @@ export const guestPopoverDataSchema = z.custom<JsonValue>((value) => {
   return true;
 }, 'Popover data must be finite JSON within its size and depth limits.');
 
-export const guestPopoverRequestSchema = z.object({
-  id: z.string().regex(GUEST_POPOVER_ID),
-  anchor: z.object({
+export const guestPopoverAnchorSchema = z.object({
     x: z.number().finite().min(-GUEST_POPOVER_COORDINATE_MAX).max(GUEST_POPOVER_COORDINATE_MAX),
     y: z.number().finite().min(-GUEST_POPOVER_COORDINATE_MAX).max(GUEST_POPOVER_COORDINATE_MAX),
     width: z.number().finite().positive().max(GUEST_POPOVER_COORDINATE_MAX),
     height: z.number().finite().positive().max(GUEST_POPOVER_COORDINATE_MAX),
-  }).strict(),
+}).strict();
+
+export const guestPopoverRequestSchema = z.object({
+  id: z.string().regex(GUEST_POPOVER_ID),
+  anchor: guestPopoverAnchorSchema,
   width: z.number().int().min(GUEST_POPOVER_WIDTH_MIN).max(GUEST_POPOVER_WIDTH_MAX),
   height: z.number().int().min(GUEST_POPOVER_HEIGHT_MIN).max(GUEST_POPOVER_HEIGHT_MAX),
   side: z.enum(GUEST_POPOVER_SIDES).optional(),
@@ -77,11 +79,6 @@ export const guestPopoverClosedEventSchema = z.object({
 
 export const guestTooltipRequestSchema = z.object({
   text: z.string().min(1).max(GUEST_TOOLTIP_TEXT_MAX),
-  anchor: z.object({
-    x: z.number().finite().min(-GUEST_POPOVER_COORDINATE_MAX).max(GUEST_POPOVER_COORDINATE_MAX),
-    y: z.number().finite().min(-GUEST_POPOVER_COORDINATE_MAX).max(GUEST_POPOVER_COORDINATE_MAX),
-    width: z.number().finite().positive().max(GUEST_POPOVER_COORDINATE_MAX),
-    height: z.number().finite().positive().max(GUEST_POPOVER_COORDINATE_MAX),
-  }).strict(),
+  anchor: guestPopoverAnchorSchema,
   side: z.enum(GUEST_POPOVER_SIDES).optional(),
 }).strict();

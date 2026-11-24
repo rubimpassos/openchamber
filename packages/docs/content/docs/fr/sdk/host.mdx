@@ -5,6 +5,13 @@ description: Chaque méthode connectHost qu'une extension peut appeler, ce qu'Op
 
 # API hôte
 
+## Sélecteur de modèle et redémarrage d'OpenCode
+
+Avec `ready.features.modelPicker`, appelez `host.pickModel({ anchor, value, none?, recommended? })`. `anchor` contient `{ x, y, width, height }` de `getBoundingClientRect()`, en pixels CSS de l'iframe, avec les limites des ancres de popover. `value` est obligatoire et vaut un ID `providerID/modelID` ou `null`. `none: { label: 'Par défaut' }` ajoute une option dont le libellé contient 1 à 120 caractères ; `recommended` marque un ID. Le délai est de 30 minutes. Le résultat est `{ picked: true, model: string | null }` ou `{ picked: false }` en cas de fermeture. Modifiez la valeur uniquement si `picked` vaut true.
+
+Le message bas niveau `listModels { id }` n'a pas de payload et exige la capacité `model` approuvée. `GuestModelCatalog` contient `{ id, name, provider?: string, variants: string[] }`. `provider` est le nom affiché du fournisseur, absent chez les anciens hôtes ; les variantes sont des IDs. Un catalogue chargé mais vide renvoie `[]`, un catalogue non chargé `HOST_UNAVAILABLE`. Le sélecteur de l'hôte gère la recherche, les groupes et les détails.
+
+Avec `ready.features.restartOpenCode`, appelez `host.restartOpenCode()` depuis un clic dans votre page ayant le focus. Aucun droit de capacité supplémentaire ; délai de 2 minutes. `host.toast({ kind: 'info', message: 'Redémarrez pour appliquer les changements', action: 'restart-opencode' })` propose un bouton traduit de l'hôte, actif après la fermeture de l'iframe. L'appel direct exige une activation dans l'iframe ; sans clic avec le focus, il est rejeté avec `HOST_REJECTED`. Le bouton du toast reçoit son propre clic. Seule l'action `restart-opencode` est acceptée. Une fonctionnalité absente ou un hôte ou environnement non pris en charge renvoie `UNSUPPORTED`. L'hôte affiche le résultat par des toasts, dont un avertissement pour redémarrer un serveur externe manuellement et des erreurs en cas d'échec opérationnel. La promesse se résout après ces messages, sans garantir le redémarrage d'OpenCode. Web, bureau, web mobile et Capacitor partagent ce contrat ; VS Code ne charge pas les extensions.
 Utilisez cette page quand vous avez besoin des méthodes exactes de `connectHost`, des limites et des codes d'erreur. Pour la structure du dossier, le manifeste et l'installation, commencez par [Créer une extension](/sdk/).
 
 ```ts

@@ -1,6 +1,7 @@
 /** Guest panel strings — merged into each locale's main dictionary. */
 export const pluginPanelI18n = {
   en: {
+    'contextPanel.plugin.modelPicker.recommended': 'Recommended: {model}',
     'chat.workStatus.sections.extensionBadge': 'Extension',
     'chat.chatInput.toast.guestHasNoPanel': 'This extension runs without a panel.',
     'header.mainSurface.backToChat': 'Back to chat',
@@ -43,6 +44,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} does not open on the phone. Open it in OpenChamber on the web or desktop.',
   },
   nl: {
+    'contextPanel.plugin.modelPicker.recommended': 'Aanbevolen: {model}',
     'chat.workStatus.sections.extensionBadge': 'Extensie',
     'chat.chatInput.toast.guestHasNoPanel': 'Deze extensie draait zonder paneel.',
     'header.mainSurface.backToChat': 'Terug naar de chat',
@@ -85,6 +87,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} opent niet op de telefoon. Open het in OpenChamber web of desktop.',
   },
   de: {
+    'contextPanel.plugin.modelPicker.recommended': 'Empfohlen: {model}',
     'chat.workStatus.sections.extensionBadge': 'Erweiterung',
     'chat.chatInput.toast.guestHasNoPanel': 'Diese Erweiterung läuft ohne Panel.',
     'header.mainSurface.backToChat': 'Zurück zum Chat',
@@ -127,6 +130,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} lässt sich auf dem Telefon nicht öffnen. Öffne es in OpenChamber Web oder Desktop.',
   },
   fr: {
+    'contextPanel.plugin.modelPicker.recommended': 'Recommandé : {model}',
     'chat.workStatus.sections.extensionBadge': 'Extension',
     'chat.chatInput.toast.guestHasNoPanel': 'Cette extension fonctionne sans panneau.',
     'header.mainSurface.backToChat': 'Retour au chat',
@@ -169,6 +173,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} ne s’ouvre pas sur le téléphone. Ouvrez-le dans OpenChamber web ou desktop.',
   },
   es: {
+    'contextPanel.plugin.modelPicker.recommended': 'Recomendado: {model}',
     'chat.workStatus.sections.extensionBadge': 'Extensión',
     'chat.chatInput.toast.guestHasNoPanel': 'Esta extensión funciona sin panel.',
     'header.mainSurface.backToChat': 'Volver al chat',
@@ -211,6 +216,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} no se abre en el teléfono. Ábrelo en OpenChamber web o escritorio.',
   },
   ja: {
+    'contextPanel.plugin.modelPicker.recommended': 'おすすめ: {model}',
     'chat.workStatus.sections.extensionBadge': '拡張機能',
     'chat.chatInput.toast.guestHasNoPanel': 'この拡張機能はパネルなしで動作します。',
     'header.mainSurface.backToChat': 'チャットに戻る',
@@ -253,6 +259,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} はスマートフォンでは開けません。OpenChamber のウェブ版かデスクトップ版で開いてください。',
   },
   ko: {
+    'contextPanel.plugin.modelPicker.recommended': '추천: {model}',
     'chat.workStatus.sections.extensionBadge': '확장 프로그램',
     'chat.chatInput.toast.guestHasNoPanel': '이 확장 프로그램은 패널 없이 실행됩니다.',
     'header.mainSurface.backToChat': '채팅으로 돌아가기',
@@ -295,6 +302,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name}은(는) 휴대폰에서 열리지 않습니다. OpenChamber 웹 또는 데스크톱에서 여세요.',
   },
   pl: {
+    'contextPanel.plugin.modelPicker.recommended': 'Zalecany: {model}',
     'chat.workStatus.sections.extensionBadge': 'Rozszerzenie',
     'chat.chatInput.toast.guestHasNoPanel': 'To rozszerzenie działa bez panelu.',
     'header.mainSurface.backToChat': 'Wróć do czatu',
@@ -337,6 +345,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} nie otwiera się na telefonie. Otwórz je w OpenChamber web lub na desktopie.',
   },
   'pt-BR': {
+    'contextPanel.plugin.modelPicker.recommended': 'Recomendado: {model}',
     'chat.workStatus.sections.extensionBadge': 'Extensão',
     'chat.chatInput.toast.guestHasNoPanel': 'Esta extensão funciona sem painel.',
     'header.mainSurface.backToChat': 'Voltar ao chat',
@@ -379,6 +388,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} não abre no celular. Abra no OpenChamber web ou desktop.',
   },
   uk: {
+    'contextPanel.plugin.modelPicker.recommended': 'Рекомендовано: {model}',
     'chat.workStatus.sections.extensionBadge': 'Розширення',
     'chat.chatInput.toast.guestHasNoPanel': 'Це розширення працює без панелі.',
     'header.mainSurface.backToChat': 'Назад до чату',
@@ -421,6 +431,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} не відкривається на телефоні. Відкрийте його в OpenChamber web або на десктопі.',
   },
   'zh-CN': {
+    'contextPanel.plugin.modelPicker.recommended': '推荐：{model}',
     'chat.workStatus.sections.extensionBadge': '扩展',
     'chat.chatInput.toast.guestHasNoPanel': '此扩展无需面板即可运行。',
     'header.mainSurface.backToChat': '返回聊天',
@@ -463,6 +474,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} 无法在手机上打开。请在 OpenChamber 网页版或桌面版中打开。',
   },
   'zh-TW': {
+    'contextPanel.plugin.modelPicker.recommended': '推薦：{model}',
     'chat.workStatus.sections.extensionBadge': '擴充功能',
     'chat.chatInput.toast.guestHasNoPanel': '此擴充功能無需面板即可執行。',
     'header.mainSurface.backToChat': '返回聊天',
@@ -505,6 +517,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} 無法在手機上開啟。請在 OpenChamber 網頁版或桌面版中開啟。',
   },
   tr: {
+    'contextPanel.plugin.modelPicker.recommended': 'Önerilen: {model}',
     'chat.workStatus.sections.extensionBadge': 'Uzantı',
     'chat.chatInput.toast.guestHasNoPanel': 'Bu uzantı panel olmadan çalışır.',
     'header.mainSurface.backToChat': 'Sohbete dön',
@@ -547,6 +560,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': '{name} telefonda açılmıyor. OpenChamber web veya masaüstünde açın.',
   },
   ar: {
+    'contextPanel.plugin.modelPicker.recommended': 'الموصى به: {model}',
     'chat.workStatus.sections.extensionBadge': 'إضافة',
     'chat.chatInput.toast.guestHasNoPanel': 'تعمل هذه الإضافة دون لوحة.',
     'header.mainSurface.backToChat': 'العودة إلى المحادثة',
@@ -589,6 +603,7 @@ export const pluginPanelI18n = {
     'chat.chatInput.toast.guestNotOnPhone': 'لا يُفتح {name} على الهاتف. افتحه في OpenChamber على الويب أو سطح المكتب.',
   },
   he: {
+    'contextPanel.plugin.modelPicker.recommended': 'מומלץ: {model}',
     'chat.workStatus.sections.extensionBadge': 'הרחבה',
     'chat.chatInput.toast.guestHasNoPanel': 'ההרחבה הזו פועלת בלי חלונית.',
     'header.mainSurface.backToChat': 'חזרה לצ\'אט',

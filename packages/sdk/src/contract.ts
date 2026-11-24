@@ -10,6 +10,10 @@ export type { SessionSnapshot } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import type { GuestStatusSummaryItem } from './status-summary.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestTooltipRequest } from './popover.ts';
+import type { GuestModelCatalog, ModelPickRequest, ModelPickResult } from './model-picker.ts';
+export type { GuestModelCatalog, ModelPickRequest, ModelPickResult } from './model-picker.ts';
+import type { ToastRequest } from './toast.ts';
+export type { ToastKind, ToastRequest } from './toast.ts';
 import type { PlanReadRequest, PlanReadResult, PlansAnnotateRequest, PlansAnnotateResultPayload, PlansChangedRequest } from './plan-providers.ts';
 
 export type HostThemeMode = 'light' | 'dark';
@@ -154,19 +158,13 @@ export type GenerateRequest = {
 
 export type GenerateResult = { text: string };
 
-/** Read-only picker catalog. IDs include the provider; variants are machine IDs. */
-export type GuestModelCatalog = readonly {
-  readonly id: string;
-  readonly name: string;
-  readonly variants: readonly string[];
-}[];
-
 export type LateGenerateResult = { request: GenerateRequest } & (
   | { ok: true; result: GenerateResult }
   | { ok: false; code: HostRequestErrorCode; error: string }
 );
 
 export type HostResultPayload =
+  | ModelPickResult
   | GuestModelCatalog
   | LoopbackUrlResult
   | LoopbackRequestResult
@@ -216,6 +214,8 @@ export type HostReadyContext = {
     /** `setStatusSummary` draws readouts on the status section header. */
     statusSummary?: true;
     popovers?: true;
+    modelPicker?: true;
+    restartOpenCode?: true;
     lateGenerateResults?: true;
     microphone?: true;
     /** `showTooltip` / `hideTooltip` draw host tooltips. */
@@ -334,16 +334,6 @@ export type BadgeRequest = {
 
 export type ResizeRequest = {
   height: number;
-};
-
-export type ToastKind = 'info' | 'success' | 'error';
-
-export type ToastRequest = {
-  kind: ToastKind;
-  message: string;
-  copy?: boolean | { text: string };
-  dismiss?: boolean;
-  persistent?: boolean;
 };
 
 export type ComposeRequest = {
@@ -683,6 +673,8 @@ export type GuestMicrophoneOpenMessage = GuestCall<'microphone-open', Microphone
 export type GuestMicrophoneCloseMessage = GuestCall<'microphone-close'>;
 
 export type GuestMessage =
+  | GuestCall<'model-pick', ModelPickRequest>
+  | GuestCall<'opencode-restart', Record<string, never>>
   | GuestCall<'listModels'>
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
   | GuestCall<'workspace-subscribe', GuestWorkspaceSubscription>

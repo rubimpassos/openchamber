@@ -39,6 +39,33 @@ test('background action messages round-trip and reject invalid payloads', () => 
   expect(guestMessageSchema.safeParse({ ...reply, payload: { ok: false, error: 'x'.repeat(501) } }).success).toBe(false);
 });
 
+test('model picker requests and outcomes round-trip with bounded anchors and model IDs', () => {
+  const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, id: 'pick-1' };
+  const payload = { anchor: { x: -100_000, y: 100_000, width: 100_000, height: 1 }, value: 'provider/model', none: { label: 'x'.repeat(120) }, recommended: 'provider/family/model' };
+  expect(guestMessageSchema.parse({ ...envelope, type: 'model-pick', payload })).toEqual({ ...envelope, type: 'model-pick', payload });
+  expect(guestMessageSchema.parse({ ...envelope, type: 'model-pick', payload: { anchor: payload.anchor, value: null } })).toMatchObject({ payload: { value: null } });
+  for (const invalid of [{ ...payload, value: 'bare' }, { ...payload, value: undefined }, { ...payload, recommended: null },
+    { ...payload, none: { label: '' } }, { ...payload, none: { label: 'x'.repeat(121) } },
+    ...[{ x: Infinity }, { y: -100_001 }, { width: 0 }, { height: -1 }, { height: 100_001 }].map((anchor) => ({ ...payload, anchor: { ...payload.anchor, ...anchor } }))]) {
+    expect(guestMessageSchema.safeParse({ ...envelope, type: 'model-pick', payload: invalid }).success).toBe(false);
+  }
+  for (const result of [{ picked: true, model: 'provider/model' }, { picked: true, model: null }, { picked: false }]) {
+    const message = { ...envelope, type: 'result', ok: true, payload: result };
+    expect(hostMessageSchema.parse(message)).toEqual(message);
+  }
+  for (const result of [{ picked: true }, { picked: true, model: 'bare' }, { picked: false, model: null }, { picked: 'yes' }]) {
+    expect(hostMessageSchema.safeParse({ ...envelope, type: 'result', ok: true, payload: result }).success).toBe(false);
+  }
+});
+
+test('OpenCode restart requires an id and an empty payload', () => {
+  const message = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'opencode-restart', id: 'restart-1', payload: {} };
+  expect(guestMessageSchema.parse(message)).toEqual(message);
+  for (const invalid of [{ ...message, id: '' }, { ...message, payload: undefined }, { ...message, payload: { directory: '/other' } }]) {
+    expect(guestMessageSchema.safeParse(invalid).success).toBe(false);
+  }
+});
+
 const readyPayload = {
   theme: {
     mode: 'dark',
@@ -549,13 +576,13 @@ describe('parseGuestMessage', () => {
   test('toast buttons round-trip and copy text is bounded without trimming it', () => {
     const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'toast', id: 'toast-buttons' };
     for (const copy of [true, false, { text: '  source\n' }, { text: 'x'.repeat(32_000) }]) {
-      const payload = { kind: 'info', message: 'Summary', copy, dismiss: true, persistent: true };
+      const payload = { kind: 'info', message: 'Summary', copy, dismiss: true, persistent: true, action: 'restart-opencode' };
       expect(guestMessageSchema.parse({ ...envelope, payload })).toEqual({ ...envelope, payload });
     }
     for (const copy of ['', 'text', { text: '' }, { text: 'x'.repeat(32_001) }, { text: 42 }, { callback: 'copy' }]) {
       expect(guestMessageSchema.safeParse({ ...envelope, payload: { kind: 'info', message: 'Summary', copy } }).success).toBe(false);
     }
-    for (const option of [{ persistent: 'yes' }, { dismiss: 'yes' }]) {
+    for (const option of [{ persistent: 'yes' }, { dismiss: 'yes' }, { action: 'restart' }, { action: true }, { action: {} }]) {
       expect(guestMessageSchema.safeParse({ ...envelope, payload: { kind: 'info', message: 'Summary', ...option } }).success).toBe(false);
     }
   });

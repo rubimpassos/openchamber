@@ -1,0 +1,31 @@
+import type { AttachIssueRequest, GuestBlockCall, GuestHostSurface, GuestItem, GuestPopoverClosedEvent, GuestPopoverContext, GuestStatusSummaryItem } from '@openchamber/sdk';
+import type { GuestBackgroundAction } from '@/lib/guests/run-action';
+import type { GuestFileChannel } from '@/lib/guests/file-editor-channel';
+import type { GuestPopoverActivation } from '@/lib/guests/popovers';
+import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
+import type { PluginContextPanelMode } from '@/lib/surfaces/modes';
+
+export type PluginPaneProps = {
+  readonly mode: PluginContextPanelMode;
+  readonly surface?: GuestHostSurface;
+  readonly item?: GuestItem | null;
+  readonly panelOpen?: boolean;
+  readonly headless?: boolean;
+  readonly backgroundAction?: GuestBackgroundAction;
+  readonly onDismiss?: () => void;
+  readonly onAttach?: (issue: AttachIssueRequest) => void;
+  readonly onSessionStarted?: () => void;
+  readonly block?: { call: GuestBlockCall; entry: string; answer: (text: string) => Promise<void> };
+  readonly onResize?: (height: number) => void;
+  readonly onStatusControls?: (binding: GuestStatusControlBinding | null) => void;
+  readonly onStatusSummary?: (items: GuestStatusSummaryItem[]) => void;
+  readonly statusDirectory?: string | null;
+  readonly fileEditor?: { editorId: string; channel: GuestFileChannel };
+  readonly pinnedDirectory?: string;
+  readonly popover?: GuestPopoverContext;
+  readonly popoverHost?: { entry: string; directory: string; context: GuestPopoverContext; activation: GuestPopoverActivation; focus: boolean };
+  readonly isActive?: () => boolean;
+  readonly onPopoverClosed?: (event: GuestPopoverClosedEvent) => void;
+  readonly onPopoverActivity?: (active: boolean) => void;
+  readonly planHostDirectory?: string;
+};

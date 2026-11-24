@@ -122,6 +122,31 @@ describe('guest toast buttons', () => {
     expect(timed.duration).toBeUndefined();
   });
 
+  test('Restart OpenCode reaches the restart route and reports an external server', async () => {
+    let reportResult = (_message: string) => {};
+    const result = new Promise<string>((resolve) => { reportResult = resolve; });
+    const warning = spyOn(toast, 'warning').mockImplementation((message) => {
+      reportResult(String(message));
+      return 'external';
+    });
+    const requests: string[] = [];
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      requests.push(String(input instanceof Request ? input.url : input));
+      return Response.json({ requiresManualRestart: true });
+    });
+    try {
+      await show({ kind: 'info', message: 'Saved', action: 'restart-opencode', copy: true, persistent: true });
+      await click('Restart OpenCode');
+      expect(await result).toContain('OpenCode');
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toContain('/api/config/reload');
+      expect(dismissed.mock.calls).toHaveLength(1);
+    } finally {
+      fetch.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
   test('button labels react to a locale change without discarding copy state', async () => {
     await show({ kind: 'info', message: 'Result', copy: true, persistent: true });
     await click('Copy');

@@ -5,6 +5,14 @@ description: 拡張機能が呼べる connectHost の全メソッド、OpenChamb
 
 # Host API
 
+## モデル選択と OpenCode の再起動
+
+`ready.features.modelPicker` が true の場合、`host.pickModel({ anchor, value, none?, recommended? })` でアプリのモデル選択画面を開きます。`anchor` は `getBoundingClientRect()` の `{ x, y, width, height }` で、iframe 内の CSS ピクセルを使い、ポップオーバーのアンカーと同じ上限が適用されます。`value` は必須で、`providerID/modelID` 形式の ID または `null` です。`none: { label: '既定' }` は 1 から 120 文字の選択肢を追加し、`recommended` はモデル ID を強調します。最大 30 分待機し、選択時は `{ picked: true, model: string | null }`、選択せず閉じた場合は `{ picked: false }` を返します。`picked` が true の場合だけ値を更新してください。
+
+低レベルの `listModels { id }` メッセージに payload はなく、承認済みの `model` 権限が必要です。結果の `GuestModelCatalog` は `{ id, name, provider?: string, variants: string[] }` を含みます。`provider` はプロバイダーの表示名で、古いホストは省略します。バリアントは機械用 ID です。読み込み済みの空のカタログは `[]`、未読み込みは `HOST_UNAVAILABLE` を返します。検索、グループ分け、モデル詳細にはホストの選択画面を使ってください。
+
+`ready.features.restartOpenCode` がある場合、フォーカスのあるページ内のクリックから `host.restartOpenCode()` を呼び出します。追加の権限は不要で、最大 2 分待機します。`host.toast({ kind: 'info', message: '変更を適用するには再起動してください', action: 'restart-opencode' })` はホスト側の翻訳済み再起動ボタンを表示し、iframe が閉じた後も機能します。直接呼び出す場合は呼び出し元 iframe 内のユーザー操作が必要で、フォーカスのあるクリックがなければ `HOST_REJECTED` で拒否します。通知ボタンは自身のクリックから操作を受け取ります。許可される値は `restart-opencode` のみです。機能がない場合やホストまたは実行環境が未対応の場合は `UNSUPPORTED` を返します。ホストは結果を通知で表示し、外部サーバーには手動再起動を促す警告、操作失敗にはエラーを表示します。Promise はこの表示後に履行されますが、OpenCode の再起動成功を保証しません。Web、デスクトップ、モバイル Web、Capacitor は同じ契約を使い、VS Code は拡張機能を読み込みません。
+
 `connectHost` のメソッド、上限、エラーコードを正確に知りたいときにこのページを使ってください。フォルダ構成、マニフェスト、インストールについては [拡張機能を作る](/sdk/) から始めてください。
 
 ```ts

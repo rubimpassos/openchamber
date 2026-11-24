@@ -5,6 +5,14 @@ description: Alle connectHost-methoden voor extensies, de gegevens die OpenChamb
 
 # Host-API
 
+## Modelkiezer en OpenCode herstarten
+
+Met `ready.features.modelPicker` opent `host.pickModel({ anchor, value, none?, recommended? })` de modelkiezer van de app. `anchor` bevat `{ x, y, width, height }` uit `getBoundingClientRect()`, in CSS-pixels van het iframe, met dezelfde grenzen als een popover-anker. `value` is verplicht en bevat een ID `providerID/modelID` of `null`. `none: { label: 'Standaard' }` voegt een optie met 1 tot 120 tekens toe; `recommended` markeert een model-ID. De aanroep wacht maximaal 30 minuten en geeft `{ picked: true, model: string | null }` of bij sluiten `{ picked: false }` terug. Wijzig de waarde alleen als `picked` true is.
+
+Het bericht `listModels { id }` heeft geen payload en vereist de goedgekeurde capability `model`. `GuestModelCatalog` bevat `{ id, name, provider?: string, variants: string[] }`. `provider` is de weergavenaam van de aanbieder en ontbreekt bij oudere hosts; varianten zijn IDs. Een geladen lege catalogus geeft `[]` terug, een ongeladen catalogus `HOST_UNAVAILABLE`. De hostkiezer verzorgt zoeken, groeperen en modeldetails.
+
+Met `ready.features.restartOpenCode` roept u `host.restartOpenCode()` aan vanuit een klik op uw pagina met focus. Geen capability-toestemming nodig; maximaal 2 minuten wachten. `host.toast({ kind: 'info', message: 'Herstart om wijzigingen toe te passen', action: 'restart-opencode' })` biedt een vertaalde hostknop die blijft werken nadat het iframe is gesloten. De directe aanroep vereist gebruikersactivatie in het iframe; zonder klik met focus wordt deze afgewezen met `HOST_REJECTED`. De toastknop krijgt activatie via zijn eigen klik. Alleen `restart-opencode` is toegestaan. Ontbrekende functies of niet-ondersteunde hosts en runtimes geven `UNSUPPORTED`. De host toont het resultaat via toasts, waaronder een waarschuwing om externe servers handmatig te herstarten en fouten bij operationele problemen. De promise wordt na deze melding vervuld, zonder te garanderen dat OpenCode opnieuw is gestart. Web, desktop, mobiel web en Capacitor delen dit contract; VS Code laadt geen extensies.
+
 Gebruik deze pagina voor de precieze `connectHost`-methoden, limieten en foutcodes. Begin voor de mapindeling, het manifest en installatie bij [Een extensie bouwen](/nl/sdk/).
 
 ```ts

@@ -108,7 +108,7 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 
 `theme.tokens` includes `primaryText`, `successText`, `warningText`, `errorText`, and `infoText`. The host computes these for text on neutral surfaces and the UI kit's tinted controls. Keep using the base colors for fills and `primaryForeground` for text on a solid primary fill.
 
-`features` is optional and only advertises implemented host operations: `deviceStorage?: true`, `statusControls?: true`, `statusSummary?: true`, `popovers?: true`, and `lateGenerateResults?: true`. Optional syntax tokens are `syntaxKeyword`, `syntaxString`, `syntaxNumber`, `syntaxFunction`, `syntaxType`, `syntaxComment`, `syntaxVariable`, and `syntaxOperator`. `applyHostReady` exposes each as `--oc-syntax-*` and the matching legacy `--syntax-*` name, and clears a missing token on a later snapshot. Use a semantic-token fallback in guest CSS when supporting older hosts.
+`features` is optional and only advertises implemented host operations: `deviceStorage?: true`, `statusControls?: true`, `statusSummary?: true`, `popovers?: true`, `lateGenerateResults?: true`, `microphone?: true`, `tooltips?: true`, `modelPicker?: true`, and `restartOpenCode?: true`. Optional syntax tokens are `syntaxKeyword`, `syntaxString`, `syntaxNumber`, `syntaxFunction`, `syntaxType`, `syntaxComment`, `syntaxVariable`, and `syntaxOperator`. `applyHostReady` exposes each as `--oc-syntax-*` and the matching legacy `--syntax-*` name, and clears a missing token on a later snapshot. Use a semantic-token fallback in guest CSS when supporting older hosts.
 
 `applyHostReady` exposes the computed colors as `--primary-text`, `--success-text`, `--warning-text`, `--error-text`, and `--info-text`, with matching `--oc-*-text` aliases. These are required theme fields. Apply each `onReady` snapshot to update them when the theme changes.
 
@@ -153,7 +153,9 @@ Access tokens never appear in `ready` or in request results.
 
 | Method            | Arguments                         | Returns                        | Behavior                                                                              |
 | ----------------- | --------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
-| `toast` | `{ kind: 'info' \| 'success' \| 'error', message, copy?, dismiss?, persistent? }` | `Promise<void>` | Show a toast, optionally with host-owned Copy and OK buttons; see Toast buttons below |
+| `toast` | `{ kind: 'info' \| 'success' \| 'error', message, copy?, dismiss?, persistent?, action?: 'restart-opencode' }` | `Promise<void>` | Show a toast with optional host-owned buttons; see Toast buttons below |
+| `pickModel` | `ModelPickRequest` | `Promise<ModelPickResult>` | Open the host model picker at an iframe-local anchor. Requires `features.modelPicker`; waits up to 30 minutes |
+| `restartOpenCode` | no arguments | `Promise<void>` | Restart OpenCode from a user activation in the extension page. Requires `features.restartOpenCode`; waits up to 2 minutes |
 | `openUrl`         | `url: string`                     | `Promise<void>`                | Open an http(s) URL. In the desktop app with a project open, a local address (`localhost`, `127.0.0.1`, `[::1]`) opens in the browser panel beside the chat, and other links follow the user's setting for chat links; elsewhere the system browser opens it |
 | `openSurface`     | `surfaceId: string`               | `Promise<void>`                | Show that surface; resolves once it is on screen, rejects `NO_DIRECTORY` or `UNSUPPORTED` when it cannot open. On the phone it opens the matching workspace tab (Changes, Files, Terminal, Notes, or an extension panel that opted into the phone) and rejects `UNSUPPORTED` for anything else |
 | `writeClipboard`  | `text: string`                    | `Promise<void>`                | Copy in the host (1–32000 chars)                                                      |
@@ -213,6 +215,7 @@ Access tokens never appear in `ready` or in request results.
 `worktree` is `false` or omitted for the target directory, `true` for a generated new worktree, `{ kind: 'existing', directory }` for a known worktree belonging to the project, or `{ kind: 'new', name?, baseBranch? }`. `name` names both the branch and worktree. Omitted name/base use the host's normal defaults. First-message model/agent/variant selection is captured when the call starts.
 
 A created session returns `{ sessionId, directory, sent, linked, worktree? }`. `linked: false` means the session exists but saving the attached item failed. If a worktree was created but bootstrap or session creation failed, the result is `{ sessionId: null, sent: 'skipped', directory, worktree, failure }`, where `failure` is `bootstrap-failed` or `session-create-failed`. The worktree is retained. Inspect the result before offering Retry, which would otherwise create another worktree. The call waits up to 180 seconds; a timeout does not prove the server rolled back.
+
 
 ### Workspace lists and subscriptions
 
@@ -347,11 +350,27 @@ The user opens, edits and saves the original file in the host. A save sends the 
 
 `request` **/** `serviceRequest` **rules:** `method` is `GET` | `POST` | `PUT` | `PATCH` | `DELETE`. `path` must start with `/`, no scheme, stay on the declared origin (cloud API or service loopback). Guest parses `body` as JSON when needed.
 
+### Model picker and catalog
+
+`host.pickModel(request)` opens the app's model picker outside the iframe, anchored to `{ x, y, width, height }` in the frame's CSS pixels. Use an element's `getBoundingClientRect()`. Coordinates are finite and within ±100,000; dimensions are positive and at most 100,000, the same bounds as popover anchors.
+
+`ModelPickRequest` is `{ anchor, value: string | null, none?: { label: string }, recommended?: string }`. `value` is required; `null` means no selected model. The optional `none` row has a label of 1 to 120 characters and returns `null` when selected. `recommended` marks a model in the picker. Model strings use `providerID/modelID`, including provider-qualified model IDs that contain further `/` characters.
+
+`ModelPickResult` is `{ picked: true, model: string | null }` for a selection, or `{ picked: false }` for dismissal. Cancellation leaves the caller's value unchanged. The SDK rejects malformed requests before posting and malformed answers as `HOST_REJECTED`. Without `ready.features.modelPicker: true`, the call rejects as `UNSUPPORTED`. It waits up to 30 minutes. Wire request: `model-pick { id, payload: request }`; the answer uses the matching `result.id`.
+
+The lower-level `listModels { id }` wire request has no payload. Its result is `GuestModelCatalog`, a read-only array of `{ id, name, provider?: string, variants: string[] }`. `id` is `providerID/modelID`, `provider` is an optional provider display name, and variants are machine IDs. Older hosts omit `provider`. Catalog reads need the approved `model` capability, use the frame directory's loaded catalog and hidden-model choices, and make no network calls. A loaded empty catalog is `[]`; an unloaded catalog is `HOST_UNAVAILABLE`. Provider configuration and credentials never cross the iframe boundary. Use `pickModel` for the app's search, grouping and model details.
+
+### Restarting OpenCode
+
+Call `host.restartOpenCode()` from a focused click in the extension page after checking `ready.features.restartOpenCode`. The host checks user activation; a call without a focused click rejects as `HOST_REJECTED`. The operation needs no capability grant. The SDK sends `opencode-restart { id, payload: {} }` and waits up to 2 minutes for the matching acknowledgement. A missing feature or unsupported host/runtime is `UNSUPPORTED`. The host reports the restart outcome through toasts, including a warning to restart an external server manually and errors for operational failures. The promise resolves after that feedback, so resolution does not guarantee a successful restart. Web, desktop, hosted mobile and Capacitor use this contract when advertised. VS Code does not load guests.
+
 ### Toast buttons
 
 `ToastRequest.copy` is an optional boolean or `{ text: string }`. `true` copies the displayed message; an object supplies the clipboard value. `false` or omission adds no Copy button. The custom text must contain 1 to `GUEST_CLIPBOARD_TEXT_MAX` characters, with whitespace preserved. The displayed message is trimmed and must contain 1 to `GUEST_TOAST_MAX` characters. The client rejects invalid text lengths as `HOST_REJECTED` before sending; the host independently validates the wire payload.
 
 `dismiss: true` adds OK. `persistent: true` disables automatic expiry and always adds OK regardless of `dismiss`, so every persistent toast can be closed. Omitted or false `persistent` retains the host's usual duration.
+
+`action: 'restart-opencode'` adds a translated, host-owned Restart OpenCode button. This is the only action literal; the SDK and host reject others. Check `features.restartOpenCode` before requesting it. The button needs no capability grant and still works after the extension frame closes: the user activates the host's own button. The page API checks activation in the calling frame because it directly requests a restart.
 
 Copy leaves the toast open, reports success on the button, and shows a retryable error when the clipboard fails. OK dismisses only its own toast. Buttons use the host's locale and clipboard helper. They retain only the supplied text and toast identity, work after guest disposal or a runtime switch, and never call back into the extension. The `toast` promise resolves after display acknowledgement, without waiting for a click. Web and desktop use the same behavior; extension support on other runtimes is unchanged.
 

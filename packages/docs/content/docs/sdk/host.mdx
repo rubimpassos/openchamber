@@ -5,6 +5,14 @@ description: Every connectHost method an extension can call, what OpenChamber pu
 
 # Host API
 
+## Model picker and OpenCode restart
+
+When `ready.features.modelPicker` is true, call `host.pickModel({ anchor, value, none?, recommended? })` to open the app's model picker. `anchor` is `{ x, y, width, height }` from an element's `getBoundingClientRect()`, in the iframe's CSS pixels, with the same bounds as a popover anchor. `value` is a required model ID or `null`; model IDs use `providerID/modelID`. `none: { label: 'Default' }` adds an optional row with a label of 1 to 120 characters, and `recommended` marks a model ID. The call waits up to 30 minutes and returns `{ picked: true, model: string | null }` or `{ picked: false }` on dismissal. Update your value only when `picked` is true.
+
+The lower-level `listModels { id }` message has no payload and needs the approved `model` capability. Its `GuestModelCatalog` result contains `{ id, name, provider?: string, variants: string[] }`: `provider` is a display name, omitted by older hosts, and variants are machine IDs. A loaded empty catalog returns `[]`; an unloaded catalog returns `HOST_UNAVAILABLE`. Use the host picker for search, grouping and model details.
+
+When `ready.features.restartOpenCode` is true, call `host.restartOpenCode()` from a focused user click in your page. It needs no capability grant and waits up to 2 minutes. Alternatively, `host.toast({ kind: 'info', message: 'Restart to apply changes', action: 'restart-opencode' })` offers a translated, host-owned restart button that still works after the frame closes. The page call requires activation in the calling frame; without a focused click it rejects as `HOST_REJECTED`. The toast button gets activation from its own click. Only the literal `restart-opencode` is accepted. Missing features or unsupported hosts/runtimes return `UNSUPPORTED`. The host shows toasts for the outcome, including a warning to restart an external server manually and errors for operational failures. The promise resolves after this feedback, which does not guarantee that OpenCode restarted. Web, desktop, hosted mobile and Capacitor use this contract; VS Code does not load extensions.
+
 Use this page when you need the exact `connectHost` methods, limits, and error codes. For the folder layout, the manifest, and installing, start at [Build an extension](/sdk/).
 
 ```ts
