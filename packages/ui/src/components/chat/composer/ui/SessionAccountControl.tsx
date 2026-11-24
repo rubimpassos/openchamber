@@ -37,7 +37,14 @@ const signInAccounts = (integrations: Parameters<typeof findIntegrationForProvid
   getCredentialConnections(findIntegrationForProvider(integrations, providerId)).filter((credential) => credential.method === 'oauth')
 );
 
-const useProviderAccounts = (providerId: string, enabled: boolean): Account[] => {
+const loadSignInAccounts = async (providerId: string) => signInAccounts((await loadIntegrationCatalog()).integrations, providerId);
+
+export const useProviderAccounts = (
+  providerId: string,
+  enabled: boolean,
+  sessionId: string | null,
+  loadAccounts: (providerId: string) => Promise<{ id: string; label: string }[]> = loadSignInAccounts,
+): Account[] => {
   const [credentials, setCredentials] = React.useState<{ id: string; label: string }[]>(() => (
     signInAccounts(peekIntegrationCatalog()?.integrations ?? [], providerId)
   ));
@@ -60,9 +67,9 @@ const useProviderAccounts = (providerId: string, enabled: boolean): Account[] =>
   React.useEffect(() => {
     if (!enabled) return undefined;
     let active = true;
-    void loadIntegrationCatalog()
-      .then((catalog) => {
-        if (active) setCredentials(signInAccounts(catalog.integrations, providerId));
+    void loadAccounts(providerId)
+      .then((next) => {
+        if (active) setCredentials(next);
       })
       .catch(() => undefined);
     // Usage only decorates the list: an unreachable sweep leaves the accounts listed.
@@ -74,7 +81,7 @@ const useProviderAccounts = (providerId: string, enabled: boolean): Account[] =>
     return () => {
       active = false;
     };
-  }, [enabled, providerId, revision]);
+  }, [enabled, providerId, sessionId, revision, loadAccounts]);
 
   return React.useMemo(() => credentials.map((credential) => ({
     id: credential.id,
@@ -96,7 +103,7 @@ export const SessionAccountControl: React.FC<{ sessionId: string | null }> = ({ 
   const draftChoice = useDraftSessionAccountStore((state) => (draftId !== null && state.choice?.draftId === draftId ? state.choice : null));
   const setDraftChoice = useDraftSessionAccountStore((state) => state.setChoice);
   const enabled = providerId === ACCOUNT_PROVIDER && (sessionId !== null || draftId !== null);
-  const accounts = useProviderAccounts(ACCOUNT_PROVIDER, enabled);
+  const accounts = useProviderAccounts(ACCOUNT_PROVIDER, enabled, sessionId);
 
   const [sessionPin, setSessionPin] = React.useState<{ mode: SessionAccountMode; credentialId: string | null; accountId: string | null } | null>(null);
   const [saving, setSaving] = React.useState(false);

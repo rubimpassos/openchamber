@@ -112,8 +112,23 @@ describe("catalogRefreshTasks", () => {
   });
 
   test("a single-catalog rebuild re-reads only that list", () => {
-    for (const kind of ["agent", "command", "skill", "plugin", "provider", "websearch"] as const) {
+    for (const kind of ["agent", "command", "skill", "plugin", "websearch"] as const) {
       expect(catalogRefreshTasks(kind)).toHaveLength(1);
+    }
+  });
+
+  test("a provider or model rebuild tells the account readers to read the integration list again", async () => {
+    // A location that just started answers the integration list empty until
+    // its plugins load; provider.updated is the event that says they did.
+    for (const kind of ["provider", "model"] as const) {
+      let notified = 0;
+      const unsubscribe = subscribeCredentialChanges(() => { notified += 1; });
+      try {
+        await catalogRefreshTasks(kind)[1]();
+      } finally {
+        unsubscribe();
+      }
+      expect(notified).toBe(1);
     }
   });
 

@@ -1775,6 +1775,27 @@ status colors by level as the one exception. Colored labels sit at `opacity`
 `--status-*-text` colors are used because `color-mix` and Tailwind `/NN`
 alpha break on old Android WebViews.
 
+## Session account picker
+
+`SessionAccountControl` shows the provider's stored sign-ins beside the model
+picker when there are at least two. It reads them from OpenCode's integration
+list for the composer's directory, and reads again when a credential changes,
+when the provider or model catalog is rebuilt (`catalogRefresh.ts` notifies the
+credential readers for those kinds too) and when the user opens another
+session.
+
+### Why the account list reads again on a provider rebuild and on a session switch
+
+The integration list is location-scoped: a directory OpenCode has not started
+yet, such as the folder of a session idle for an hour, answers it empty, and
+the full list arrives seconds later together with `provider.updated`. With one
+read per mount, the picker stayed hidden until a credential changed or the page
+reloaded, even while a fixed session waited out a limit on its account. The
+rebuild event is the moment the list is ready, so it carries the re-read; a
+retry timer would guess at that moment. A read that fails outright waits for
+the next of these triggers. Reading the global `/api/credential` instead would
+bring each credential's secret value into the UI.
+
 ## Other sessions as context
 
 Another session, or one message of it, is mentioned in the text itself: as
