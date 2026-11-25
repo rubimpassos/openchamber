@@ -286,10 +286,11 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     return next;
   };
 
-  const navigationPending = usePanelNavigation({
-    directory, tabID, scope, chromeTabId: myChromeTab,
+  const navigation = usePanelNavigation({
+    directory, tabID, sessionId: serverBrowser.sessionId, scope, chromeTabId: myChromeTab,
     navigate: (url) => runNavigation(() => serverBrowser.navigate(url)), error: serverBrowser.error, disabled: Boolean(signIn),
   });
+  const navigationPending = navigation.pending;
 
   React.useEffect(() => {
     if (signIn || !scope || pairingRef.current) return;
@@ -444,12 +445,16 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   }, [claims, closeContextPanelTabs, directory, release, scope, serverBrowser]);
 
   const [address, setAddress] = React.useState('');
+  const requestedAddress = navigation.requestedUrl;
+  const pageUrl = scope?.url;
   React.useEffect(() => {
-    setAddress(scope ? toDisplayUrl(scope.url) : '');
-    // Only the url, not the whole (identity-changing-every-poll) scope object:
-    // resyncing on every poll tick would fight whatever the user is typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope?.url]);
+    setAddress(requestedAddress ?? (pageUrl ? toDisplayUrl(pageUrl) : ''));
+  }, [pageUrl, requestedAddress]);
+
+  const openAddress = (url: string) => {
+    if (signIn || isSignInScope) void runNavigation(() => serverBrowser.navigate(normalizeBrowserUrl(url)));
+    else navigation.load(url);
+  };
 
   const [showDeviceBar, setShowDeviceBar] = React.useState(false);
   const viewport = fromServiceViewport(scope?.viewport);
@@ -660,9 +665,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         address={address}
         onAddressChange={setAddress}
         onSubmit={(value) => {
-          const next = normalizeBrowserUrl(value);
-          if (next === BLANK_URL) return;
-          void runNavigation(() => serverBrowser.navigate(next));
+          if (normalizeBrowserUrl(value) === BLANK_URL) return;
+          openAddress(value);
         }}
         suggestions={suggestions}
         onForgetSuggestion={(url) => forgetHistoryVisit(directory, url)}
@@ -755,7 +759,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         ) : null}
         {!loaded && showingMine ? (
           <div className="absolute inset-0">
-            <BrowserEmptyState onOpen={(url) => void runNavigation(() => serverBrowser.navigate(normalizeBrowserUrl(url)))} directory={directory} visible={visible} />
+            <BrowserEmptyState onOpen={openAddress} directory={directory} visible={visible} />
           </div>
         ) : null}
       </div>

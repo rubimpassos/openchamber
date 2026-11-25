@@ -6,16 +6,19 @@ This module owns the rendered browser panel, its navigation lifecycle, agent-act
 
 `ServerBrowserView` pairs context-panel tabs with the selected chat's Chrome
 tabs when a Server Browser provider is selected. `usePanelNavigation` delivers
-requested addresses after pairing selects the corresponding Chrome tab. The
+requested addresses after pairing selects the corresponding Chrome tab: the
+address a tab opened with, a link to an existing tab, and an address the person
+enters in the address field or picks from the server list. The
 service owns observed page URLs, loading and errors. The built-in provider keeps
 the native webview and iframe navigation lifecycles in `BrowserPane`.
 
 ## Invariants
 
 - `directory` identifies the panel and composer destination; `siteDirectory` identifies the browsed folder, history and servers. They can differ while a draft shows an isolated space.
-- A newly requested Server Browser address survives blank service snapshots until its navigation finishes. Page-URL synchronization cannot erase pending intent.
+- A newly requested Server Browser address survives blank service snapshots until its navigation finishes. Page-URL synchronization cannot erase pending intent, in the panel tab or in the address field.
+- An address the person enters or picks is sent once, after the chat's browser has opened and this panel tab's Chrome tab is selected, and replaces a working page. It belongs to the chat it was asked in: a chat switch, a sign-in browser, another panel tab or hiding the view drops it.
 - Existing-tab requests reach the mounted view, or the latest request is delivered when that view subscribes. Reopening a working page only focuses it.
-- A sign-in browser does not receive chat-link navigation.
+- A sign-in browser does not receive chat-link navigation. It has no panel tab, so an address entered there is sent at once.
 - A panel tab mirroring a page already opened by Chrome or the agent consumes its first-open marker without navigating that page again.
 - Failed requested navigations remain associated with their scope and Chrome tab until a successful navigation, reload, history action or claim release. Selecting another tab cannot clear a failed navigation.
 - A space's view attaches only after the shell configures its in-memory session proxy, including for saved public addresses. Its partition name matches the shell's contract, and external-browser opening stays unavailable because that browser lacks the space's proxy restrictions.
@@ -39,6 +42,18 @@ The service also writes page URLs into panel tabs after navigation and redirects
 Replaying every target-path update would navigate on service synchronization.
 Explicit first-open markers and existing-tab load requests distinguish user
 intent from observed page state.
+
+### Why an entered address waits for its Chrome tab and is not retried
+
+A dock command carries the generation of the view it was built from, and the
+service refuses it once the view has moved on. A panel that just opened has no
+generation, then no browser of its own, then a Chrome tab that is not selected
+yet, and each of those steps moves the view. An address sent at once was
+refused, refused again on the one retry, and lost. `usePanelNavigation` already holds a tab's
+first address until its Chrome tab is selected, so the entered address waits in
+the same place and is sent once. The rejected alternative is retrying the
+refused command: a retry can land after the service selected another chat's
+browser and load the address there.
 
 ### Why the iframe exposes fewer controls than the webview
 
