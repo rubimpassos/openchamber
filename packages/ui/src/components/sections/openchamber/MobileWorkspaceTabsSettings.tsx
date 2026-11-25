@@ -1,7 +1,7 @@
 import React from 'react';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsSortableVisibilityList } from '@/components/sections/shared/SettingsSortableVisibilityList';
-import { phoneGuestPanelModes } from '@/lib/guests/phone';
+import { useOfferedMobileWorkspaceTabs } from '@/hooks/useOfferedMobileWorkspaceTabs';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type BuiltInMobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
@@ -24,7 +24,7 @@ export const MobileWorkspaceTabsSettings: React.FC = () => {
   const setOrder = useUIStore((state) => state.setMobileWorkspaceTabOrder);
   const setVisible = useUIStore((state) => state.setMobileWorkspaceTabVisible);
   const guests = useGuestsStore((state) => state.guests);
-  const extensions = React.useMemo(() => phoneGuestPanelModes(guests), [guests]);
+  const extensions = useOfferedMobileWorkspaceTabs();
 
   const items = React.useMemo(() => {
     const shown = shownMobileWorkspaceTabs(order, hidden, extensions);
@@ -48,7 +48,7 @@ export const MobileWorkspaceTabsSettings: React.FC = () => {
         items={items}
         onVisibleChange={(id, visible) => {
           const tab = items.find((item) => item.id === id)?.id;
-          if (tab) setVisible(tab, visible, extensions);
+          if (tab) setVisible(tab, visible, extensions.filter(isPluginContextPanelMode));
         }}
         onReorder={setOrder}
         settingsItemPrefix="layout.mobile-workspace-tabs."

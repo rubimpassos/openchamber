@@ -88,6 +88,12 @@ or navigating the owner releases the same selection.
 
 ### Routing
 
+- `useMobileBrowserNavigation` owns mobile Browser session transitions and
+  automatic reveals. It shares the desktop session-match rule, ignores other
+  chats and projects, and never starts a stopped service to restore a pane.
+  Browser Back registration follows the current live view and releases on hide;
+  a stale page cannot consume Back after the view changes.
+
 - A route write is suppressed while a route is being applied, and only the latest applied request may normalize the current history entry.
 - The session named in the URL is retained until directory and message bootstrap catch up. A route that startup would drop is not acknowledged.
 - An empty route supersedes pending startup and closes Settings.
