@@ -28,6 +28,7 @@ the native webview and iframe navigation lifecycles in `BrowserPane`.
 - Only the current annotation run changes panel state or attaches its result. Cancellation also reaches an overlay still starting, and leaving the tab clears overlays and live style overrides.
 - Annotation dictation ends with its annotation. Transcript delivery precedes the idle-state message; a failed recording preserves partial text and leaves a waiting submit unsent for review. Model-download status appears in the overlay while recording continues.
 - A frame annotation captures only the visible area clipped by the window and scrolling ancestors, after overlay teardown and repaint. Hosts without desktop capture attach the annotation without an image.
+- A Server Browser view that is not on screen holds no picture socket, no state polling and no typing field: its host passes no tab (`tabID` null), as the desktop zone does for a tab of another kind and the phone's workspace drawer does for a hidden Browser tab.
 - Iframe tunnel resolutions are generation-scoped. A later navigation, return to discovery or teardown invalidates an older resolution so it cannot replace the selected page.
 
 ## Decisions
@@ -121,9 +122,32 @@ An announcement represents a server the user just started and makes that port re
 
 A centered column that overflows can clip its own top beyond scroll reach. Keeping the surrounding panel fixed and letting only the shrinking server list scroll preserves access to every row; unavailable rows use `aria-disabled` so their explanatory marks retain pointer tooltips.
 
-### Why address suggestions select on pointer down
+### Why address suggestions select on click with mouse-down cancelled
 
-Address-field blur closes the list before a click can select a row. Pointer-down selection preserves the choice; the toolbar owns keyboard selection, resets it when the address or focus changes, and cycles through an unselected state so the typed address stays reachable.
+Address-field blur closes the list before a click can select a row, so a suggestion cancels mouse-down and the field keeps its focus. Selecting on pointer-down, the earlier approach, opened a row the moment a finger landed on it, which made the list impossible to scroll on a phone. The toolbar owns keyboard selection, resets it when the address or focus changes, and cycles through an unselected state so the typed address stays reachable.
+
+Arrow keys and Ctrl+N/P share that selection. Composition events belong to the
+input method; accepting an IME candidate cannot navigate a history suggestion.
+
+### Why the toolbar counts the actions that fit and not `ActionToolbar`'s fold
+
+The address is the only part of the row that can shrink, so the action group never overflows its own box and its fold never ran: on a phone the address collapsed to 28 px under the buttons. The toolbar measures its row and its navigation buttons, keeps 144 px for the address, and moves the actions that do not fit into More (`browserToolbarRoom.ts`). The count changes state only when it changes, so a panel resize does not re-render the row per frame.
+
+### Why a phone types through a hidden field and not the picture
+
+A canvas cannot open a touch keyboard. A field inside the picture's container takes the keyboard and its changes go out through the picture's own input queue, in order with taps, under the same control and frame checks. It mounts only while this viewer holds control, so handing control back closes the keyboard, and a key pressed in it never also reaches the container's key handler.
+
+### Why typed changes are compared by grapheme
+
+Autocorrect and input methods replace text the page already has. The field's previous value is compared with the new one by grapheme (`remoteTyping.ts`). Removed graphemes become Backspace presses where Chrome's Backspace removes exactly one of them (single code points, emoji sequences); a letter with combining marks would lose only its last mark, so those are selected with Shift+ArrowLeft and replaced. The remembered text starts over on a tap in the page, Enter, a paste, an editing key, a refused input, another tab or chat, and a page load, so a correction cannot delete in a field it was not typed into.
+
+### Why a finger drag scrolls and does not drag the mouse
+
+Sent as mouse events, a finger drag selects text in desktop Chrome. A touch that moves past 8 px sends wheel deltas anchored where it began; one that stays put is a click on release (`touchGesture.ts`). A fast release adds one more wheel step in the same direction, capped at the page height: a frame loop for momentum would be a timer in UI code, and Chrome animates a wheel step itself.
+
+### Why a custom viewport size commits on blur and not per digit
+
+Each digit used to be applied at once and clamped to the minimum, so typing "1" became 240 before the second digit. The boxes hold a draft; Enter in the width moves to the height, Enter in the height leaves the field, and leaving a field applies it.
 
 ### Why annotation images attach before prompt text
 
@@ -144,3 +168,7 @@ The overlay matches physical letter and digit keys in a single chord, so other s
 ### Why mobile Back uses a frame-history guard
 
 The opaque iframe's internal history belongs to the WebView and takes priority over leaving the preview. Walking off the guard triggers the preview's own history step; the handler avoids reading the reported state because WebKit can report the departed guard's state after crossing a full load. Reload resolves a phone-local tunnel listener again because background suspension can reclaim the previous listener.
+
+Server Browser has authoritative history on the server. Its registered Back
+handler closes DevTools, then navigates that history, and yields to the shell
+only when the page has none. Hiding the view releases the handler.

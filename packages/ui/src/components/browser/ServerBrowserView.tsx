@@ -7,6 +7,8 @@ import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useServerBrowserBackHandler, type RegisterBrowserBackHandler } from '@/hooks/useServerBrowserBackHandler';
+import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { BLANK_URL, normalizeBrowserUrl } from '@/lib/browser/url';
@@ -51,7 +53,8 @@ import { usePanelNavigation } from '@/lib/browser/serverBrowser/usePanelNavigati
 import { forgetBrowserTabOpenedWithAddress, wasBrowserTabOpenedWithAddress } from '@/lib/browser/devServerWait';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
 
-import { BrowserToolbar } from './BrowserToolbar';
+import { BrowserToolbar, type BrowserToolbarMenuItem } from './BrowserToolbar';
+import { evaluateHeld } from './evaluateHeld';
 import { BrowserDeviceBar } from './BrowserDeviceBar';
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
@@ -65,9 +68,11 @@ type ServerBrowserViewProps = {
   directory: string;
   /** The Browser panel tab in front, which shows one Chrome tab of the chat; null when no Browser tab is. */
   tabID: string | null;
+  menuItems?: readonly BrowserToolbarMenuItem[];
+  registerBackHandler?: RegisterBrowserBackHandler;
 };
 
-type LiveViewProps = { guestId: string; directory: string; tabID: string };
+type LiveViewProps = Omit<ServerBrowserViewProps, 'tabID'> & { tabID: string };
 
 const ZOOM_MIN = -5;
 const ZOOM_MAX = 5;
@@ -154,52 +159,10 @@ const useCloseChromeTabsOfClosedPanelTabs = (guestId: string): void => {
   }, [guestId]);
 };
 
-export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, directory, tabID }) => {
+export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, directory, tabID, menuItems, registerBackHandler }) => {
   useCloseChromeTabsOfClosedPanelTabs(guestId);
   if (!tabID) return null;
-  return <ServerBrowserLiveView guestId={guestId} directory={directory} tabID={tabID} />;
-};
-
-// Each dock request must answer within the host proxy's 20 s, but the
-// annotation script resolves only when the person finishes. So the promise is
-// started in the page and its result fetched by short requests that each wait
-// up to HELD_POLL_MS inside the page. `code` must be an expression.
-const HELD_POLL_MS = 8_000;
-let heldSequence = 0;
-
-const evaluateHeld = async (
-  evaluate: (expression: string, userGesture?: boolean) => Promise<unknown>,
-  code: string,
-  userGesture?: boolean,
-): Promise<unknown> => {
-  heldSequence += 1;
-  const key = JSON.stringify(`${Date.now()}-${heldSequence}`);
-  // Callers pass a statement-like expression, possibly ending in `;`.
-  const expression = code.trim().replace(/;+\s*$/, '');
-  await evaluate(`(() => {
-    const store = (window.__openchamberHeld ||= {});
-    const slot = store[${key}] = { done: false, value: null, error: null, wake: [] };
-    const finish = () => { slot.done = true; for (const wake of slot.wake.splice(0)) wake(); };
-    Promise.resolve((
-${expression}
-)).then((value) => { slot.value = value ?? null; finish(); }, (error) => { slot.error = String(error && error.message || error); finish(); });
-    return true;
-  })()`, userGesture);
-  for (;;) {
-    const result = await evaluate(`(async () => {
-      const slot = window.__openchamberHeld && window.__openchamberHeld[${key}];
-      if (!slot) return { gone: true };
-      if (!slot.done) await new Promise((resolve) => { slot.wake.push(resolve); setTimeout(resolve, ${HELD_POLL_MS}); });
-      if (!slot.done) return { pending: true };
-      delete window.__openchamberHeld[${key}];
-      return { done: true, value: slot.value, error: slot.error };
-    })()`) as { gone?: boolean; pending?: boolean; value?: unknown; error?: string | null } | null;
-    // The page navigated away: whatever the script was doing went with it.
-    if (!result || result.gone) return null;
-    if (result.pending) continue;
-    if (result.error) throw new Error(result.error);
-    return result.value ?? null;
-  }
+  return <ServerBrowserLiveView guestId={guestId} directory={directory} tabID={tabID} menuItems={menuItems} registerBackHandler={registerBackHandler} />;
 };
 
 const activeChromeTabOf = (state: ServerBrowserState | null): string | null => (
@@ -278,8 +241,9 @@ const useServerBrowserDownloads = (scope: ServerBrowserScope | null) => {
     }), [downloads, files.downloadFile, save, t]);
 };
 
-const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, tabID }) => {
+const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, tabID, menuItems: leadingMenuItems = [], registerBackHandler }) => {
   const { t } = useI18n();
+  const { hasTouchInput } = useDeviceInfo();
   const visible = useZoneInteractive();
   const { currentTheme } = useThemeSystem();
   const canvasHandleRef = React.useRef<ServerBrowserCanvasHandle | null>(null);
@@ -299,6 +263,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const scope = serverBrowser.scope && (serverBrowser.scope.signIn || serverBrowser.scope.sessionId === serverBrowser.sessionId)
     ? serverBrowser.scope
     : null;
+  useServerBrowserBackHandler(registerBackHandler, scope?.devtools
+    ? () => serverBrowser.setDevTools(false)
+    : scope?.canGoBack ? serverBrowser.back : null);
 
   // ---- this panel tab <-> one Chrome tab of the chat ----------------------
   const claims = useServerBrowserPanelTabs((store) => store.claims);
@@ -644,6 +611,15 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
 
   const downloadMenuItems = useServerBrowserDownloads(scope);
 
+  const [typingOpenFor, setTypingOpenFor] = React.useState<string | null>(null);
+  const typingTarget = `${tabID}\u0000${scope?.id ?? ''}\u0000${shownTab?.id ?? ''}`;
+  const canType = control.controller === 'user' && control.mine && connection.status === 'open' && loaded;
+  if (!canType && typingOpenFor !== null) setTypingOpenFor(null);
+  const toggleKeyboard = () => {
+    if (canType) canvasHandleRef.current?.toggleKeyboard();
+    else toast.info(t('contextPanel.browser.keyboard.tapFirst'));
+  };
+
   // ---- sound: off until the person turns it on ----------------------------
   const [soundSupported, setSoundSupported] = React.useState(false);
   const [soundOn, setSoundOn] = React.useState(false);
@@ -701,11 +677,16 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         isAnnotating={isAnnotating}
         onToggleInspector={() => setInspectorOpen((current) => !current)}
         isInspectorOpen={inspectorOpen}
+        onToggleDevTools={scope && !isSignInScope ? () => void serverBrowser.setDevTools(scope.devtools !== true) : undefined}
+        isDevToolsOpen={scope?.devtools === true}
+        onToggleKeyboard={hasTouchInput ? toggleKeyboard : undefined}
+        isKeyboardOpen={canType && typingOpenFor === typingTarget}
         onZoomIn={() => void serverBrowser.setZoom(Math.min(ZOOM_MAX, zoomLevel + 1))}
         onZoomOut={() => void serverBrowser.setZoom(Math.max(ZOOM_MIN, zoomLevel - 1))}
         onZoomReset={() => void serverBrowser.setZoom(0)}
         zoomPercent={zoomPercent}
         menuItems={[
+          ...leadingMenuItems,
           ...downloadMenuItems,
           ...(downloadMenuItems.length > 0 ? [{ kind: 'separator' as const, id: 'sep-downloads' }] : []),
           { kind: 'item', id: 'cookies', icon: 'delete-bin', label: t('contextPanel.browser.clearCookies'), onSelect: () => setClearConfirm('cookies') },
@@ -754,6 +735,11 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
           onConnection={setConnection}
           onFocusChange={setCanvasFocused}
           onAudioState={(available) => setSoundMissing(!available)}
+          typing={hasTouchInput && canType ? {
+            targetKey: typingTarget,
+            pageEpoch: `${scope?.url ?? ''}:${scope?.isLoading ? 'loading' : 'loaded'}:${scope?.devtools ? 'devtools' : 'page'}`,
+            onOpenChange: (open) => setTypingOpenFor(open ? typingTarget : null),
+          } : undefined}
         />
         {shownTab?.dialog ? (
           <ServerBrowserDialogCard key={shownTab.dialog.id} dialog={shownTab.dialog} url={shownTab.url} disabled={answerLocked} onAnswer={answerDialog} />

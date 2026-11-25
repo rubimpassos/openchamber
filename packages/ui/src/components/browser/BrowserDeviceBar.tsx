@@ -21,6 +21,8 @@ export type BrowserColorScheme = 'system' | 'light' | 'dark';
 
 const RESPONSIVE = 'responsive';
 
+type ViewportSide = 'width' | 'height';
+
 const SCHEMES: ReadonlyArray<{ value: BrowserColorScheme; icon: IconName }> = [
   { value: 'system', icon: 'contrast-2' },
   { value: 'light', icon: 'sun' },
@@ -43,8 +45,14 @@ export const BrowserDeviceBar: React.FC<{
   );
   const shownPanelSize = { width: Math.round(panelSize.width), height: Math.round(panelSize.height) };
 
-  const commitSize = (side: 'width' | 'height', raw: string) => {
-    const parsed = Number.parseInt(raw, 10);
+  const [draft, setDraft] = React.useState<{ side: ViewportSide; digits: string } | null>(null);
+  const heightInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const commitDraft = () => {
+    setDraft(null);
+    if (!draft) return;
+    const { side } = draft;
+    const parsed = Number.parseInt(draft.digits, 10);
     if (!Number.isFinite(parsed)) return;
     const current = size ?? shownPanelSize;
     onViewportChange({
@@ -54,18 +62,39 @@ export const BrowserDeviceBar: React.FC<{
     });
   };
 
+  const sizeInput = (side: ViewportSide) => ({
+    value: draft?.side === side ? draft.digits : size ? String(size[side]) : '',
+    placeholder: shownPanelSize[side] > 0 ? String(shownPanelSize[side]) : '',
+    type: 'text',
+    inputMode: 'numeric',
+    pattern: '[0-9]*',
+    autoComplete: 'off',
+    onChange: (event: React.ChangeEvent<HTMLInputElement>) => setDraft({ side, digits: event.target.value.replace(/\D/g, '') }),
+    onBlur: commitDraft,
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Escape') {
+        setDraft(null);
+        return;
+      }
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      if (side === 'width') heightInputRef.current?.focus();
+      else event.currentTarget.blur();
+    },
+  } satisfies React.ComponentProps<'input'>);
+
   const sizeInputClass = cn(
     'w-11 min-w-0 bg-transparent text-center typography-meta tabular-nums text-foreground outline-none',
     'placeholder:text-muted-foreground',
   );
 
   return (
-    <div className="flex min-w-0 items-center gap-1.5 px-2 pb-1.5">
+    <div className="@container flex min-w-0 items-center gap-1.5 px-2 pb-1.5">
       <Select<string>
         value={presetId}
         onValueChange={(value) => onViewportChange(value === RESPONSIVE ? FILL_VIEWPORT : presetViewport(value) ?? FILL_VIEWPORT)}
       >
-        <SelectTrigger className="min-w-0 max-w-[12rem]" aria-label={t('contextPanel.browser.device.preset')}>
+        <SelectTrigger className="min-w-0 max-w-[12rem] shrink" aria-label={t('contextPanel.browser.device.preset')}>
           <SelectValue>{(value) => presetLabel(String(value))}</SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -76,21 +105,18 @@ export const BrowserDeviceBar: React.FC<{
         </SelectContent>
       </Select>
 
-      <div className="oc-raised oc-field flex h-7 shrink-0 items-center rounded-md bg-[var(--surface-elevated)] px-1">
+      <div className="oc-raised oc-field flex min-h-7 shrink-0 items-center rounded-md bg-[var(--surface-elevated)] px-1">
         <input
-          value={size ? String(size.width) : ''}
-          onChange={(event) => commitSize('width', event.target.value)}
-          placeholder={shownPanelSize.width > 0 ? String(shownPanelSize.width) : ''}
-          inputMode="numeric"
+          {...sizeInput('width')}
+          enterKeyHint="next"
           aria-label={t('contextPanel.browser.device.width')}
           className={sizeInputClass}
         />
         <span className="typography-meta text-muted-foreground" aria-hidden="true">×</span>
         <input
-          value={size ? String(size.height) : ''}
-          onChange={(event) => commitSize('height', event.target.value)}
-          placeholder={shownPanelSize.height > 0 ? String(shownPanelSize.height) : ''}
-          inputMode="numeric"
+          {...sizeInput('height')}
+          ref={heightInputRef}
+          enterKeyHint="done"
           aria-label={t('contextPanel.browser.device.height')}
           className={sizeInputClass}
         />
@@ -111,10 +137,15 @@ export const BrowserDeviceBar: React.FC<{
       <div
         role="group"
         aria-label={t('contextPanel.browser.device.scheme')}
-        className="oc-recessed ms-auto inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5"
+        className="oc-recessed ms-auto inline-flex min-h-7 shrink-0 items-center gap-0.5 rounded-lg bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5"
       >
         {SCHEMES.map(({ value, icon }) => {
           const selected = colorScheme === value;
+          const schemeLabel = t(value === 'system'
+            ? 'contextPanel.browser.device.schemeSystem'
+            : value === 'light'
+              ? 'contextPanel.browser.device.schemeLight'
+              : 'contextPanel.browser.device.schemeDark');
           return (
             <ButtonTooltip
               key={value}
@@ -130,6 +161,7 @@ export const BrowserDeviceBar: React.FC<{
                 variant="ghost"
                 size="xs"
                 aria-pressed={selected}
+                aria-label={schemeLabel}
                 onClick={() => onColorSchemeChange(value)}
                 className={cn(
                   'h-6 gap-1.5 rounded-md px-2 typography-meta !font-normal',
@@ -139,11 +171,7 @@ export const BrowserDeviceBar: React.FC<{
                 )}
               >
                 <Icon name={icon} className="size-3.5" aria-hidden="true" />
-                {t(value === 'system'
-                  ? 'contextPanel.browser.device.schemeSystem'
-                  : value === 'light'
-                    ? 'contextPanel.browser.device.schemeLight'
-                    : 'contextPanel.browser.device.schemeDark')}
+                <span className="hidden @md:inline">{schemeLabel}</span>
               </Button>
             </ButtonTooltip>
           );

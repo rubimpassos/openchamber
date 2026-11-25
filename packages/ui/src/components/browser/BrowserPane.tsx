@@ -1286,7 +1286,7 @@ export const BrowserPane: React.FC<BrowserPaneProps> = (props) => {
   const [chromium] = React.useState(isChromiumHost);
   const browserProvider = useUIStore((state) => state.browserProvider);
   if (browserProvider && browserProvider !== BUILTIN_BROWSER_PROVIDER) {
-    return <ServerBrowserView guestId={browserProvider} directory={props.directory} tabID={props.tabID} />;
+    return <ServerBrowserView guestId={browserProvider} directory={props.directory} tabID={props.visible === false ? null : props.tabID} registerBackHandler={props.registerBackHandler} />;
   }
   return chromium ? <WebviewBrowser {...props} /> : <IframeBrowser {...props} />;
 };

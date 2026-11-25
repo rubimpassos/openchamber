@@ -1,14 +1,17 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
-import { ActionToolbar, ButtonTooltip, ToolbarTooltipButton, type ToolbarGroup } from '@/components/ui/action-toolbar';
+import { ActionToolbar, ButtonTooltip, ToolbarTooltipButton, type ToolbarAction, type ToolbarGroup } from '@/components/ui/action-toolbar';
+import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useI18n } from '@/lib/i18n';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 import { BrowserAddressSuggestions } from './BrowserAddressSuggestions';
 import type { BrowserHistoryEntry } from '@/lib/browser/history';
 import { cn } from '@/lib/utils';
+import { isIMECompositionEvent } from '@/lib/ime';
 import type { IconName } from '@/components/icon/icons';
+import { rowActionsThatFit } from './browserToolbarRoom';
 
 const splitAddress = (address: string): { host: string; rest: string } | null => {
   const match = /^(https?:\/\/)?([^/?#\s]+)(.*)$/i.exec(address.trim());
@@ -16,9 +19,25 @@ const splitAddress = (address: string): { host: string; rest: string } | null =>
   return { host: match[2], rest: match[3] };
 };
 
-type BrowserToolbarMenuItem =
-  | { kind: 'item'; id: string; icon: IconName; label: string; onSelect: () => void; destructive?: boolean; disabled?: boolean }
+export type BrowserToolbarMenuItem =
+  | { kind: 'item'; id: string; icon: IconName; label: string; onSelect: () => void; destructive?: boolean; disabled?: boolean; pressed?: boolean }
   | { kind: 'separator'; id: string };
+
+const ROW_PADDING_PX = 16;
+const ROW_GAP_PX = 6;
+
+const measureRowRoom = (row: HTMLElement): number | null => {
+  const nav = row.querySelector<HTMLElement>('[data-browser-toolbar-nav]');
+  const navButtons = nav?.querySelectorAll('button').length ?? 0;
+  if (!nav || navButtons === 0 || row.clientWidth === 0) return null;
+  const pinned = Array.from(row.querySelectorAll<HTMLElement>('[data-browser-toolbar-pinned]'));
+  const pinnedWidth = pinned.reduce((total, element) => total + element.offsetWidth + ROW_GAP_PX, 0);
+  return rowActionsThatFit({
+    rowWidth: row.clientWidth,
+    takenWidth: ROW_PADDING_PX + nav.offsetWidth + ROW_GAP_PX * 2 + pinnedWidth,
+    buttonWidth: nav.offsetWidth / navButtons,
+  });
+};
 
 type BrowserToolbarProps = {
   address: string;
@@ -38,6 +57,10 @@ type BrowserToolbarProps = {
   isLoading: boolean;
   onAnnotate?: () => void;
   onOpenDevTools?: () => void;
+  onToggleDevTools?: () => void;
+  isDevToolsOpen?: boolean;
+  onToggleKeyboard?: () => void;
+  isKeyboardOpen?: boolean;
   /** The server browser's console/network drawer, shown instead of `onOpenDevTools`. */
   onToggleInspector?: () => void;
   isInspectorOpen?: boolean;
@@ -84,6 +107,10 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   isLoading,
   onAnnotate,
   onOpenDevTools,
+  onToggleDevTools,
+  isDevToolsOpen,
+  onToggleKeyboard,
+  isKeyboardOpen,
   onToggleInspector,
   isInspectorOpen,
   isAnnotating,
@@ -109,22 +136,44 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   const [isAddressFocused, setIsAddressFocused] = React.useState(false);
   const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const visibleSuggestions = isAddressFocused ? suggestions : [];
+  const [rowRoom, setRowRoom] = React.useState<number | null>(null);
+  const watchRowRoom = React.useCallback((row: HTMLDivElement | null) => {
+    if (!row) return undefined;
+    const measure = () => {
+      const room = measureRowRoom(row);
+      if (room !== null) setRowRoom(room);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
 
   React.useEffect(() => {
     setActiveSuggestion(-1);
   }, [address, isAddressFocused]);
 
+  const addressInputRef = React.useRef<HTMLInputElement | null>(null);
   const submitAddress = (value: string) => {
     setIsAddressFocused(false);
     setActiveSuggestion(-1);
+    addressInputRef.current?.blur();
     onSubmit(value);
   };
 
   const onAddressKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (visibleSuggestions.length === 0) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (isIMECompositionEvent(event)) return;
+    if (event.key === 'Enter' && activeSuggestion < 0) {
       event.preventDefault();
-      const step = event.key === 'ArrowDown' ? 1 : -1;
+      submitAddress(address);
+      return;
+    }
+    if (visibleSuggestions.length === 0) return;
+    const key = getDropdownNavigationKey(event) ?? event.key;
+    if (key === 'ArrowDown' || key === 'ArrowUp') {
+      event.preventDefault();
+      event.stopPropagation();
+      const step = key === 'ArrowDown' ? 1 : -1;
       const count = visibleSuggestions.length;
       setActiveSuggestion((current) => {
         const next = current + step;
@@ -163,14 +212,18 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
     onZoomIn ? { id: 'zoom-in', icon: 'zoom-in', label: t('contextPanel.browser.zoomIn'), onSelect: onZoomIn, shortcut: shortcut('zoom_in') } : null,
     onZoomOut ? { id: 'zoom-out', icon: 'zoom-out', label: t('contextPanel.browser.zoomOut'), onSelect: onZoomOut, shortcut: shortcut('zoom_out') } : null,
     onOpenDevTools ? { id: 'devtools', icon: 'terminal-box', label: t('contextPanel.browser.devTools'), onSelect: onOpenDevTools } : null,
+    onToggleDevTools ? { id: 'chrome-devtools', icon: 'code-sslash', label: t('contextPanel.browser.server.devTools.toggle'), onSelect: onToggleDevTools, pressed: isDevToolsOpen } : null,
     onClearCache ? { id: 'clear-cache', icon: 'database-2', label: t('contextPanel.browser.clearCache'), onSelect: onClearCache } : null,
     onClearCookies ? { id: 'clear-cookies', icon: 'delete-bin', label: t('contextPanel.browser.clearCookies'), onSelect: onClearCookies, destructive: true } : null,
     ...(menuItems?.flatMap((item) => item.kind === 'item' ? [item] : []) ?? []),
   ];
+  const offeredRowActions = rowActions.filter((action): action is ToolbarAction => Boolean(action));
+  const shownRowActions = rowRoom === null ? offeredRowActions : offeredRowActions.slice(0, rowRoom);
+  const keyboardLabel = t('contextPanel.browser.keyboard.toggle');
 
   return (
-    <div className="flex min-w-0 items-center gap-1.5 px-2 py-1.5">
-      <div className="flex shrink-0 items-center gap-0.5">
+    <div ref={watchRowRoom} className="flex min-w-0 items-center gap-1.5 px-2 py-1.5">
+      <div data-browser-toolbar-nav="" className="flex shrink-0 items-center gap-0.5">
         {onHome ? <ToolbarTooltipButton icon="home" label={t('contextPanel.browser.devServers.title')} onClick={onHome} /> : null}
         <ToolbarTooltipButton icon="arrow-left" label={t('contextPanel.browser.back')} onClick={onBack} disabled={!canGoBack} />
         <ToolbarTooltipButton icon="arrow-right" label={t('contextPanel.browser.forward')} onClick={onForward} disabled={!canGoForward} />
@@ -198,6 +251,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           </span>
         ) : null}
         <input
+          ref={addressInputRef}
           value={address}
           onChange={(event) => onAddressChange(event.target.value)}
           onFocus={(event) => {
@@ -210,7 +264,9 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           autoComplete="off"
           autoCapitalize="none"
           autoCorrect="off"
+          type="text"
           inputMode="url"
+          enterKeyHint="go"
           role="combobox"
           aria-expanded={visibleSuggestions.length > 0}
           aria-controls="openchamber-browser-address-suggestions"
@@ -228,6 +284,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
             aria-hidden="true"
             className={cn(
               'pointer-events-none absolute inset-y-0 inset-s-0 flex min-w-0 items-center overflow-hidden px-3.5 typography-meta',
+              'max-lg:[.mobile-pointer:not(.desktop-runtime)_&]:text-[16px]',
               addressMark && 'ps-8',
               zoomPercent !== 100 ? 'inset-e-14' : 'inset-e-0',
             )}
@@ -260,11 +317,22 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           />
         </div>
       </form>
+      {onToggleKeyboard ? (
+        <span data-browser-toolbar-pinned="" className="inline-flex shrink-0">
+          <ToolbarTooltipButton
+            icon="keyboard"
+            label={keyboardLabel}
+            pressed={isKeyboardOpen}
+            onPointerDown={(event) => event.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onToggleKeyboard}
+          />
+        </span>
+      ) : null}
       <ActionToolbar
         className="shrink-0"
-        groups={[rowActions]}
-        menuOnly={menuActions}
-        fold
+        groups={[shownRowActions]}
+        menuOnly={[...offeredRowActions.slice(shownRowActions.length), ...menuActions]}
       />
     </div>
   );
