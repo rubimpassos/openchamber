@@ -11,6 +11,7 @@
  */
 import React from 'react';
 
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 import {
@@ -22,6 +23,7 @@ import {
   closeServerBrowserScope,
   evaluateServerBrowserPage,
   getServerBrowserState,
+  isServerBrowserViewChanged,
   goServerBrowserBack,
   goServerBrowserForward,
   navigateServerBrowser,
@@ -35,11 +37,13 @@ import {
   setServerBrowserViewport,
   setServerBrowserZoom,
   setServerBrowserColorScheme,
+  setServerBrowserDevTools,
   stopServerBrowser,
   type ServerBrowserCapture,
   type ServerBrowserResult,
 } from './client';
 import { emptiedChatPanelTabs } from './panelTabs';
+import { useServerBrowserSharedState } from './sharedState';
 import { findSelectedScope, type ServerBrowserScope, type ServerBrowserState } from './types';
 
 const POLL_MS = 2_000;
@@ -65,6 +69,7 @@ type ServerBrowserConnection = {
   readonly setViewport: (viewport: { mode: 'auto' | 'fixed'; mobile: boolean; width?: number; height?: number }) => Promise<ServerBrowserState | null>;
   readonly setZoom: (level: number) => Promise<ServerBrowserState | null>;
   readonly setColorScheme: (scheme: 'system' | 'light' | 'dark') => Promise<ServerBrowserState | null>;
+  readonly setDevTools: (open: boolean) => Promise<ServerBrowserState | null>;
   readonly clearData: (what: 'cookies' | 'cache') => Promise<ServerBrowserState | null>;
   readonly selectScope: (scopeId: string) => Promise<ServerBrowserState | null>;
   readonly closeScope: (scopeId: string) => Promise<ServerBrowserState | null>;
@@ -119,7 +124,8 @@ export const useServerBrowserConnection = (
     generationRef.current = next.generation;
     setState(next);
     setError(null);
-  }, []);
+    useServerBrowserSharedState.getState().publish(guestId, getRuntimeKey(), next);
+  }, [guestId]);
 
   const act = React.useCallback(async (
     fn: (generation: number) => Promise<ServerBrowserResult<ServerBrowserState>>,
@@ -127,7 +133,7 @@ export const useServerBrowserConnection = (
     let result = await fn(generationRef.current);
     // The view moved on since our last poll (another tab, the agent): catch
     // up and try once more instead of dropping the click.
-    if (!result.ok && /view changed/i.test(result.error)) {
+    if (!result.ok && isServerBrowserViewChanged(result.error)) {
       const current = await getServerBrowserState(guestId, viewerId);
       if (current.ok) {
         applyState(current.data);
@@ -228,7 +234,8 @@ export const useServerBrowserConnection = (
       timer = setTimeout(tick, delay);
     };
     let timer = setTimeout(tick, 0);
-    return () => { disposed = true; clearTimeout(timer); };
+    const stopFollowing = useServerBrowserSharedState.getState().follow(guestId);
+    return () => { disposed = true; clearTimeout(timer); stopFollowing(); };
   }, [applyState, enabled, guestId, viewerId]);
 
   const scope = React.useMemo(() => findSelectedScope(state), [state]);
@@ -251,6 +258,7 @@ export const useServerBrowserConnection = (
     setViewport: (viewport) => act((generation) => setServerBrowserViewport(guestId, viewerId, { generation, ...viewport })),
     setZoom: (level) => act((generation) => setServerBrowserZoom(guestId, viewerId, { generation, level })),
     setColorScheme: (scheme) => act((generation) => setServerBrowserColorScheme(guestId, viewerId, { generation, scheme })),
+    setDevTools: (open) => act((generation) => setServerBrowserDevTools(guestId, viewerId, { open, generation })),
     clearData: (what) => act((generation) => clearServerBrowserData(guestId, viewerId, { generation, what })),
     selectScope: (scopeId) => act((generation) => selectServerBrowserScope(guestId, viewerId, { scopeId, generation })),
     closeScope: (scopeId) => act((generation) => closeServerBrowserScope(guestId, viewerId, { scopeId, generation })),

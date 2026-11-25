@@ -10,9 +10,11 @@
  */
 import { proxyGuestServiceRequest } from '@/lib/guests/service';
 import type { GuestRequest, GuestRequestMethod } from '@openchamber/sdk';
+import { z } from 'zod';
 
 import type {
   ServerBrowserInspectorBatch,
+  ServerBrowserMemory,
   ServerBrowserRequestDetail,
   ServerBrowserState,
 } from './types';
@@ -99,6 +101,30 @@ export const getServerBrowserState = async (
   return state ? { ok: true, data: state } : { ok: false, error: 'The server browser returned no state.' };
 };
 
+export const isServerBrowserViewChanged = (error: string): boolean => /view changed/i.test(error);
+
+const measuredScopeSchema = z.object({ scopeId: z.string(), memoryBytes: z.number().positive() });
+
+export const serverBrowserMemorySchema = z
+  .object({ sampledAt: z.number(), scopes: z.array(z.unknown()) })
+  .transform((reading): ServerBrowserMemory => ({
+    sampledAt: reading.sampledAt,
+    bytesByScope: new Map(reading.scopes.flatMap((scope) => {
+      const measured = measuredScopeSchema.safeParse(scope);
+      return measured.success ? [[measured.data.scopeId, measured.data.memoryBytes] as const] : [];
+    })),
+  }));
+
+export const getServerBrowserMemory = async (
+  guestId: string,
+  viewerId: string | undefined,
+): Promise<ServerBrowserResult<ServerBrowserMemory>> => {
+  const result = await call<unknown>(guestId, viewerId, 'GET', '/browser/memory');
+  if (!result.ok) return result;
+  const memory = serverBrowserMemorySchema.safeParse(result.data);
+  return memory.success ? { ok: true, data: memory.data } : { ok: false, error: 'The server browser returned no memory reading.' };
+};
+
 export const openServerBrowserScope = (
   guestId: string,
   viewerId: string | undefined,
@@ -133,6 +159,12 @@ export const goServerBrowserBack = historyCommand('/browser/back');
 export const goServerBrowserForward = historyCommand('/browser/forward');
 export const reloadServerBrowser = historyCommand('/browser/reload');
 export const stopServerBrowser = historyCommand('/browser/stop');
+
+export const setServerBrowserDevTools = (
+  guestId: string,
+  viewerId: string | undefined,
+  body: { open: boolean; generation: number },
+): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/browser/devtools', body);
 
 const tabCommand = (operation: 'new' | 'select' | 'close') => (
   guestId: string,

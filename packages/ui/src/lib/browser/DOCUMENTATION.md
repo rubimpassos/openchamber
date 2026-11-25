@@ -10,6 +10,13 @@ This folder is the UI half of the in-app browser and of agent browser control. T
 - `annotationOverlay.ts`, `annotationSession.ts`, `annotationPrompt.ts`, `annotationScreenshot.ts`, `overlayTheme.ts` and `previewFrameHost.ts` own annotation: the overlay injected into a page, one session from overlay to screenshot, the prompt the agent reads, the image drawn on the capture, theme resolution for the overlay, and the parent half of the preview-frame bridge.
 - `devServers.ts`, `announcedServers.ts`, `hiddenDevServers.ts`, `devServerWait.ts`, `devTunnel.ts` and `mobileDevTunnel.ts` own dev-server discovery, the wait for a server that is starting, and tunnelling a remote loopback server into a local origin.
 - `crashRecovery.ts`, `liveTabs.ts`, `history.ts`, `url.ts`, `viewport.ts`, `uploads.ts` and `hostCapability.ts` own one policy each.
+- `openPanel.ts` routes chat and extension links to an available Browser panel.
+  A server provider supports web and mobile; the local webview remains desktop.
+  The phone opens its workspace tab and captures the selected chat before
+  creating a panel tab. An unavailable phone shell leaves no hidden browser tab.
+- `serverBrowser/sharedState.ts` publishes the pane's authoritative service
+  snapshots to visible Work Status consumers. The monitor samples memory on
+  demand and reuses a pane's live state instead of starting another state loop.
 
 ## Invariants
 
