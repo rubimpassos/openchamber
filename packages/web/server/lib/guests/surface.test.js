@@ -79,7 +79,7 @@ const createFakeService = () => {
           status: 200,
           headers: {
             'content-type': frame.mime ?? 'image/png',
-            'x-surface-seq': String(frame.seq),
+            'x-surface-seq': String(frame.serviceSeq ?? frame.seq),
             'x-surface-width': String(frame.width ?? 320),
             'x-surface-height': String(frame.height ?? 200),
             ...(frame.title ? { 'x-surface-title': frame.title } : {}),
@@ -87,6 +87,7 @@ const createFakeService = () => {
           },
         })
         : new Response(null, { status: 204 });
+      if (frame?.viewId !== undefined) response.headers.set('x-surface-view-id', frame.viewId);
     } else if (path === SURFACE_AUDIO_PATH) {
       const after = Number(query.after);
       let sound = sounds.find((entry) => entry.seq > after) ?? null;
@@ -166,7 +167,7 @@ const openViewer = (port, guestId = 'sim', query = '') => new Promise((resolve, 
   const send = (message) => ws.send(JSON.stringify(message));
   // The pong follows the server's message handlers for all preceding frames.
   const received = () => new Promise((resolve) => { ws.once('pong', resolve); ws.ping(); });
-  ws.on('open', () => resolve({ ws, next, send, received, closed: new Promise((r) => ws.on('close', r)) }));
+  ws.on('open', () => resolve({ ws, next, send, received, pending: () => [...inbox], closed: new Promise((r) => ws.on('close', r)) }));
   ws.on('error', reject);
   ws.on('unexpected-response', (_req, res) => reject(new Error(`upgrade ${res.statusCode}`)));
 });
@@ -303,6 +304,67 @@ describe('guest surface runtime', () => {
     await drainViewer(runtime, viewer);
     // Input is stamped with the frame the viewer last drew, not the one still in flight.
     expect(service.callsTo(SURFACE_INPUT_PATH)[0].headers['x-surface-frame-seq']).toBe('2');
+  });
+
+  test('confirms only successful explicit presentation using the sent frame identity and service sequence', async () => {
+    const { port, service, runtime } = await createHarness();
+    const viewer = await openViewer(port, 'sim', '?frames=2');
+    await viewer.next();
+    await viewer.next();
+    service.pushFrame({ seq: 7, bytes: Buffer.from('A'), viewId: 'view-A' });
+    expect(await viewer.next()).toMatchObject({ seq: 7, viewId: 'view-A' });
+    await viewer.next();
+
+    // Legacy ACKs still advance the service cursor, without an unknown message to old clients.
+    viewer.send({ type: 'ack', seq: 7 });
+    await viewer.received();
+    expect(viewer.pending()).toEqual([]);
+    expect(runtime.viewerHeaders('sim', 'viewer-1')['x-surface-frame-seq']).toBe('7');
+
+    service.pushFrame({ seq: 8, serviceSeq: 2, bytes: Buffer.from('B'), viewId: 'view-B' });
+    expect(await viewer.next()).toMatchObject({ seq: 8, viewId: 'view-B' });
+    await viewer.next();
+    service.pushFrame({ seq: 9, serviceSeq: 3, bytes: Buffer.from('C'), viewId: 'view-C' });
+    await viewer.next();
+    await viewer.next();
+    service.pushFrame({ seq: 10, serviceSeq: 4, bytes: Buffer.from('D'), viewId: 'view-D' });
+    await service.frameRequestedAfter(10);
+
+    // A failed draw frees both cumulative slots, while the last shown picture stays A.
+    viewer.send({ type: 'ack', seq: 9, presented: false });
+    expect(await viewer.next()).toMatchObject({ type: 'frame', seq: 10, viewId: 'view-D' });
+    await viewer.next();
+    await viewer.received();
+    expect(viewer.pending()).toEqual([]);
+    expect(runtime.viewerHeaders('sim', 'viewer-1')['x-surface-frame-seq']).toBe('7');
+
+    viewer.send({ type: 'ack', seq: 10, presented: true, viewId: 'forged-by-viewer' });
+    await viewer.received();
+    expect(viewer.pending()).toEqual([{ type: 'presented', seq: 10, viewId: 'view-D' }]);
+    expect(runtime.viewerHeaders('sim', 'viewer-1')['x-surface-frame-seq']).toBe('4');
+    await viewer.next();
+    viewer.send({ type: 'ack', seq: 8, presented: true });
+    await viewer.received();
+    expect(viewer.pending()).toEqual([]);
+    expect(runtime.viewerHeaders('sim', 'viewer-1')['x-surface-frame-seq']).toBe('4');
+  });
+
+  test('an explicit successful ACK still releases a generic surface without view identity', async () => {
+    const { port, service, runtime } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next();
+    await viewer.next();
+    service.pushFrame({ seq: 1, bytes: Buffer.from('generic') });
+    await viewer.next();
+    await viewer.next();
+    service.pushFrame({ seq: 2, bytes: Buffer.from('next') });
+    await service.frameRequestedAfter(2);
+    viewer.send({ type: 'ack', seq: 1, presented: true });
+    expect(await viewer.next()).toMatchObject({ type: 'frame', seq: 2 });
+    await viewer.next();
+    await viewer.received();
+    expect(viewer.pending()).toEqual([]);
+    expect(runtime.viewerHeaders('sim', 'viewer-1')['x-surface-frame-seq']).toBe('1');
   });
 
   test('asks the service for sound only while a viewer listens and gives it only to listeners', async () => {

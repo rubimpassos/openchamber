@@ -33,6 +33,7 @@ import {
   SURFACE_TITLE_MAX,
   SURFACE_VIEWER_CONTROLS_HEADER,
   SURFACE_VIEWER_HEADER,
+  SURFACE_VIEW_ID_HEADER,
   SURFACE_WIDTH_HEADER,
   isGuestApproved,
   requestedGuestCapabilities,
@@ -41,6 +42,7 @@ import {
   surfaceClipboardAnswerSchema,
   surfaceResizeAnswerSchema,
   surfaceViewerMessageSchema,
+  surfaceViewIdSchema,
 } from '@openchamber/sdk/schemas';
 
 import { GuestServiceError, holdGuestService, openGuestServiceRequest } from './service.js';
@@ -169,7 +171,7 @@ export const createGuestSurfaceRuntime = ({
   const deliverLatest = (session: SurfaceSession, viewer: SurfaceViewer) => {
     const frame = session.latest;
     if (!frame || viewer.inFlight.length >= viewer.framesInFlight || viewer.sentSeq >= frame.seq || viewer.ws.readyState !== 1) return;
-    viewer.inFlight.push({ seq: frame.seq, serviceSeq: frame.serviceSeq });
+    viewer.inFlight.push({ seq: frame.seq, serviceSeq: frame.serviceSeq, viewId: frame.viewId });
     viewer.sentSeq = frame.seq;
     const meta: Extract<SurfaceHostMessage, { type: 'frame' }> = {
       type: 'frame',
@@ -181,6 +183,7 @@ export const createGuestSurfaceRuntime = ({
       agentActive: frame.agentActive,
     };
     if (frame.title) meta.title = frame.title;
+    if (frame.viewId !== undefined) meta.viewId = frame.viewId;
     send(viewer, meta);
     try {
       viewer.ws.send(frame.bytes, { binary: true });
@@ -221,6 +224,8 @@ export const createGuestSurfaceRuntime = ({
     const width = readDimension(response.headers.get(SURFACE_WIDTH_HEADER));
     const height = readDimension(response.headers.get(SURFACE_HEIGHT_HEADER));
     if (seq === null || width === null || height === null) return null;
+    const viewId = surfaceViewIdSchema.optional().safeParse(response.headers.get(SURFACE_VIEW_ID_HEADER) ?? undefined);
+    if (!viewId.success) return null;
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length === 0 || bytes.length > SURFACE_FRAME_MAX_BYTES) return null;
     const title = (response.headers.get(SURFACE_TITLE_HEADER) || '').slice(0, SURFACE_TITLE_MAX);
@@ -234,6 +239,7 @@ export const createGuestSurfaceRuntime = ({
       agentActive: response.headers.get(SURFACE_AGENT_ACTIVE_HEADER) === '1',
     };
     if (title) frame.title = title;
+    if (viewId.data !== undefined) frame.viewId = viewId.data;
     return frame;
   };
 
@@ -567,9 +573,13 @@ export const createGuestSurfaceRuntime = ({
         const acked = viewer.inFlight.findIndex((sent) => sent.seq === message.seq);
         const frame = viewer.inFlight[acked];
         if (!frame) return;
-        // Acknowledged after drawing: this is the picture its next input is made on.
-        viewer.shownServiceSeq = frame.serviceSeq;
         viewer.inFlight.splice(0, acked + 1);
+        // Legacy ACKs mean success. Explicit failure only releases capacity.
+        if (message.presented !== false) viewer.shownServiceSeq = frame.serviceSeq;
+        // New confirmations are opt-in: old viewers may reject unknown variants.
+        if (message.presented === true && frame.viewId !== undefined) {
+          send(viewer, { type: 'presented', seq: frame.seq, viewId: frame.viewId });
+        }
         deliverLatest(session, viewer);
         return;
       }
