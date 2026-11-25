@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import { I18nProvider } from '@/lib/i18n';
+import { handleMobileWorkspaceEscape } from '@/apps/mobileWorkspaceEscape';
 import { FILL_VIEWPORT, VIEWPORT_PRESETS, presetViewport, type BrowserViewport } from '@/lib/browser/viewport';
 
 import { BrowserDeviceBar } from './BrowserDeviceBar';
@@ -20,7 +21,7 @@ type Page = {
 
 // The device is the one the app runs on: its window size and pointer. The page
 // shown inside the browser panel has a viewport of its own, set by `initial`.
-const openDeviceBar = async (device: Device, initial: BrowserViewport): Promise<Page> => {
+const openDeviceBar = async (device: Device, initial: BrowserViewport, applyImmediately = true): Promise<Page> => {
   const dom = new Window({ url: 'http://localhost/', width: device.width, height: device.height });
   Object.defineProperty(dom, 'matchMedia', {
     configurable: true,
@@ -50,7 +51,7 @@ const openDeviceBar = async (device: Device, initial: BrowserViewport): Promise<
     return (
       <BrowserDeviceBar
         viewport={viewport}
-        onViewportChange={(next) => { applied.push(next); setViewport(next); }}
+        onViewportChange={(next) => { applied.push(next); if (applyImmediately) setViewport(next); }}
         colorScheme="system"
         onColorSchemeChange={() => undefined}
         scale={1}
@@ -82,6 +83,16 @@ const find = <T extends HTMLElement>(scope: ParentNode, selector: string): T => 
 const tap = (target: HTMLElement) => act(async () => {
   target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 });
+
+const writeSize = async (input: HTMLInputElement, value: string) => {
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+  if (!setter) throw new Error('The size input has no native value setter');
+  await act(async () => {
+    input.focus();
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
 
 const presetSheet = () => document.querySelector<HTMLElement>('#mobile-overlay-root [role="dialog"][aria-label="Device preset"]');
 
@@ -153,3 +164,51 @@ test('a desktop window showing a phone-sized page keeps the dropdown picker', as
     await page.close();
   }
 });
+
+test('rotation consumes the edited size before a deferred viewport update arrives', async () => {
+  const page = await openDeviceBar(DESKTOP, { kind: 'custom', width: 600, height: 320 }, false);
+  try {
+    const width = find<HTMLInputElement>(page.host, 'input[enterkeyhint="next"]');
+    const rotate = find<HTMLButtonElement>(page.host, 'button[aria-label="Rotate"]');
+    await writeSize(width, '450');
+    await act(async () => rotate.focus());
+    await tap(rotate);
+    expect(page.applied).toEqual([{ kind: 'custom', width: 320, height: 450 }]);
+  } finally {
+    await page.close();
+  }
+});
+
+test('leaving Rotate without activating it commits the edited size', async () => {
+  const page = await openDeviceBar(DESKTOP, { kind: 'custom', width: 600, height: 320 }, false);
+  try {
+    await writeSize(find<HTMLInputElement>(page.host, 'input[enterkeyhint="next"]'), '450');
+    await act(async () => find<HTMLButtonElement>(page.host, 'button[aria-label="Rotate"]').focus());
+    await act(async () => find<HTMLInputElement>(page.host, 'input[enterkeyhint="done"]').focus());
+    expect(page.applied).toEqual([{ kind: 'custom', width: 450, height: 320 }]);
+  } finally {
+    await page.close();
+  }
+});
+
+for (const focus of ['field', 'Rotate'] as const) {
+  test(`Escape cancels a size draft from ${focus} without closing its workspace`, async () => {
+    const page = await openDeviceBar(DESKTOP, { kind: 'custom', width: 600, height: 320 }, false);
+    let closed = 0;
+    const onKeyDown = (event: KeyboardEvent) => handleMobileWorkspaceEscape(event, 'preview', () => { closed += 1; });
+    document.addEventListener('keydown', onKeyDown);
+    try {
+      const width = find<HTMLInputElement>(page.host, 'input[enterkeyhint="next"]');
+      await writeSize(width, '450');
+      const target = focus === 'field' ? width : find<HTMLButtonElement>(page.host, 'button[aria-label="Rotate"]');
+      await act(async () => target.focus());
+      await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+      expect(width.value).toBe('600');
+      expect(page.applied).toEqual([]);
+      expect(closed).toBe(0);
+    } finally {
+      document.removeEventListener('keydown', onKeyDown);
+      await page.close();
+    }
+  });
+}

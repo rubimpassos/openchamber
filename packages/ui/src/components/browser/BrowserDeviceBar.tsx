@@ -55,19 +55,28 @@ export const BrowserDeviceBar: React.FC<{
 
   const [draft, setDraft] = React.useState<{ side: ViewportSide; digits: string } | null>(null);
   const heightInputRef = React.useRef<HTMLInputElement | null>(null);
+  const rotateButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
-  const commitDraft = () => {
-    setDraft(null);
-    if (!draft) return;
+  const draftViewport = (): BrowserViewport | null => {
+    if (!draft) return null;
     const { side } = draft;
     const parsed = Number.parseInt(draft.digits, 10);
-    if (!Number.isFinite(parsed)) return;
+    if (!Number.isFinite(parsed)) return null;
     const current = size ?? shownPanelSize;
-    onViewportChange({
+    return {
       kind: 'custom',
       width: clampViewportSize(side === 'width' ? parsed : current.width),
       height: clampViewportSize(side === 'height' ? parsed : current.height),
-    });
+    };
+  };
+  const commitDraft = () => {
+    const next = draftViewport();
+    setDraft(null);
+    if (next) onViewportChange(next);
+  };
+  const cancelDraft = (event: React.KeyboardEvent) => {
+    event.preventDefault();
+    setDraft(null);
   };
 
   const sizeInput = (side: ViewportSide) => ({
@@ -78,10 +87,12 @@ export const BrowserDeviceBar: React.FC<{
     pattern: '[0-9]*',
     autoComplete: 'off',
     onChange: (event: React.ChangeEvent<HTMLInputElement>) => setDraft({ side, digits: event.target.value.replace(/\D/g, '') }),
-    onBlur: commitDraft,
+    onBlur: (event: React.FocusEvent<HTMLInputElement>) => {
+      if (event.relatedTarget !== rotateButtonRef.current) commitDraft();
+    },
     onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => {
       if (event.key === 'Escape') {
-        setDraft(null);
+        cancelDraft(event);
         return;
       }
       if (event.key !== 'Enter') return;
@@ -162,9 +173,23 @@ export const BrowserDeviceBar: React.FC<{
         />
       </div>
       <ToolbarTooltipButton
+        ref={rotateButtonRef}
         icon="anticlockwise-2"
         label={t('contextPanel.browser.device.rotate')}
-        onClick={() => onViewportChange(rotateViewport(viewport))}
+        onPointerDown={(event) => {
+          // A pointer-down blur would clear the draft before this click uses it.
+          event.preventDefault();
+        }}
+        onClick={(event) => {
+          const current = draftViewport() ?? viewport;
+          event.currentTarget.focus();
+          setDraft(null);
+          onViewportChange(rotateViewport(current));
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && draft) cancelDraft(event);
+        }}
+        onBlur={commitDraft}
         disabled={!size}
       />
 
