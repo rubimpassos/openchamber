@@ -16,6 +16,7 @@ const DIRECTORY = '/activity-project';
 const snapshot = (lastActivityAt: number): ServerBrowserState => ({
   version: 'same-material-version',
   generation: 1,
+  viewId: 'activity-view',
   controller: 'none',
   viewerInControl: false,
   selectedScopeId: 'scope',

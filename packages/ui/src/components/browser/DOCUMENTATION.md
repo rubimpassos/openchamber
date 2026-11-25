@@ -6,7 +6,8 @@ This module owns the rendered browser panel, its navigation lifecycle, agent-act
 
 `ServerBrowserView` pairs context-panel tabs with the selected chat's Chrome
 tabs when a Server Browser provider is selected. `usePanelNavigation` delivers
-requested addresses after pairing selects the corresponding Chrome tab: the
+requested addresses after pairing selects the corresponding Chrome tab and the
+host confirms presentation of its current view identity: the
 address a tab opened with, a link to an existing tab, and an address the person
 enters in the address field or picks from the server list. The
 service owns observed page URLs, loading and errors. The built-in provider keeps
@@ -18,6 +19,7 @@ the native webview and iframe navigation lifecycles in `BrowserPane`.
 - A newly requested Server Browser address survives blank service snapshots until its navigation finishes. Page-URL synchronization cannot erase pending intent, in the panel tab or in the address field.
 - What the person types in the Server Browser address field stays there while the field has focus: a page address that arrives meanwhile, the blank page of a browser that just opened included, cannot replace it. The draft belongs to its panel tab (directory and tab id), so another panel tab starts from its own address even when the same field keeps focus. A field nobody is typing in follows the tab's address (`useBrowserAddress`).
 - An address the person enters or picks is sent once, after the chat's browser has opened and this panel tab's Chrome tab is selected, and replaces a working page. It belongs to the chat it was asked in: a chat switch, a sign-in browser, another panel tab or hiding the view drops it.
+- Queued navigation requires a confirmed presented identity equal to HTTP `state.viewId`, with the claimed tab active in the requesting session's selected scope. Canvas readiness requires a successful current-connection draw and a matching host confirmation. Failed decoding, a local ACK send, or a confirmation for another view grants no readiness. Hiding the browser zone retires its socket and pending draw; a blank discovery overlay keeps the canvas mounted.
 - Existing-tab requests reach the mounted view, or the latest request is delivered when that view subscribes. Reopening a working page only focuses it.
 - A sign-in browser does not receive chat-link navigation. It has no panel tab, so an address entered there is sent at once.
 - A panel tab mirroring a page already opened by Chrome or the agent consumes its first-open marker without navigating that page again.
@@ -44,17 +46,17 @@ Replaying every target-path update would navigate on service synchronization.
 Explicit first-open markers and existing-tab load requests distinguish user
 intent from observed page state.
 
-### Why an entered address waits for its Chrome tab and is not retried
+### Why an entered address waits for host-confirmed presentation
 
 A dock command carries the generation of the view it was built from, and the
 service refuses it once the view has moved on. A panel that just opened has no
 generation, then no browser of its own, then a Chrome tab that is not selected
-yet, and each of those steps moves the view. An address sent at once was
-refused, refused again on the one retry, and lost. `usePanelNavigation` already holds a tab's
-first address until its Chrome tab is selected, so the entered address waits in
-the same place and is sent once. The rejected alternative is retrying the
-refused command: a retry can land after the service selected another chat's
-browser and load the address there.
+yet, and each of those steps moves the view. HTTP can report that selection
+before the host has processed the picture's ACK, so selecting the tab alone
+still sends a command stamped with the previous picture. `usePanelNavigation`
+holds the address until Canvas has drawn that view and the host confirms its
+retained identity after advancing the shown service sequence. Retrying the
+refused command can instead land after another chat is selected.
 
 ### Why a typed address is a draft kept apart from the page address
 

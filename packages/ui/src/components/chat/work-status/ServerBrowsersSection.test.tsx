@@ -158,7 +158,7 @@ describe('browsers in work status', () => {
       ui.showBrowserTabsOfSession('/work/app', 'ses_checkout');
       ui.openContextBrowser('/work/app', 'https://example.com/a');
       const closedState: ServerBrowserState = {
-        controller: 'none', viewerInControl: false, selectedScopeId: null, generation: 2,
+        controller: 'none', viewerInControl: false, selectedScopeId: null, generation: 2, viewId: null,
         help: null, chrome: { status: 'system', message: '' }, scopes: [],
       };
       await render(monitor([browser({ scopeId: 'mine', sessionId: 'ses_checkout' })], {

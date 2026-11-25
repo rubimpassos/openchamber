@@ -39,6 +39,7 @@ const browserState = (version: string, generation = 1): ServerBrowserState => ({
   viewerInControl: false,
   selectedScopeId: null,
   generation,
+  viewId: null,
   help: null,
   chrome: { status: 'ready', message: '' },
   scopes: [],

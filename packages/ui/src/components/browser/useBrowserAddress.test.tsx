@@ -54,6 +54,7 @@ const AddressRow: React.FC<PanelProps> = ({ tabID, pageUrl }) => {
   const scope = React.useMemo(() => (pageUrl === null ? null : scopeShowing(pageUrl)), [pageUrl]);
   const navigation = usePanelNavigation({
     directory: DIRECTORY, tabID, sessionId: SESSION, scope, chromeTabId: scope ? CHROME_TAB : null,
+    viewId: scope ? 'address-view' : null, presentedViewId: scope ? 'address-view' : null,
     navigate, error: null, disabled: false,
   });
   const address = useBrowserAddress({ directory: DIRECTORY, tabID, requestedUrl: navigation.requestedUrl, pageUrl: scope?.url });

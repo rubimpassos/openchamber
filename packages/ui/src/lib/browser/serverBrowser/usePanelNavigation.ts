@@ -26,16 +26,18 @@ type PanelNavigation = {
   readonly load: (url: string) => void;
 };
 
-/** Delivers an address asked of a panel tab only after its Chrome tab is selected. */
-export const usePanelNavigation = ({ directory, tabID, sessionId, scope, chromeTabId, navigate, error, disabled }: {
+/** Delivers a panel address only after the host confirms presentation of its selected Chrome view. */
+export const usePanelNavigation = ({ directory, tabID, sessionId, scope, chromeTabId, viewId, presentedViewId, navigate, error, disabled }: {
   readonly directory: string;
   readonly tabID: string;
   readonly sessionId: string | null;
   readonly scope: ServerBrowserScope | null;
   readonly chromeTabId: string | null;
+  readonly viewId: string | null;
+  readonly presentedViewId: string | null;
   readonly navigate: (url: string) => Promise<ServerBrowserState | null>;
   readonly error: string | null;
-  /** A sign-in browser is shown instead of the chat's. */
+  /** A sign-in browser or hidden panel cannot dispatch the chat's navigation. */
   readonly disabled: boolean;
 }): PanelNavigation => {
   const [request, setRequest] = React.useState<NavigationRequest | null>(null);
@@ -56,7 +58,7 @@ export const usePanelNavigation = ({ directory, tabID, sessionId, scope, chromeT
       setRequest(null);
       return;
     }
-    if (disabled || !scope) return;
+    if (disabled || !scope || !scope.selected || scope.sessionId !== sessionId || scope.directory !== directory) return;
     const chromeTab = scope.tabs.find((tab) => tab.id === chromeTabId && tab.active);
     if (!chromeTab) return;
     // Reopening a working page only focuses it, preserving the person's work.
@@ -64,12 +66,13 @@ export const usePanelNavigation = ({ directory, tabID, sessionId, scope, chromeT
       setRequest(null);
       return;
     }
+    if (viewId === null || presentedViewId !== viewId) return;
     started.current = request;
     void navigate(normalizeBrowserUrl(request.url)).finally(() => {
       if (request.intent === 'open') forgetBrowserTabOpenedWithAddress(directory, tabID);
       setRequest((current) => current === request ? null : current);
     });
-  }, [chromeTabId, directory, disabled, error, navigate, request, scope, sessionId, tabID]);
+  }, [chromeTabId, directory, disabled, error, navigate, presentedViewId, request, scope, sessionId, tabID, viewId]);
 
   const load = React.useCallback((url: string) => {
     forgetBrowserTabOpenedWithAddress(directory, tabID);

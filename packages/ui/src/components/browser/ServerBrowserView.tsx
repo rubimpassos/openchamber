@@ -252,11 +252,12 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const [viewerId, setViewerId] = React.useState<string | undefined>(undefined);
   const [control, setControl] = React.useState<SurfaceControlState>({ controller: 'none', mine: false });
   const [connection, setConnection] = React.useState<SurfaceConnectionState>({ status: 'connecting' });
+  const [presentedViewId, setPresentedViewId] = React.useState<string | null>(null);
   const [canvasFocused, setCanvasFocused] = React.useState(false);
 
   const signIn = useServerBrowserSignIn((store) => store.signIn);
   const setSignIn = useServerBrowserSignIn((store) => store.setSignIn);
-  const serverBrowser = useServerBrowserConnection(guestId, directory, viewerId, true, signIn?.profileId ?? null);
+  const serverBrowser = useServerBrowserConnection(guestId, directory, viewerId, visible, signIn?.profileId ?? null);
   const { state } = serverBrowser;
   // Right after a chat switch the service still shows the previous chat's
   // browser until this chat's opens. Nothing of it is paired, shown as this
@@ -289,7 +290,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
 
   const navigation = usePanelNavigation({
     directory, tabID, sessionId: serverBrowser.sessionId, scope, chromeTabId: myChromeTab,
-    navigate: (url) => runNavigation(() => serverBrowser.navigate(url)), error: serverBrowser.error, disabled: Boolean(signIn),
+    viewId: state?.viewId ?? null, presentedViewId,
+    navigate: (url) => runNavigation(() => serverBrowser.navigate(url)), error: serverBrowser.error, disabled: Boolean(signIn) || !visible,
   });
   const navigationPending = navigation.pending;
 
@@ -736,6 +738,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
           onViewer={setViewerId}
           onControl={setControl}
           onConnection={setConnection}
+          onPresented={setPresentedViewId}
           onFocusChange={setCanvasFocused}
           onAudioState={(available) => setSoundMissing(!available)}
           typing={hasTouchInput && canType ? {

@@ -8,6 +8,7 @@ import { SurfaceAudioPlayer } from '@/lib/guests/surface-audio';
 import { clearSurfaceViewerId, setSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import { SurfaceClient, type SurfaceConnectionState, type SurfaceControlState, type SurfaceFrame } from '@/lib/guests/surface-client';
 import { cn } from '@/lib/utils';
+import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 
 import { RemoteTypingField, type RemoteTypingHandle } from './RemoteTypingField';
 import { beginTouch, endTouch, moveTouch, type ScrollDelta, type TouchGesture } from './touchGesture';
@@ -64,12 +65,16 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
   onViewer: (viewerId: string | undefined) => void;
   onControl: (control: SurfaceControlState) => void;
   onConnection: (connection: SurfaceConnectionState) => void;
+  onPresented: (viewId: string | null) => void;
   onFocusChange?: (focused: boolean) => void;
   /** `false` once the extension says it has no sound to send. */
   onAudioState?: (available: boolean) => void;
   typing?: ServerBrowserTyping;
-}>(({ guestId, onViewer, onControl, onConnection, onFocusChange, onAudioState, typing }, forwardedRef) => {
+}>(({ guestId, onViewer, onControl, onConnection, onPresented, onFocusChange, onAudioState, typing }, forwardedRef) => {
   const { t } = useI18n();
+  const visible = useZoneInteractive();
+  const visibleRef = React.useRef(visible);
+  visibleRef.current = visible;
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const clientRef = React.useRef<SurfaceClient | null>(null);
@@ -109,37 +114,40 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
     playerRef.current = null;
   }, []);
 
-  const drawFrame = React.useCallback(async (frame: SurfaceFrame) => {
-    const canvas = canvasRef.current;
-    const client = clientRef.current;
-    if (!canvas || !client) return;
-    try {
-      const bitmap = await createImageBitmap(new Blob([frame.bytes], { type: frame.mime }));
-      // The page renders at this screen's density, so the picture has more
-      // pixels than the frame's CSS size. Back the canvas with every one of
-      // them and lay it out at the CSS size; drawing it at CSS size would
-      // throw the extra sharpness away.
-      if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-      }
-      fitCanvas(canvas, containerRef.current, frame.width, frame.height);
-      const context = canvas.getContext('2d');
-      if (context) context.imageSmoothingQuality = 'high';
-      context?.drawImage(bitmap, 0, 0);
-      bitmap.close();
-      // Pointer coordinates go to the page in CSS pixels.
-      frameSizeRef.current = { width: frame.width, height: frame.height };
-      setHasFrame(true);
-    } catch {
-      // An undecodable frame is skipped; the next one replaces it.
-    } finally {
-      client.ack(frame.seq);
-    }
-  }, []);
-
   React.useEffect(() => {
+    if (!visible) return;
     let viewerId: string | null = null;
+    let drawn: SurfaceFrame | null = null;
+    const drawFrame = async (frame: SurfaceFrame) => {
+      const canvas = canvasRef.current;
+      let bitmap: ImageBitmap | null = null;
+      let presented = false;
+      try {
+        if (!canvas) return;
+        bitmap = await createImageBitmap(new Blob([frame.bytes], { type: frame.mime }));
+        if (!visibleRef.current || clientRef.current !== client || canvasRef.current !== canvas || !client.isCurrentFrame(frame)) return;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        // Keep every device pixel, laid out at the page's CSS size.
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+        }
+        fitCanvas(canvas, containerRef.current, frame.width, frame.height);
+        context.imageSmoothingQuality = 'high';
+        context.drawImage(bitmap, 0, 0);
+        if (drawn?.viewId !== frame.viewId) onPresented(null);
+        drawn = frame;
+        frameSizeRef.current = { width: frame.width, height: frame.height };
+        setHasFrame(true);
+        presented = true;
+      } catch {
+        // An undecodable frame releases capacity without claiming presentation.
+      } finally {
+        bitmap?.close();
+        client.ack(frame, presented);
+      }
+    };
     const client = new SurfaceClient(guestId, {
       onViewer: (id) => {
         if (viewerId) clearSurfaceViewerId(guestId, viewerId);
@@ -149,7 +157,15 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
       },
       onFrame: (frame) => { void drawFrame(frame); },
       onControl: (next) => { controlRef.current = next; onControl(next); },
-      onConnection,
+      onConnection: (next) => {
+        drawn = null;
+        onPresented(null);
+        onConnection(next);
+      },
+      onPresented: ({ seq, viewId }) => {
+        // A newer image of this view can already be drawn while the host processes an earlier ACK.
+        if (visibleRef.current && clientRef.current === client && drawn && seq <= drawn.seq && drawn.viewId === viewId) onPresented(viewId);
+      },
       onClipboard: (_id, text) => { void copyTextToClipboard(text); },
       onAudio: (batch) => playerRef.current?.play(batch),
       onAudioState: (available) => onAudioStateRef.current?.(available),
@@ -162,6 +178,7 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
     return () => {
       if (viewerId) clearSurfaceViewerId(guestId, viewerId);
       onViewer(undefined);
+      onPresented(null);
       client.dispose();
       if (clientRef.current === client) clientRef.current = null;
       if (flushRef.current !== null) cancelAnimationFrame(flushRef.current);
@@ -170,11 +187,9 @@ export const ServerBrowserCanvas = React.forwardRef<ServerBrowserCanvasHandle, {
       frameSizeRef.current = null;
       setHasFrame(false);
     };
-    // `onViewer`/`onControl`/`onConnection` are identity-stable callbacks from
-    // the parent; re-subscribing on every render would tear the socket down
-    // for no reason.
+    // The parent supplies identity-stable callbacks; re-subscribing on every render would tear the socket down.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guestId, drawFrame]);
+  }, [guestId, visible, onPresented]);
 
   React.useEffect(() => {
     const container = containerRef.current;

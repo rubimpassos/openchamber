@@ -14,6 +14,11 @@ This folder is the UI half of the in-app browser and of agent browser control. T
   A server provider supports web and mobile; the local webview remains desktop.
   The phone opens its workspace tab and captures the selected chat before
   creating a panel tab. An unavailable phone shell leaves no hidden browser tab.
+- `serverBrowser` requires a bounded presentation identity in HTTP state. A
+  missing or malformed identity uses the existing invalid-state result.
+  Optional monitoring fields remain compatible; arbitrary frame arrival never
+  makes queued navigation ready. The Canvas confirmation contract is documented
+  in `packages/ui/src/components/browser/DOCUMENTATION.md`.
 - `serverBrowser/sharedState.ts` publishes the pane's authoritative service
   snapshots to visible Work Status consumers. The monitor samples memory on
   demand and reuses a pane's live state instead of starting another state loop.

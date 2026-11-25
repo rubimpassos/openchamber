@@ -73,6 +73,13 @@ A rewritten document keeps its own relative links. Without a base pointing at th
 
 A shared surface sends one `frame` text message followed by one binary message with the image. The client permits 3 unacknowledged frames, draws one at a time and keeps only the newest that arrived while drawing. Acknowledging that frame also covers skipped frames, so a slow pane never builds a drawing queue. Older viewers that omit the window keep one frame in flight.
 
+The frame object also belongs to one connection's active draw. Canvas consumers
+check `isCurrentFrame` after asynchronous decoding and acknowledge that object
+with its presentation outcome. Reconnect, end and disposal invalidate the draw
+even when the next connection reuses its numeric sequence. A host presentation
+confirmation is delivered separately through `onPresented`; sending an ACK
+locally never calls it. Generic surfaces need no view identity.
+
 ### Why a loaded frame document is kept
 
 A frame that navigates inside its own document keeps the `srcDoc` it already has. The URL is resolved again only when the frame starts over, so an open panel does not reload its package for every navigation, and scoped auth is renewed on that new load rather than per navigation.

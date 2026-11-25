@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'bun:test';
 const proxied: Array<{ guestId: string; request: unknown; viewerId: string | undefined }> = [];
 let nextResponse: { ok: true; result: { status: number; body: string } } | { ok: false; code: string; message: string } = {
   ok: true,
-  result: { status: 200, body: JSON.stringify({ scopes: [], controller: 'none', viewerInControl: false, selectedScopeId: null, generation: 0, help: null, chrome: { status: 'ready', message: '' } }) },
+  result: { status: 200, body: JSON.stringify({ scopes: [], controller: 'none', viewerInControl: false, selectedScopeId: null, generation: 0, viewId: null, help: null, chrome: { status: 'ready', message: '' } }) },
 };
 
 mock.module('@/lib/guests/service', () => ({
@@ -53,8 +53,14 @@ describe('server browser client', () => {
   test('parseServerBrowserState rejects a value with no scopes array', () => {
     expect(parseServerBrowserState({ foo: 'bar' })).toBeNull();
     expect(parseServerBrowserState(null)).toBeNull();
-    expect(parseServerBrowserState({ scopes: [] })).not.toBeNull();
+    expect(parseServerBrowserState({ scopes: [], viewId: null })).not.toBeNull();
   });
+
+  for (const viewId of [undefined, '', 'x'.repeat(129), 'view\nB', 'view\u00e9']) {
+    test(`rejects browser state with incompatible presentation identity ${JSON.stringify(viewId)}`, () => {
+      expect(parseServerBrowserState({ scopes: [], viewId })).toBeNull();
+    });
+  }
 
   test('a memory reading keeps measured browsers and leaves out the ones the service could not measure', () => {
     const memory = serverBrowserMemorySchema.parse({
@@ -91,7 +97,7 @@ describe('server browser client', () => {
 
   test('DevTools sends only open and the generation, which is all the service accepts', async () => {
     proxied.length = 0;
-    nextResponse = { ok: true, result: { status: 200, body: JSON.stringify({ scopes: [{ id: 's', devtools: true }], generation: 8 }) } };
+    nextResponse = { ok: true, result: { status: 200, body: JSON.stringify({ scopes: [{ id: 's', devtools: true }], generation: 8, viewId: 'view-s' }) } };
     const result = await setServerBrowserDevTools('guest', 'viewer-1', { open: true, generation: 7 });
     expect(proxied[0]?.request).toEqual({ method: 'POST', path: '/browser/devtools', body: JSON.stringify({ open: true, generation: 7 }) });
     expect(result.ok && result.data.scopes[0]?.devtools).toBe(true);

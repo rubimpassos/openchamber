@@ -126,6 +126,8 @@ export type ServerBrowserState = {
   /** The chat the agent holds the picture for; older services do not report it. */
   readonly agentScopeId?: string | null;
   readonly generation: number;
+  /** Fresh identity for the selected scope, active tab, and capture surface. Null with no selection. */
+  readonly viewId: string | null;
   readonly help: ServerBrowserHelp | null;
   /** Chats whose browser closed with its last tab, until that chat opens a browser again. */
   readonly emptiedSessions?: readonly string[];

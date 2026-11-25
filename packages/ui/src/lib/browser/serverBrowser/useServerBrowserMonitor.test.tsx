@@ -32,7 +32,7 @@ for (const change of ['provider', 'runtime']) {
     const globals = ['window', 'document', 'CustomEvent', 'IS_REACT_ACT_ENVIRONMENT'];
     const descriptors = globals.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
     const closes: string[] = [];
-    const state = { generation: 1, controller: 'none', scopes: [], selectedScopeId: null, help: null, chrome: { status: 'ready' } };
+    const state = { generation: 1, viewId: null, controller: 'none', scopes: [], selectedScopeId: null, help: null, chrome: { status: 'ready' } };
     const server = await serveTestHttp(async (request, response) => {
       response.setHeader('Content-Type', 'application/json');
       if (request.url?.endsWith('/service/status')) {

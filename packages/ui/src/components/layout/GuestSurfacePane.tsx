@@ -63,23 +63,28 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     const canvas = canvasRef.current;
     const client = clientRef.current;
     if (!canvas || !client) return;
+    let bitmap: ImageBitmap | null = null;
+    let presented = false;
     try {
-      const bitmap = await createImageBitmap(new Blob([frame.bytes], { type: frame.mime }));
+      bitmap = await createImageBitmap(new Blob([frame.bytes], { type: frame.mime }));
+      if (clientRef.current !== client || canvasRef.current !== canvas || !client.isCurrentFrame(frame)) return;
+      const context = canvas.getContext('2d');
+      if (!context) return;
       if (canvas.width !== frame.width || canvas.height !== frame.height) {
         canvas.width = frame.width;
         canvas.height = frame.height;
       }
-      const context = canvas.getContext('2d');
-      context?.drawImage(bitmap, 0, 0, frame.width, frame.height);
-      bitmap.close();
+      context.drawImage(bitmap, 0, 0, frame.width, frame.height);
       frameSizeRef.current = { width: frame.width, height: frame.height };
       setHasFrame(true);
       setTitle(frame.title ?? '');
       setAgentActive(frame.agentActive);
+      presented = true;
     } catch {
       // An undecodable frame is skipped; the next one replaces it.
     } finally {
-      client.ack(frame.seq);
+      bitmap?.close();
+      client.ack(frame, presented);
     }
   }, []);
 

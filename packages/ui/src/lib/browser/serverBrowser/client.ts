@@ -10,6 +10,7 @@
  */
 import { proxyGuestServiceRequest } from '@/lib/guests/service';
 import type { GuestRequest, GuestRequestMethod } from '@openchamber/sdk';
+import { surfaceViewIdSchema } from '@openchamber/sdk/schemas';
 import { z } from 'zod';
 
 import type {
@@ -31,6 +32,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
 const asServerBrowserState = (value: unknown): ServerBrowserState | null => {
   if (!isRecord(value)) return null;
   if (!Array.isArray(value.scopes)) return null;
+  const viewId = surfaceViewIdSchema.nullable().safeParse(value.viewId);
+  if (!viewId.success || (value.selectedScopeId != null && viewId.data === null)) return null;
   return value as unknown as ServerBrowserState;
 };
 

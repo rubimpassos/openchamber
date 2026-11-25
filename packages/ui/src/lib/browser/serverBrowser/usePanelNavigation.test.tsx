@@ -16,6 +16,8 @@ type PanelProps = {
   readonly sessionId: string;
   readonly scope: ServerBrowserScope | null;
   readonly chromeTabId: string | null;
+  readonly viewId: string | null;
+  readonly presentedViewId: string | null;
 };
 
 const scopeOf = (sessionId: string, page: { readonly url: string; readonly active: boolean }): ServerBrowserScope => ({
@@ -37,6 +39,7 @@ const scopeOf = (sessionId: string, page: { readonly url: string; readonly activ
 });
 const showing = (sessionId: string, url: string): PanelProps => ({
   sessionId, scope: scopeOf(sessionId, { url, active: true }), chromeTabId: CHROME_TAB,
+  viewId: `view-${sessionId}`, presentedViewId: `view-${sessionId}`,
 });
 
 let dom: ReturnType<typeof installHookTestDom>;
@@ -94,13 +97,13 @@ test('an address the person asks for replaces a page that works', async () => {
 });
 
 test('an address asked for before the chat\'s Chrome tab is ready loads once that tab is selected', async () => {
-  await render({ sessionId: 'ses_a', scope: null, chromeTabId: null });
+  await render({ sessionId: 'ses_a', scope: null, chromeTabId: null, viewId: null, presentedViewId: null });
   await act(async () => navigation().load('localhost:4192'));
   expect(navigation()).toMatchObject({ pending: true, requestedUrl: 'localhost:4192' });
 
   // The chat's browser opens blank, then the panel tab claims its Chrome tab, then that tab is selected.
-  await render({ sessionId: 'ses_a', scope: scopeOf('ses_a', { url: 'about:blank', active: false }), chromeTabId: null });
-  await render({ sessionId: 'ses_a', scope: scopeOf('ses_a', { url: 'about:blank', active: false }), chromeTabId: CHROME_TAB });
+  await render({ ...showing('ses_a', 'about:blank'), scope: scopeOf('ses_a', { url: 'about:blank', active: false }), chromeTabId: null });
+  await render({ ...showing('ses_a', 'about:blank'), scope: scopeOf('ses_a', { url: 'about:blank', active: false }) });
   expect(sent).toEqual([]);
   expect(navigation().requestedUrl).toBe('localhost:4192');
 
@@ -116,7 +119,7 @@ test('an address asked for before the chat\'s Chrome tab is ready loads once tha
 });
 
 test('an address asked for in one chat never loads in another chat\'s browser', async () => {
-  await render({ sessionId: 'ses_a', scope: null, chromeTabId: null });
+  await render({ sessionId: 'ses_a', scope: null, chromeTabId: null, viewId: null, presentedViewId: null });
   await act(async () => navigation().load('localhost:4192'));
 
   await render(showing('ses_b', WORKING_PAGE));
@@ -124,6 +127,32 @@ test('an address asked for in one chat never loads in another chat\'s browser', 
   await render(showing('ses_a', 'about:blank'));
 
   expect(sent).toEqual([]);
+});
+
+test('a selected tab waits for host-confirmed presentation of its exact view', async () => {
+  const selected = showing('ses_b', 'about:blank');
+  await render({ ...selected, presentedViewId: 'view-ses_a' });
+  await act(async () => navigation().load('localhost:4192'));
+  expect(sent).toEqual([]);
+  expect(navigation().pending).toBe(true);
+
+  // Decoding B and sending its ACK alone does not confirm host processing.
+  await render({ ...selected, presentedViewId: null });
+  expect(sent).toEqual([]);
+  expect(navigation().requestedUrl).toBe('localhost:4192');
+  await render(selected);
+  expect(sent).toEqual(['http://localhost:4192/']);
+  await finishNavigation();
+});
+
+test('matching presentation cannot send a chat request through another selected session', async () => {
+  await render({ ...showing('ses_b', 'about:blank'), sessionId: 'ses_a' });
+  await act(async () => navigation().load('localhost:4192'));
+  expect(sent).toEqual([]);
+  expect(navigation().pending).toBe(true);
+  await render(showing('ses_a', 'about:blank'));
+  expect(sent).toEqual(['http://localhost:4192/']);
+  await finishNavigation();
 });
 
 test('a link to a tab that shows a working page only brings it in front', async () => {

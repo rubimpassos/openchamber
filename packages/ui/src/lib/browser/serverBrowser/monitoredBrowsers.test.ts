@@ -27,6 +27,7 @@ const state = (scopes: ServerBrowserScope[], overrides: Partial<ServerBrowserSta
   viewerInControl: false,
   selectedScopeId: null,
   generation: 1,
+  viewId: null,
   help: null,
   chrome: { status: 'ready', message: '' },
   scopes,
@@ -68,9 +69,10 @@ describe('monitored browsers', () => {
     }), '/p')[0]?.control).toBe('viewer');
   });
 
-  test('a provider that sends none of the newer fields still gives a row', () => {
+  test('a compatible provider can omit optional monitoring fields and still give a row', () => {
     const received = parseServerBrowserState({
       controller: 'none',
+      viewId: null,
       scopes: [{ id: 'old', directory: '/p', sessionId: 'ses_1', url: 'about:blank', title: '' }],
     });
 
