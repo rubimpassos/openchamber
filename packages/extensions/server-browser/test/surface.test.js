@@ -25,7 +25,7 @@ const fixture = () => {
     },
   };
   const surface = createSurface({
-    ensurePage: async () => page,
+    surfacePage: async () => page,
     dialogOpen: () => false,
     untilDialog: (_target, work) => work,
     contextMenu: { isOpen: false, observe: async () => {}, settle: async () => {} },
