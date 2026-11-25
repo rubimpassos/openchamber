@@ -16,6 +16,7 @@ the native webview and iframe navigation lifecycles in `BrowserPane`.
 
 - `directory` identifies the panel and composer destination; `siteDirectory` identifies the browsed folder, history and servers. They can differ while a draft shows an isolated space.
 - A newly requested Server Browser address survives blank service snapshots until its navigation finishes. Page-URL synchronization cannot erase pending intent, in the panel tab or in the address field.
+- What the person types in the Server Browser address field stays there while the field has focus: a page address that arrives meanwhile, the blank page of a browser that just opened included, cannot replace it. The draft belongs to its panel tab (directory and tab id), so another panel tab starts from its own address even when the same field keeps focus. A field nobody is typing in follows the tab's address (`useBrowserAddress`).
 - An address the person enters or picks is sent once, after the chat's browser has opened and this panel tab's Chrome tab is selected, and replaces a working page. It belongs to the chat it was asked in: a chat switch, a sign-in browser, another panel tab or hiding the view drops it.
 - Existing-tab requests reach the mounted view, or the latest request is delivered when that view subscribes. Reopening a working page only focuses it.
 - A sign-in browser does not receive chat-link navigation. It has no panel tab, so an address entered there is sent at once.
@@ -54,6 +55,25 @@ first address until its Chrome tab is selected, so the entered address waits in
 the same place and is sent once. The rejected alternative is retrying the
 refused command: a retry can land after the service selected another chat's
 browser and load the address there.
+
+### Why a typed address is a draft kept apart from the page address
+
+The view used to copy every new page address into the field. A browser that
+opens while the person types reports `about:blank` between the last key and
+Enter, so the typed address was replaced and Enter loaded nothing.
+`useBrowserAddress` keeps the typed text as a draft owned by its panel tab and
+shows the tab's address only when there is no draft. A new address drops the
+draft unless the field has focus, which the toolbar reports from the field's
+own focus and blur events before it does anything else with them. Focus sits in
+a ref: as state, a blur would run the synchronization again and wipe a draft
+the person only stepped away from. Holding back every address while the field
+has focus was rejected too, since a field that was focused and left unedited
+would keep an address the page has moved on from. A draft left behind without
+focus stays until the tab's next address, as it did before.
+
+An unedited focused address stays fully selected when its live value changes,
+so the next keystroke replaces the new value. A panel owner change resets that
+editing state even if the same input keeps focus.
 
 ### Why the iframe exposes fewer controls than the webview
 

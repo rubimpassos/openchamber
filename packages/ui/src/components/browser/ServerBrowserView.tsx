@@ -58,6 +58,7 @@ import { evaluateHeld } from './evaluateHeld';
 import { BrowserDeviceBar } from './BrowserDeviceBar';
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
+import { useBrowserAddress } from './useBrowserAddress';
 import { ServerBrowserCanvas, type ServerBrowserCanvasHandle } from './ServerBrowserCanvas';
 import { ServerBrowserBanners } from './ServerBrowserBanners';
 import { ServerBrowserInspector } from './ServerBrowserInspector';
@@ -444,12 +445,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     });
   }, [claims, closeContextPanelTabs, directory, release, scope, serverBrowser]);
 
-  const [address, setAddress] = React.useState('');
-  const requestedAddress = navigation.requestedUrl;
-  const pageUrl = scope?.url;
-  React.useEffect(() => {
-    setAddress(requestedAddress ?? (pageUrl ? toDisplayUrl(pageUrl) : ''));
-  }, [pageUrl, requestedAddress]);
+  const addressField = useBrowserAddress({ directory, tabID, requestedUrl: navigation.requestedUrl, pageUrl: scope?.url });
+  const address = addressField.value;
 
   const openAddress = (url: string) => {
     if (signIn || isSignInScope) void runNavigation(() => serverBrowser.navigate(normalizeBrowserUrl(url)));
@@ -663,7 +660,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
       ) : null}
       <BrowserToolbar
         address={address}
-        onAddressChange={setAddress}
+        addressOwner={addressField.owner}
+        onAddressChange={addressField.edit}
+        onAddressFocusChange={addressField.setFocused}
         onSubmit={(value) => {
           if (normalizeBrowserUrl(value) === BLANK_URL) return;
           openAddress(value);

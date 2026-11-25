@@ -120,6 +120,11 @@ or navigating the owner releases the same selection.
 
 ### Keyboard, focus and window behavior
 
+- `useBrowserAddressSelection` keeps an unedited focused browser address fully
+  selected after page updates. An edit preserves its caret; changing panel
+  ownership resets that editing state. Draft ownership is documented in
+  `components/browser/DOCUMENTATION.md`.
+
 - Shortcut handling is scoped by surface: VS Code, the phone shell and the desktop app each receive only the chords their UI can act on.
 - A completion key typed into an editable target is a deliberate sequence only when the prefix was armed from that same target. Otherwise it is typing and must not be swallowed.
 - Double Escape from a chat's composer stops that chat's run; the first press arms the prompt and the second within three seconds stops it. An Escape already prevented was spent by the composer itself.

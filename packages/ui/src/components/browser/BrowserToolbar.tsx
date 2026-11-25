@@ -6,6 +6,7 @@ import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useI18n } from '@/lib/i18n';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
+import { useBrowserAddressSelection } from '@/hooks/useBrowserAddressSelection';
 import { BrowserAddressSuggestions } from './BrowserAddressSuggestions';
 import type { BrowserHistoryEntry } from '@/lib/browser/history';
 import { cn } from '@/lib/utils';
@@ -41,10 +42,12 @@ const measureRowRoom = (row: HTMLElement): number | null => {
 
 type BrowserToolbarProps = {
   address: string;
+  addressOwner?: string;
   addressMark?: { icon: IconName; label: string };
   suggestions?: readonly BrowserHistoryEntry[];
   onForgetSuggestion?: (url: string) => void;
   onAddressChange: (value: string) => void;
+  onAddressFocusChange?: (focused: boolean) => void;
   onSubmit: (value: string) => void;
   onHome?: () => void;
   onBack: () => void;
@@ -91,10 +94,12 @@ type BrowserToolbarProps = {
 
 export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   address,
+  addressOwner = '',
   addressMark,
   suggestions = [],
   onForgetSuggestion,
   onAddressChange,
+  onAddressFocusChange,
   onSubmit,
   onHome,
   onBack,
@@ -153,11 +158,11 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
     setActiveSuggestion(-1);
   }, [address, isAddressFocused]);
 
-  const addressInputRef = React.useRef<HTMLInputElement | null>(null);
+  const addressSelection = useBrowserAddressSelection(address, addressOwner, isAddressFocused);
   const submitAddress = (value: string) => {
     setIsAddressFocused(false);
     setActiveSuggestion(-1);
-    addressInputRef.current?.blur();
+    addressSelection.inputRef.current?.blur();
     onSubmit(value);
   };
 
@@ -251,14 +256,22 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           </span>
         ) : null}
         <input
-          ref={addressInputRef}
+          ref={addressSelection.inputRef}
           value={address}
-          onChange={(event) => onAddressChange(event.target.value)}
+          onChange={(event) => {
+            addressSelection.edit();
+            onAddressChange(event.target.value);
+          }}
           onFocus={(event) => {
+            addressSelection.focus();
+            onAddressFocusChange?.(true);
             setIsAddressFocused(true);
             event.currentTarget.select();
           }}
-          onBlur={() => setIsAddressFocused(false)}
+          onBlur={() => {
+            onAddressFocusChange?.(false);
+            setIsAddressFocused(false);
+          }}
           onKeyDown={onAddressKeyDown}
           spellCheck={false}
           autoComplete="off"
