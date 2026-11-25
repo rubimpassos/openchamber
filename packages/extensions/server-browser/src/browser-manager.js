@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { InspectorError } from './inspector.js';
 import { cssSize } from './viewports.js';
 import { knownScope, scopeId, scopeMemory, scopeState, SIGN_IN_PREFIX } from './browser-scopes.js';
@@ -101,12 +102,12 @@ export const createBrowserManager = ({
   // Viewers act on the picture they last drew, named by our frame sequence. A
   // view is the visible scope and its active tab; input or a dock command made
   // on a frame of an earlier view is refused so it cannot land in this one.
-  let view = { key: null, firstSequence: 1 };
+  let view = { key: null, id: null, firstSequence: 1 };
   const observeView = () => {
     const entry = selected();
     const key = entry ? JSON.stringify([entry.id, entry.runtime.tabs?.find((tab) => tab.active)?.id ?? null, entry.runtime.surfaceIdentity]) : null;
     if (key !== view.key) {
-      view = { key, firstSequence: frameSequence + 1 };
+      view = { key, id: key === null ? null : randomUUID(), firstSequence: frameSequence + 1 };
       frameState = null;
       for (const pending of frameControllers) pending.abort();
     }
@@ -130,6 +131,7 @@ export const createBrowserManager = ({
     void selected()?.runtime.closeDevTools?.().catch(() => {});
     for (const pending of frameControllers) pending.abort();
     selectedScopeId = entry.id;
+    observeView();
     frameState = null;
     viewGeneration += 1;
     for (const waiter of selectionWaiters) finishSelectionWaiter(waiter);
@@ -154,6 +156,7 @@ export const createBrowserManager = ({
     if (selectedScopeId === entry.id) {
       for (const pending of frameControllers) pending.abort();
       selectedScopeId = null;
+      observeView();
       frameState = null;
       viewGeneration += 1;
     }
@@ -623,6 +626,7 @@ export const createBrowserManager = ({
       return scopeMemory(scopes, now);
     },
     state({ viewer = null } = {}, { problems = false } = {}) {
+      observeView();
       return {
         controller,
         // Whether the viewer asking holds control, so its dock can act.
@@ -631,6 +635,7 @@ export const createBrowserManager = ({
         // The chat the agent holds the picture for; other chats' pages are free.
         agentScopeId: controller === 'agent' ? agentScopeId : null,
         generation: viewGeneration,
+        viewId: view.id,
         notice: notice ? { ...notice } : null,
         help: help ? { ...help } : null,
         emptiedSessions: [...emptiedSessions],
@@ -861,6 +866,8 @@ export const createBrowserManager = ({
         });
       }
       touch(entry);
+      observeView();
+      const capturedView = view;
       const generation = viewGeneration;
       const current = frameState?.scopeId === entry.id ? frameState : null;
       if (current?.frame && current.sequence > after) return current.frame;
@@ -882,12 +889,12 @@ export const createBrowserManager = ({
       } finally {
         frameControllers.delete(switchController);
       }
-      if (!frame || selectedScopeId !== entry.id || viewGeneration !== generation) return null;
+      observeView();
+      if (!frame || selectedScopeId !== entry.id || viewGeneration !== generation || view !== capturedView) return null;
       const published = frameState?.scopeId === entry.id ? frameState : null;
       if (published && frame.sequence <= published.sourceSequence) return null;
-      observeView();
       frameSequence = Math.max(frameSequence + 1, after + 1);
-      const wrapped = { ...frame, sequence: frameSequence };
+      const wrapped = { ...frame, sequence: frameSequence, viewId: capturedView.id };
       frameState = {
         scopeId: entry.id,
         sourceSequence: frame.sequence,

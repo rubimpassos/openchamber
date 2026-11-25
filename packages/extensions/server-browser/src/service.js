@@ -22,6 +22,7 @@ import {
   SURFACE_TITLE_MAX,
   SURFACE_VIEWER_CONTROLS_HEADER,
   SURFACE_VIEWER_HEADER,
+  SURFACE_VIEW_ID_HEADER,
   SURFACE_WIDTH_HEADER,
   readBrowserProviderRequest,
   readSurfaceControlNotice,
@@ -667,6 +668,7 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
       };
       const title = surfaceTitleHeader(frame.title);
       if (title) headers[SURFACE_TITLE_HEADER] = title;
+      if (frame.viewId) headers[SURFACE_VIEW_ID_HEADER] = frame.viewId;
       if (runtime.agentActive) headers[SURFACE_AGENT_ACTIVE_HEADER] = '1';
       response.writeHead(200, headers);
       return response.end(frame.bytes);

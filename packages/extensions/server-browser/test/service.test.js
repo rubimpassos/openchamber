@@ -49,7 +49,7 @@ const createRuntime = () => {
     async setNativeSelectCompatibility(enabled, generation) { calls.push(['select-compatibility', enabled, generation]); },
     async surfaceFrame(request) {
       calls.push(['frame', request.after, request.wait]);
-      return { sequence: 4, bytes: Buffer.from('jpeg'), mime: 'image/jpeg', width: 800, height: 600, title: 'Frame 😀\nTitle' };
+      return { sequence: 4, viewId: 'view-4', bytes: Buffer.from('jpeg'), mime: 'image/jpeg', width: 800, height: 600, title: 'Frame 😀\nTitle' };
     },
     async surfaceInput(events) { calls.push(['input', events]); },
     async surfaceControl(controller) { calls.push(['control', controller]); },
@@ -121,6 +121,7 @@ describe('server browser service', () => {
       expect(await resize.json()).toEqual({ width: 640, height: 480 });
       expect(await clipboard.json()).toEqual({ text: 'copied' });
       expect(frame.headers.get('x-surface-seq')).toBe('4');
+      expect(frame.headers.get('x-surface-view-id')).toBe('view-4');
       expect(frame.headers.get('x-surface-agent-active')).toBe('1');
       expect(frame.headers.get('x-surface-title')).toBe('Frame ? Title');
       expect(await frame.text()).toBe('jpeg');

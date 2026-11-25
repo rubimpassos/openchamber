@@ -21,6 +21,29 @@
 - Settings puts enabled built-in token/OAuth cards inside Built-in integrations. Other extension accounts stay in their existing section.
 - Built-ins render wherever user extensions do: web, Electron and the mobile shell, direct or relay, with the phone's per-surface rules (`packages/sdk/DOCUMENTATION.md`, *On the phone*). VS Code keeps the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
 
+## Server Browser presentation
+
+The browser manager owns `state.viewId`, null without a selected scope and a
+fresh UUID whenever the selected scope, active tab or runtime surface identity
+changes. Returning to a previous view and restarting the manager create fresh
+identities. Each capture binds to the identity before awaiting its engine;
+changed identities discard that capture, and cached images retain their own
+identity. The service sends it as the SDK's `SURFACE_VIEW_ID_HEADER`.
+
+Remote Chrome uses the fonts available to its service process. On Linux,
+Fontconfig must have a font covering the page's script, including a CJK font
+for Japanese text. Correct Unicode delivery can still render missing-glyph
+boxes when the host lacks that coverage; inspect the remote bitmap as well as
+the field value.
+
+### Why presentation identity is separate from generation and frame sequence
+
+Generation still guards dock commands, and service frame sequences still reject
+commands made on an earlier picture. HTTP selection and WebSocket presentation
+complete independently, so the UI also needs an identity the host can confirm
+after processing the exact picture's successful ACK. A reusable scope/tab key
+or a frame captured before a switch cannot authorize the returned view.
+
 ## Adding a package
 
 1. Add its SDK manifest and source under this directory.
