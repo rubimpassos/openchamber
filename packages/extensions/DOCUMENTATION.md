@@ -44,6 +44,17 @@ complete independently, so the UI also needs an identity the host can confirm
 after processing the exact picture's successful ACK. A reusable scope/tab key
 or a frame captured before a switch cannot authorize the returned view.
 
+### Why screenshots and viewport changes share a CDP session queue
+
+Chrome's surface screenshot temporarily changes device emulation and restores
+the metrics saved at capture start when it finishes. A concurrent viewport
+change would therefore be undone. The CDP client serializes screenshots and
+metrics overrides within each session while other sessions and page commands
+remain independent. Captures retain their device density and CSS clip behavior.
+A timed-out operation in that queue closes the connection: Chrome may still
+complete it, so subsequent metrics cannot safely use that runtime. A definite
+protocol rejection releases the queue and preserves the connection.
+
 ## Adding a package
 
 1. Add its SDK manifest and source under this directory.

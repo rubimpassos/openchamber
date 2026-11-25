@@ -15,6 +15,7 @@ export const connectCdp = async (webSocketDebuggerUrl, {
   const pending = new Map();
   const listeners = new Set();
   const closeListeners = new Set();
+  const viewportOperations = new Map();
   let nextId = 1;
   let open = false;
 
@@ -46,6 +47,11 @@ export const connectCdp = async (webSocketDebuggerUrl, {
       const timeout = setTimeout(() => {
         pending.delete(id);
         reject(commandError(method, `timed out after ${commandTimeoutMs}ms`, 'timeout'));
+        if (method === 'Page.captureScreenshot' || method === 'Emulation.setDeviceMetricsOverride') {
+          // A late capture can still restore old metrics after this timeout.
+          disconnect('viewport operation timed out');
+          socket.close();
+        }
       }, commandTimeoutMs);
       timeout.unref?.();
       pending.set(id, { method, sessionId, resolve, reject, timeout });
@@ -57,6 +63,22 @@ export const connectCdp = async (webSocketDebuggerUrl, {
         reject(commandError(method, error instanceof Error ? error.message : String(error), 'closed'));
       }
     });
+  };
+
+  // Chrome restores the capture-start metrics when a screenshot completes.
+  // Keep captures and metrics changes exclusive without blocking page input.
+  const sendSession = (sessionId, method, params = {}) => {
+    if (method !== 'Page.captureScreenshot' && method !== 'Emulation.setDeviceMetricsOverride') {
+      return sendCommand(method, params, sessionId);
+    }
+    const previous = viewportOperations.get(sessionId) ?? Promise.resolve();
+    const operation = previous.then(() => sendCommand(method, params, sessionId));
+    const release = () => {
+      if (viewportOperations.get(sessionId) === settled) viewportOperations.delete(sessionId);
+    };
+    const settled = operation.then(release, release);
+    viewportOperations.set(sessionId, settled);
+    return operation;
   };
 
   socket.addEventListener('message', (event) => {
@@ -119,7 +141,7 @@ export const connectCdp = async (webSocketDebuggerUrl, {
 
   return {
     send: (method, params = {}) => sendCommand(method, params),
-    sendSession: (sessionId, method, params = {}) => sendCommand(method, params, sessionId),
+    sendSession,
     async attach(targetId) {
       const result = await sendCommand('Target.attachToTarget', { targetId, flatten: true });
       if (typeof result.sessionId !== 'string') throw new Error('Chrome returned no target session id');
