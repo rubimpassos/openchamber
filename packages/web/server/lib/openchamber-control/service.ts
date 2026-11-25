@@ -8,6 +8,7 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction, isAgentPrompt } from './render-page.js';
+import { createPageRecovery } from './page-recovery.js';
 import { completeFormAnswer } from './form-answer.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
@@ -24,7 +25,6 @@ import { resolveUploadFiles, UploadRefusedError } from '../browser-control/uploa
 import type { SessionInfo, ModelInfo, PermissionReplyInput, SessionFormCancelInput, FormInfo } from '@opencode/client';
 import type { ControlClient } from './opencode-client.js';
 import type { FormValues } from './form-answer.js';
-import type { PageAnswerInput } from './render-page.js';
 import type { ControlInput, PendingPermission, PublicSessionStatus, SessionMessagesResult, SessionStatusResult, StoredSessionMetadata } from './contracts.js';
 import type { ControlErrorFields } from './error.js';
 import type { createOpenChamberSessionService } from '../openchamber-sessions/routes.js';
@@ -548,6 +548,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     }
   };
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
+  const { recover: recoverPage, answer: answerPage } = createPageRecovery({ getClient, pageAnswers, laterPages });
   const readSession = async (sessionID: string) => (await getClient()).session.get({ sessionID });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, readSession, laterPages, sharePages });
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, saved: savedSecrets, onWaitChange: onPageWaitChange, hasUnreadChat });
@@ -1439,18 +1440,11 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     pageAnswers.release(sessionId);
     secretRequests.release(sessionId);
   };
-  const answerPage = (input: PageAnswerInput) => {
-    try {
-      return pageAnswers.answer(input);
-    } catch (error) {
-      if (!laterPages || controlErrorFields(error)?.statusCode !== 404) throw error;
-      return laterPages.answer(input);
-    }
-  };
   return {
     execute,
     resolveSessionDirectory,
     answerPage,
+    recoverPage,
     answerSecret: secretRequests.answer,
     secretFields: secretRequests.fields,
     forgetSavedSecret: secretRequests.forgetSaved,
