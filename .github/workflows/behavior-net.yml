@@ -20,7 +20,7 @@ permissions:
 jobs:
   net:
     name: net (${{ matrix.part }}/6)
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.repository_owner == 'rubimpassos' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
