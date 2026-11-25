@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Message, Part, QuestionInfo, QuestionOption, QuestionRequest, Session } from '@/lib/opencode/model';
 import type { RestartCutTurn } from '@/lib/sessionRestartInterruption';
 import type { PendingQuestion } from './pendingQuestion';
+import { classifyQuestionToolError } from '@/sync/recoverable-questions';
 
 /**
  * Orphaned question detection.
@@ -111,6 +112,10 @@ const causeOf = (part: QuestionToolPart, records: OrphanedQuestionRecords): Orph
   const { restartCut, inactivityAt, pending } = records;
   const stranded = part.state.status === 'pending' || part.state.status === 'running';
   const errored = part.state.status === 'error';
+  if (part.state.status === 'error') {
+    const outcome = classifyQuestionToolError(part.state.error, part.state.errorType, part.state.errorSource === 'local');
+    if (outcome !== 'turn-death' && outcome !== 'shutdown') return null;
+  }
   if (pending && pending.callID === part.callID && pending.messageID === part.messageID && (stranded || errored)) {
     return { kind: pending.cause, at: pending.at };
   }

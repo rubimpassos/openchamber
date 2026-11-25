@@ -1,7 +1,7 @@
 import { useMemo, useReducer } from 'react';
 import type { FormRequest, Part } from '@/lib/opencode/model';
 import { projectQuestionForm } from '@/lib/opencode/projection';
-import { useSessionMessages, useSessionPartsForMessages, useSessionStatus, useSessionSelector, useSessionStatusSnapshotReady } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessages, useSessionPartsForMessages, useSessionStatus, useSessionSelector, useSessionStatusSnapshotReady } from '@/sync/sync-context';
 import { getRestartCutTurn, type RestartCutTurn } from '@/lib/sessionRestartInterruption';
 import { getPendingQuestion, type PendingQuestion } from './pendingQuestion';
 import { collectOrphanedQuestionRequests, findLastContentMessageIndex, inactivityInterruptionAt } from './orphanedQuestions';
@@ -24,6 +24,7 @@ export function useOrphanedQuestions(sessionId: string | null, directory: string
   const parts = useSessionPartsForMessages(lastMessageIds, directory)[lastMessageId ?? ''] ?? NO_PARTS;
   const status = useSessionStatus(sessionId ?? '', directory);
   const statusReady = useSessionStatusSnapshotReady(directory, sessionId ?? undefined);
+  const bootstrapReady = useDirectorySync((state) => state.status === 'complete', directory);
   const inactivityAt = useSessionSelector(sessionId, directory, inactivityInterruptionAt);
   const restartCut = useSessionSelector(sessionId, directory, getRestartCutTurn, sameRestartCutTurn);
   const pending = useSessionSelector(sessionId, directory, getPendingQuestion, samePendingQuestion);
@@ -32,9 +33,9 @@ export function useOrphanedQuestions(sessionId: string | null, directory: string
   // Dismissals live in localStorage; refresh must read them even when sync inputs are unchanged.
   const questions = useMemo(() => {
     void revision; // A refresh invalidates the localStorage-derived dismissal result.
-    if (!sessionId || !lastMessage || !statusReady || (status && status.type !== 'idle')) return [];
+    if (!sessionId || !lastMessage || !bootstrapReady || !statusReady || (status && status.type !== 'idle')) return [];
     const live = forms.map(projectQuestionForm).filter((form) => form !== null);
     return collectOrphanedQuestionRequests(sessionId, [{ info: lastMessage, parts }], live, interruptions);
-  }, [sessionId, lastMessage, statusReady, status, forms, parts, interruptions, revision]);
+  }, [sessionId, lastMessage, bootstrapReady, statusReady, status, forms, parts, interruptions, revision]);
   return { questions, refresh };
 }
