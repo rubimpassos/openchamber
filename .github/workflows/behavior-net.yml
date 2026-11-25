@@ -20,7 +20,7 @@ permissions:
 jobs:
   net:
     name: net (${{ matrix.part }}/6)
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ${{ github.repository == 'openchamber/openchamber' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -35,7 +35,36 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Play the net
-        run: bun run verify -- --retry-failed --shard ${{ matrix.part }}/6
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          if [ "$GITHUB_REPOSITORY" = "openchamber/openchamber" ]; then
+            bun run verify -- --retry-failed --shard "$PART/6"
+            exit
+          fi
+
+          bin="$RUNNER_TEMP/verify-bin"
+          mkdir -p "$bin"
+          real_bun="$(command -v bun)"
+          real_chrome="$(command -v google-chrome || command -v chromium)"
+          cat > "$bin/bun" <<EOF
+          #!/bin/sh
+          if [ "\$1" = "x" ] && [ "\$2" = "vite" ]; then
+            shift 2
+            export NODE_OPTIONS=--max-old-space-size=1536
+            export GOMEMLIMIT=512MiB
+            export GOMAXPROCS=2
+            exec node "$GITHUB_WORKSPACE/packages/web/node_modules/vite/bin/vite.js" "\$@"
+          fi
+          exec "$real_bun" "\$@"
+          EOF
+          cat > "$bin/chrome" <<EOF
+          #!/bin/sh
+          exec "$real_chrome" --js-flags=--max-old-space-size=512 "\$@"
+          EOF
+          chmod u+x "$bin/bun" "$bin/chrome"
+          PATH="$bin:$PATH" npm_execpath="$bin/bun" node scripts/verify/run.mjs \
+            --retry-failed --shard "$PART/6" --chrome "$bin/chrome"
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -45,6 +74,7 @@ jobs:
             tmp/verify/**/summary.json
             tmp/verify/**/result.json
             tmp/verify/**/failure.png
+            tmp/verify/**/end.png
             tmp/verify/**/logs/**
           retention-days: 7
 

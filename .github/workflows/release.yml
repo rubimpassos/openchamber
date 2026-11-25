@@ -152,6 +152,16 @@ jobs:
         # prepack emits build/server and build/bin before the tarball is read.
         run: bun pm pack
 
+      - name: Keep packaged server archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-release
+          path: |
+            packages/web/openchamber-web-*.tgz
+            packages/sdk/openchamber-sdk-*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload npm tarball to release
         if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
