@@ -118,13 +118,13 @@ export const useServerBrowserConnection = (
   }, [showsOtherChat]);
 
   const applyState = React.useCallback((next: ServerBrowserState) => {
+    useServerBrowserSharedState.getState().publish(guestId, getRuntimeKey(), next);
     // A held request that timed out returns the same state; nothing to render.
     if (next.version && next.version === stateRef.current?.version) return;
     stateRef.current = next;
     generationRef.current = next.generation;
     setState(next);
     setError(null);
-    useServerBrowserSharedState.getState().publish(guestId, getRuntimeKey(), next);
   }, [guestId]);
 
   const act = React.useCallback(async (
