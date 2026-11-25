@@ -3,7 +3,6 @@ import { ReceivedPagesList } from '@/components/chat/sharePages/received/Receive
 import { hasReceivedPages, useReceivedPages } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { createPortal } from 'react-dom';
 import { arrayMove } from '@dnd-kit/sortable';
-import { isIMECompositionEvent } from '@/lib/ime';
 
 import { Icon } from '@/components/icon/Icon';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
@@ -33,7 +32,7 @@ import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigatio
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileStatusPane } from './MobileStatusPane';
 import { useEdgeSwipe } from './useEdgeSwipe';
-import { isVimEditorEventTarget } from '@/lib/editorFocus';
+import { handleMobileWorkspaceEscape } from './mobileWorkspaceEscape';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 const MobileBrowserSurface = React.lazy(() => import('./MobileBrowserSurface').then((module) => ({ default: module.MobileBrowserSurface })));
@@ -134,10 +133,7 @@ export const MobileWorkspaceDrawer: React.FC<{
     const previousOverflow = document.body.style.overflow;
     if (variant === 'drawer') document.body.style.overflow = 'hidden';
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || tabRef.current === 'terminal') return;
-      if (isVimEditorEventTarget(event.target)) return;
-      if (isIMECompositionEvent(event)) return;
-      onCloseRef.current();
+      handleMobileWorkspaceEscape(event, tabRef.current, onCloseRef.current);
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => {
