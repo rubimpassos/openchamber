@@ -120,6 +120,26 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+### Why interrupted pages recover through the server
+
+An `awaitAnswer` call can remain running in history after the server lost its
+waiter. For the latest content message only, `usePageAsk` asks the server to
+recover the page after an authoritative idle snapshot and without a live waiter.
+The server rereads the canonical call before registering it. Recovery never
+executes the render action again. Its durable page state overrides the stale
+running or errored call, so the original HTML and UI forms take an answer and
+show a choice made on another client. A folded ask summary restores the full
+form when recovery opens it; a terminal `closed` projection keeps its controls
+disabled. Recovery reads retry on the existing
+stream reconnect signal and make up to three attempts with bounded backoff for
+transient read failures. Leaving the page cancels requests and backoff; obsolete
+runtime responses cannot publish.
+
+A recovered page uses the later-page delivery path and does not claim that an
+OpenCode execution still waits. Completed answers, declines and chat-ended
+results retain their canonical outcome. VS Code does not run that server owner,
+so it retains the existing unanswered-page state.
+
 ### Why editor interaction sends an empty dismissal report
 
 Focusing or clicking a page editor dismisses stale prose menus in other frames

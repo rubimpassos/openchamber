@@ -50,7 +50,7 @@ import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
-import { pageBlocksTurn, usePageAsk } from './usePageAsk';
+import { pageBlocksTurn, usePageAsk } from '@/hooks/usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
 import { SharedPageCard } from '../../sharePages/SharedPageCard';

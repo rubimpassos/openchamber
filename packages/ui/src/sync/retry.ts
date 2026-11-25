@@ -4,6 +4,7 @@ export interface RetryOptions {
   factor?: number
   maxDelay?: number
   retryIf?: (error: unknown) => boolean
+  signal?: AbortSignal
 }
 
 // external: #2470 Half-open undici connections and normalized SDK transport timeouts are transient read failures.
@@ -41,17 +42,27 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
     factor = 2,
     maxDelay = 10000,
     retryIf = isTransientError,
+    signal,
   } = options
 
   let lastError: unknown
   for (let attempt = 0; attempt < attempts; attempt++) {
+    signal?.throwIfAborted()
     try {
       return await fn()
     } catch (error) {
       lastError = error
-      if (attempt === attempts - 1 || !retryIf(error)) throw error
+      if (signal?.aborted || attempt === attempts - 1 || !retryIf(error)) throw error
       const wait = Math.min(delay * Math.pow(factor, attempt), maxDelay)
-      await new Promise((resolve) => setTimeout(resolve, wait))
+      await new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) { reject(signal.reason); return }
+        const onAbort = () => { clearTimeout(timer); reject(signal?.reason) }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort)
+          resolve()
+        }, wait)
+        signal?.addEventListener("abort", onAbort, { once: true })
+      })
     }
   }
   throw lastError

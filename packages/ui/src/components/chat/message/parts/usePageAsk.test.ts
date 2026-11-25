@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { laterPageAsk, livePageAsk } from './usePageAsk';
+import { laterPageAsk, livePageAsk } from '@/hooks/usePageAsk';
 
 describe('livePageAsk', () => {
     test('an announced wait stands whatever the session status says', () => {
@@ -46,5 +46,10 @@ describe('laterPageAsk', () => {
 
     test('a page the server does not keep is shown without asking', () => {
         expect(laterPageAsk(undefined)).toEqual({ kind: 'show' });
+    });
+
+    test('a recovered question superseded by conversation progress stays unanswered', () => {
+        expect(laterPageAsk({ ...page, source: 'recovered-await', status: 'closed' }))
+            .toEqual({ kind: 'unanswered' });
     });
 });

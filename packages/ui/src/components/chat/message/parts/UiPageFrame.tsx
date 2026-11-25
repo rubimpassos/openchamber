@@ -12,7 +12,7 @@ import { useUiBlockComponent } from '../../uiBlocks/useUiBlockComponent';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
 import { PageAskStatus } from './PageAskStatus';
-import { pageBlocksTurn } from './usePageAsk';
+import { pageBlocksTurn } from '@/hooks/usePageAsk';
 
 export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: string; ask: RenderedPageAsk }) {
     const { t } = useI18n();
