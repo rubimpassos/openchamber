@@ -563,6 +563,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const zoomPercent = Math.round(1.2 ** zoomLevel * 100);
 
   const loaded = Boolean(showingMine && scope && scope.url && scope.url !== BLANK_URL);
+  // Chrome DevTools is drawn on the canvas of a blank tab too.
+  const showingDevTools = showingMine && scope?.devtools === true;
 
   // ---- what the page in front asks of the person ---------------------------
   const { files } = useRuntimeAPIs();
@@ -617,7 +619,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
 
   const [typingOpenFor, setTypingOpenFor] = React.useState<string | null>(null);
   const typingTarget = `${tabID}\u0000${scope?.id ?? ''}\u0000${shownTab?.id ?? ''}`;
-  const canType = control.controller === 'user' && control.mine && connection.status === 'open' && loaded;
+  const canType = control.controller === 'user' && control.mine && connection.status === 'open' && (loaded || showingDevTools);
   if (!canType && typingOpenFor !== null) setTypingOpenFor(null);
   const toggleKeyboard = () => {
     if (canType) canvasHandleRef.current?.toggleKeyboard();
@@ -759,7 +761,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
             onCancel={cancelFiles}
           />
         ) : null}
-        {!loaded && showingMine ? (
+        {!loaded && !showingDevTools && showingMine ? (
           <div className="absolute inset-0">
             <BrowserEmptyState onOpen={openAddress} directory={directory} visible={visible} />
           </div>

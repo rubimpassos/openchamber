@@ -54,7 +54,7 @@ mock.module('./ServerBrowserCanvas', () => ({
     return null;
   },
 }));
-mock.module('./BrowserEmptyState', () => ({ BrowserEmptyState: () => null }));
+mock.module('./BrowserEmptyState', () => ({ BrowserEmptyState: () => <div data-discovery-list="" /> }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ files: { downloadFile: async () => undefined } }) }));
 
 const { ServerBrowserView } = await import('./ServerBrowserView');
@@ -124,8 +124,16 @@ test('opens a chat link through the server browser and receives another click on
     await act(async () => useUIStore.getState().openContextPreview(directory, url));
     expect(navigations).toHaveLength(5);
 
-    // Mirroring an agent-opened Chrome page must not reload that page.
+    // Given a blank tab, which offers the discovery list.
     const current = connection.getState().scope;
+    await act(async () => connection.setState({ scope: blankScope }));
+    expect(host.querySelector('[data-discovery-list]') !== null).toBe(true);
+    // When Chrome DevTools opens on it, the list leaves the canvas DevTools is drawn on.
+    await act(async () => connection.setState({ scope: { ...blankScope, devtools: true } }));
+    expect(host.querySelector('[data-discovery-list]') !== null).toBe(false);
+    await act(async () => connection.setState({ scope: current }));
+
+    // Mirroring an agent-opened Chrome page must not reload that page.
     await act(async () => connection.setState({ scope: { ...current, tabs: [...current.tabs, {
       id: 'agent-tab', url: 'https://example.com/agent', title: 'Agent page', isLoading: false, active: false,
     }] } }));
