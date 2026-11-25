@@ -2,6 +2,8 @@ import { settingsDict } from './nl.settings';
 import { botsI18n } from './bots.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { browserMobileInputI18n } from './browser-mobile-input.i18n';
+import { browserStatusI18n } from './browser-status.i18n';
 import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -260,6 +262,8 @@ export const dict = {
   ...extensionPlansI18n.nl,
   ...linearPanelI18n.nl,
   ...browserServerPanelI18n.nl,
+  ...browserMobileInputI18n.nl,
+  ...browserStatusI18n.nl,
   ...prFixLoopI18n.nl,
   ...routingI18n.nl,
   ...pluginPanelI18n.nl,
