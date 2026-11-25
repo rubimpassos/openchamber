@@ -103,16 +103,36 @@ const rulesForCatalog = (guests: readonly InstalledGuest[]): GuestMessageRule[] 
 };
 
 /** Text parts of a user message, joined the way the plugin sent them. */
-export const userMessageText = (parts: readonly { type: string; text?: unknown; synthetic?: unknown }[]): string => (
+export const userMessageText = (parts: readonly { type: string; text?: unknown }[]): string => (
   parts
     .flatMap((part) => (part.type === 'text' && typeof part.text === 'string' ? [part.text] : []))
     .join('\n')
 );
 
-/** The presentation of `text` under a catalog the caller already holds. Same memo as the hook. */
-export const guestMessagePresentationIn = (guests: readonly InstalledGuest[], text: string): GuestMessagePresentation | null => (
-  matchGuestMessageRule(rulesForCatalog(guests), text)
-);
+let claimedCatalog: readonly InstalledGuest[] | null = null;
+let claimedByParts = new WeakMap<object, boolean>();
+
+/**
+ * Whether a rule of the catalog the caller holds claims a user message. The
+ * answer is kept per parts array, so a transcript asks each message once per
+ * catalog however often its rows are rebuilt.
+ */
+export const isGuestMessageIn = (
+  guests: readonly InstalledGuest[],
+  parts: readonly { type: string; text?: unknown }[],
+): boolean => {
+  const rules = rulesForCatalog(guests);
+  if (rules.length === 0) return false;
+  if (guests !== claimedCatalog) {
+    claimedCatalog = guests;
+    claimedByParts = new WeakMap();
+  }
+  const known = claimedByParts.get(parts);
+  if (known !== undefined) return known;
+  const claimed = matchGuestMessageRule(rules, userMessageText(parts)) !== null;
+  claimedByParts.set(parts, claimed);
+  return claimed;
+};
 
 /**
  * The presentation of one user message, or `null` to keep the bubble.

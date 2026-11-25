@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Message, Part } from '@/lib/opencode/model';
 import { buildPromptPreviewsByTurnId } from '../lib/promptPreviews';
-import { guestMessagePresentationIn, userMessageText } from '@/lib/guests/message-presentation';
+import { isGuestMessageIn } from '@/lib/guests/message-presentation';
 import { useGuestsStore } from '@/lib/guests/store';
 
 export const usePromptRail = ({
@@ -19,7 +19,7 @@ export const usePromptRail = ({
         const next = buildPromptPreviewsByTurnId(renderedMessages);
         // Filter after context folding so activity cannot donate context to the next prompt.
         for (const message of renderedMessages) {
-            if (message.info.role === 'user' && guestMessagePresentationIn(guestCatalog, userMessageText(message.parts))) {
+            if (message.info.role === 'user' && isGuestMessageIn(guestCatalog, message.parts)) {
                 next.delete(message.info.id);
             }
         }
