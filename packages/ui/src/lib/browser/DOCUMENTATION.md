@@ -19,10 +19,10 @@ This folder is the UI half of the in-app browser and of agent browser control. T
   Optional monitoring fields remain compatible; arbitrary frame arrival never
   makes queued navigation ready. The Canvas confirmation contract is documented
   in `packages/ui/src/components/browser/DOCUMENTATION.md`.
-- A pending address navigation retains its original service `viewId` across a
-  stale-generation refresh. It retries only in that same view; a chat or Chrome
-  tab switch refuses the original command. Explicit-target tab selectors keep
-  their own target IDs when refreshing and retrying.
+- Commands acting on the selected view retain its original service `viewId`
+  across a stale-generation refresh. They retry only in that same view; a chat
+  or Chrome tab switch refuses the original command. Commands naming their own
+  scope, tab, dialog or file-chooser target keep that target when retrying.
 - `serverBrowser/sharedState.ts` publishes the pane's authoritative service
   snapshots to visible Work Status consumers. The monitor samples memory on
   demand and reuses a pane's live state instead of starting another state loop.
@@ -62,13 +62,14 @@ This folder is the UI half of the in-app browser and of agent browser control. T
 
 ## Decisions
 
-### Why address retries retain the original view
+### Why selected-view retries retain the original view
 
 A refreshed generation can belong to a different chat or Chrome tab that the
-viewer has already presented. Retrying the original URL there would pass the
-host's presentation gate while changing the wrong page. The invocation's
-`viewId` keeps the address tied to its original target and still permits a retry
-when only the generation changed within that view.
+viewer has already presented. Retrying navigation, history or a DevTools toggle
+there would pass the host's presentation gate while changing the wrong page.
+The invocation's `viewId` keeps the command tied to its original target and
+still permits a retry when only the generation changed within that view.
+Explicit-target commands retain their named target independently of selection.
 
 ### Why a navigation status carries its URL
 

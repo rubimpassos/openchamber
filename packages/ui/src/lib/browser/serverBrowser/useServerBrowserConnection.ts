@@ -129,16 +129,17 @@ export const useServerBrowserConnection = (
 
   const act = React.useCallback(async (
     fn: (generation: number) => Promise<ServerBrowserResult<ServerBrowserState>>,
-    retryViewId?: string | null,
+    targetsSelectedView = true,
   ): Promise<ServerBrowserState | null> => {
+    const originalViewId = stateRef.current?.viewId;
     let result = await fn(generationRef.current);
-    // The view moved on since our last poll (another tab, the agent): catch
-    // up and try once more instead of dropping the click.
+    // A fresh generation may belong to another chat or Chrome tab. Only a
+    // command naming its own target may follow that change on retry.
     if (!result.ok && isServerBrowserViewChanged(result.error)) {
       const current = await getServerBrowserState(guestId, viewerId);
       if (current.ok) {
         applyState(current.data);
-        if (retryViewId === undefined || (retryViewId !== null && current.data.viewId === retryViewId)) {
+        if (!targetsSelectedView || (originalViewId != null && current.data.viewId === originalViewId)) {
           result = await fn(current.data.generation);
         }
       }
@@ -250,24 +251,21 @@ export const useServerBrowserConnection = (
     loading,
     error,
     refresh,
-    navigate: (url) => act(
-      (generation) => navigateServerBrowser(guestId, viewerId, { url, generation }),
-      stateRef.current?.viewId ?? null,
-    ),
+    navigate: (url) => act((generation) => navigateServerBrowser(guestId, viewerId, { url, generation })),
     back: () => act((generation) => goServerBrowserBack(guestId, viewerId, generation)),
     forward: () => act((generation) => goServerBrowserForward(guestId, viewerId, generation)),
     reload: () => act((generation) => reloadServerBrowser(guestId, viewerId, generation)),
     stop: () => act((generation) => stopServerBrowser(guestId, viewerId, generation)),
     newTab: () => act((generation) => newServerBrowserTab(guestId, viewerId, { generation })),
-    selectTab: (tabId) => act((generation) => selectServerBrowserTab(guestId, viewerId, { generation, tabId })),
-    closeTab: (tabId) => act((generation) => closeServerBrowserTab(guestId, viewerId, { generation, tabId })),
+    selectTab: (tabId) => act((generation) => selectServerBrowserTab(guestId, viewerId, { generation, tabId }), false),
+    closeTab: (tabId) => act((generation) => closeServerBrowserTab(guestId, viewerId, { generation, tabId }), false),
     setViewport: (viewport) => act((generation) => setServerBrowserViewport(guestId, viewerId, { generation, ...viewport })),
     setZoom: (level) => act((generation) => setServerBrowserZoom(guestId, viewerId, { generation, level })),
     setColorScheme: (scheme) => act((generation) => setServerBrowserColorScheme(guestId, viewerId, { generation, scheme })),
     setDevTools: (open) => act((generation) => setServerBrowserDevTools(guestId, viewerId, { open, generation })),
     clearData: (what) => act((generation) => clearServerBrowserData(guestId, viewerId, { generation, what })),
-    selectScope: (scopeId) => act((generation) => selectServerBrowserScope(guestId, viewerId, { scopeId, generation })),
-    closeScope: (scopeId) => act((generation) => closeServerBrowserScope(guestId, viewerId, { scopeId, generation })),
+    selectScope: (scopeId) => act((generation) => selectServerBrowserScope(guestId, viewerId, { scopeId, generation }), false),
+    closeScope: (scopeId) => act((generation) => closeServerBrowserScope(guestId, viewerId, { scopeId, generation }), false),
     evaluate: async (expression, userGesture) => {
       const result = await evaluateServerBrowserPage(guestId, viewerId, {
         generation: generationRef.current,
@@ -282,12 +280,12 @@ export const useServerBrowserConnection = (
       return result.ok ? result.data : null;
     },
     // A dialog or file request is named by its own ids, so these need no generation.
-    answerDialog: (answer) => act(() => answerServerBrowserDialog(guestId, viewerId, answer)),
+    answerDialog: (answer) => act(() => answerServerBrowserDialog(guestId, viewerId, answer), false),
     answerFileChooser: ({ tabId, chooserId, files }) => act(() => answerServerBrowserFileChooser(
       guestId,
       viewerId,
       files === null ? { tabId, chooserId, cancel: true } : { tabId, chooserId, files },
-    )),
+    ), false),
     answerProfileRequest: (approve) => act(() => answerServerBrowserProfileRequest(guestId, viewerId, approve)),
   };
 };

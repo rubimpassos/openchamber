@@ -37,14 +37,19 @@ for (const { name, viewId, sessionId, operation, retries } of [
   { name: 'another Chrome tab', viewId: 'other-tab-view', sessionId: 'activity-session', operation: 'navigate', retries: false },
   { name: 'a newer generation of the original view', viewId: 'activity-view', sessionId: 'activity-session', operation: 'navigate', retries: true },
   { name: 'an explicitly selected tab across views', viewId: 'other-tab-view', sessionId: 'activity-session', operation: 'selectTab', retries: true },
+  { name: 'another chat', viewId: 'other-chat-view', sessionId: 'other-session', operation: 'devtools', retries: false },
+  { name: 'another Chrome tab', viewId: 'other-tab-view', sessionId: 'activity-session', operation: 'devtools', retries: false },
+  { name: 'a newer generation of the original view', viewId: 'activity-view', sessionId: 'activity-session', operation: 'devtools', retries: true },
+  { name: 'another chat', viewId: 'other-chat-view', sessionId: 'other-session', operation: 'back', retries: false },
+  { name: 'a newer generation of the original view', viewId: 'activity-view', sessionId: 'activity-session', operation: 'back', retries: true },
 ] as const) {
-  test(`a pending command preserves its target after ${name} is refreshed`, async () => {
+  test(`pending ${operation} preserves its target after ${name} is refreshed`, async () => {
     let current = snapshot(60_000);
-    const commands: Array<{ generation: number; url?: string; tabId?: string }> = [];
+    const commands: Array<{ generation: number; url?: string; tabId?: string; open?: boolean }> = [];
     let receiveFirstCommand: (response: ServerResponse) => void = () => { throw new Error('Command barrier is not initialized'); };
     const firstCommand = new Promise<ServerResponse>((resolve) => { receiveFirstCommand = resolve; });
     const requestSchema = z.object({ path: z.string(), body: z.string().optional() });
-    const commandSchema = z.object({ generation: z.number(), url: z.string().optional(), tabId: z.string().optional() });
+    const commandSchema = z.object({ generation: z.number(), url: z.string().optional(), tabId: z.string().optional(), open: z.boolean().optional() });
     const server = await serveTestHttp((request, response) => {
       const chunks: Buffer[] = [];
       request.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -82,9 +87,12 @@ for (const { name, viewId, sessionId, operation, retries } of [
 
       let result: ServerBrowserState | null = null;
       await act(async () => {
-        const pending = operation === 'navigate'
-          ? connection().navigate('https://example.com/requested-by-A')
-          : connection().selectTab('explicit-tab-A');
+        const pending = {
+          navigate: () => connection().navigate('https://example.com/requested-by-A'),
+          selectTab: () => connection().selectTab('explicit-tab-A'),
+          devtools: () => connection().setDevTools(true),
+          back: () => connection().back(),
+        }[operation]();
         const response = await firstCommand;
         current = {
           ...current, generation: 2, version: 'next-material-version', viewId,
@@ -97,9 +105,12 @@ for (const { name, viewId, sessionId, operation, retries } of [
         result = await pending;
       });
 
-      const target = operation === 'navigate'
-        ? { url: 'https://example.com/requested-by-A' }
-        : { tabId: 'explicit-tab-A' };
+      const target = {
+        navigate: { url: 'https://example.com/requested-by-A' },
+        selectTab: { tabId: 'explicit-tab-A' },
+        devtools: { open: true },
+        back: {},
+      }[operation];
       expect(commands).toEqual(retries
         ? [{ ...target, generation: 1 }, { ...target, generation: 2 }]
         : [{ ...target, generation: 1 }]);
