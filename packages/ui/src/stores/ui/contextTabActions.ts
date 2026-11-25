@@ -1,10 +1,8 @@
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from '../useFilesViewTabsStore';
-import { isVSCodeRuntime } from '@/lib/desktop';
-import { forgetBrowserTabOpenedWithAddress, noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
+import { forgetBrowserTabOpenedWithAddress } from '@/lib/browser/devServerWait';
 import { CONTEXT_ZONES, getZoneView, resolveZoneActiveTab, resolveZoneActiveTabId, withZoneView, zoneOfMode } from '@/lib/workspace/zones';
-import type { ContextPanelTab, ContextPanelDirectoryState, UIStore, UIStoreSlice } from './types';
-import { createBrowserTabDedupeKey } from './browserTabIdentity';
+import type { UIStore, UIStoreSlice } from './types';
 import {
   normalizeDirectoryPath,
   normalizeContextTargetPath,
@@ -27,20 +25,6 @@ import {
   pruneContextZoneReturnStacks,
 } from './contextPanelState';
 
-const noteBrowserTabAddressRequested = (
-  byDirectory: Record<string, ContextPanelDirectoryState>,
-  directory: string,
-  dedupeKey: string,
-  url: string,
-): void => {
-  const tabID = buildContextPanelTabID('browser', dedupeKey);
-  if (byDirectory[directory]?.tabs.some((tab) => tab.id === tabID)) {
-    requestBrowserTabLoad(directory, tabID, url);
-    return;
-  }
-  noteBrowserTabOpenedWithAddress(directory, tabID);
-};
-
 const openFileTab = (state: UIStore, directory: string, filePath: string, preview: boolean) => {
   const tabs = state.contextPanelByDirectory[directory]?.tabs ?? [];
   const replacedPreviewPath = preview
@@ -61,10 +45,6 @@ export const createContextTabActions: UIStoreSlice<
   | 'openContextFile'
   | 'openContextFileAtLine'
   | 'openContextOverview'
-  | 'openContextPreview'
-  | 'openAgentBrowserTab'
-  | 'openNewContextBrowserTab'
-  | 'openContextBrowser'
   | 'setContextPanelTabTargetPath'
   | 'moveContextFilePaths'
   | 'setActiveContextPanelTab'
@@ -168,9 +148,15 @@ export const createContextTabActions: UIStoreSlice<
         : options?.recordReturn === false
           ? clearContextZoneReturnStack(state.contextZoneReturnStack, normalizedDirectory, zone)
           : pushContextZoneReturnEntry(state.contextZoneReturnStack, normalizedDirectory, zone, prevActiveTab, nextTab.mode);
+      const openedTab = { ...nextTab };
+      if (nextTab.mode === 'browser' && nextTab.ownerSessionId == null
+        && state.browserProvider !== 'builtin'
+        && state.browserSessionContext?.directory === normalizedDirectory) {
+        openedTab.ownerSessionId = state.browserSessionContext.sessionId;
+      }
       const byDirectory = {
         ...state.contextPanelByDirectory,
-        [normalizedDirectory]: upsertContextPanelTab(current, nextTab, placement, options),
+        [normalizedDirectory]: upsertContextPanelTab(current, openedTab, placement, options),
       };
 
       const clamped = clampContextPanelRoots(byDirectory, 20);
@@ -287,61 +273,6 @@ export const createContextTabActions: UIStoreSlice<
     }
 
     get().openContextPanelTab(normalizedDirectory, { mode: 'context' });
-  },
-
-  openContextPreview: (directory, url) => {
-    const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-    const normalizedUrl = (url || '').trim();
-    if (!normalizedDirectory || !normalizedUrl || isVSCodeRuntime()) {
-      return;
-    }
-
-    noteBrowserTabAddressRequested(get().contextPanelByDirectory, normalizedDirectory, normalizedUrl, normalizedUrl);
-    get().openContextPanelTab(normalizedDirectory, {
-      mode: 'browser',
-      targetPath: normalizedUrl,
-      dedupeKey: normalizedUrl,
-      label: null,
-    });
-  },
-
-  openAgentBrowserTab: (directory, url, ownerSessionId) => {
-    const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-    if (!normalizedDirectory || isVSCodeRuntime()) return null;
-    const dedupeKey = createBrowserTabDedupeKey('agent');
-    if (url.trim()) noteBrowserTabAddressRequested(get().contextPanelByDirectory, normalizedDirectory, dedupeKey, url.trim());
-    get().openContextPanelTab(normalizedDirectory, {
-      mode: 'browser',
-      targetPath: url.trim(),
-      dedupeKey,
-      label: null,
-      ownerSessionId,
-    }, { reveal: false });
-    return buildContextPanelTabID('browser', dedupeKey);
-  },
-
-  openNewContextBrowserTab: (directory) => {
-    const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-    if (!normalizedDirectory || isVSCodeRuntime()) return;
-    get().openContextPanelTab(normalizedDirectory, {
-      mode: 'browser',
-      targetPath: '',
-      dedupeKey: createBrowserTabDedupeKey('new'),
-      label: null,
-    });
-  },
-
-  openContextBrowser: (directory, url = '', options) => {
-    const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-    if (!normalizedDirectory || isVSCodeRuntime()) return;
-    const targetUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : '';
-    if (targetUrl) noteBrowserTabAddressRequested(get().contextPanelByDirectory, normalizedDirectory, targetUrl, targetUrl);
-    get().openContextPanelTab(normalizedDirectory, {
-      mode: 'browser',
-      targetPath: targetUrl,
-      dedupeKey: targetUrl || 'browser',
-      label: null,
-    }, options);
   },
 
   setContextPanelTabTargetPath: (directory, tabID, targetPath) => {
@@ -507,19 +438,16 @@ export const createContextTabActions: UIStoreSlice<
       return;
     }
 
-    const closedTabs = normalizedTabIds
-      .map((id) => get().contextPanelByDirectory[normalizedDirectory]?.tabs.find((tab) => tab.id === id))
-      .filter((tab): tab is ContextPanelTab => Boolean(tab));
+    const panel = get().contextPanelByDirectory[normalizedDirectory];
+    const closedTabs = [...(panel?.tabs ?? []), ...(panel?.parkedBrowserTabs ?? [])]
+      .filter((tab) => normalizedTabIds.includes(tab.id));
 
     set((state) => {
       const placement = state.contextSurfaceZones;
       const prev = state.contextPanelByDirectory[normalizedDirectory];
       const current = touchContextPanelState(prev, placement);
-      if (!current.tabs.some((tab) => normalizedTabIds.includes(tab.id))) {
-        return state;
-      }
-
       const next = closeContextPanelTabs(current, normalizedTabIds, placement);
+      if (next === current) return state;
       let contextZoneReturnStack = state.contextZoneReturnStack;
 
       for (const zone of CONTEXT_ZONES) {

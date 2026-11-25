@@ -16,7 +16,7 @@ const getTerminalTab = (directory: string) => getContextPanelTabs(directory).fin
 const originalPersistOptions = useUIStore.persist.getOptions();
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextZoneReturnStack: {}, contextRailOrder: [], contextZoneSizes: {} });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextZoneReturnStack: {}, contextRailOrder: [], contextZoneSizes: {}, browserSessionContext: null });
   useTerminalStore.getState().clearAll();
 });
 
@@ -625,6 +625,54 @@ describe('useUIStore Browser tabs per chat', () => {
     const panel = useUIStore.getState().contextPanelByDirectory['/repo'];
     return panel?.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
   };
+
+  test('a Browser opened during a chat stays with that chat when another chat is selected', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    store.openContextBrowser('/repo', 'https://example.com/');
+    const browserTabID = activeTab()?.id;
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+
+    const panel = useUIStore.getState().contextPanelByDirectory['/repo'];
+    expect(panel.tabs.filter((tab) => tab.mode === 'browser')).toEqual([]);
+    expect(panel.isOpen).toBe(false);
+    expect(panel.parkedBrowserTabs?.map((tab) => [tab.id, tab.ownerSessionId])).toEqual([[browserTabID, 'ses_a']]);
+  });
+
+  test('two chats opening the same address keep distinct Browser tabs on return', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    store.openContextBrowser('/repo', 'https://example.com/');
+    const first = activeTab()?.id;
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    store.openContextBrowser('/repo', 'https://example.com/');
+    const second = activeTab()?.id;
+
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+
+    expect(first).not.toBe(second);
+    expect(activeTab()?.id).toBe(first);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].parkedBrowserTabs?.map((tab) => tab.id)).toEqual([second]);
+  });
+
+  test('closing a parked chat tab leaves the chat on screen open and cannot restore the closed tab', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    store.openContextBrowser('/repo', 'https://example.com/a');
+    const first = activeTab()?.id ?? '';
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    store.openContextBrowser('/repo', 'https://example.com/b');
+    const second = activeTab()?.id;
+
+    store.closeContextPanelTab('/repo', first);
+
+    expect(activeTab()?.id).toBe(second);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].isOpen).toBe(true);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].parkedBrowserTabs).toBeUndefined();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    expect(getContextPanelTabs('/repo').filter((tab) => tab.mode === 'browser')).toEqual([]);
+  });
 
   test('a chat whose Browser tab was in front gets it in front again when it comes back', () => {
     const store = useUIStore.getState();

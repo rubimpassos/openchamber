@@ -24,6 +24,7 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useGuestsStore } from '@/lib/guests/store';
 import { loadGuestServiceStatus } from '@/lib/guests/service';
 import { getServerBrowserState } from '@/lib/browser/serverBrowser/client';
+import { followsBrowserSession } from '@/lib/browser/serverBrowser/followSession';
 import { guestHasSharedSurface, guestSurfaceDocking, type GuestSurfaceDocking } from '@/lib/guests/surfaces';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import {
@@ -412,14 +413,14 @@ export const ContextSurfacePanes: React.FC = () => {
   // Every chat has its own Chrome on the server, so the Browser strip shows
   // the tabs of the chat on screen and keeps the others' aside. The in-app
   // browser keeps one strip for the project.
-  // With no chat on screen (a draft, or the app still loading its session)
-  // the strip stays as it was; the view shows no browser that is not the chat's.
-  React.useEffect(() => {
+  // A draft owns no existing chat's browser. Apply the ownership transition
+  // before paint so a session switch never flashes the previous chat's page.
+  React.useLayoutEffect(() => {
     if (!serverBrowserGuest) {
       showBrowserTabsOfSession(null, null);
       return;
     }
-    if (directoryKey && currentSessionId) showBrowserTabsOfSession(directoryKey, currentSessionId);
+    if (directoryKey) showBrowserTabsOfSession(directoryKey, currentSessionId);
   }, [currentSessionId, directoryKey, serverBrowserGuest, showBrowserTabsOfSession]);
   // "Follow agent" (the robot in the Browser toolbar, per chat): the agent of
   // the chat on screen using its browser opens the Browser panel. The view
@@ -427,12 +428,15 @@ export const ContextSurfacePanes: React.FC = () => {
   React.useEffect(() => {
     if (!serverBrowserGuest) return undefined;
     return subscribeOpenchamberEvents((event) => {
-      if (event.type !== 'browser-agent-activity' || event.guestId !== serverBrowserGuest) return;
+      if (event.type !== 'browser-agent-activity') return;
       const ui = useUIStore.getState();
-      if (!event.sessionId || !event.directory || !isFollowingBrowserAgent(ui.browserFollowAgentOffSessions, event.sessionId)) return;
-      if (event.sessionId !== useSessionUIStore.getState().currentSessionId) return;
+      if (!event.sessionId || !event.directory) return;
       const directory = normalizeContextPanelDirectoryKey(event.directory);
-      if (directory !== directoryKey) return;
+      if (!followsBrowserSession(
+        { guestId: event.guestId, directory, sessionId: event.sessionId },
+        { guestId: serverBrowserGuest, directory: directoryKey, sessionId: useSessionUIStore.getState().currentSessionId },
+        isFollowingBrowserAgent(ui.browserFollowAgentOffSessions, event.sessionId),
+      )) return;
       ui.revealSessionBrowser(directory, event.sessionId);
     });
   }, [directoryKey, serverBrowserGuest]);
