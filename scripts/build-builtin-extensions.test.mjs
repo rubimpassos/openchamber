@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { buildBuiltInExtensions } from './build-builtin-extensions.mjs';
 import { readBuiltInRegistry } from '../packages/web/server/lib/guests/builtins.js';
 
@@ -14,6 +16,53 @@ const temporary = async () => {
 };
 
 describe('built-in extension build', () => {
+  test('a declared host socket dependency works in a self-contained Node service bundle', async () => {
+    const root = await temporary();
+    const sourceRoot = path.join(root, 'source');
+    const service = path.join(sourceRoot, 'fixture/service');
+    await fs.mkdir(service, { recursive: true });
+    await fs.writeFile(path.join(sourceRoot, 'registry.json'), JSON.stringify({ version: 1, extensions: [{
+      id: 'openchamber-builtin-fixture', directory: 'fixture', files: [],
+      build: [{ entry: 'service/source.js', out: 'service/main.js', target: 'node' }],
+    }] }));
+    await fs.writeFile(path.join(sourceRoot, 'fixture/package.json'), JSON.stringify({
+      name: 'builtin-fixture', version: '0.0.1', type: 'module', dependencies: { ws: '^8.18.3' },
+      openchamber: { apiVersion: 1, contributes: {
+        panel: { id: 'openchamber-builtin-fixture', name: 'Fixture', icon: 'apps' },
+        service: { entry: 'service/main.js', runtime: 'host', provides: ['browser'], surface: true },
+      } },
+    }));
+    await fs.writeFile(path.join(service, 'source.js'), `
+      import { once } from 'node:events';
+      import { WebSocket, WebSocketServer } from 'ws';
+      export async function roundTrip() {
+        const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+        await once(server, 'listening');
+        server.on('connection', (socket) => socket.once('message', (data) => socket.send(data)));
+        const socket = new WebSocket('ws://127.0.0.1:' + server.address().port);
+        await once(socket, 'open');
+        socket.send('bundled socket works');
+        const [message] = await once(socket, 'message');
+        socket.close();
+        await once(socket, 'close');
+        await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+        return message.toString();
+      }
+    `);
+    const outDir = path.join(root, 'bundle');
+    await buildBuiltInExtensions({ sourceRoot, outDir });
+
+    const bundle = pathToFileURL(path.join(outDir, 'fixture/service/main.js')).href;
+    const run = spawnSync(process.execPath.includes('bun') ? 'node' : process.execPath, [
+      '--input-type=module', '-e', `const m=await import(${JSON.stringify(bundle)});console.log(await m.roundTrip());`,
+    ], { cwd: outDir, encoding: 'utf8', timeout: 5000 });
+
+    expect({ status: run.status, stderr: run.stderr, error: run.error?.message }).toEqual({
+      status: 0, stderr: '', error: undefined,
+    });
+    expect(run.stdout.trim()).toBe('bundled socket works');
+  });
+
   test.skipIf(process.platform === 'win32')('publishes a traversable catalog when build and runtime users differ', async () => {
     const root = await temporary();
     const sourceRoot = path.join(root, 'source');

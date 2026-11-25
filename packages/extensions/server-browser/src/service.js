@@ -1,9 +1,8 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
+import { z } from 'zod';
 import {
-  BROWSER_PROVIDER_ACTION_TIMEOUT_MS,
-  BROWSER_PROVIDER_OPEN_TIMEOUT_MS,
   BROWSER_PROVIDER_PATH,
   SURFACE_AGENT_ACTIVE_HEADER,
   SURFACE_AUDIO_CHANNELS_HEADER,
@@ -32,65 +31,14 @@ import {
 import { readMenuTheme } from './context-menu.js';
 import { InspectorError } from './inspector.js';
 import { MAX_VIEWPORT_DIMENSION } from './viewports.js';
+import { actionDeadlineMs, HELP_ACTION, readHelpRequest, SAVE_ACTION } from './browser-provider-request.js';
+export { HELP_ACTION, readHelpRequest, SAVE_ACTION } from './browser-provider-request.js';
 
 // A held state request stays under the host proxy's 20 s timeout.
 const STATE_WAIT_MAX_MS = 15_000;
 const STATE_WAIT_STEP_MS = 60;
 
 const BODY_MAX_BYTES = 17 * 1024 * 1024;
-export const HELP_ACTION = 'browser.requestHelp';
-export const SAVE_ACTION = 'browser.saveProfile';
-const SAVE_TIMEOUT_MS = 45_000;
-const HELP_KINDS = new Set(['login', 'page', 'profile']);
-const PROFILE_NAME_MAX = 80;
-const HELP_TIMEOUT_MIN_S = 30;
-const HELP_TIMEOUT_MAX_S = 900;
-const HELP_TIMEOUT_DEFAULT_S = 300;
-const HELP_REASON_MAX = 300;
-
-// The host's own `readBrowserProviderRequest` recognizes these two actions
-// too and validated their parameters before sending, but this engine is
-// also exercised directly (tests, a standalone host on an older published
-// SDK) without that upstream check, so it re-validates and defaults
-// `timeoutSeconds`/`kind` itself rather than trusting a passthrough shape.
-export const readHelpRequest = (body) => {
-  let wire;
-  try {
-    wire = JSON.parse(body);
-  } catch {
-    return null;
-  }
-  if (!wire || typeof wire !== 'object' || (wire.action !== HELP_ACTION && wire.action !== SAVE_ACTION)) return null;
-  if (typeof wire.requestId !== 'string' || wire.requestId.length === 0) return null;
-  const parameters = wire.parameters;
-  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return null;
-  const text = (value) => (typeof value === 'string' && value.length > 0 ? value : null);
-  const context = { directory: text(wire.context?.directory), sessionId: text(wire.context?.sessionId) };
-  if (parameters.tabId !== undefined && (typeof parameters.tabId !== 'string' || parameters.tabId.length === 0 || parameters.tabId.length > 128)) return null;
-  if (wire.action === SAVE_ACTION) return { requestId: wire.requestId, action: SAVE_ACTION, parameters: {}, context };
-  const kind = parameters.kind ?? 'page';
-  if (!HELP_KINDS.has(kind)) return null;
-  const reason = typeof parameters.reason === 'string' ? parameters.reason.trim() : '';
-  const timeoutSeconds = parameters.timeoutSeconds ?? HELP_TIMEOUT_DEFAULT_S;
-  if (reason.length === 0 || reason.length > HELP_REASON_MAX) return null;
-  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < HELP_TIMEOUT_MIN_S || timeoutSeconds > HELP_TIMEOUT_MAX_S) return null;
-  const helpParameters = { reason, timeoutSeconds, kind };
-  if (parameters.tabId !== undefined) helpParameters.tabId = parameters.tabId;
-  if (parameters.profileName !== undefined) {
-    const profileName = String(parameters.profileName).trim();
-    if (kind !== 'profile' || profileName.length === 0 || profileName.length > PROFILE_NAME_MAX) return null;
-    helpParameters.profileName = profileName;
-  }
-  return { requestId: wire.requestId, action: HELP_ACTION, parameters: helpParameters, context };
-};
-
-const actionDeadlineMs = (parsed) => {
-  // The host waits timeoutSeconds plus 15 seconds; the wait itself ends at timeoutSeconds.
-  if (parsed.action === HELP_ACTION) return parsed.parameters.timeoutSeconds * 1000 + 10_000;
-  if (parsed.action === SAVE_ACTION) return SAVE_TIMEOUT_MS - 2_000;
-  return (parsed.action === 'browser.open' ? BROWSER_PROVIDER_OPEN_TIMEOUT_MS : BROWSER_PROVIDER_ACTION_TIMEOUT_MS) - 2_000;
-};
-
 const json = (response, status, body) => {
   const bytes = Buffer.from(JSON.stringify(body));
   response.writeHead(status, {
@@ -178,6 +126,7 @@ const viewportDimension = (value) => Number.isInteger(value) && value >= 1 && va
 const PROMPT_TEXT_MAX = 10_000;
 const CHOSEN_FILES_MAX = 32;
 const FILE_NAME_MAX = 255;
+const devToolsCommandSchema = z.object({ open: z.boolean(), generation: z.number().int().nonnegative() }).strict();
 
 const requestNumber = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 
@@ -333,11 +282,16 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
     }
     const access = dockAccess(request);
 
+    if (request.method === 'GET' && url.pathname === '/browser/memory') {
+      return json(response, 200, await runtime.memory());
+    }
+
     if (request.method === 'GET' && url.pathname === '/browser/state') {
       const options = { problems: url.searchParams.get('problems') === '1' };
       const versioned = () => {
         const state = runtime.state(access, options);
-        const version = crypto.createHash('sha1').update(JSON.stringify(state)).digest('base64url').slice(0, 16);
+        const signature = { ...state, scopes: state.scopes.map((scope) => ({ ...scope, lastActivityAt: undefined })) };
+        const version = crypto.createHash('sha1').update(JSON.stringify(signature)).digest('base64url').slice(0, 16);
         return { ...state, version };
       };
       // `since` + `wait`: answer as soon as the state differs from the
@@ -394,6 +348,19 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
       if (!target || generation === null) return text(response, 400, 'url and generation are required\n');
       try {
         await runtime.navigate(withScheme(target), generation, access);
+        return json(response, 200, runtime.state(access));
+      } catch (error) {
+        return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/browser/devtools') {
+      const parsed = devToolsCommandSchema.safeParse(await readObjectBody(request));
+      if (!parsed.success) {
+        return text(response, 400, 'open (boolean) and generation are required\n');
+      }
+      try {
+        await runtime.setDevTools(parsed.data.open, parsed.data.generation, access);
         return json(response, 200, runtime.state(access));
       } catch (error) {
         return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });

@@ -1,28 +1,17 @@
 import { InspectorError } from './inspector.js';
 import { cssSize } from './viewports.js';
+import { knownScope, scopeId, scopeMemory, scopeState, SIGN_IN_PREFIX } from './browser-scopes.js';
 
 const DEFAULT_MAX_SCOPES = 6;
 const IDLE_SWEEP_INTERVAL_MS = 60_000;
 // A scope can make room for a new one after this long without activity.
 const EVICTABLE_AFTER_MS = 60_000;
 
-const scopeId = ({ directory, sessionId }) => JSON.stringify([directory, sessionId]);
 const HELP_TIMEOUT_DEFAULT_S = 300;
 const HELP_MIN_WAIT_S = 30;
 const SIGN_IN_START_S = 15;
 const LOGIN_NOT_SAVED_NOTE = 'This chat\'s browser does not run on a saved profile, so the login was not saved anywhere: it lasts only as long as this chat\'s browser. To keep logins across chats, the user binds this project to a profile on the Server Browser page; a chat browser opened after that uses it.';
-// A dock opens a profile for signing in under this pseudo-project; agents
-// never send it, because the host fills their context from the chat.
-const SIGN_IN_PREFIX = 'profile:';
 const SIGN_IN_SESSION = 'sign-in';
-
-const knownScope = (context) => (
-  context
-  && typeof context.directory === 'string'
-  && context.directory.length > 0
-  && typeof context.sessionId === 'string'
-  && context.sessionId.length > 0
-);
 
 // `profiles` is the profile store. A chat whose project is bound to a profile
 // browses on its own copy of it, so chats never share a live cookie jar. A
@@ -93,6 +82,19 @@ export const createBrowserManager = ({
   const touch = (entry) => {
     if (entry) entry.lastActivityAt = now();
   };
+  const runInScope = async (entry, operation) => {
+    touch(entry);
+    try {
+      const result = await operation();
+      entry.lastError = null;
+      return result;
+    } catch (error) {
+      entry.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      touch(entry);
+    }
+  };
 
   const selected = () => selectedScopeId ? scopes.get(selectedScopeId) ?? null : null;
 
@@ -102,8 +104,12 @@ export const createBrowserManager = ({
   let view = { key: null, firstSequence: 1 };
   const observeView = () => {
     const entry = selected();
-    const key = entry ? JSON.stringify([entry.id, entry.runtime.tabs?.find((tab) => tab.active)?.id ?? null]) : null;
-    if (key !== view.key) view = { key, firstSequence: frameSequence + 1 };
+    const key = entry ? JSON.stringify([entry.id, entry.runtime.tabs?.find((tab) => tab.active)?.id ?? null, entry.runtime.surfaceIdentity]) : null;
+    if (key !== view.key) {
+      view = { key, firstSequence: frameSequence + 1 };
+      frameState = null;
+      for (const pending of frameControllers) pending.abort();
+    }
   };
   const shownEarlierView = (frameSeq) => {
     observeView();
@@ -121,6 +127,7 @@ export const createBrowserManager = ({
 
   const select = (entry) => {
     if (selectedScopeId === entry.id) return;
+    void selected()?.runtime.closeDevTools?.().catch(() => {});
     for (const pending of frameControllers) pending.abort();
     selectedScopeId = entry.id;
     frameState = null;
@@ -239,6 +246,7 @@ export const createBrowserManager = ({
       profile: profile ? { id: profile.id, name: profile.name } : null,
       runtime: createRuntime(context, profile),
       lastActivityAt: now(),
+      lastError: null,
       helpPending: 0,
     };
     scopes.set(id, entry);
@@ -254,7 +262,10 @@ export const createBrowserManager = ({
     }).catch(() => {}));
     // A tab switch changes what the dock commands act on, like a scope switch.
     entry.runtime.onTabsChanged(() => {
-      if (selectedScopeId === entry.id) viewGeneration += 1;
+      if (selectedScopeId === entry.id) {
+        viewGeneration += 1;
+        observeView();
+      }
       closeWhenEmptied(entry);
     });
     if (!selectedScopeId) {
@@ -523,8 +534,7 @@ export const createBrowserManager = ({
     requireDockAccess(access);
     requireGeneration(expectedGeneration);
     const entry = requireSelected();
-    touch(entry);
-    await entry.runtime.command(name, parameters);
+    await runInScope(entry, () => entry.runtime.command(name, parameters));
   });
 
   let sweepTimer = null;
@@ -553,14 +563,11 @@ export const createBrowserManager = ({
           throw new Error('The user controls the browser. Wait for them to hand control back.');
         }
         const entry = await ensureScope(context);
-        touch(entry);
         agentScopeId = entry.id;
-        try {
+        return runInScope(entry, async () => {
           const data = await entry.runtime.perform(action, parameters, signal);
           return action === 'browser.snapshot' && entry.profile ? { ...data, profile: describeCopy(entry) } : data;
-        } finally {
-          touch(entry);
-        }
+        });
       });
     },
     // Saves this chat's copy into its profile, one save at a time. Chrome
@@ -612,6 +619,9 @@ export const createBrowserManager = ({
         };
       });
     },
+    async memory() {
+      return scopeMemory(scopes, now);
+    },
     state({ viewer = null } = {}, { problems = false } = {}) {
       return {
         controller,
@@ -628,31 +638,7 @@ export const createBrowserManager = ({
         copy: selected()?.runtime.copyRequest ?? null,
         // The visible tab's errors and warnings, only for a dock whose console is open.
         ...(problems ? { consoleProblems: selected()?.runtime.consoleProblems?.() ?? [] } : {}),
-        scopes: Array.from(scopes.values(), (entry) => ({
-          id: entry.id,
-          directory: entry.directory,
-          sessionId: entry.sessionId,
-          profile: entry.profile ? { ...entry.profile, copyVersion: entry.runtime.profileVersion ?? null, users: profileUsers(entry).length } : null,
-          signIn: isSignIn(entry),
-          selected: entry.id === selectedScopeId,
-          url: entry.runtime.url ?? 'about:blank',
-          title: entry.runtime.title ?? '',
-          isLoading: entry.runtime.isLoading === true,
-          canGoBack: entry.runtime.canGoBack === true,
-          canGoForward: entry.runtime.canGoForward === true,
-          nativeSelectCompatibility: entry.runtime.nativeSelectCompatibility === true,
-          nativeSelectCompatibilityError: entry.runtime.nativeSelectCompatibilityError ?? '',
-          tabs: entry.runtime.tabs ?? [],
-          // Where the agent works, and whether an action runs there now.
-          agentTabId: entry.runtime.agentTabId ?? null,
-          agentActive: entry.runtime.agentActive === true,
-          downloads: entry.runtime.downloads ?? [],
-          audioUnavailable: entry.runtime.audioUnavailable === true,
-          viewport: entry.runtime.viewportState ?? null,
-          problems: entry.runtime.problemCounts ?? { errors: 0, warnings: 0 },
-          zoomLevel: entry.runtime.zoomLevel ?? 0,
-          colorScheme: entry.runtime.colorScheme ?? 'system',
-        })),
+        scopes: Array.from(scopes.values(), (entry) => scopeState(entry, selectedScopeId, profileUsers)),
       };
     },
     // A viewer opens the browser of the chat it is looking at, before any agent
@@ -683,6 +669,9 @@ export const createBrowserManager = ({
         select(entry);
         notice = null;
       });
+    },
+    setDevTools(open, expectedGeneration, access) {
+      return dockCommand('devtools', { open }, expectedGeneration, access);
     },
     async selectScope(id, expectedGeneration, access) {
       const entry = scopes.get(id);
@@ -947,10 +936,11 @@ export const createBrowserManager = ({
       return enqueue(async () => {
         const entry = requireSelected();
         if (shownEarlierView(frameSeq)) throw new Error('The browser view changed before this input arrived');
-        touch(entry);
         const { runtime } = entry;
-        await runtime.surfaceControl('user');
-        return runtime.surfaceInput(events, viewerTheme);
+        return runInScope(entry, async () => {
+          await runtime.surfaceControl('user');
+          return runtime.surfaceInput(events, viewerTheme);
+        });
       });
     },
     surfaceControl(nextController, viewer = null) {
