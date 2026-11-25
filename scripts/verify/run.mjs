@@ -10,6 +10,7 @@ import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
 import { acquireSlot } from "./slots.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
+import { createRunResources, validateIsolation } from "./resources.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, "../..")
@@ -30,7 +31,7 @@ Options:
   --base <ref>      With --changed: compare with <ref> instead; A..B takes
                     the files changed between two commits only
   --list            Print the feature map for the selection and exit
-  --repeat <n>      Run the selection n times in the same stand
+  --repeat <n>      Run the selection n times, honoring scenario isolation
   --retry-failed    Play a failed scenario once more; one that then passes is
                     reported as flaky and does not fail the run
   --shard <k>/<n>   Run the k-th of n equal parts of the selection, so n
@@ -92,6 +93,7 @@ const loadMap = () => {
     }
   }
   if (problems.length) throw new Error(`The feature map has errors:\n  ${problems.join("\n  ")}`)
+  validateIsolation(scenarios)
   return { vocabulary, zones, scenarios }
 }
 
@@ -261,60 +263,34 @@ const main = async () => {
     console.log("[verify] nothing to run")
     return 0
   }
+  validateIsolation(chosen, Boolean(options.attach))
   const outDir = options.out ?? join(REPO_ROOT, "tmp/verify", stamp())
   mkdirSync(outDir, { recursive: true })
   const log = (message) => console.log(`[verify] ${message}`)
   const startedAt = Date.now()
-  let browser = null
-  let browserStarting = null
-  let stopStand = async () => undefined
-  let stopping = null
-  const stopAll = () => {
-    stopping ??= (async () => {
-      try {
-        const running = browser ?? await browserStarting?.catch(() => null)
-        browser = null
-        browserStarting = null
-        await running?.stop()
-      } finally {
-        await stopStand()
-      }
-    })().finally(() => { stopping = null })
-    return stopping
-  }
-  let starting = null
+  const resources = createRunResources({ options, outDir, log }, {
+    startStand, startBrowser, attachKeptStand, acquireSlot,
+    warmUp: (running) => warmUp({ ...running, vocabulary }),
+  })
+  let active
   let exiting = false
   for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
     process.on(signal, () => {
       if (exiting) return
       exiting = true
-      void (async () => {
-        try { await stopAll() } finally {
-          await starting?.catch(() => undefined)
-          await stopAll()
-        }
-      })().then(() => process.exit(code), (error) => { console.error(`[verify] cleanup failed: ${error.message}`); process.exit(2) })
+      void resources.close().then(() => process.exit(code), (error) => { console.error(`[verify] cleanup failed: ${error.message}`); process.exit(2) })
     })
   }
   const results = []
-  let releaseSlot = () => undefined
   try {
-    if (!options.attach) releaseSlot = await acquireSlot({ log })
-    starting = options.attach
-      ? attachKeptStand(JSON.parse(readFileSync(options.attach, "utf8")))
-      : startStand({ log, logsDir: join(outDir, "logs"), onStop: (stop) => { stopStand = stop } })
-    const stand = await starting
     const standFile = join(outDir, "stand.json")
-    if (!options.attach) writeFileSync(standFile, JSON.stringify(stand.describe(), null, 2))
-    log(`stand ready after ${Math.round((Date.now() - startedAt) / 1000)}s; ${chosen.length} scenarios × ${options.repeat}; warming up`)
-    browserStarting = startBrowser({ chrome: options.chrome, headed: options.headed, onSpawn: stand.trackProcess })
-    browser = await browserStarting
-    await stand.reset()
-    await warmUp({ stand, browser, vocabulary })
-    log(`warmed up after ${Math.round((Date.now() - startedAt) / 1000)}s`)
+    log(`${chosen.length} scenarios × ${options.repeat}`)
     for (let round = 1; round <= options.repeat; round += 1) {
       for (const scenario of chosen) {
-        const result = await playOrRetry((dir) => runScenario({ scenario, stand, browser, vocabulary, outDir: dir, round: options.repeat > 1 ? round : 1 }), outDir, options.retryFailed)
+        const result = await playOrRetry(async (dir) => {
+          active = await resources.acquire(scenario)
+          return runScenario({ scenario, ...active, vocabulary, outDir: dir, round: options.repeat > 1 ? round : 1 })
+        }, outDir, options.retryFailed)
         if (result.flaky) console.log(`FLAKY ${scenario.id}: failed, then passed when played again\n     ${describeFailure(result.flaky)}${result.flaky.artifacts.length ? `\n     ${result.flaky.dir}/${result.flaky.artifacts.at(-1)}` : ""}`)
         result.round = round
         results.push(result)
@@ -324,20 +300,18 @@ const main = async () => {
         console.log(result.ok ? line : `${line}\n     ${describeFailure(result.failure)}${artifact}${changed}`)
       }
     }
-    await browser.stop()
-    browser = null
-    browserStarting = null
+    await resources.stopBrowser()
     const failedCount = results.filter((result) => !result.ok).length
     const totalSeconds = Math.round((Date.now() - startedAt) / 1000)
     const flaky = results.filter((result) => result.flaky).map((result) => result.id)
     writeFileSync(join(outDir, "summary.json"), JSON.stringify({ passed: results.length - failedCount, failed: failedCount, flaky, seconds: totalSeconds, results }, null, 2))
     log(`${results.length - failedCount} passed${flaky.length ? ` (${flaky.length} flaky: ${flaky.join(", ")})` : ""}, ${failedCount} failed in ${totalSeconds}s; artifacts in ${relative(REPO_ROOT, outDir)}`)
     if (options.keep && !options.attach) {
-      log(`the stand keeps running at ${stand.uiUrl}; run more with --attach ${relative(REPO_ROOT, standFile)}; Ctrl-C stops it`)
+      log(`the stand keeps running at ${active.stand.uiUrl}; descriptor: ${relative(REPO_ROOT, standFile)}; Ctrl-C stops it`)
       await new Promise(() => undefined)
     }
   } finally {
-    try { await stopAll() } finally { releaseSlot() }
+    await resources.close()
   }
   return results.some((result) => !result.ok) ? 1 : 0
 }

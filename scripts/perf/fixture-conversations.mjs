@@ -1,4 +1,5 @@
 import { fixtureCommand, javascriptCommand } from "./shell-command.mjs"
+import { BOT_PAGE_TURNS } from "./fixture-bot-pages.mjs"
 
 /**
  * Scripted conversations for the fixture provider, keyed by the user's prompt.
@@ -523,6 +524,7 @@ const subagentTurn = (id, prompt, task, model) => ({
 const LOCALES = ["de", "fr", "pl", "uk", "ja"]
 
 const VERIFY_TURNS = [
+  ...BOT_PAGE_TURNS,
 {
   id: "verify_locales",
   prompt: "Add a locale file for each language we ship.",

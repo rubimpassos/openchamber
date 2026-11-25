@@ -10,6 +10,7 @@ Sections: *Ownership*, *Running it*, *The feature map*, *Steps*, *Invariants*, *
 - `vocabulary.json` names every part of the UI a step points at (`composer.send`, `sidebar.row`, `diff.added`) with its selector and one line saying what it is. It is the shared name for each thing, and the one place a selector changes when the markup does.
 - `server-routes.mjs` and `requests.mjs` select and record by server route (see *Running only what a change touches*).
 - `stand.mjs` starts and resets the isolated instance, `browser.mjs` drives Chrome, `steps.mjs` runs steps, `changed.mjs` picks the scenarios a change touches, `run.mjs` is the command.
+- `resources.mjs` owns the runner's stand/browser lifetime, warmup, slot lease and cancellation cleanup. Scenario isolation replaces these resources through the same factories and process guardians.
 - `processes.mjs` owns process identities and recovery records under this checkout's `tmp/verify/owners`. `process-guardian.mjs` waits for the runner's pipe to close and reaps that run if its owner died without cleanup.
 
 The stand reuses `scripts/perf`: `cdp.mjs` for Chrome, `fixture-provider.mjs` for the model, `fixture-conversations.mjs` for the scratch project and the scripted agent turns.
@@ -37,6 +38,10 @@ FAIL composer.send.shift-enter (21.8s)
 
 A fresh stand warms up for about 40 s (Vite's first compile of the chat, Changes and Files) before the first scenario; a full run of about 200 scenarios takes about 25 minutes. With `--keep` the stand runs until Ctrl-C, and `--attach` runs against it in seconds, which is the loop for writing scenarios. Vite serves the checkout's UI source, so a UI edit shows in the next scenario without restarting the stand. The server runs the code it started with: a change under `packages/web/server` needs a new stand.
 
+A scenario with `"isolation": "stand"` starts a fresh stand and browser for each attempt, including retries and repeats. The following ordinary scenario also starts fresh; later ordinary scenarios reuse that stand and its warmup as usual. Replacements stop the previous browser and stand before admitting another, while the run holds one slot. Their logs go under `logs/stand-2/`, `logs/stand-3/` and so on. `stand.json` always describes the current stand.
+
+`--attach` refuses a selection containing a stand-isolated scenario before touching the kept stand. A stand kept after an isolated scenario carries `"isolation": "stand"` in its descriptor and cannot be attached for ordinary scenarios either. It stays available for inspection until its owning runner stops it; start a fresh run to play more scenarios.
+
 The stand runs the OpenCode server the desktop app bundles, at the version this checkout pins (`@opencode/server` in `packages/electron/package.json`). It stages it into `packages/electron/resources/opencode-server` on first use, which downloads native packages from npm; without network access the stand stops at once and says so. `OPENCODE_BINARY` overrides it with an OpenCode CLI of that exact version; a separate official npm platform package can be extracted outside the checkout without changing `PATH`. For example, in Windows Command Prompt:
 
 ```bat
@@ -49,6 +54,8 @@ start "" /b /wait /high bun run verify -- composer > C:\Users\openc\verify-compo
 `node --test scripts/verify/platform.test.mjs` checks the fixture entrypoint, isolated Git configuration, the installed virtualizer patch and repeated Windows fixture shutdown without starting the app. A frozen install can report no changes while leaving a corrupted installed patch in place; this smoke test catches the broken virtualizer before a browser warm-up.
 
 `node --test scripts/verify/processes.test.mjs scripts/verify/stand.test.mjs` covers process ownership, detached children, an exited group leader, abrupt runner death, stale-run recovery, live/foreign-run protection and PID reuse. `VERIFY_LIFECYCLE_TEST=1 node --test scripts/verify/lifecycle.test.mjs` opts into five real stand/browser runs: success, a failing scenario, a thrown error, SIGINT and SIGTERM. They run sequentially and verify that no process identity, command line or cwd from the stand survives, and that its root and Vite cache are gone.
+
+`node --test scripts/verify/resources.test.mjs` checks isolation, retry/repeat transitions, ordinary reuse, the current kept descriptor, attachment refusal and cancellation/startup/cleanup failures without starting the app. Its resource factories own independent journals and browser storage; a retained Bot lead refuses reset, so reusing that stand fails the test.
 
 ### Running only what a change touches
 
@@ -75,6 +82,11 @@ The selection code is `changed.mjs`, tested without a stand in `changed.test.mjs
 ### Where it runs by itself
 
 Pull requests play `--changed` against their base in four parts (`behavior-net` in `.github/workflows/oc-review.yml`), with `--retry-failed`. The check is not required. `.github/workflows/behavior-net.yml` plays the whole net every night on the default branch in six parts, and from those results rewrites `requests.json`; when the file differs it opens a pull request from `ci/net-requests`.
+
+Fork runs use GitHub-hosted Ubuntu runners because the upstream Blacksmith pool
+is private. Temporary launch wrappers bound Vite, esbuild and Chrome memory on
+those runners. The stand still receives its isolated environment; the wrappers
+add resource limits only to their own compiler and browser processes.
 
 ## The feature map
 
@@ -110,6 +122,8 @@ A zone file:
 `sources` are the files (or directories, ending in `/`) whose breakage the zone's scenarios catch, the ones `--changed` selects by. A feature may name its own; then it is selected by those alone, and a feature without them by its zone's. A feature's sources name the files its behavior lives in, including the container whose own code its scenarios play (the list that scrolls, the row that opens a menu), and leave out stores and libraries many features share: the import graph finds those. A source path that does not exist stops the run before it starts, so a split or a rename updates the map in the same change.
 
 A scenario id is `zone.feature.scenario`. `kind` is `path` for the plain user path and `break` for an ordinary failure (a provider that is down, a dropped connection, a file changed outside the app). The runner rejects a step whose `do` or `on` it does not know before anything starts.
+
+`isolation` is optional and accepts only `"stand"`. Use it when the scenario creates state that an ordinary reset intentionally cannot delete, such as a native Bot conversation. Omission keeps the shared stand and fresh browser context behavior.
 
 A selector in the vocabulary can hold `{name}` placeholders. A step fills them from its own field of that name, and a value naming a variable (`"session": "s"`) becomes that variable's value; `{project}` is always the project path. `"text"` on a step keeps only elements whose visible text contains it (`"exact": true` for equal), `"index"` picks among several.
 
@@ -170,6 +184,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the reset refuses before deleting anything.
 - Every scenario starts from the same state: all sessions deleted, linked worktrees removed, unfinished rebases and merges cleared, the project's starting branch and commit restored with a clean index and tree, saved drafts removed, scenario branches and stashes removed, the repository configuration restored, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything. A failed Git reset rebuilds the fixture and records the reason as a failed scenario; later scenarios still run. Other reset failures also become scenario results.
+- A stand-isolated scenario's retained state is never passed to generic session deletion. The runner stops that owned stand and starts another before the next attempt or scenario; application ownership guards and journals remain intact until normal stand teardown.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
 - Tools run without asking, except a read of a `*.secret` file and a web fetch: those ask, so a scenario can raise a permission request by having the agent read such a file, or hold a session on the user with a scripted fetch.
 - A stopped run leaves nothing: the API, Vite, OpenCode, PTY daemons, fixture, Chrome and its helpers are tracked through OS process identities and the stand's isolated directories. Cleanup continues after a wrapper or group leader exits, escalates remaining processes, and removes the stand folder, Chrome profile and port-specific Vite cache only after the tree is gone. Failure in browser cleanup still runs stand cleanup. Startup errors and both runner signals take the same path.
@@ -178,6 +193,12 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Steps act as a user does: real pointer and keys at element centres, the URL, files on disk, other clients through the CLI. Stores are not set from the page.
 
 ## Decisions
+
+### Why retained conversations replace the stand
+
+Native Bot conversations belong to their server owner and generic session deletion intentionally returns 403. A scenario that creates one opts into full stand isolation so retries and later ordinary scenarios use fresh storage. Resetting ownership journals or deleting the conversation through another identity would bypass the behavior the net must preserve.
+
+The runner replaces the browser with the stand, updates the kept descriptor and reuses its existing slot lease. Ordinary scenarios continue sharing a warmed stand; attaching a kept stand cannot authorize replacing or deleting its resources.
 
 ### Why shell fixtures run JavaScript files
 

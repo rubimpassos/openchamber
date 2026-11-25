@@ -1,0 +1,46 @@
+{
+  "zone": "bots",
+  "name": "Bot conversations",
+  "sources": ["packages/ui/src/components/bots/"],
+  "features": [{
+    "id": "conversation",
+    "name": "An item has an ordinary supervised conversation",
+    "sources": [
+      "packages/ui/src/components/bots/",
+      "packages/ui/src/components/chat/ChatContainer.tsx",
+      "packages/web/server/lib/bots/conversation-sessions.ts",
+      "packages/web/server/lib/session-lead/bot-guidance.ts"
+    ],
+    "what": "A bot can explain an item and maintain its native lead brief and digest while the coordinator waits.",
+    "reach": "Bots, create a bot and a manual demand, then write in the item's conversation.",
+    "proof": "The model calls the actual lead controls and the pinned conversation shows the digest they stored.",
+    "scenarios": [{
+      "id": "lead",
+      "kind": "path",
+      "isolation": "stand",
+      "title": "The item's lead updates its brief and digest through its available tools",
+      "steps": [
+        {"do": "open"},
+        {"do": "click", "on": "bots.open"},
+        {"do": "see", "on": "bots.newBot", "disabled": false},
+        {"do": "click", "on": "bots.newBot"},
+        {"do": "click", "on": "bots.name"},
+        {"do": "type", "text": "Verify catalog"},
+        {"do": "click", "on": "bots.mission"},
+        {"do": "type", "text": "Inspect the sample catalog query and retain its result."},
+        {"do": "click", "on": "bots.save"},
+        {"do": "see", "on": "bots.saved"},
+        {"do": "click", "on": "bots.newDemand", "index": 0},
+        {"do": "click", "on": "bots.demandTitle"},
+        {"do": "type", "text": "Sample catalog query"},
+        {"do": "see", "on": "bots.submitDemand", "disabled": false},
+        {"do": "click", "on": "bots.submitDemand"},
+        {"do": "see", "on": "bots.conversation"},
+        {"do": "click", "on": "bots.editor"},
+        {"do": "type", "text": "Show the retained bot proof."},
+        {"do": "press", "key": "Enter"},
+        {"do": "see", "on": "bots.digest", "text": "The catalog investigation is waiting for its configured identity.", "timeout": 60}
+      ]
+    }]
+  }]
+}
