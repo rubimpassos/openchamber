@@ -31,11 +31,12 @@ interface TurnFoldProps {
     expanded: boolean;
     finalMessageId: string | undefined;
     keepText: boolean;
+    openerUnderFold: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
 }
 
-export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, keepText, onToggle, renderMessage }: TurnFoldProps) {
+export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, keepText, openerUnderFold, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
     const { finalMessage, activityMessages, settled, isExpanded: autoExpanded, pages } = useTurnFold(turn, hasLaterAssistant, expanded, finalMessageId, keepText);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
@@ -49,17 +50,18 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
     const liveTrim = React.useMemo(() => {
         if (expanded) return null;
         const shownBelow = new Set(pages.map((part) => part.id));
-        return planActivityTrim(
-            activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).filter((part) => !shownBelow.has(part.id)).length),
-            LIVE_ACTIVITY_VISIBLE_ROWS,
-        );
-    }, [activityMessages, expanded, pages, showReasoningTraces]);
+        const stepRows = activityMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).filter((part) => !shownBelow.has(part.id)).length);
+        return planActivityTrim(openerUnderFold ? [1, ...stepRows] : stepRows, LIVE_ACTIVITY_VISIBLE_ROWS);
+    }, [activityMessages, expanded, openerUnderFold, pages, showReasoningTraces]);
     const trimRef = React.useRef(liveTrim);
     if (!held) trimRef.current = liveTrim;
     const trim = held && !expanded ? trimRef.current : liveTrim;
+    const hiddenMessages = trim?.hiddenMessages ?? 0;
+    const openerShown = openerUnderFold && hiddenMessages === 0;
+    const hiddenSteps = openerUnderFold ? Math.max(0, hiddenMessages - 1) : hiddenMessages;
     const shownMessages = React.useMemo(
-        () => (trim && trim.hiddenMessages > 0 ? activityMessages.slice(trim.hiddenMessages) : activityMessages),
-        [activityMessages, trim],
+        () => (hiddenSteps > 0 ? activityMessages.slice(hiddenSteps) : activityMessages),
+        [activityMessages, hiddenSteps],
     );
     const skippedMessageId = trim && trim.skipRows > 0 ? shownMessages[0]?.info.id : undefined;
     const skippedRows = trim?.skipRows ?? 0;
@@ -138,6 +140,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, ke
                         <div ref={previewRef}>
                             <LiveActivityCollapse expanded={isExpanded} id={contentId}>
                                 <div ref={rowsRef}>
+                                    {openerShown ? renderMessage(turn.userMessage) : null}
                                     <ActivityRowSkipContext.Provider value={rowSkip}>
                                         {messagesAbovePages.map((message) => (
                                             <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>

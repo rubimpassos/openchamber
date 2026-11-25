@@ -38,19 +38,21 @@ export const TurnRow = React.memo(({
     }, [onToggleTurnActivity, turn.turnId]);
 
     if (row.kind === 'turn-head') {
-        return <TurnItem turn={turn} gapBelow={row.gapBelow} renderMessage={renderMessage} />;
+        return <TurnItem turn={turn} gapBelow={row.gapBelow} openerInFold={row.openerUnderFold} renderMessage={renderMessage} />;
     }
 
     let content: React.ReactNode = null;
     if (row.kind === 'turn-fold') {
         content = (
             <TurnFold turn={turn} hasLaterAssistant={hasLaterAssistant} expanded={isActivityExpanded}
-                finalMessageId={row.finalMessageId} keepText={row.keepText} onToggle={handleToggleActivity} renderMessage={renderMessage} />
+                finalMessageId={row.finalMessageId} keepText={row.keepText} openerUnderFold={row.openerUnderFold} onToggle={handleToggleActivity} renderMessage={renderMessage} />
         );
     } else if (row.kind === 'turn-pages') {
         content = <TurnPagesRow turn={turn} keepText={row.keepText} />;
     } else {
-        const message = turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
+        const message = row.messageId === turn.userMessage.info.id
+            ? turn.userMessage
+            : turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
         if (message) {
             content = (
                 <MessageSliceContext.Provider value={row.slice}>

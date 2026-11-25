@@ -111,6 +111,7 @@ function TurnRows({ record, retired, expanded, keepText = false, onToggle, rende
 }) {
     const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
         collapsedActivity: true, keepActivityText: keepText, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+        isActivityOpener: () => false,
     }, []);
     const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
     const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId, keepText);
@@ -118,7 +119,7 @@ function TurnRows({ record, retired, expanded, keepText = false, onToggle, rende
         {rows.map((row) => {
             if (row.kind === 'turn-fold') {
                 return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
-                    finalMessageId={row.finalMessageId} keepText={keepText} onToggle={onToggle} renderMessage={renderMessage} />;
+                    finalMessageId={row.finalMessageId} keepText={keepText} openerUnderFold={row.openerUnderFold} onToggle={onToggle} renderMessage={renderMessage} />;
             }
             if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} keepText={keepText} />;
             if (row.kind !== 'turn-message') return null;

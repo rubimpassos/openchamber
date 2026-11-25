@@ -50,6 +50,19 @@ height estimates.
   text containing a UI block remain visible in chronological order; the final
   answer's text remains the answer. An `openui-lang literal` fence stays a code
   sample.
+- A user message that an active extension claims through `contributes.messages`
+  is agent activity. It still opens its own turn, with the same turn ID, message
+  ID and place in the transcript. With Activity collapsed its turn always has a
+  fold, also when the turn holds nothing else, and the message is the fold's
+  first step: hidden under a settled fold, the oldest row of the live window
+  while the turn waits or runs, and a `step:<messageId>` row once the fold is
+  opened. The prompt row of that turn draws nothing and never sticks, so the
+  message is drawn in one place. Navigating to it opens the fold. Show notes
+  keeps only what the assistant wrote in view, so the message stays in the
+  fold. With Activity expanded by default it stays the row that opens the turn.
+  The rows follow the extension catalog: a paused, removed or unapproved
+  extension gives the message back its bubble, and VS Code, which has no
+  catalog, never folds one.
 - Show notes (`activityRenderMode: 'text'`) keeps every visible text before
   the final answer in view the same way, in the order it was written: below the
   latest rows while the turn runs, between the Activity header and the answer
@@ -151,6 +164,19 @@ shapes navigation, holds and size estimates rely on. A fold per run of tools
 between two texts would show which steps each text followed, but Collapsed
 deliberately has no tool subgroups, and it needs a second row model for the
 same turn. The order is one click away in the open fold.
+
+### Why a claimed plugin message folds in its own turn and not into the turn before it
+
+A background-task notice reads as part of the work that follows it, so it
+belongs under Activity with the tools it triggers. Row construction decides
+that from the catalog while turn projection stays unaware of extensions: turn
+IDs, keyboard turn navigation, selection keys and the projection cache keep
+their meaning when an extension is paused or the catalog loads late. Joining a
+notice to the previous turn would give one fold for a run of notices, but it
+moves turn boundaries with the catalog and needs the same classifier in every
+turn model. The cost of the chosen approach is that a notice that never gets a
+reply settles into an Activity header of its own, as a turn of tool calls
+without an answer does.
 
 ### Why Activity yields while the reader acts on it, and not the other way round
 
