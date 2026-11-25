@@ -31,6 +31,7 @@ type ServerBrowserMonitorDependencies = {
   readonly closeScope: (body: { scopeId: string; generation: number }) => Promise<ServerBrowserResult<ServerBrowserState>>;
   readonly now: () => number;
   readonly wait: (ms: number) => Promise<void>;
+  readonly isCurrent: () => boolean;
 };
 
 export type ServerBrowserMonitor = {
@@ -91,8 +92,8 @@ export const createServerBrowserMonitor = (deps: ServerBrowserMonitorDependencie
       const result = await deps.readMemory();
       memorySampledAt = deps.now();
       if (result.ok) update({ memory: result.data });
-      else if (routeIsMissing(result)) {
-        memorySupported = false;
+      else {
+        if (routeIsMissing(result)) memorySupported = false;
         update({ memory: null });
       }
     } while (memoryDue && memorySupported && !disposed);
@@ -195,12 +196,17 @@ export const createServerBrowserMonitor = (deps: ServerBrowserMonitorDependencie
       else void read().then((ok) => (ok ? follow(true) : undefined));
     },
     close: async (scopeId) => {
+      const unavailable: ServerBrowserResult<ServerBrowserState> = { ok: false, error: 'The browser list is no longer shown.' };
+      if (disposed || !deps.isCurrent()) return unavailable;
       let result = await deps.closeScope({ scopeId, generation: deps.currentState()?.generation ?? 0 });
+      if (disposed || !deps.isCurrent()) return unavailable;
       if (!result.ok && isServerBrowserViewChanged(result.error)) {
         const current = await deps.readState();
+        if (disposed || !deps.isCurrent()) return unavailable;
         if (current.ok) {
-          if (!disposed) deps.publishState(current.data);
+          deps.publishState(current.data);
           result = await deps.closeScope({ scopeId, generation: current.data.generation });
+          if (disposed || !deps.isCurrent()) return unavailable;
         }
       }
       if (result.ok && !disposed) deps.publishState(result.data);

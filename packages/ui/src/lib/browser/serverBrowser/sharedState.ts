@@ -22,8 +22,7 @@ export const useServerBrowserSharedState = create<ServerBrowserSharedState>((set
     publish: (guestId, runtimeKey, state) => set((current) => {
       const previous = current.published[guestId];
       const unchanged = previous?.runtimeKey === runtimeKey
-        && state.version !== undefined
-        && previous.state.version === state.version;
+        && previous.state === state;
       return unchanged ? current : { published: { ...current.published, [guestId]: { runtimeKey, state } } };
     }),
     clear: (guestId) => set((current) => {

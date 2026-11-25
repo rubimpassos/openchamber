@@ -17,6 +17,12 @@ This folder is the UI half of the in-app browser and of agent browser control. T
 - `serverBrowser/sharedState.ts` publishes the pane's authoritative service
   snapshots to visible Work Status consumers. The monitor samples memory on
   demand and reuses a pane's live state instead of starting another state loop.
+  Material-state versions omit input activity, so equal versions still publish
+  fresh timestamps. Rows compare their derived minute to avoid input-frequency
+  rendering. Failed memory reads clear the measurement.
+  Close confirmations keep their originating monitor. A provider, project or
+  runtime change retires it, and a runtime change also cancels stale-generation
+  retries before another close request can use the new transport.
 
 ## Invariants
 

@@ -53,6 +53,7 @@ type World = {
   watch: ServerBrowserWatch;
   status: ServerBrowserServiceStatus;
   now: number;
+  currentOwner: boolean;
 };
 
 const setup = (initial: ServerBrowserState | null = null) => {
@@ -60,7 +61,7 @@ const setup = (initial: ServerBrowserState | null = null) => {
   const memoryReads = recorder<undefined, ServerBrowserResult<ServerBrowserMemory>>();
   const closes = recorder<{ scopeId: string; generation: number }, ServerBrowserResult<ServerBrowserState>>();
   const waits = recorder<number, void>();
-  const world: World = { state: initial, watch: IDLE, status: 'ready', now: 100_000 };
+  const world: World = { state: initial, watch: IDLE, status: 'ready', now: 100_000, currentOwner: true };
   const harness = Object.assign(world, { stateReads, memoryReads, closes, waits });
   const monitor = createServerBrowserMonitor({
     currentState: () => harness.state,
@@ -76,6 +77,7 @@ const setup = (initial: ServerBrowserState | null = null) => {
     closeScope: closes.call,
     now: () => harness.now,
     wait: waits.call,
+    isCurrent: () => harness.currentOwner,
   });
   return { harness, monitor };
 };
@@ -133,6 +135,27 @@ describe('server browser monitor', () => {
     expect(monitor.getSnapshot().memory).toBeNull();
     expect(harness.memoryReads.unanswered()).toBe(0);
   });
+
+  for (const status of [undefined, 500]) {
+    test(`a failed memory refresh clears the previous measurement with status ${status}`, async () => {
+      const { harness, monitor } = setup();
+      const first = monitor.refresh();
+      (await harness.stateReads.next()).answer({ ok: true, data: browserState('v1') });
+      (await harness.memoryReads.next()).answer({ ok: true, data: reading(512) });
+      await first;
+      await settle();
+
+      const next = monitor.refresh();
+      (await harness.stateReads.next()).answer({ ok: true, data: browserState('v1') });
+      (await harness.memoryReads.next()).answer({ ok: false, error: 'Unavailable', status });
+      await next;
+      await settle();
+
+      expect(monitor.getSnapshot().memory).toBeNull();
+      expect(harness.state?.version).toBe('v1');
+      monitor.dispose();
+    });
+  }
 
   test('changes inside the interval share one later reading, and a refresh does not wait for it', async () => {
     const { harness, monitor } = setup();
@@ -237,20 +260,23 @@ describe('server browser monitor', () => {
     expect(harness.stateReads.unanswered()).toBe(0);
   });
 
-  test('closing retries once with the generation the view moved to', async () => {
-    const { harness, monitor } = setup(browserState('v1', 3));
-    const closed = monitor.close('scope');
-    const stale = await harness.closes.next();
-    expect(stale.args).toEqual({ scopeId: 'scope', generation: 3 });
-    stale.answer({ ok: false, error: 'The browser view changed before the dock command ran', status: 409 });
-    (await harness.stateReads.next()).answer({ ok: true, data: browserState('v2', 4) });
-    const retried = await harness.closes.next();
-    expect(retried.args).toEqual({ scopeId: 'scope', generation: 4 });
-    retried.answer({ ok: true, data: browserState('v3', 5) });
+  for (const retire of [false, true]) {
+    test(`closing retries with the current generation and retires its result when disposed: ${retire}`, async () => {
+      const { harness, monitor } = setup(browserState('v1', 3));
+      const closed = monitor.close('scope');
+      const stale = await harness.closes.next();
+      expect(stale.args).toEqual({ scopeId: 'scope', generation: 3 });
+      stale.answer({ ok: false, error: 'The browser view changed before the dock command ran', status: 409 });
+      (await harness.stateReads.next()).answer({ ok: true, data: browserState('v2', 4) });
+      const retried = await harness.closes.next();
+      expect(retried.args).toEqual({ scopeId: 'scope', generation: 4 });
+      if (retire) monitor.dispose();
+      retried.answer({ ok: true, data: browserState('v3', 5) });
 
-    expect((await closed).ok).toBe(true);
-    expect(harness.state?.version).toBe('v3');
-  });
+      expect((await closed).ok).toBe(!retire);
+      expect(harness.state?.version).toBe(retire ? 'v2' : 'v3');
+    });
+  }
 
   test('a refused close leaves the browsers as they were', async () => {
     const { harness, monitor } = setup(browserState('v1', 3));
@@ -264,5 +290,32 @@ describe('server browser monitor', () => {
     expect(await closed).toMatchObject({ ok: false, status: 409 });
     expect(harness.state?.version).toBe('v1');
     expect(harness.closes.unanswered()).toBe(0);
+  });
+
+  test('a disposed monitor refuses a delayed confirmation without sending a close', async () => {
+    const { harness, monitor } = setup(browserState('v1'));
+    monitor.dispose();
+    const closing = monitor.close('scope');
+    await settle();
+
+    expect(harness.closes.unanswered()).toBe(0);
+    expect((await closing).ok).toBe(false);
+  });
+
+  test('a runtime change while refreshing a stale generation prevents a close retry', async () => {
+    const { harness, monitor } = setup(browserState('v1', 3));
+    const closing = monitor.close('scope');
+    (await harness.closes.next()).answer({
+      ok: false, error: 'The browser view changed before the dock command ran', status: 409,
+    });
+    const refresh = await harness.stateReads.next();
+    harness.currentOwner = false;
+    refresh.answer({ ok: true, data: browserState('v2', 4) });
+    await settle();
+
+    expect(harness.closes.unanswered()).toBe(0);
+    expect((await closing).ok).toBe(false);
+    expect(harness.state?.version).toBe('v1');
+    monitor.dispose();
   });
 });

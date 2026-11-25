@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { parseServerBrowserState } from './client';
 import { browserMemoryKey, monitoredBrowsers } from './monitoredBrowsers';
 import type { ServerBrowserScope, ServerBrowserState } from './types';
+import { publishedServerBrowserState, useServerBrowserSharedState } from './sharedState';
 
 const scope = (overrides: Partial<ServerBrowserScope> & Pick<ServerBrowserScope, 'id' | 'directory'>): ServerBrowserScope => ({
   sessionId: 'ses_1',
@@ -98,6 +99,20 @@ describe('monitored browsers', () => {
     expect(later).toEqual(first);
     expect(browserMemoryKey(later)).toBe(browserMemoryKey(first));
     expect(at(1_700_000_105_000)[0]?.lastActiveMinute).not.toBe(first[0]?.lastActiveMinute);
+  });
+
+  test('a refreshed snapshot updates last use even when material state has the same version', () => {
+    const store = useServerBrowserSharedState.getState();
+    const guest = 'activity-fixture';
+    try {
+      store.publish(guest, 'runtime', state([scope({ id: 'a', directory: '/p', lastActivityAt: 60_000 })], { version: 'v1' }));
+      store.publish(guest, 'runtime', state([scope({ id: 'a', directory: '/p', lastActivityAt: 180_000 })], { version: 'v1' }));
+
+      const current = publishedServerBrowserState(useServerBrowserSharedState.getState(), guest, 'runtime');
+      expect(monitoredBrowsers(current, '/p')[0]?.lastActiveMinute).toBe(180_000);
+    } finally {
+      store.clear(guest);
+    }
   });
 
   test('the memory key follows what changes a browser\'s memory and is empty with no browser', () => {
