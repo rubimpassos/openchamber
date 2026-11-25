@@ -186,6 +186,10 @@ Sent as mouse events, a finger drag selects text in desktop Chrome. A touch that
 
 Each digit used to be applied at once and clamped to the minimum, so typing "1" became 240 before the second digit. The boxes hold a draft; Enter in the width moves to the height, Enter in the height leaves the field, and leaving a field applies it.
 
+### Why a phone picks the device preset from a sheet and not the dropdown
+
+The preset list has 9 values, and on a phone the app picks a value from a sheet; an anchored dropdown there is kept for 2 to 5 actions. `BrowserDeviceBar` shows `MobileOverlayPanel` with one `MobileSheetRow` per preset when `useDeviceInfo().isMobile` is true, and the shared `Select` otherwise. That flag describes the device the app runs on. The viewport of the page in the panel is a different thing: a desktop window that emulates an iPhone keeps the `Select`. Both pickers apply a choice through the same `onViewportChange` transition, and the phone trigger keeps the `Select` trigger's chrome and 12rem cap, so the bar's row has the same width in both.
+
 ### Why annotation images attach before prompt text
 
 An upload can fail, so the prompt describes only an image that actually landed. The screenshot belongs to the annotation row, and the user's comment stays in the draft's editable text; the completed draft is accepted as written because the overlay is already gone and refusal would lose the marks and comment.

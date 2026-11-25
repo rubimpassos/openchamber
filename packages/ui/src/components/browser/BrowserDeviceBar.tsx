@@ -4,7 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { ButtonTooltip, ToolbarTooltipButton } from '@/components/ui/action-toolbar';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
@@ -38,11 +42,15 @@ export const BrowserDeviceBar: React.FC<{
   panelSize: { width: number; height: number };
 }> = ({ viewport, onViewportChange, colorScheme, onColorSchemeChange, scale, panelSize }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
+  const [presetSheetOpen, setPresetSheetOpen] = React.useState(false);
+  const presetLabelId = React.useId();
   const size = viewportSize(viewport);
   const presetId = viewport.kind === 'preset' ? viewport.id : RESPONSIVE;
   const presetLabel = (id: string) => (
     id === RESPONSIVE ? t('contextPanel.browser.device.responsive') : VIEWPORT_PRESETS.find((preset) => preset.id === id)?.label ?? id
   );
+  const choosePreset = (id: string) => onViewportChange(id === RESPONSIVE ? FILL_VIEWPORT : presetViewport(id) ?? FILL_VIEWPORT);
   const shownPanelSize = { width: Math.round(panelSize.width), height: Math.round(panelSize.height) };
 
   const [draft, setDraft] = React.useState<{ side: ViewportSide; digits: string } | null>(null);
@@ -90,20 +98,52 @@ export const BrowserDeviceBar: React.FC<{
 
   return (
     <div className="@container flex min-w-0 items-center gap-1.5 px-2 pb-1.5">
-      <Select<string>
-        value={presetId}
-        onValueChange={(value) => onViewportChange(value === RESPONSIVE ? FILL_VIEWPORT : presetViewport(value) ?? FILL_VIEWPORT)}
-      >
-        <SelectTrigger className="min-w-0 max-w-[12rem] shrink" aria-label={t('contextPanel.browser.device.preset')}>
-          <SelectValue>{(value) => presetLabel(String(value))}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={RESPONSIVE}>{t('contextPanel.browser.device.responsive')}</SelectItem>
-          {VIEWPORT_PRESETS.map((preset) => (
-            <SelectItem key={preset.id} value={preset.id}>{preset.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {isMobile ? (
+        <>
+          <button
+            type="button"
+            aria-label={t('contextPanel.browser.device.preset')}
+            aria-describedby={presetLabelId}
+            aria-haspopup="dialog"
+            aria-expanded={presetSheetOpen}
+            onClick={() => setPresetSheetOpen(true)}
+            className={cn(dropdownTriggerVariants(), 'w-fit min-w-0 max-w-[12rem] shrink')}
+          >
+            <span id={presetLabelId} className="min-w-0 flex-1 truncate">{presetLabel(presetId)}</span>
+            <Icon name="arrow-down-s" className="size-4 opacity-50" aria-hidden="true" />
+          </button>
+          <MobileOverlayPanel
+            open={presetSheetOpen}
+            title={t('contextPanel.browser.device.preset')}
+            onClose={() => setPresetSheetOpen(false)}
+          >
+            {[RESPONSIVE, ...VIEWPORT_PRESETS.map((preset) => preset.id)].map((id) => (
+              <MobileSheetRow
+                key={id}
+                selected={id === presetId}
+                onClick={() => {
+                  choosePreset(id);
+                  setPresetSheetOpen(false);
+                }}
+              >
+                {presetLabel(id)}
+              </MobileSheetRow>
+            ))}
+          </MobileOverlayPanel>
+        </>
+      ) : (
+        <Select<string> value={presetId} onValueChange={choosePreset}>
+          <SelectTrigger className="min-w-0 max-w-[12rem] shrink" aria-label={t('contextPanel.browser.device.preset')}>
+            <SelectValue>{(value) => presetLabel(String(value))}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={RESPONSIVE}>{t('contextPanel.browser.device.responsive')}</SelectItem>
+            {VIEWPORT_PRESETS.map((preset) => (
+              <SelectItem key={preset.id} value={preset.id}>{preset.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       <div className="oc-raised oc-field flex min-h-7 shrink-0 items-center rounded-md bg-[var(--surface-elevated)] px-1">
         <input
