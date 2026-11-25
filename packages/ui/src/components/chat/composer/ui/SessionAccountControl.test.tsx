@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { notifyCredentialChanged } from '@/lib/opencode/integration-catalog';
-import { useProviderAccounts } from './SessionAccountControl';
+import { useProviderAccounts } from './useProviderAccounts';
 
 type SignIn = { id: string; label: string };
 const signIns: SignIn[] = [{ id: 'cred_ultra', label: 'Ultra' }, { id: 'cred_team', label: 'Team Premium' }];

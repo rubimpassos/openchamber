@@ -3,6 +3,11 @@
 The chat composer: the prompt language, the editor that renders it, and
 everything between typing and sending.
 
+The account control's catalog subscription lives in `ui/useProviderAccounts.ts`.
+Only OAuth sign-ins can replace a session's token; usage decorates those
+accounts and a failed usage read leaves them listed. Session changes refresh
+the same hook without exporting a hook from the component's refresh boundary.
+
 A whole-stack attachment creates ordinary change-request chips and one inline
 stack-summary draft. Each member's context includes its diff, checks, and
 comments. The anchor chip carries `followStack: true` into `toLinkedIssue`, so
