@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
 import { OpenChamberControlError, controlErrorFields } from './error.js';
 import { readPageAnswer } from './render-page.js';
+import { readRecoveredPageProgress } from './page-recovery.js';
+import type { PageRecoveryIdentity, PageRecoveryValidation } from './page-recovery.js';
 import type { PrWatchEventHub } from '../pr-watch/runtime.js';
 import type { DispatchResultsOptions } from '../dispatch-results/runtime.js';
 import type { ControlErrorFields } from './error.js';
@@ -24,7 +26,7 @@ const answerSchema = z.union([
   z.object({ answered: z.literal(true), summary: z.string(), data: z.json().catch(null) }),
   z.object({ answered: z.literal(false), reason: z.enum(['declined', 'ui-not-drawn']), errors: z.array(z.string()).optional() }),
 ]);
-const pageSchema = z.object({
+const pageFieldsSchema = z.object({
   sessionId: z.string().min(1),
   callId: z.string().min(1),
   directory: z.string().min(1).nullable(),
@@ -36,10 +38,15 @@ const pageSchema = z.object({
   answeredAt: z.number().finite().nonnegative().nullable(),
   messageID: z.string().nullable(),
 });
+const pageSourceSchema = z.union([
+  z.object({ source: z.literal('recovered-await'), messageId: z.string().min(1), closed: z.literal(true).optional() }),
+  z.object({ source: z.undefined().optional(), messageId: z.undefined().optional(), closed: z.undefined().optional() }),
+]);
+const pageSchema = pageFieldsSchema.and(pageSourceSchema);
 const storedFileSchema = z.object({ revision: z.number().int().nonnegative().optional(), pages: z.array(z.unknown()) });
 const deletedEventSchema = z.object({ type: z.literal('session.deleted'), properties: z.object({ sessionID: z.string().min(1) }) });
 
-type LaterPage = Omit<z.infer<typeof pageSchema>, 'answer'> & {
+type LaterPage = Omit<z.infer<typeof pageFieldsSchema>, 'answer'> & z.infer<typeof pageSourceSchema> & {
   answer: ReturnType<typeof readPageAnswer>['answer'] | z.infer<typeof answerSchema> | null;
 };
 
@@ -52,10 +59,11 @@ export interface LaterPageInput {
   directory?: string | null | undefined;
 }
 
-interface PublicLaterPage {
+export interface PublicLaterPage {
   sessionID: string;
   callID: string;
-  status: string | undefined;
+  status: 'open' | 'answered' | 'declined' | 'ui-not-drawn' | 'closed';
+  source?: 'recovered-await';
   undelivered?: boolean;
 }
 
@@ -88,16 +96,19 @@ const buildLaterAnswerMessage = (page: LaterPage) => {
   if (answer === null) throw new TypeError("Cannot read properties of null (reading 'answered')");
   const title = page.title || 'Page';
   const shown = { title, page: page.question ?? '', ...(page.questionCaptured && { questionCaptured: page.questionCaptured }) };
+  const subject = page.source === 'recovered-await' ? 'a recovered page whose awaitAnswer call was interrupted' : 'a page you showed earlier with answerLater';
   const [lead, fields, close] = answer.answered
     ? [
-      'The user answered a page you showed earlier with answerLater. summary is their choice in words, data is what the page sent.',
+      `The user answered ${subject}. summary is their choice in words, data is what the page sent.`,
       { ...shown, summary: answer.summary, data: answer.data },
-      'Act on it now if it changes what you are doing, else when you reach the step that needs it. The chat shows the summary under the page, so do not repeat it back.',
+      page.source === 'recovered-await'
+        ? 'Continue the task from this answer. The chat shows the summary under the page, so do not repeat it back.'
+        : 'Act on it now if it changes what you are doing, else when you reach the step that needs it. The chat shows the summary under the page, so do not repeat it back.',
     ]
     : answer.reason === 'declined'
-      ? ['The user declined to answer a page you showed earlier with answerLater.', shown, "Don't choose for them and don't ask the same question again."]
+      ? [`The user declined to answer ${subject}.`, shown, "Don't choose for them and don't ask the same question again."]
       : [
-        'The chat could not draw a page you showed earlier with answerLater, so the user saw its source instead of fields. errors are the parser\'s.',
+        `The chat could not draw ${subject}, so the user saw its source instead of fields. errors are the parser's.`,
         { ...shown, errors: answer.errors ?? [] },
         'Fix the program from the errors and show it again.',
       ];
@@ -119,7 +130,7 @@ const buildLaterAnswerMessage = (page: LaterPage) => {
 
 const toPublicPage = (page: LaterPage, undelivered: boolean) => {
   const { answer } = page;
-  const known: PublicLaterPage = { sessionID: page.sessionId, callID: page.callId, status: !answer ? 'open' : answer.answered ? 'answered' : answer.reason };
+  const known: PublicLaterPage = { sessionID: page.sessionId, callID: page.callId, ...(page.source && { source: page.source }), status: page.closed ? 'closed' : !answer ? 'open' : answer.answered ? 'answered' : answer.reason };
   if (undelivered) known.undelivered = true;
   return answer?.answered ? { ...known, summary: answer.summary, data: answer.data } : known;
 };
@@ -146,6 +157,7 @@ export function createLaterPages({
   const deliveryTimers = new Map<string, NodeJS.Timeout>();
   const delivering = new Set<string>();
   const deliveryFailures = new Map<string, number>();
+  const activityRevisions = new Map<string, number>();
 
   const pagesOf = (sessionId: string) => Array.from(pages.values()).filter((page) => page.sessionId === sessionId);
   const publicPage = (page: LaterPage) => toPublicPage(page, Boolean(page.messageID) && deliveryFailures.has(keyOf(page.sessionId, page.callId)));
@@ -180,6 +192,7 @@ export function createLaterPages({
           for (const page of stored.pages) {
             const key = keyOf(page.sessionId, page.callId);
             if (!pages.has(key)) pages.set(key, page);
+            if (page.source === 'recovered-await' && !activityRevisions.has(page.sessionId)) activityRevisions.set(page.sessionId, 0);
           }
           revision = Math.max(revision, stored.revision, now());
         })
@@ -208,10 +221,10 @@ export function createLaterPages({
     }
   };
 
-  const mutate = (apply: () => (() => void) | null, sessionIds: string[]) => {
+  const mutate = (apply: () => (() => void) | null | Promise<(() => void) | null>, sessionIds: string[]) => {
     const run = writePromise.then(async () => {
       await load();
-      const undo = apply();
+      const undo = await apply();
       if (!undo) return false;
       revision += 1;
       try {
@@ -233,22 +246,32 @@ export function createLaterPages({
 
   const snapshot = () => ({ revision, pages: Array.from(pages.values(), publicPage) });
 
+  const insert = (page: LaterPage) => {
+    const key = keyOf(page.sessionId, page.callId);
+    const values = Array.from(pages.values());
+    const evicted = values.length >= MAX_PAGES ? values.find((value) => value.source !== 'recovered-await' && value.answer && !value.messageID) : undefined;
+    if (values.length >= MAX_PAGES && !evicted) {
+      throw new OpenChamberControlError(`${MAX_PAGES} pages already wait for a later answer; ask in text`, 409);
+    }
+    if (evicted) pages.delete(keyOf(evicted.sessionId, evicted.callId));
+    pages.set(key, page);
+    return () => {
+      pages.delete(key);
+      if (evicted) pages.set(keyOf(evicted.sessionId, evicted.callId), evicted);
+    };
+  };
+  const close = (page: LaterPage) => {
+    if (page.source !== 'recovered-await') return null;
+    page.closed = true;
+    return () => { delete page.closed; };
+  };
+
   const open = async ({ sessionId, callId, title, question = '', questionCaptured, directory }: LaterPageInput) => {
     const key = keyOf(sessionId, callId);
     try {
       await mutate(() => {
         if (pages.has(key)) throw new OpenChamberControlError('This call already shows a page', 409);
-        const values = Array.from(pages.values());
-        const evicted = values.length >= MAX_PAGES ? values.find((page) => page.answer && !page.messageID) : undefined;
-        if (values.length >= MAX_PAGES && !evicted) {
-          throw new OpenChamberControlError(`${MAX_PAGES} pages already wait for a later answer; ask in text`, 409);
-        }
-        if (evicted) pages.delete(keyOf(evicted.sessionId, evicted.callId));
-        pages.set(key, { sessionId, callId, directory: directory || null, title, question, ...(questionCaptured && { questionCaptured }), openedAt: now(), answer: null, answeredAt: null, messageID: null });
-        return () => {
-          pages.delete(key);
-          if (evicted) pages.set(keyOf(evicted.sessionId, evicted.callId), evicted);
-        };
+        return insert({ sessionId, callId, directory: directory || null, title, question, ...(questionCaptured && { questionCaptured }), openedAt: now(), answer: null, answeredAt: null, messageID: null });
       }, [sessionId]);
     } catch (error) {
       if (error instanceof OpenChamberControlError) throw error;
@@ -256,15 +279,53 @@ export function createLaterPages({
     }
   };
 
-  const answer = async (input: Parameters<typeof readPageAnswer>[0]) => {
+  const recover = async (identity: PageRecoveryIdentity, validation: PageRecoveryValidation) => {
+    const { sessionId, callId, messageId } = identity;
+    const key = keyOf(sessionId, callId);
+    const activity = activityRevisions.get(sessionId) ?? 0;
+    activityRevisions.set(sessionId, activity);
+    let result: ReturnType<typeof toPublicPage> | null = null;
+    await mutate(async () => {
+      const existing = pages.get(key);
+      if (existing && (existing.source !== 'recovered-await' || existing.messageId !== messageId)) return null;
+      if (existing?.answer || existing?.closed) {
+        result = publicPage(existing);
+        return null;
+      }
+      const page = await validation.read(identity);
+      if (!page || validation.isWaiting(identity) || activityRevisions.get(sessionId) !== activity) {
+        if (existing) return close(existing);
+        return null;
+      }
+      if (existing) {
+        result = publicPage(existing);
+        return null;
+      }
+      const recovered = { ...page, directory: page.directory || null, question: page.question ?? '', openedAt: now(), answer: null, answeredAt: null, messageID: null };
+      const undo = insert(recovered);
+      result = publicPage(recovered);
+      return undo;
+    }, [sessionId]);
+    return result;
+  };
+
+  const answer = async (input: Parameters<typeof readPageAnswer>[0], validation?: PageRecoveryValidation) => {
     const { sessionId, callId, answer: given } = readPageAnswer(input);
     const key = keyOf(sessionId, callId);
     const messageID = createMessageId(now());
-    let changed;
+    let accepted = false;
     try {
-      changed = await mutate(() => {
+      await mutate(async () => {
         const page = pages.get(key);
-        if (!page || page.answer) return null;
+        if (!page || page.answer || page.closed) return null;
+        if (page.source === 'recovered-await') {
+          if (!validation) throw new OpenChamberControlError('Recovered pages require an authoritative eligibility read', 503);
+          const activity = activityRevisions.get(sessionId);
+          const identity = { sessionId, callId, messageId: page.messageId };
+          const eligible = await validation.read(identity);
+          if (!eligible || validation.isWaiting(identity) || activityRevisions.get(sessionId) !== activity) return close(page);
+        }
+        accepted = true;
         page.answer = given;
         page.answeredAt = now();
         page.messageID = messageID;
@@ -275,9 +336,10 @@ export function createLaterPages({
         };
       }, [sessionId]);
     } catch (error) {
+      if (error instanceof OpenChamberControlError) throw error;
       throw new OpenChamberControlError(`OpenChamber could not save the answer, so the page stays open: ${controlErrorFields(error)?.message ?? error}`, 500);
     }
-    if (!changed) throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
+    if (!accepted) throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
     arm(key, 0);
     return { answered: given.answered };
   };
@@ -359,9 +421,23 @@ export function createLaterPages({
   };
 
   const processPayload = (payload: Parameters<typeof deletedEventSchema.safeParse>[0]) => {
+    const progress = readRecoveredPageProgress(payload);
+    if (progress) {
+      const sessionId = progress.sessionId;
+      if (!activityRevisions.has(sessionId)) return;
+      activityRevisions.set(sessionId, (activityRevisions.get(sessionId) ?? 0) + 1);
+      void mutate(() => {
+        const undo = pagesOf(sessionId)
+          .filter((page) => page.source === 'recovered-await' && !page.answer && !page.closed && page.messageId !== progress.messageId)
+          .map(close);
+        return undo.length ? () => { for (const restore of undo) restore?.(); } : null;
+      }, [sessionId]).catch(() => undefined);
+      return;
+    }
     const deleted = parse(deletedEventSchema, payload);
     if (!deleted) return;
     const { sessionID } = deleted.properties;
+    activityRevisions.delete(sessionID);
     void mutate(() => {
       const gone = pagesOf(sessionID);
       if (gone.length === 0) return null;
@@ -386,5 +462,5 @@ export function createLaterPages({
     };
   };
 
-  return { load, snapshot, open, answer, processPayload, start, flush: () => writePromise };
+  return { load, snapshot, open, recover, answer, processPayload, start, flush: () => writePromise };
 }

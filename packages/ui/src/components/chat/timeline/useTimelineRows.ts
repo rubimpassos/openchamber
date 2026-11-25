@@ -3,6 +3,9 @@ import React from 'react';
 import { turnHeaderCanStick } from '../lib/turns/stickyPrompt';
 import { getTurnsWithLaterAssistant } from '../lib/turns/liveActivity';
 import type { ChatMessageEntry } from '../lib/turns/types';
+import { deriveMessageRole } from '../message/messageRole';
+import { isGuestMessageIn } from '@/lib/guests/message-presentation';
+import { useGuestsStore } from '@/lib/guests/store';
 import { useTurnRecords } from '../hooks/useTurnRecords';
 import { buildHistoryEntries, findFirstVisibleMessageId } from '../lib/turns/timelineEntries';
 import { buildTimelineRows } from '../lib/turns/timelineRows';
@@ -94,6 +97,11 @@ export const useTimelineRows = (
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
+    const guestCatalog = useGuestsStore((state) => state.guests);
+    const isActivityOpener = React.useCallback((message: ChatMessageEntry) => (
+        deriveMessageRole(message.info).isUser && isGuestMessageIn(guestCatalog, message.parts)
+    ), [guestCatalog]);
+
     const previousRowsRef = React.useRef<RenderRow[]>([]);
     const rows = React.useMemo(() => streamPerfMeasure('ui.message_list.render_rows_ms', () => {
         const next = buildTimelineRows(allEntries, {
@@ -101,16 +109,17 @@ export const useTimelineRows = (
             keepActivityText,
             expandedTurns: turnExpansion,
             showReasoningTraces,
+            isActivityOpener,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
-    }), [allEntries, defaultActivityExpanded, keepActivityText, showReasoningTraces, turnExpansion]);
+    }), [allEntries, defaultActivityExpanded, isActivityOpener, keepActivityText, showReasoningTraces, turnExpansion]);
 
     const stickyRowIndices = React.useMemo(() => {
         if (!stickyUserHeader) return undefined;
         const indices: number[] = [];
         rows.forEach((row, index) => {
-            if (row.kind === 'turn-head' && turnHeaderCanStick(row.entry.turn.userMessage)) indices.push(index);
+            if (row.kind === 'turn-head' && !row.openerUnderFold && turnHeaderCanStick(row.entry.turn.userMessage)) indices.push(index);
         });
         return indices.length > 0 ? indices : undefined;
     }, [rows, stickyUserHeader]);

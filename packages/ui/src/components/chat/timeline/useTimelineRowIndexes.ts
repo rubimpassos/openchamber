@@ -22,6 +22,11 @@ export const useTimelineRowIndexes = (rows: RenderRow[], allEntries: RenderEntry
                 messageIndexes.set(row.entry.turn.userMessage.info.id, index);
             } else if (row.kind === 'turn-fold') {
                 foldIndexes.set(turnId, index);
+                if (row.openerUnderFold) {
+                    const openerId = row.entry.turn.userMessage.info.id;
+                    messageIndexes.set(openerId, index);
+                    collapsible.set(openerId, turnId);
+                }
             } else if (row.kind === 'turn-message' && !row.slice?.from) {
                 messageIndexes.set(row.messageId, index);
             }

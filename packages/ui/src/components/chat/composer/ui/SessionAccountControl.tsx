@@ -23,7 +23,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useDraftSessionAccountStore } from '@/stores/useDraftSessionAccountStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { AccountUsageLines } from './AccountUsageLines';
-import { useProviderAccounts } from './useProviderAccounts';
+import { useProviderAccounts } from '@/hooks/useProviderAccounts';
 
 /**
  * The account a session runs on, and whether a limit may move it. Shown for a

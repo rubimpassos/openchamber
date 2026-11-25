@@ -125,8 +125,8 @@ constructor retains its existing `Object.assign` behavior.
   16,000 characters as JSON, or `declined: true` when the user declined, which
   ends the call with `{ answered: false, reason: "declined" }` and a note that
   tells the agent not to choose for them) or the request is aborted. Nothing outlives the
-  call, so a second answer, an answer for a call that ended, and an answer
-  after a server restart are a `404`, never a silent success.
+  call. A second answer and an answer for a call that ended are a `404`.
+  A stranded call can be recovered on demand as described below.
   Before it waits, the action reads the session's OpenCode inbox. A message
   the user steered into the turn that the agent has not read yet means they
   wrote before the page appeared (a queued one waits for the turn to end
@@ -205,6 +205,36 @@ constructor retains its existing `Object.assign` behavior.
   answered, `undelivered` while delivery fails); every change broadcasts `openchamber:render-later.updated`
   `{ revision, sessionID, pages[] }`, and the chat reads it through
   `packages/ui/src/sync/later-pages.ts` (`usePageAsk`).
+  `POST /api/openchamber/render/recover` takes
+  `{ sessionId, messageId, callId }` and returns `{ page: PublicLaterPage | null }`.
+  `page-recovery.ts` reads the canonical session, active executions, forms,
+  inbox and latest content message through the SDK, in that session's directory.
+  Failed reads fail the route and preserve existing pages. Only an unresolved
+  `openchamber_render` await in the latest assistant content message can be
+  promoted, while idle and without a live waiter or canonical form.
+  A legacy running/idle await needs no additional metadata. An aborted await
+  needs a current inactivity record or a restart cut naming its exact message,
+  call and tool. A user Stop, a completed result, shared page, later chat or
+  session progress cannot grant eligibility. Recovery never executes the page
+  or calls the render action.
+  The promoted entry has `source: 'recovered-await'` and keeps its original
+  message id privately for answer-time revalidation. Its public projection uses
+  the existing `sessionID`, `callID`, answer fields and `undelivered` flag.
+  The original page submits through `/render/answer`; its answer is revalidated
+  inside the later-page write queue and then uses the same durable synthetic
+  delivery, retries, deduplication and archive check. The synthetic envelope and
+  metadata source stay `openchamber-page-answer`, with prose identifying the
+  recovered await. A declined or undrawable recovered page is terminal too.
+  Session progress, chat and Stop close only open recovered awaits with public
+  `status: 'closed'`; these durable tombstones cannot be recovered again.
+  Recovered dispositions are retained until session deletion, including answers
+  already delivered, so capacity eviction cannot reopen the original call.
+  The existing 500-page limit still applies.
+  Revalidation can close a page when this server missed the corresponding event.
+  AnswerLater entries keep their existing lifetime. Concurrent recoveries
+  return the same entry, and concurrent submissions accept only one answer.
+  Web, Electron, hosted mobile and Capacitor use this server contract. VS Code
+  has no local recovery owner and must gate or bridge the capability explicitly.
   Known limits: the OpenChamber server inside an isolated space refuses
   `answerLater` with `503`, as it refuses extension waits and `pr.watch`
   (`index.js` gives it no `laterPages`), because the host's chat reads later
@@ -991,6 +1021,16 @@ the chat holds background messages out of the transcript while a page waits
 message and Stop all end waits on purpose. A later page asks nothing of the
 turn, so it lives beside the waits, saved on disk because the user may answer
 after a restart.
+
+### Why stranded awaits are promoted only on demand
+
+The latest canonical call still contains the original form after its process
+lost the waiter. Validating that call at recovery and submission lets the
+existing durable later-page owner deliver the answer without replaying render
+or keeping live awaits in a second persistence queue. A recovered await closes
+when the conversation moves on, while an answerLater page remains independent
+of the turn. Closed recovery entries remain as tombstones because their history
+can still contain the unresolved original call.
 
 ### Why a later answer steers into a running turn
 

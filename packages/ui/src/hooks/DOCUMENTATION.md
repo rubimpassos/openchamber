@@ -39,6 +39,10 @@ or navigating the owner releases the same selection.
 
 ### Catalog reads
 
+- `useProviderAccounts` owns the credential-change and failover subscriptions
+  used by the session account picker. `usePageAsk` owns page-wait subscriptions
+  and interrupted-page recovery; its rendering contract stays in
+  `components/chat/message/parts/DOCUMENTATION.md`.
 - A failed catalog or model-list request keeps the previous answer. An empty successful answer and a failed request are different states and never look the same.
 - Model lists are re-read when the provider catalog changes, on a provider login and on a runtime switch. A panel restored at launch otherwise keeps the empty answer OpenCode gave while it was still starting.
 - Directory-scoped lists name the current directory. Without one, the answer describes OpenCode's own working location, which need not hold the project's models.

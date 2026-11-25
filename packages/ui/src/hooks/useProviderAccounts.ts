@@ -6,9 +6,12 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 
 type Account = { id: string; label: string; limits: LimitAccount | null };
 
+/** The provider's stored accounts from OpenCode, with the usage the failover swept for them. */
+// A session account swaps the request's sign-in token, so only sign-ins count.
 const signInAccounts = (integrations: Parameters<typeof findIntegrationForProvider>[0], providerId: string) => (
   getCredentialConnections(findIntegrationForProvider(integrations, providerId)).filter((credential) => credential.method === 'oauth')
 );
+
 const loadSignInAccounts = async (providerId: string) => signInAccounts((await loadIntegrationCatalog()).integrations, providerId);
 
 export const useProviderAccounts = (
@@ -22,6 +25,7 @@ export const useProviderAccounts = (
   ));
   const [limits, setLimits] = React.useState<LimitAccount[]>([]);
   const [revision, setRevision] = React.useState(0);
+
   React.useEffect(() => {
     if (!enabled) return undefined;
     const reload = () => setRevision((value) => value + 1);
@@ -29,17 +33,34 @@ export const useProviderAccounts = (
     const unsubscribeEvents = subscribeOpenchamberEvents((event) => {
       if (event.type === 'limit-failover') reload();
     });
-    return () => { unsubscribeCredentials(); unsubscribeEvents(); };
+    return () => {
+      unsubscribeCredentials();
+      unsubscribeEvents();
+    };
   }, [enabled]);
+
   React.useEffect(() => {
     if (!enabled) return undefined;
     let active = true;
-    void loadAccounts(providerId).then((next) => { if (active) setCredentials(next); }).catch(() => undefined);
-    void fetchLimitAccounts(providerId).then((next) => { if (active) setLimits(next); }).catch(() => undefined);
-    return () => { active = false; };
+    void loadAccounts(providerId)
+      .then((next) => {
+        if (active) setCredentials(next);
+      })
+      .catch(() => undefined);
+    // Usage only decorates the list: an unreachable sweep leaves the accounts listed.
+    void fetchLimitAccounts(providerId)
+      .then((next) => {
+        if (active) setLimits(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, [enabled, providerId, sessionId, revision, loadAccounts]);
+
   return React.useMemo(() => credentials.map((credential) => ({
-    id: credential.id, label: credential.label,
+    id: credential.id,
+    label: credential.label,
     limits: limits.find((entry) => entry.id === credential.id) ?? null,
   })), [credentials, limits]);
 };

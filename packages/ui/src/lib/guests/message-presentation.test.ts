@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { compileGuestMessageRules, guestMessageBodyText, matchGuestMessageRule } from './message-presentation';
+import { compileGuestMessageRules, guestMessageBodyText, isGuestMessageIn, matchGuestMessageRule } from './message-presentation';
 import type { InstalledGuest } from './types';
 
 const guest = (overrides: Partial<InstalledGuest> = {}): InstalledGuest => ({
@@ -47,5 +47,36 @@ describe('guest message presentation', () => {
 
   test('the body drops HTML comments and system-reminder tags', () => {
     expect(guestMessageBodyText('<system-reminder>\nhello\n</system-reminder>\n\n\n<!-- X -->')).toBe('hello');
+  });
+
+  test('a user message is a plugin message only under a catalog whose active rules claim it', () => {
+    const catalog = [guest({
+      messages: [
+        { match: '^\\[ALL TASKS COMPLETE\\]', name: 'All tasks complete', tone: 'success' },
+        { match: '^\\[TASK (?<status>DONE|FAILED|RETRYING)\\]', name: 'Task', subtitle: '{match.status}' },
+        { match: '\\[DIRECTIVE - TODO CONTINUATION\\]', name: 'Todo continuation', body: 'todos' },
+        { match: '<peer_message\\b[^>]*\\bfrom="(?<from>[^"]+)"', name: 'Team message', subtitle: 'from {match.from}' },
+      ],
+    })];
+    const parts = (text: string) => [{ type: 'text', text }];
+    const claimed = [
+      '[ALL TASKS COMPLETE]',
+      '[TASK DONE]\n**Description:** Find the auth middleware',
+      '[TASK FAILED]\n**Error:** provider unavailable',
+      '[TASK RETRYING]\n- Next model: `other/model`',
+      '[DIRECTIVE - TODO CONTINUATION]\n\n- [in_progress] Check the grouping',
+      '<peer_message messageId="m1" from="reviewer">The review is ready.</peer_message>',
+    ].map(parts);
+    const aggregate = claimed[0];
+    if (!aggregate) throw new Error('Expected an aggregate task message');
+    expect(claimed.map((message) => isGuestMessageIn(catalog, message))).toEqual([true, true, true, true, true, true]);
+    expect(isGuestMessageIn(catalog, parts('please fix the [TASK DONE] parser'))).toBe(false);
+    expect(isGuestMessageIn(catalog, [{ type: 'file' }])).toBe(false);
+    // The same message under another catalog: the extension paused, no extension at all, other rules.
+    expect(claimed.map((message) => isGuestMessageIn([guest({ ...catalog[0], enabled: false })], message))).toEqual([false, false, false, false, false, false]);
+    expect(isGuestMessageIn([], aggregate)).toBe(false);
+    const updated = [guest({ messages: [{ match: '^\\[TASK DONE\\]', name: 'Task' }] })];
+    expect(claimed.map((message) => isGuestMessageIn(updated, message))).toEqual([false, true, false, false, false, false]);
+    expect(isGuestMessageIn(catalog, aggregate)).toBe(true);
   });
 });

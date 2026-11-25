@@ -124,14 +124,14 @@ const elementText = (html: string, pattern: RegExp) => (pattern.exec(html)?.[1] 
   .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, entity: keyof typeof TITLE_ENTITIES) => TITLE_ENTITIES[entity])
   .replace(/\s+/g, ' ')
   .trim();
-const renderPageTitleFromHtml = (html: string) => (
+export const renderPageTitleFromHtml = (html: string) => (
   elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
   || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)
 ).slice(0, RENDER_PAGE_MAX_TITLE_LENGTH).trim();
 const RENDER_PAGE_FALLBACK_TITLE = 'Page';
 
 const RENDER_PAGE_MAX_QUESTION_LENGTH = 2_000;
-const renderPageQuestion = (field: string, content: string) => {
+export const renderPageQuestion = (field: string, content: string) => {
   const text = field === 'ui'
     ? content.trim()
     : content
@@ -256,7 +256,7 @@ export const createPageAnswers = ({ onWaitChange = () => {} }: PageAnswersOption
     }
   };
 
-  return { wait, answer, release };
+  return { wait, answer, release, has: (sessionId: string, callId: string) => waiting.has(pageKey(sessionId, callId)) };
 };
 
 const OPERATOR_CHILD_REFUSAL = 'Nobody answers pages in this session: the user does not interact with it, and your final answer goes to the agent that started it. Show the page without awaitAnswer or answerLater, and write your question in plain text in your answer';

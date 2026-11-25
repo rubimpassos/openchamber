@@ -101,6 +101,7 @@ const hoistedHeight = (pages: ShownPart[], metrics: RowSizeMetrics): number => p
 }, 0);
 
 const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetrics): number | undefined => {
+    if (row.messageId === row.entry.turn.userMessage.info.id) return metrics.lineHeight + (row.gapBelow ? TURN_END_WITHOUT_ANSWER_PX : 0);
     const message = row.entry.turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
     if (!message) return undefined;
     const hoisted = hoistedPages(row);
@@ -145,7 +146,7 @@ export const estimateTimelineRowSize = (row: TimelineRow, metrics: RowSizeMetric
     let height: number;
     switch (row.kind) {
         case 'ungrouped': return UNGROUPED_PX;
-        case 'turn-head': height = promptHeight(row.entry.turn.userMessage, metrics); break;
+        case 'turn-head': height = row.openerUnderFold ? 0 : promptHeight(row.entry.turn.userMessage, metrics); break;
         case 'turn-fold': height = FOLD_HEADER_PX + (row.keepText && !row.finalMessageId ? hoistedHeight(hoistedPages(row), metrics) : 0); break;
         case 'turn-pages': height = hoistedHeight(hoistedPages(row), metrics); break;
         case 'turn-message': {

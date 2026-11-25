@@ -8,6 +8,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import type { FormRequest, Message, Part, Session } from '@/lib/opencode/model';
 import { SyncProvider, useDirectoryStore } from '@/sync/sync-context';
 import type { State } from '@/sync/types';
+import { DEFERRED_QUESTION_NOTE } from '@/sync/recoverable-questions';
 import { markOrphanedQuestionDismissed } from './orphanedQuestions';
 import { useOrphanedQuestions } from './useOrphanedQuestions';
 
@@ -71,7 +72,7 @@ const publish = async (state: Partial<State>) => {
 };
 const seed = async (ready = true, part = questionPart()) => publish({
   session: [session()], message: { [SESSION_ID]: [assistant] }, part: { [assistant.id]: [part] },
-  sessionStatusReady: ready, session_status: {},
+  sessionStatusReady: ready, session_status: {}, status: 'complete',
 });
 
 beforeEach(() => {
@@ -181,4 +182,33 @@ test('follows interruption records and does not retain questions across session 
   expect(result().questions).toEqual([]);
   await seed();
   expect(result().questions[0]?.cause).toEqual({ kind: 'unknown' });
+});
+
+test('waits for cold bootstrap to finish before treating missing live forms as authoritative', async () => {
+  await render();
+  await seed();
+  await publish({ status: 'partial' });
+
+  // Status can succeed while form.list is pending or has failed.
+  expect(result().questions).toEqual([]);
+  await publish({ status: 'complete' });
+  expect(result().questions.map((question) => question.tool?.callID)).toEqual(['call_question']);
+});
+
+for (const error of [
+  'The user dismissed this question',
+  'The user declined',
+  DEFERRED_QUESTION_NOTE,
+]) test(`does not revive an explicitly closed question under persisted restart evidence: ${error}`, async () => {
+  await render();
+  const part = questionPart('Which mode?', 'error');
+  if (part.type !== 'tool' || part.state.status !== 'error') throw new Error('Expected an errored question');
+  await seed(true, { ...part, state: { ...part.state, error, errorType: 'tool.execution' } });
+
+  await publish({ session: [session({ openchamber: {
+    pendingQuestion: { messageID: assistant.id, callID: 'call_question', title: 'Mode', cause: 'opencode-restart', at: 300 },
+    restartCutTurn: { messageID: assistant.id, callID: 'call_question', toolName: 'question', at: 300 },
+  } })] });
+
+  expect(result().questions).toEqual([]);
 });

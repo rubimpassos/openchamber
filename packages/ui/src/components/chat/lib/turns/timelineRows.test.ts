@@ -36,8 +36,12 @@ const turnEntry = (messages: ChatMessageEntry[]): TimelineEntry => {
     return { kind: 'turn', key: `turn:${turn.turnId}`, turn, isLastTurn: true };
 };
 
-const summary: TimelineRowsOptions = { collapsedActivity: false, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true };
-const collapsed: TimelineRowsOptions = { collapsedActivity: true, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true };
+const summary: TimelineRowsOptions = { collapsedActivity: false, keepActivityText: false, expandedTurns: new Map(), showReasoningTraces: true, isActivityOpener: () => false };
+const collapsed: TimelineRowsOptions = { ...summary, collapsedActivity: true };
+// The turn's opener is a plugin message an extension claims, drawn as agent activity.
+const claimed: TimelineRowsOptions = { ...collapsed, isActivityOpener: (message) => message.info.id === 'user' };
+const expanded = (options: TimelineRowsOptions): TimelineRowsOptions => ({ ...options, expandedTurns: new Map([['user', true]]) });
+const openerUnderFold = (rows: ReturnType<typeof buildTimelineRows>) => rows.map((row) => row.kind !== 'ungrouped' && row.openerUnderFold);
 
 describe('answerChunkCuts', () => {
     test('leaves a short text whole', () => {
@@ -142,5 +146,60 @@ describe('buildTimelineRows', () => {
         expect(buildTimelineRows([entry], summary, first)).toBe(first);
         const opened = buildTimelineRows([entry], { ...summary, collapsedActivity: true }, first);
         expect(opened[0]).toBe(first[0]);
+    });
+
+    test('an opener drawn as activity is the first step of its turn\'s fold, and a prompt keeps its row', () => {
+        const entry = turnEntry([
+            assistant('step', [readPart], 'tool-calls'),
+            assistant('answer', [textPart('final', 'Done')], 'stop'),
+        ]);
+        const closed = buildTimelineRows([entry], claimed, []);
+        expect(closed.map((row) => row.key)).toEqual(['turn:user', 'fold:user', 'step:answer']);
+        expect(openerUnderFold(closed)).toEqual([true, true, true]);
+        expect(buildTimelineRows([entry], expanded(claimed), []).map((row) => row.key))
+            .toEqual(['turn:user', 'fold:user', 'step:user', 'step:step', 'step:answer']);
+
+        expect(openerUnderFold(buildTimelineRows([entry], collapsed, []))).toEqual([false, false, false]);
+        expect(buildTimelineRows([entry], expanded(collapsed), []).map((row) => row.key))
+            .toEqual(['turn:user', 'fold:user', 'step:step', 'step:answer']);
+        // With Activity expanded by default nothing folds, so the opener stays where it is drawn today.
+        const unfolded = buildTimelineRows([entry], { ...claimed, collapsedActivity: false }, []);
+        expect(unfolded.map((row) => row.key)).toEqual(['turn:user', 'step:step', 'step:answer']);
+        expect(openerUnderFold(unfolded)).toEqual([false, false, false]);
+    });
+
+    test('an opener drawn as activity is enough for a fold: before a reply without steps, and while no reply exists', () => {
+        const answered = turnEntry([assistant('answer', [textPart('final', 'Done')], 'stop')]);
+        expect(buildTimelineRows([answered], collapsed, []).map((row) => row.key)).toEqual(['turn:user', 'step:answer']);
+        expect(buildTimelineRows([answered], claimed, []).map((row) => row.key)).toEqual(['turn:user', 'fold:user', 'step:answer']);
+        expect(buildTimelineRows([answered], expanded(claimed), []).map((row) => row.key))
+            .toEqual(['turn:user', 'fold:user', 'step:user', 'step:answer']);
+
+        const waiting = turnEntry([]);
+        expect(buildTimelineRows([waiting], collapsed, []).map((row) => row.key)).toEqual(['turn:user']);
+        expect(buildTimelineRows([waiting], claimed, []).map((row) => row.key)).toEqual(['turn:user', 'fold:user']);
+        const open = buildTimelineRows([waiting], expanded(claimed), []);
+        expect(open.map((row) => row.key)).toEqual(['turn:user', 'fold:user', 'step:user']);
+        expect(open.map((row) => row.kind !== 'ungrouped' && row.gapBelow)).toEqual([false, false, true]);
+    });
+
+    test('draws an opener with dozens of parts as one row of the opened fold', () => {
+        const parts: Part[] = Array.from({ length: 30 }, (_, index) => textPart(`line-${index}`, `Line ${index}`));
+        const turn = projectTurnRecords([{ info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 } }, parts }]).turns[0];
+        if (!turn) throw new Error('Expected the opener to create a turn');
+        const rows = buildTimelineRows([{ kind: 'turn', key: 'turn:user', turn, isLastTurn: true }], expanded(claimed), []);
+        expect(rows.map((row) => row.key)).toEqual(['turn:user', 'fold:user', 'step:user']);
+    });
+
+    test('replaces a turn\'s rows when its opener starts or stops being drawn as activity', () => {
+        const entry = turnEntry([
+            assistant('step', [readPart], 'tool-calls'),
+            assistant('answer', [textPart('final', 'Done')], 'stop'),
+        ]);
+        const prompt = buildTimelineRows([entry], collapsed, []);
+        const activity = buildTimelineRows([entry], claimed, prompt);
+        expect(activity.map((row, index) => row === prompt[index])).toEqual([false, false, false]);
+        expect(buildTimelineRows([entry], claimed, activity)).toBe(activity);
+        expect(openerUnderFold(buildTimelineRows([entry], collapsed, activity))).toEqual([false, false, false]);
     });
 });

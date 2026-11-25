@@ -8,7 +8,7 @@ import type { createOpenChamberControlService } from './service.js';
 import type { ControlErrorDetails } from './error.js';
 
 export interface ControlRoutesOptions {
-  controlService: Pick<ReturnType<typeof createOpenChamberControlService>, 'execute' | 'answerPage' | 'secretFields' | 'answerSecret' | 'forgetSavedSecret'>;
+  controlService: Pick<ReturnType<typeof createOpenChamberControlService>, 'execute' | 'answerPage' | 'recoverPage' | 'secretFields' | 'answerSecret' | 'forgetSavedSecret'>;
   laterPages?: Pick<ReturnType<typeof createLaterPages>, 'load' | 'snapshot'> | null;
 }
 
@@ -75,6 +75,15 @@ export const registerOpenChamberControlRoutes = (app: Application, { controlServ
       return res.json(laterPages.snapshot());
     } catch (error) {
       const controlError = asControlError(error, 'Could not read the pages');
+      return res.status(controlError.statusCode).json({ error: controlError.message });
+    }
+  });
+
+  app.post('/api/openchamber/render/recover', express.json({ limit: '4kb' }), async (req, res) => {
+    try {
+      return res.json(await controlService.recoverPage(req.body));
+    } catch (error) {
+      const controlError = asControlError(error, 'Could not recover the page');
       return res.status(controlError.statusCode).json({ error: controlError.message });
     }
   });

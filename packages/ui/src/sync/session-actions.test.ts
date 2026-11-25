@@ -5878,6 +5878,7 @@ describe("answerOrphanedQuestion", () => {
   })
 
   test("answers via question.reply with the real server request id when the question is still pending", async () => {
+    sessionRecords.set("session-a", sessionFixture("session-a"))
     const store = createStore({}, { message: { "session-a": [askingAssistantMessage] } })
     const childStores = createChildStores([["/test/project", store]])
     const question = buildOrphanedQuestion("session-a")

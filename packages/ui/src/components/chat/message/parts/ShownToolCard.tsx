@@ -14,6 +14,7 @@ import type { ToolPopupContent } from '../types';
 import { GeneratedImages } from './GeneratedImages';
 import { ShownPage } from './HtmlRenderFrame';
 import { SecretForgetCard, SecretRequestCard, SecretRunCard } from './SecretRequestCard';
+import { usePageAsk } from '@/hooks/usePageAsk';
 
 export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPopup?: (content: ToolPopupContent) => void }) {
   const runId = React.useMemo(() => proposedWorkflowRunId(part.tool, part.state), [part.tool, part.state]);
@@ -31,10 +32,12 @@ export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPop
 
 function SettledAskLine({ part }: { part: ToolPart }) {
   const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-  if (!page) return null;
+  const ask = usePageAsk(part, page?.ask);
+  if (!page || !ask) return null;
+  if (ask.kind === 'waiting') return <ShownToolCard part={part} />;
   return (
     <div className="my-2">
-      <PageAskStatus ask={page.ask} answeredSummary={page.ask.kind === 'answered' ? page.ask.summary : undefined} />
+      <PageAskStatus ask={ask} answeredSummary={ask.kind === 'answered' ? ask.summary : undefined} />
     </div>
   );
 }

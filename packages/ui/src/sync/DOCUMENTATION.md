@@ -10,6 +10,13 @@ This document covers the current client-side session/data architecture in `packa
 
 `interrupted-turn-recovery.ts` owns recorded interruption and managed-restart finalization. `sync-event-dispatch.ts` applies that recovery to late metadata patches, while message loading uses its public re-export. `session-request-hooks.ts` includes persisted pending questions in blocking-request reads; the provider starts and disposes their subscription. `surface-notifications.ts` routes restart notices and guest/bot notification targets. `send-message-options.ts` carries both delivery progress and draft-creation recovery callbacks.
 
+`recover-rendered-page.ts` registers an interrupted OpenChamber page on demand
+and refreshes the existing later-page projection. The server owns recovery
+eligibility and durable delivery. History alone cannot re-enable a form, and a
+runtime change invalidates the registration response and its snapshot read.
+Transient recovery failures use the existing retry helper with a caller-owned
+abort signal, so leaving the form cancels both requests and pending backoff.
+
 ### Why provider effects keep their shared refs together
 
 Bootstrap disposal, stream reconnect and the watchdog share recovery state for the provider's lifetime. Keeping those effects with their refs preserves the original dependency arrays and effect order without threading mutable refs through unrelated lifecycle hooks.

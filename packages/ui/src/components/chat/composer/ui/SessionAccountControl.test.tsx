@@ -1,16 +1,18 @@
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { notifyCredentialChanged } from '@/lib/opencode/integration-catalog';
-import { useProviderAccounts } from './useProviderAccounts';
+import { useProviderAccounts } from '@/hooks/useProviderAccounts';
 
 type SignIn = { id: string; label: string };
 const signIns: SignIn[] = [{ id: 'cred_ultra', label: 'Ultra' }, { id: 'cred_team', label: 'Team Premium' }];
 
 let root: Root | null = null;
 let shown: string[] = [];
+const originalGlobals = new Map<string, PropertyDescriptor | undefined>();
+let restoreFetch: (() => void) | undefined;
 
 const Accounts: React.FC<{ sessionId: string; load: (providerId: string) => Promise<SignIn[]> }> = ({ sessionId, load }) => {
   shown = useProviderAccounts('anthropic', true, sessionId, load).map((account) => account.label);
@@ -35,9 +37,19 @@ const render = (sessionId: string, load: (providerId: string) => Promise<SignIn[
 
 const mount = () => {
   const win = new Window({ url: 'http://localhost' });
-  for (const [key, value] of Object.entries({ window: win, document: win.document, IS_REACT_ACT_ENVIRONMENT: true })) {
+  for (const [key, value] of Object.entries({
+    window: win,
+    document: win.document,
+    Event: win.Event,
+    CustomEvent: win.CustomEvent,
+    localStorage: win.localStorage,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    originalGlobals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, value });
   }
+  const fetch = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<never>(() => undefined));
+  restoreFetch = () => fetch.mockRestore();
   root = createRoot(document.createElement('div'));
 };
 
@@ -45,6 +57,13 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = null;
   shown = [];
+  restoreFetch?.();
+  restoreFetch = undefined;
+  for (const [key, descriptor] of originalGlobals) {
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else Reflect.deleteProperty(globalThis, key);
+  }
+  originalGlobals.clear();
 });
 
 describe('useProviderAccounts', () => {

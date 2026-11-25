@@ -10,6 +10,7 @@ interface TurnItemProps {
     turn: Turn;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
     gapBelow?: boolean;
+    openerInFold?: boolean;
 }
 
 const stickyHeaderBackground = (fadeRem: string): React.CSSProperties => ({
@@ -19,7 +20,7 @@ const stickyHeaderBackground = (fadeRem: string): React.CSSProperties => ({
 const STICKY_HEADER_BACKGROUND_DESKTOP = stickyHeaderBackground('2.25rem');
 const STICKY_HEADER_BACKGROUND_MOBILE = stickyHeaderBackground('0.75rem');
 
-const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = false }) => {
+const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = false, openerInFold = false }) => {
     const { isMobile } = useDeviceInfo();
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     // A hidden prompt has nothing to pin, and a turn opened by anything but
@@ -28,8 +29,8 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = fal
     // the setting as a one-line strip over the chat (PinnedPromptStrip), so
     // the prompt stays in its turn there.
     const headerSticks = React.useMemo(
-        () => stickyUserHeader && !isMobile && turnHeaderCanStick(turn.userMessage),
-        [stickyUserHeader, isMobile, turn.userMessage]
+        () => stickyUserHeader && !isMobile && !openerInFold && turnHeaderCanStick(turn.userMessage),
+        [stickyUserHeader, isMobile, openerInFold, turn.userMessage]
     );
 
     const hasNotices = Boolean(turn.waitingNotices?.length);
@@ -45,7 +46,7 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = fal
             data-turn-id={turn.turnId}
             data-scroll-spy-id={turn.turnId}
         >
-            {headerSticks ? (
+            {openerInFold ? null : headerSticks ? (
                 <div
                     className="sticky top-0 z-20 [overflow-anchor:none]"
                     data-turn-sticky-header=""

@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { z } from 'zod';
 
-const laterPageSchema = z.object({
+export const laterPageSchema = z.object({
   sessionID: z.string().min(1),
   callID: z.string().min(1),
-  status: z.enum(['open', 'answered', 'declined', 'ui-not-drawn']),
+  status: z.enum(['open', 'answered', 'declined', 'ui-not-drawn', 'closed']),
+  source: z.literal('recovered-await').optional(),
   summary: z.string().optional(),
   data: z.json().optional().catch(undefined),
   undelivered: z.literal(true).optional().catch(undefined),
