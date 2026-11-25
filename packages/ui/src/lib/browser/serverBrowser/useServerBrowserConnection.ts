@@ -129,6 +129,7 @@ export const useServerBrowserConnection = (
 
   const act = React.useCallback(async (
     fn: (generation: number) => Promise<ServerBrowserResult<ServerBrowserState>>,
+    retryViewId?: string | null,
   ): Promise<ServerBrowserState | null> => {
     let result = await fn(generationRef.current);
     // The view moved on since our last poll (another tab, the agent): catch
@@ -137,7 +138,9 @@ export const useServerBrowserConnection = (
       const current = await getServerBrowserState(guestId, viewerId);
       if (current.ok) {
         applyState(current.data);
-        result = await fn(current.data.generation);
+        if (retryViewId === undefined || (retryViewId !== null && current.data.viewId === retryViewId)) {
+          result = await fn(current.data.generation);
+        }
       }
     }
     if (result.ok) {
@@ -247,7 +250,10 @@ export const useServerBrowserConnection = (
     loading,
     error,
     refresh,
-    navigate: (url) => act((generation) => navigateServerBrowser(guestId, viewerId, { url, generation })),
+    navigate: (url) => act(
+      (generation) => navigateServerBrowser(guestId, viewerId, { url, generation }),
+      stateRef.current?.viewId ?? null,
+    ),
     back: () => act((generation) => goServerBrowserBack(guestId, viewerId, generation)),
     forward: () => act((generation) => goServerBrowserForward(guestId, viewerId, generation)),
     reload: () => act((generation) => reloadServerBrowser(guestId, viewerId, generation)),
