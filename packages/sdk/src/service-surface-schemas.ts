@@ -11,6 +11,7 @@ import {
   SURFACE_INPUT_BATCH_MAX,
   SURFACE_TEXT_MAX,
   SURFACE_TITLE_MAX,
+  SURFACE_VIEW_ID_MAX,
 } from './service-surface.ts';
 
 const modifiersSchema = z.object({ alt: z.boolean(), ctrl: z.boolean(), meta: z.boolean(), shift: z.boolean() });
@@ -40,9 +41,10 @@ export const surfaceInputEventSchema = z.discriminatedUnion('type', [
 ]);
 
 const dimension = z.number().int().min(1).max(SURFACE_DIMENSION_MAX);
+export const surfaceViewIdSchema = z.string().min(1).max(SURFACE_VIEW_ID_MAX).regex(/^[\x21-\x7e]+$/);
 
 export const surfaceViewerMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('ack'), seq: z.number().int().min(0) }),
+  z.object({ type: z.literal('ack'), seq: z.number().int().min(0), presented: z.boolean().optional() }),
   z.object({ type: z.literal('input'), events: z.array(surfaceInputEventSchema).min(1).max(SURFACE_INPUT_BATCH_MAX) }),
   z.object({ type: z.literal('release') }),
   z.object({ type: z.literal('resize'), width: dimension, height: dimension }),
@@ -64,8 +66,10 @@ export const surfaceHostMessageSchema = z.discriminatedUnion('type', [
     mime: z.enum(SURFACE_FRAME_MIMES),
     bytes: z.number().int().min(1),
     title: z.string().max(SURFACE_TITLE_MAX).optional(),
+    viewId: surfaceViewIdSchema.optional(),
     agentActive: z.boolean(),
   }),
+  z.object({ type: z.literal('presented'), seq: z.number().int().min(0), viewId: surfaceViewIdSchema }),
   z.object({ type: z.literal('control'), controller: surfaceControllerSchema, mine: z.boolean() }),
   z.object({ type: z.literal('resized'), width: dimension, height: dimension }),
   z.object({ type: z.literal('clipboard'), id: z.string().min(1).max(64), text: z.string().max(SURFACE_TEXT_MAX) }),

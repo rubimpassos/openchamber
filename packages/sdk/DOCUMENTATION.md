@@ -37,6 +37,17 @@ unparsed forwarding remain subject to both rules. Host admission still uses Zod.
 
 Plan payloads share path, progress and annotation limits from `plan-providers.ts`. A dedicated host-side schema module keeps those rules together without pulling Zod into the guest entry. The protocol registry retains union ordering, including the plan-read result before the file-read result so parsing preserves `hash`.
 
+### Why surface presentation confirmations require an explicit successful ACK
+
+The confirmation orders later HTTP commands after the host updates the viewer's
+shown service sequence. A local ACK send provides no ordering across those
+channels. Requiring `presented: true` also keeps new host messages away from
+legacy viewers, whose parsers may reject an unknown message type.
+
+After changing SDK source, rebuild `packages/sdk` before server type-checks or
+server builds. Those consumers read its published `dist` declarations and
+exports, while the UI's source aliases can already see the changed contract.
+
 ## Model catalog
 
 Guest `listModels` has an `id` and no payload. Its id-correlated `result.payload` is a `GuestModelCatalog` array of `{ id: 'provider/model', name, provider?: string, variants: string[] }`, under the existing approved `model` capability. `provider` is a display name and is optional for older hosts. `PluginPane` handles it on every guest surface, including a page-only extension; `lib/guests/models.ts` projects the frame directory's loaded chat catalog and hidden-model choices using the same variant-ID helper as the session picker. Reads perform no network calls or model generation. An unloaded catalog is `HOST_UNAVAILABLE`; a successfully loaded empty catalog is `[]`. The SDK defines this wire contract; the iframe client helper is independent.
@@ -69,6 +80,7 @@ The host owns model search, grouping and model details. Sharing its picker keeps
 - File-editor documents have a larger limit than ordinary file API calls because drawings with embedded images and office documents need several megabytes. Files above the editor limit stay in the host's view.
 - Browser provider context comes from the host's tool-call scope. A null project or session is unknown and must not become a shared scope key. Unknown tab IDs fail instead of targeting another tab; `settled: false` means loading continues and does not indicate a failed open.
 - Surface frame reads allow only one outstanding request per viewer to bound backlog. Input names the frame the viewer last drew so a service can refuse stale coordinates with 409; one malformed input event rejects its entire batch.
+- Surface frames may carry `x-surface-view-id` (`SURFACE_VIEW_ID_HEADER`), an opaque 1 to 128 character printable ASCII token without spaces. The host retains it beside both frame sequences. An ACK with `presented: false` releases cumulative capacity without advancing the shown service sequence. Omitted `presented` retains legacy success and sends no confirmation. Explicit `presented: true` advances the shown sequence before the host sends `{ type: 'presented', seq, viewId }` from its retained metadata, only when the service supplied an identity. Generic services omit the token.
 - A provider callback's client timeout extends slightly beyond the host's outbound deadline so the host's diagnostic answer arrives first. An HTTP error status from the remote server is a valid relayed response; callback refusals and malformed or missing answers throw.
 - Quota provider IDs are validated by shape at install because credentials can arrive later. `configured: false` sends the user to OpenChamber's Providers page and applies only to missing listed OpenCode credentials; a missing extension-owned key is a configured provider with an error naming where to enter it.
 - Wait state is host-owned and accompanies every check, so a service can restart between checks without retaining state. A malformed start answer never creates a running wait; a malformed check envelope changes no wait, and a malformed entry fails only that entry.

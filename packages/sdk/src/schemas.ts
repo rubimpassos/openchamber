@@ -43,5 +43,6 @@ export {
   surfaceInputEventSchema,
   surfaceResizeAnswerSchema,
   surfaceViewerMessageSchema,
+  surfaceViewIdSchema,
 } from './service-surface-schemas.ts';
 export type { SurfaceHostMessage, SurfaceViewerMessage } from './service-surface-schemas.ts';
