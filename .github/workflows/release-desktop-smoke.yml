@@ -48,36 +48,6 @@ permissions:
   contents: read
 
 jobs:
-  build-web-assets:
-    if: ${{ !inputs.build_macos && !inputs.build_windows && !inputs.build_linux && !inputs.sign_windows }}
-    name: Build production web assets
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout selected ref
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ inputs.repository || github.repository }}
-          ref: ${{ inputs.ref || github.ref }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '26'
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Build production web and mobile assets
-        run: |
-          bun run build:web
-          bun run --cwd packages/mobile build:assets
-          GIT_MASTER=1 git rev-parse HEAD > packages/web/dist/build-commit.txt
-          tar -C packages/web -czf web-production-assets.tgz dist
-      - name: Keep production web assets for runtime QA
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: web-production-assets
-          path: web-production-assets.tgz
-          if-no-files-found: error
-          retention-days: ${{ fromJSON(inputs.retention_days) }}
-
   build-macos-electron:
     if: ${{ inputs.build_macos }}
     name: Build macOS Electron (${{ matrix.arch }})
