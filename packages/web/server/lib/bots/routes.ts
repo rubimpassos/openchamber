@@ -13,7 +13,7 @@ type BotRoutesOptions = {
     | ReturnType<typeof createAgentBotServices>['identities'];
 };
 type Runtime = BotRoutesOptions['botsRuntime'];
-type RouteMethod = 'getProject' | 'getConfig' | 'saveConfig' | 'getItems' | 'detail' | 'getArchive' | 'answer' | 'resume' | 'stopItem' | 'runScheduled' | 'getPolicy' | 'approvePolicy';
+type RouteMethod = 'getProject' | 'getConfig' | 'saveConfig' | 'getItems' | 'detail' | 'getArchive' | 'answer' | 'resume' | 'stopItem' | 'runScheduled' | 'getPolicy' | 'approvePolicy' | 'ensureConversation';
 type Identities = BotRoutesOptions['identities'];
 type RouteReply = Awaited<ReturnType<Runtime[RouteMethod]>>
   | { readonly identities: Awaited<ReturnType<Identities['list']>> }
@@ -25,7 +25,7 @@ const failureSchema = z.object({ code: z.unknown().optional(), statusCode: z.unk
 const json = express.json({ limit: '256kb' });
 const id = z.string().min(1).max(512);
 const admission = sourceCandidateSchema.extend({ botId: id });
-const answer = z.object({ text: z.string().min(1).max(100_000), eventId: id }).strict();
+const answer = z.object({ text: z.string().min(1).max(100_000), eventId: id, questionKey: id.optional() }).strict();
 const approval = z.object({ file: id, fingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const run = z.object({ occurrence: id.optional() }).strict();
 const edit = z.object({ config: z.json() }).strict();
@@ -66,7 +66,13 @@ export const registerBotRoutes = (app: Router, { botsRuntime, identities }: BotR
   }));
   app.get(`${base}/archive`, handle((req) => botsRuntime.getArchive(req.params.projectId, req.query.month)));
   app.get(`${base}/items/:itemId`, handle((req) => botsRuntime.detail(req.params.projectId, req.params.itemId)));
-  app.post(`${base}/items/:itemId/answer`, json, handle((req) => botsRuntime.answer(req.params.projectId, req.params.itemId, parse(answer, req.body))));
+  app.post(`${base}/items/:itemId/conversation`, handle((req) => botsRuntime.ensureConversation(req.params.projectId, req.params.itemId)));
+  app.post(`${base}/items/:itemId/answer`, json, handle((req) => {
+    const { questionKey, ...input } = parse(answer, req.body);
+    let answerOptions: Parameters<Runtime['answer']>[3] = { explicit: true };
+    if (questionKey !== undefined) answerOptions = { ...answerOptions, questionKey };
+    return botsRuntime.answer(req.params.projectId, req.params.itemId, input, answerOptions);
+  }));
   app.post(`${base}/items/:itemId/resume`, handle((req) => botsRuntime.resume(req.params.projectId, req.params.itemId)));
   app.post(`${base}/items/:itemId/stop`, handle((req) => botsRuntime.stopItem(req.params.projectId, req.params.itemId)));
   app.post(`${base}/:botId/run`, json, handle((req) => botsRuntime.runScheduled(req.params.projectId, req.params.botId, parse(run, req.body).occurrence ?? `manual:${Date.now()}`)));

@@ -5,6 +5,7 @@ import { checkedBotServiceReply, parseBotServiceInput } from '../agent-server/bo
 import { createBotExecutionOwner, fail } from './agent-execution-owner.js';
 import { createBotExecutionHandlers } from './agent-execution-handlers.js';
 import type { CallOptions, ExecutionDependencies, ExecutionScope } from './agent-execution.types.js';
+import { assertBotLeadAction } from '../session-lead/bot-guidance.js';
 
 export function createBotExecutionServices(deps: ExecutionDependencies) {
   const owner = createBotExecutionOwner(deps);
@@ -54,7 +55,7 @@ export function createBotExecutionServices(deps: ExecutionDependencies) {
     stopping = true;
     for (const controller of activeProofs.keys()) controller.abort();
     const pending = [...activeProofs.values(), Promise.resolve().then(() => gateway.stop())];
-    shutdown = (async () => {
+    const cleanup = (async () => {
       const deadline = AbortSignal.timeout(cleanupTimeoutMs);
       const { promise: expired, reject } = Promise.withResolvers<never>();
       const expire = () => reject(botBoundaryError('BOT_PROOF_CLEANUP_TIMEOUT', 503));
@@ -65,8 +66,17 @@ export function createBotExecutionServices(deps: ExecutionDependencies) {
         if (failures.length) throw new AggregateError(failures, 'Bot execution cleanup failed');
       } finally { deadline.removeEventListener('abort', expire); }
     })();
+    shutdown = Promise.allSettled([cleanup, owner.artifacts.capture.flush()]).then((settled) => {
+      const failures: unknown[] = settled.filter((result) => result.status === 'rejected').map((result) => result.reason);
+      if (failures.length === 1) throw failures[0];
+      if (failures.length) throw new AggregateError(failures, 'Bot execution shutdown could not fully drain');
+    });
     return shutdown;
   };
   return Object.freeze({ agentServer: true as const, execute, worktrees: Object.freeze({ resolveTransferSource }),
+    artifacts: owner.artifacts,
+    assertConversationControlTarget: async (action: string, sessionId: string | undefined) => {
+      if (sessionId && (await owner.resolveArtifactBinding(sessionId))?.producer.role === 'conversation') assertBotLeadAction(action);
+    },
     handleTool: <Input>(request: Input, options?: Parameters<typeof inbox.request>[1]) => stopping ? Promise.reject(botBoundaryError('BOT_EXECUTION_STOPPED', 503)) : inbox.request(request, options), stop });
 }

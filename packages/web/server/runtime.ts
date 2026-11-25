@@ -140,6 +140,9 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
+import { createBotConversationQueue, registerBotConversationGuards } from './lib/bots/conversation-queue.js';
+import { createBotSessionDefaults } from './lib/bots/session-defaults.js';
+import { botConversationDeliveryFetch } from './lib/bots/conversation-delivery.js';
 import { createFixLoopRuntime } from './lib/pr-fix-loop/runtime.js';
 import { createFixLoopHostAdapters, type FixLoopClient } from './lib/pr-fix-loop/host-adapters.js';
 import { requireLocalRuntime } from './lib/server-frame/local-runtime.js';
@@ -305,7 +308,6 @@ import { createAgentBotServices } from './lib/agent-server/bot-services.js';
 import { createBotExecutionServices, registerBotServiceRoutes } from './lib/agent-server/bot-service-routes.js';
 import { createOwnerBotConfig } from './lib/bots/owner-config.js';
 import type { MigrationRequest } from './lib/bots/production-worktree-contracts.js';
-import type { BotServiceReply } from './lib/agent-server/bot-service-contract.js';
 
 type BootstrapResult = ReturnType<ReturnType<typeof createBootstrapRuntime>['setupBaseRoutes']>;
 type StartupPipelineInput = Parameters<ReturnType<typeof createStartupPipelineRuntime>['run']>[0];
@@ -1543,7 +1545,11 @@ const autoReviewRuntime = FRONT_DOOR ? null : createAutoReviewRuntime({
 });
 autoReviewRuntime?.start();
 
-const messageQueueRuntime = FRONT_DOOR ? null : createMessageQueueRuntime({
+const messageQueueRuntime = FRONT_DOOR ? createBotConversationQueue({
+  dataDir: OPENCHAMBER_DATA_DIR, globalEventHub: globalMessageStreamHub, buildOpenCodeUrl, getOpenCodeAuthHeaders,
+  fetchImpl: requireLocalRuntime(agentUpstream, 'Agent upstream').fetch, broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
+  assertDispatchAdmission: (input) => requireLocalRuntime(botsHost, 'Bot conversation admission').admitConversationMessage(input),
+}) : createMessageQueueRuntime({
   automation: automationAdmission,
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
@@ -1581,7 +1587,7 @@ const recordRestackConflict = (run: RestackRun) => {
     sessionId: run.sessionId, directory: run.directory, requestId: run.id,
   });
 };
-const prStackRestackRuntime = messageQueueRuntime ? createRestackRuntime({
+const prStackRestackRuntime = !FRONT_DOOR ? createRestackRuntime({
   runGit: runGitCommandNoEditor,
   dataDir: OPENCHAMBER_DATA_DIR,
   readConflictMode: async () => ((await readSettingsFromDisk().catch(() => null))?.prStackConflictMode === 'agent' ? 'agent' : 'pause'),
@@ -1713,7 +1719,10 @@ const extensionWaitsRuntime = FRONT_DOOR ? null : createExtensionWaitsRuntime({
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });
 extensionWaitsRuntime?.start(globalMessageStreamHub);
+const renderDeliveryFetch = botConversationDeliveryFetch(() =>
+  botChildServer?.artifacts.delivery ?? botExecutionServices?.artifacts.delivery ?? botsHost?.artifacts.local?.delivery ?? null);
 const laterPagesRuntime = FRONT_DOOR ? null : createLaterPages({
+  fetchImpl: renderDeliveryFetch,
   dataDir: OPENCHAMBER_DATA_DIR,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -1729,6 +1738,7 @@ const mergeFollowRuntime = FRONT_DOOR ? null : createMergeFollowRuntime({
 const readWorkflowSettings = () => readSettingsFromDiskMigrated().catch(() => null);
 const isWorkflowToolEnabled = async () => (await readWorkflowSettings())?.agentWorkflowToolEnabled === true;
 const workflowAgentSessions = FRONT_DOOR ? null : createWorkflowAgentSessions({
+  fetchImpl: renderDeliveryFetch,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady: (...args) => waitForOpenCodeReady(...args),
@@ -1815,6 +1825,8 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   globalEventHub: globalMessageStreamHub,
   onWirePayload: (payload, { spaceId }) => {
     if (!FRONT_DOOR && !spaceId) chatDirectoryCleanupRuntime.observeWirePayload(payload);
+    if (spaceId && isRecord(payload) && payload.type === 'openchamber:space-stream'
+      && isRecord(payload.properties) && payload.properties.status === 'connected') botsHost?.reconnect(spaceId);
   },
   onDisconnect: () => { if (!FRONT_DOOR) chatDirectoryCleanupRuntime.onDisconnected(); },
   onPayload: (payload, { spaceId }) => {
@@ -1826,6 +1838,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     void botsHost?.processPayload(payload, { spaceId });
   },
   onConnect: async () => {
+    botsHost?.reconnect();
     if (protectedMcpMirror) { void protectedMcpMirror.push(); return; }
     void chatDirectoryCleanupRuntime.onConnected();
     const readAt = Date.now();
@@ -2524,34 +2537,20 @@ const openChamberSessionService: ReturnType<typeof createOpenChamberSessionServi
 const readOnlyBotSessionService = sessionServiceDependencies && sessionKnowledgeRuntime ? createOpenChamberSessionService({ ...sessionServiceDependencies,
   sessionKnowledgeRuntime: { sync: (sessionId, directory) => sessionKnowledgeRuntime.sync(sessionId, directory, { includeMemorySaveRule: false }) },
 }) : null;
-const readBotSessionDefaults = async (projectId: string) => {
-  const settings = await readSettingsFromDiskMigrated();
-  const project = await resolveBotProject(projectId);
-  const defaults = resolveSessionDefaults({ settings, project });
-  if (!defaults.providerID || !defaults.modelID) {
-    const model = unwrapOpenCodeResponse(await openCodeSessionClient(project.path).model.default());
-    if (!isRecord(model) || !isString(model.providerID) || !isString(model.id)) {
-      throw new OpenChamberControlError('OpenCode did not return a default model', 503);
-    }
-    defaults.providerID = model.providerID;
-    defaults.modelID = model.id;
-  }
-  const selection: BotServiceReply<'defaults'> = {
-    providerID: defaults.providerID, modelID: defaults.modelID,
-  };
-  if (defaults.variant) selection.variant = defaults.variant;
-  if (defaults.agent) selection.agent = defaults.agent;
-  return selection;
-};
+const readBotSessionDefaults = createBotSessionDefaults({ readSettings: readSettingsFromDiskMigrated,
+  resolveProject: resolveBotProject, clientFor: openCodeSessionClient });
 if (isInsideBotSpace) {
-  botChildServer = createBotChildServer({ dataDir: OPENCHAMBER_DATA_DIR, updateMetadata: persistSessionMetadataPatch });
+  botChildServer = createBotChildServer({ dataDir: OPENCHAMBER_DATA_DIR, updateMetadata: async (sessionId, patch) => { await persistSessionMetadataPatch(sessionId, patch); },
+    readArtifactPage: (origin) => requireLocalRuntime(openChamberControlService, 'Page owner').readPageProjection(origin),
+    readSession: (sessionID) => openCodeSessionClient('').session.get({ sessionID }) });
 } else if (AGENT_SERVER) {
   botExecutionServices = createBotExecutionServices({ agentServer: true, dataDir: OPENCHAMBER_DATA_DIR,
     readSettings: readSettingsFromDiskMigrated, listProjects: listConfiguredProjects,
     sessionService: requireLocalRuntime(openChamberSessionService, 'Agent session service'), readOnlySessionService: requireLocalRuntime(readOnlyBotSessionService, 'Read-only agent sessions'),
     clientFor: openCodeSessionClient, permissionAutoAcceptRuntime: requireLocalRuntime(permissionAutoAcceptRuntime, 'Agent permission policy'), sessionKnowledgeRuntime: requireLocalRuntime(sessionKnowledgeRuntime, 'Agent knowledge'),
     readSessionDefaults: readBotSessionDefaults, buildOpenCodeUrl, getOpenCodeAuthHeaders,
-    updateMetadata: persistSessionMetadataPatch,
+    updateMetadata: async (sessionId, patch) => { await persistSessionMetadataPatch(sessionId, patch); },
+    readArtifactPage: (origin) => requireLocalRuntime(openChamberControlService, 'Page owner').readPageProjection(origin),
     trustMigrationPath: (mapping: NonNullable<MigrationRequest['trustedMigrationPath']>, options: Pick<Parameters<typeof trustMigratedBotCheckout>[0], 'allowMissingCheckout'>) => trustMigratedBotCheckout({ mapping, ...options,
       runGit: (args) => runSpaceCommand(resolveGitBinaryForSpawn(), args, { timeoutMs: 10_000 }) }),
     isSessionArchived: (sessionId: string) => requireLocalRuntime(openChamberSessionService, 'Session archive').sessionArchive.isArchived(sessionId),
@@ -2569,6 +2568,8 @@ if (isInsideBotSpace) {
     buildOpenCodeUrl, getOpenCodeAuthHeaders, getSpacesHost: () => spacesHost, getSpaceArchive: () => spaceArchive,
     messageQueueRuntime, notificationCenter, notify: notificationTriggerRuntime.notifyBotAttention,
     broadcast: broadcastOpenChamberUiEvent, getFixLoopRuntime: () => prFixLoopRuntime,
+    updateMetadata: async (sessionId, patch) => { await persistSessionMetadataPatch(sessionId, patch); },
+    readArtifactPage: (origin) => requireLocalRuntime(openChamberControlService, 'Page owner').readPageProjection(origin),
     disposeInstance: async (directory: string) => openCodeSessionClient(directory).debug.location.evict({ location: { directory } }),
   });
 }
@@ -2733,7 +2734,11 @@ function executeServiceControl(action: string, input?: ControlInput, contextDire
 }
 
 const browserUploadStore = createUploadStore();
-const openChamberControlService = FRONT_DOOR ? null : createOpenChamberControlService({
+const isAgentToolEnabled = async (field: 'agentKnowledgeToolEnabled' | 'agentRenderToolEnabled' | 'agentSecretToolEnabled') =>
+  (await readSettingsFromDiskMigrated().catch(() => null))?.[field] !== false;
+const openChamberControlService: ReturnType<typeof createOpenChamberControlService> | null = FRONT_DOOR ? null : createOpenChamberControlService({
+  artifacts: botChildServer?.artifacts.capture ?? botExecutionServices?.artifacts.capture ?? botsHost?.artifacts.local?.capture,
+  assertConversationControlTarget: (action, sessionId) => (botExecutionServices ?? botsHost)?.assertConversationControlTarget(action, sessionId) ?? Promise.resolve(),
   isHiddenSession: (sessionID, record) => hiddenSessions.has(sessionID, record),
   chatsScope: scheduledChatsScope,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
@@ -2766,18 +2771,9 @@ const openChamberControlService = FRONT_DOOR ? null : createOpenChamberControlSe
     }
     return delivered;
   },
-  isKnowledgeToolEnabled: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentKnowledgeToolEnabled !== false;
-  },
-  isRenderToolEnabled: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentRenderToolEnabled !== false;
-  },
-  isSecretToolEnabled: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentSecretToolEnabled !== false;
-  },
+  isKnowledgeToolEnabled: () => isAgentToolEnabled('agentKnowledgeToolEnabled'),
+  isRenderToolEnabled: () => isAgentToolEnabled('agentRenderToolEnabled'),
+  isSecretToolEnabled: () => isAgentToolEnabled('agentSecretToolEnabled'),
   secretFiles, savedSecrets: savesSecrets ? createSavedSecrets({ store: environmentStore, projectIdFor: requireLocalRuntime(environmentRuntime, 'Environment').projectIdFor }) : null,
   onPageWaitChange: (change) => {
     sessionRuntime.trackWaitingPage(change);
@@ -2986,7 +2982,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
-  getBotsHost: () => botsHost ?? botExecutionServices,
+  getBotsHost: () => botsHost ?? botExecutionServices ?? botChildServer,
   getNotificationCenter: () => notificationCenter,
   stopFolderWatches: async () => {
     stopEnterprisePolicyWatch();
@@ -3321,7 +3317,7 @@ async function main(options: WebUiServerOptions = {}) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells,X-OpenChamber-Operation-Id');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age Chromium caps the preflight cache lifetime at 2 hours.
       res.setHeader('Access-Control-Max-Age', '7200');
@@ -3355,6 +3351,9 @@ async function main(options: WebUiServerOptions = {}) {
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     frontDoor: FRONT_DOOR,
     afterApiAuth: (auth) => {
+      registerBotConversationGuards(app, () => botsHost,
+        FRONT_DOOR ? () => requireLocalRuntime(agentUpstream, 'Agent upstream').json('/api/message-queue') : null);
+      if (AGENT_SERVER && !isInsideBotSpace) botExecutionServices?.artifacts.registerRoutes(app, 'agent');
       limitFailoverRuntime?.registerUiRoutes(app, express);
       if (AGENT_SERVER) registerSpaceTransferRoutes(app, { agent: true, readSettings: readSettingsFromDiskMigrated, dataDir: OPENCHAMBER_DATA_DIR, resolveGitPath: resolveGitBinaryForSpawn,
         resolveTransferSource: (source, options) => requireLocalRuntime(botExecutionServices, 'Bot execution').worktrees.resolveTransferSource(source, options) });

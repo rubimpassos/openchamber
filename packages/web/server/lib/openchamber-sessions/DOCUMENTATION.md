@@ -5,6 +5,12 @@
 This module owns server-side session creation, dispatch, forking, archive and metadata persistence, linked-item operations, task naming, and moves into worktrees. The control service consumes these operations. The UI owns its direct OpenCode fork repairs and linked-item display shapes; Git owns worktree creation, bootstrap, and removal. Server operations preserve the same selection, project-folder, archive-restore, and naming contracts as their UI counterparts.
 Automation producers choose their metadata and permission policy.
 
+`prompt-dispatch.ts` owns prompt expansion, Auto resolution, admission, goal
+setup, selection application, knowledge synchronization and native delivery.
+The service supplies its selection resolver and metadata writer, and resolves
+the current admission hook at dispatch. Directory, creation, archive and
+worktree policy remain in the service.
+
 ## Invariants
 
 - `create(payload, { metadata, onSessionCreated })` passes internal metadata

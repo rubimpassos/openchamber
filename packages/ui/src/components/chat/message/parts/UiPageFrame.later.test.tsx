@@ -2,7 +2,6 @@ import { afterEach, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 
-import type { ToolPart } from '@/lib/opencode/model';
 import type { RenderedPageAsk } from '@/lib/opencode/tools';
 
 const browser = new Window({ url: 'http://localhost/' });
@@ -10,6 +9,10 @@ Object.assign(globalThis, {
   window: browser,
   document: browser.document,
   navigator: browser.navigator,
+  localStorage: browser.localStorage,
+  sessionStorage: browser.sessionStorage,
+  // The stores this graph loads read their settings at import; no runtime answers here.
+  fetch: Object.assign(() => new Promise<Response>(() => {}), globalThis.fetch),
   Node: browser.Node,
   Element: browser.Element,
   HTMLElement: browser.HTMLElement,
@@ -22,7 +25,6 @@ Object.assign(globalThis, {
 type SentAnswer = { sessionId: string; callId: string; notDrawn?: string[] };
 const answers: SentAnswer[] = [];
 const revealed: (string | undefined)[] = [];
-mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 mock.module('@/components/ui', () => ({ toast: { error: () => undefined } }));
 mock.module('@/lib/renderPageAnswer', () => ({
   answerRenderedPage: async (answer: SentAnswer) => {
@@ -32,13 +34,6 @@ mock.module('@/lib/renderPageAnswer', () => ({
 mock.module('@/components/chat/lib/scroll/timelineScrollIntent', () => ({
   dispatchPageWaiting: (block: HTMLElement | null) => revealed.push(block?.dataset.waitingPage),
 }));
-mock.module('@/sync/sync-context', () => ({
-  useSessionDirectory: () => '/project',
-  useSessionStatus: () => undefined,
-  useSessionStatusSnapshotReady: () => false,
-}));
-mock.module('@/sync/global-blocking-requests', () => ({ useIsCallWaiting: () => false }));
-mock.module('@/sync/later-pages', () => ({ useLaterPage: () => undefined }));
 
 const { useGuestsStore } = await import('@/lib/guests/store');
 
@@ -60,15 +55,11 @@ mock.module('../../uiBlocks/useUiBlockComponent', () => ({ useUiBlockComponent: 
 
 const { createRoot } = await import('react-dom/client');
 const { UiPageFrame } = await import('./UiPageFrame');
+const { I18nProvider } = await import('@/lib/i18n');
+type RenderedPageOrigin = React.ComponentProps<typeof UiPageFrame>['origin'];
 
-const part = (callID: string): ToolPart => ({
-  id: `part-${callID}`,
-  sessionID: 'ses-1',
-  messageID: 'msg-1',
-  type: 'tool',
-  tool: 'openchamber_render',
-  callID,
-  state: { status: 'pending', input: {}, raw: '' },
+const origin = (callId: string): RenderedPageOrigin => ({
+  sessionId: 'ses-1', callId, partId: `part-${callId}`, messageId: 'msg-1',
 });
 
 const LATER: RenderedPageAsk = { kind: 'waiting', later: true };
@@ -81,7 +72,7 @@ const mount = async () => {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const render = (node: React.ReactNode) => act(async () => root.render(node));
+  const render = (node: React.ReactNode) => act(async () => root.render(<I18nProvider>{node}</I18nProvider>));
   return {
     container,
     render,
@@ -102,7 +93,7 @@ test('a later page restored before the extension catalog is not reported as undr
   const view = await mount();
   try {
     // The later pages' snapshot lands first: the program names an extension component nobody knows yet.
-    await view.render(<UiPageFrame part={part('call-1')} source="root = DeskChart()" ask={LATER} />);
+    await view.render(<UiPageFrame origin={origin('call-1')} source="root = DeskChart()" ask={LATER} />);
     expect(answers).toEqual([]);
     await act(async () => setCatalog('ready'));
     expect(answers).toEqual([]);
@@ -115,7 +106,7 @@ test('a later page that cannot be drawn reports it once the catalog is in', asyn
   setCatalog('loading');
   const view = await mount();
   try {
-    await view.render(<UiPageFrame part={part('call-1')} source="root = Bogus()" ask={LATER} />);
+    await view.render(<UiPageFrame origin={origin('call-1')} source="root = Bogus()" ask={LATER} />);
     expect(answers).toEqual([]);
     await act(async () => setCatalog('ready'));
     expect(answers).toEqual([{ sessionId: 'ses-1', callId: 'call-1', notDrawn: ['Bogus: Unknown component'] }]);
@@ -130,8 +121,8 @@ test('an older later page never stands in for a page the turn waits on', async (
   try {
     await view.render(
       <>
-        <UiPageFrame part={part('call-later')} source="root = Text()" ask={LATER} />
-        <UiPageFrame part={part('call-wait')} source="root = Text()" ask={WAITING} />
+        <UiPageFrame origin={origin('call-later')} source="root = Text()" ask={LATER} />
+        <UiPageFrame origin={origin('call-wait')} source="root = Text()" ask={WAITING} />
       </>,
     );
     // What a toast's "Open session" looks for (useChatTimelineScroll) and what the chat brings into view.
@@ -143,20 +134,37 @@ test('an older later page never stands in for a page the turn waits on', async (
   }
 });
 
+test('a read-only page reports nothing about a call that still waits', async () => {
+  setCatalog('ready');
+  const view = await mount();
+  try {
+    // Given a waiting page this client cannot draw, shown where it may only be read.
+    await view.render(<UiPageFrame origin={origin('call-1')} source="root = Bogus()" ask={WAITING} readOnly />);
+
+    // Then the wait is left to the conversation: no report closes it and nothing is brought into view.
+    expect(answers).toEqual([]);
+    expect(view.container.querySelector('[data-waiting-page]')).toBeNull();
+    expect(view.container.querySelector('[data-html-render-status="waiting"]')).not.toBeNull();
+  } finally {
+    await view.unmount();
+  }
+});
+
 test('an answer the agent has not got yet is marked under the page', async () => {
   setCatalog('ready');
   const view = await mount();
   try {
-    await view.render(<UiPageFrame part={part('call-1')} source="root = Text()" ask={{ kind: 'answered', summary: 'Red', data: null, undelivered: true }} />);
-    expect(view.container.querySelector('[data-html-render-status]')?.textContent).toBe('chat.htmlRender.answered· chat.htmlRender.undelivered');
+    await view.render(<UiPageFrame origin={origin('call-1')} source="root = Text()" ask={{ kind: 'answered', summary: 'Red', data: null, undelivered: true }} />);
+    const summary = () => view.container.querySelector('[data-html-render-status="answered"] .truncate')?.textContent ?? '';
+    expect(summary()).toContain('Red');
     // Its own element beside the summary, which alone is cut when the line is too narrow.
     const warning = view.container.querySelector<HTMLElement>('[data-html-render-undelivered]');
-    expect(warning?.textContent).toBe('· chat.htmlRender.undelivered');
+    expect(warning).not.toBeNull();
     expect(warning?.closest('.truncate')).toBeNull();
     expect(warning?.className).toContain('shrink-0');
-    expect(view.container.querySelector('[data-html-render-status] .truncate')?.textContent).toBe('chat.htmlRender.answered');
-    await view.render(<UiPageFrame part={part('call-1')} source="root = Text()" ask={{ kind: 'answered', summary: 'Red', data: null }} />);
-    expect(view.container.querySelector('[data-html-render-status]')?.textContent).toBe('chat.htmlRender.answered');
+    const answered = summary();
+    await view.render(<UiPageFrame origin={origin('call-1')} source="root = Text()" ask={{ kind: 'answered', summary: 'Red', data: null }} />);
+    expect(summary()).toBe(answered);
     expect(view.container.querySelector('[data-html-render-undelivered]')).toBeNull();
   } finally {
     await view.unmount();

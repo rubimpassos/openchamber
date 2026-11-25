@@ -21,9 +21,15 @@ entries (`../session-knowledge/`), the control service routes the actions
 
 ## Invariants
 
-- Only the user makes a session a lead (the session menu, or a draft opened
-  with New lead). The lead actions refuse any other session with `409`, so an
+- The user makes a session a lead through the session menu, New lead, or a
+  configured Bot workflow whose server creates its persistent item conversation.
+  Agents cannot request that Bot identity. The lead actions refuse any other session with `409`, so an
   agent cannot turn itself or a child into a lead.
+- A Bot item conversation receives `BOT_LEAD_GUIDANCE` instead of autonomous
+  delegation guidance. Its coordinator owns workers and publication. The control
+  service uses `assertBotLeadControl` before actions from this lead; brief/digest
+  and explicit reads remain available. Ordinary chat cannot answer a coordinator
+  question or Resume the item.
 - A lead has no parent. OpenCode copies a parent's metadata into every child
   it creates (a subagent, for one), the lead mark and digest included, so the
   runtime's `session.created` handler clears what a new child copied from its
@@ -78,6 +84,9 @@ entries (`../session-knowledge/`), the control service routes the actions
   cancels the timer; a session the user keeps warm, one that is running again
   and one that is no lead any more are left alone. Overflow compaction during
   a turn stays with the model.
+- Bot conversations skip automatic sleep compaction when arming and before
+  dispatch. Their coordinator owns every inference admission, including budget
+  and Stop; cache expiry cannot authorize a new turn.
 - The compaction hook in our OpenCode plugin asks
   `POST /api/openchamber/agent-tool/lead-compaction` on every compaction. Only a
   compaction this runtime started within the last 2 minutes, for a lead that

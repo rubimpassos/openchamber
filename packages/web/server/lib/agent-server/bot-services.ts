@@ -16,6 +16,8 @@ import type { JiraCommentPage } from '../bots/services/jira.js';
 import type { createProductionBotWorktrees } from '../bots/production-worktrees.js';
 import type { createBotQuestionBlame } from '../bots/questions-blame.js';
 import type { AdoptionRequest } from '../bots/production-worktree-contracts.js';
+import { createOwnerBotConversations } from './bot-owner-conversations.js';
+import { createAgentBotArtifactTransport } from './bot-artifact-services.js';
 import type { createBotHostTools } from '../bots/host-tools.js';
 import { BOT_SERVICE_BYTES, BOT_SERVICE_INPUT_BYTES, BOT_SERVICE_ROUTE, BOT_SERVICE_TIMEOUT_MS,
   assertBotEffectInput, botBoundaryError, botReplySchema, botRequestAssociation, botScopeSchema, botWatchAuthoritySchema } from './bot-service-contract.js';
@@ -77,6 +79,8 @@ export function createAgentBotServices(upstream: BotUpstream, options: AgentBotS
     pullTools: (entry: SessionEntry) => sessionCall('tools-pull', entry),
     settleTool: (entry: SessionEntry, settlement: Parameters<Parameters<typeof createBotHostTools>[0]['execution']['settleTool']>[1]) => sessionCall('tools-settle', entry, { settlement }),
   };
+  const conversations = createOwnerBotConversations({ call, target: owner.conversationTarget });
+  const artifacts = createAgentBotArtifactTransport(upstream);
   const watchAuthority = (value: WatchReference | undefined) => botWatchAuthoritySchema.parse(value && ('botAuthority' in value ? value.botAuthority : 'authority' in value ? value.authority : value));
   const selectedWatchAuthority = (input: WatchInput) => {
     const authority = watchAuthority(input.octokit ?? input.authority);
@@ -201,7 +205,7 @@ export function createAgentBotServices(upstream: BotUpstream, options: AgentBotS
     identities: { list: () => inventoryFor(), create: async <Definition>(definition: Definition) => call('identity-create', { project: await identityProject(), definition }),
       update: async <Definition>(id: string, expectedRevision: number, definition: Definition) => call('identity-update', { project: await identityProject(), id, expectedRevision, definition }),
       remove: async (id: string, expectedRevision: number) => call('identity-remove', { project: await identityProject(), id, expectedRevision }) },
-    context, worktrees, services, hostSessions, botWatch,
+    context, worktrees, services, hostSessions, conversations, artifacts, botWatch,
     createGateway(input: GatewayOptions) {
       if (!input.project || !input.bot) throw botBoundaryError('BOT_EXECUTION_SCOPE_REQUIRED', 409);
       const scope = botScopeSchema.parse({ project: input.project, bot: input.bot,

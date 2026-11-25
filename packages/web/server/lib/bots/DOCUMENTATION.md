@@ -1,5 +1,8 @@
 # Bots persistence and repository policy
 
+Persistent item leads and their parent integration slots are documented in
+[conversation-contract.md](conversation-contract.md).
+
 Production Git, isolated-result adoption, exact service context and PR-watch composition are documented in [production-worktrees.md](production-worktrees.md). The coordinator contract remains in [runtime-contract.md](runtime-contract.md).
 
 The running server constructs those owners through [host-composition.md](host-composition.md), including its child-only tool inbox, lifecycle, isolated queues and event wiring.
@@ -8,6 +11,9 @@ Bot-owned isolated network and model-access references, the pure resolver and it
 
 Durable questions, approved recipient routing, service-only mentions and answer
 recovery are documented in [questions-contract.md](questions-contract.md).
+
+Durable render capture, owner publication, bounded agent/Space pull transport and
+the required composition hooks are documented in [artifacts.md](artifacts.md).
 
 `createBotNotices` adapts feedback to durable synthetic delivery. Its required
 constructor, dispatch guard and isolated-queue contract are in

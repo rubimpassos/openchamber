@@ -10,6 +10,20 @@ const model = z.object({
 }).refine((value) => value.useDefaults || Boolean(value.providerID && value.modelID), 'an explicit model needs providerID and modelID');
 const mcp = z.array(z.object({ server: text, tools: z.record(text, z.enum(['allow', 'ask', 'deny'])) })).default([]);
 const snowflake = z.string().regex(/^[1-9][0-9]{5,24}$/);
+const avatar = z.string().max(32_768).regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/)
+  .pipe(z.string().refine((value) => {
+    const bytes = Buffer.from(value.slice(value.indexOf(',') + 1), 'base64');
+    switch (value.slice(5, value.indexOf(';'))) {
+    case 'image/png':
+      return bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case 'image/jpeg':
+      return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    case 'image/webp':
+      return bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+    default:
+      return false;
+    }
+  }, 'The bot photo must be a PNG, JPEG or WebP thumbnail'));
 export const botDiscordConfigSchema = z.object({
   channels: z.array(z.object({ guildId: snowflake, channelId: snowflake }).strict()).max(100).default([]),
 }).strict().refine((value) => new Set(value.channels.map((channel) => `${channel.guildId}/${channel.channelId}`)).size === value.channels.length, 'Discord channels must be unique');
@@ -22,6 +36,7 @@ const schedule = z.object({
 
 export const botDefinitionSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]+$/), name: text, enabled: z.boolean().default(true), mission: text,
+  avatar: avatar.nullable().optional(),
   schedule: schedule.prefault({}),
   source: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('manual') }),

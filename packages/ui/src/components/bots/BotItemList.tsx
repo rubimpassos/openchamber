@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import type { BotItem, BotState } from '@/lib/bots/items';
 
 const stateKeys = {
@@ -13,6 +14,17 @@ const stateKeys = {
 export function BotStateLabel({ state }: { readonly state: BotState }) {
   const { t } = useI18n();
   return <span className={state === 'needs-you' || state === 'waiting-answer' ? 'text-[var(--status-warning-text)]' : state === 'failed' ? 'text-[var(--status-error-text)]' : 'text-muted-foreground'}>{t(stateKeys[state])}</span>;
+}
+
+const markTones = {
+  queued: 'bg-muted-foreground', investigating: 'bg-status-info', 'waiting-answer': 'bg-status-warning', fixing: 'bg-status-info',
+  proving: 'bg-status-info', judging: 'bg-status-info', 'in-review': 'bg-muted-foreground', merging: 'bg-status-info',
+  closing: 'bg-status-info', done: 'bg-status-success', 'needs-you': 'bg-status-warning', failed: 'bg-status-error', stopped: 'bg-muted-foreground',
+} satisfies Record<BotState, string>;
+
+export function BotStateMark({ state }: { readonly state: BotState }) {
+  const { t } = useI18n();
+  return <><span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', markTones[state])} /><span className="sr-only">{t(stateKeys[state])}</span></>;
 }
 
 export function BotItemList({ items, onOpen, audit = false }: {

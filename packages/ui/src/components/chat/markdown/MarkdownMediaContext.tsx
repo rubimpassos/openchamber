@@ -2,7 +2,7 @@ import React from 'react';
 import type { ToolPopupContent } from '../message/types';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { MarkdownMediaOwner, MediaContext, type MarkdownDocumentAssets } from './markdown-media-context';
+import { MarkdownMediaOwner, MediaContext, RetainedMarkdownImagesContext, type MarkdownDocumentAssets } from './markdown-media-context';
 
 export type { MarkdownDocumentAssets } from './markdown-media-context';
 
@@ -34,6 +34,7 @@ export function MarkdownMediaProvider({
   const filePath = documentAssets?.filePath;
   const workspaceRoot = documentAssets?.workspaceRoot;
   const ownerContent = mode === 'assistant' && settled ? content : '';
+  const retained = React.useContext(RetainedMarkdownImagesContext) ?? undefined;
   const owner = React.useMemo(() => {
     void ownerContent;
     void runtimeKey;
@@ -45,8 +46,9 @@ export function MarkdownMediaProvider({
       sessionId,
       messageId,
       documentAssets: filePath ? { filePath, workspaceRoot: workspaceRoot ?? null } : undefined,
+      retained,
     });
-  }, [ownerContent, mode, directory, sessionId, messageId, runtimeKey, transportRevision, resolver, filePath, workspaceRoot]);
+  }, [ownerContent, mode, directory, sessionId, messageId, runtimeKey, transportRevision, resolver, filePath, workspaceRoot, retained]);
   React.useLayoutEffect(() => {
     if (runtimeKey !== getRuntimeKey() || resolver !== getRuntimeUrlResolver()) {
       owner.dispose();

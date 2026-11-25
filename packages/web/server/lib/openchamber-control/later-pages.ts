@@ -462,5 +462,11 @@ export function createLaterPages({
     };
   };
 
-  return { load, snapshot, open, recover, answer, processPayload, start, flush: () => writePromise };
+  return { load, snapshot, open, recover, answer, processPayload, start, flush: () => writePromise,
+    find: async (sessionId: string, callId: string) => {
+      await load();
+      const page = pages.get(keyOf(sessionId, callId));
+      return page ? publicPage(page) : null;
+    },
+  };
 }

@@ -52,7 +52,7 @@ export const fixture = async () => {
     throw new Error(`Unexpected request: ${req.url}`);
   };
   vi.stubGlobal('fetch', transport);
-  const make = () => {
+  const make = ({ artifacts } = {}) => {
     const timers = [];
     let onBroadcast = () => {};
     const laterPages = createLaterPages({
@@ -68,7 +68,7 @@ export const fixture = async () => {
     const service = createOpenChamberControlService({
       readSettingsFromDiskMigrated: async () => ({}), sanitizeProjects: () => [],
       buildOpenCodeUrl: (route) => `http://recovery.test${route}`, getOpenCodeAuthHeaders: () => ({}),
-      sessionService: {}, scheduledTaskService: {}, laterPages,
+      sessionService: {}, scheduledTaskService: {}, laterPages, artifacts,
       onPageWaitChange: (change) => { if (change.type === 'waiting') state.onWait(change); },
     });
     const app = express();

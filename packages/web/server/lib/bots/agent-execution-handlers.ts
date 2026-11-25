@@ -46,6 +46,13 @@ export function createBotExecutionHandlers(owner: ReturnType<typeof createBotExe
     blame, prFor, watchReader, trustRetainedCheckout, watchScope, reviewApps, inbox } = owner;
   const { readSessionDefaults, sessionKnowledgeRuntime, clientFor } = deps;
   return {
+    'conversation-ensure': async ({ capture }) => { await registeredProject(capture.project); return owner.conversations.ensure(capture); },
+    'conversation-read': async ({ target }) => { await registeredProject(target.project); return owner.conversations.read(target); },
+    'conversation-prepare': async ({ target }) => { await registeredProject(target.project); await owner.conversations.prepare(target); return ok(); },
+    'conversation-tokens': async ({ target }) => { await registeredProject(target.project); return owner.conversations.tokens(target); },
+    'conversation-stop': async ({ target }) => { await registeredProject(target.project); await owner.conversations.stop(target); return ok(); },
+    'conversation-notice': async ({ target, notice }) => { await registeredProject(target.project); await owner.conversations.notice(target, notice); return ok(); },
+    'conversation-native': async ({ target, request }) => { await registeredProject(target.project); return owner.conversations.dispatch(target, request); },
     ...createBotExecutionStages(owner),
     'identity-list': async () => identities.list(),
     'identity-create': async (input) => identities.create(input.definition),

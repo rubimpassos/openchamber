@@ -13,6 +13,7 @@ const source = z.object({ kind: z.enum(['manual', 'jira', 'suggestion', 'alert',
 export { state as botItemStateSchema, source as botItemSourceSchema };
 const evidence = z.object({ source: text, summary: text, url: text.optional() }).strict();
 const receipt = z.object({ id: text, url: text.optional(), sha: text.optional(), sessionId: text.optional() }).strict();
+export const botConversationSchema = z.object({ sessionId: text, directory: text, createdAt: time }).strict();
 
 // References only. The executor resolves credentials against this captured revision.
 export const botEffectAuthoritySchema = z.object({
@@ -39,6 +40,7 @@ export const botItemSchema = z.object({
   owner: botOwnerSchema.nullable().default(null),
   worktree: text.optional(), branch: text.optional(), publicationBranch: text.optional(),
   sessions: z.object({ investigation: text.optional(), fixing: text.optional(), judge: text.optional() }).strict().default({}),
+  conversation: botConversationSchema.optional(),
   pr: z.object({ number: z.number().int().positive(), url: text, headSha: text, baseSha: text.optional() }).strict().optional(),
   evidence: z.array(evidence).default([]),
   proof: z.discriminatedUnion('status', [
@@ -49,8 +51,8 @@ export const botItemSchema = z.object({
   judgment: z.object({ decision: z.enum(['auto', 'review', 'ask']), reason: text, headSha: text, baseSha: text,
     policyFingerprint: text, reviewers: z.array(text).default([]), questions: z.array(text).default([]) }).strict().optional(),
   wait: z.object({ reason: text, since: time, channel: z.enum(['ui', 'jira', 'discord', 'github']), people: z.array(text).default([]) }).strict().optional(),
-  tokens: z.object({ total: time, byStage: z.object({ investigation: time, fixing: time, judge: time }).strict(), byDay: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time) }).strict()
-    .default({ total: 0, byStage: { investigation: 0, fixing: 0, judge: 0 }, byDay: {} }),
+  tokens: z.object({ total: time, conversation: time.default(0), byStage: z.object({ investigation: time, fixing: time, judge: time }).strict(), byDay: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time) }).strict()
+    .default({ total: 0, conversation: 0, byStage: { investigation: 0, fixing: 0, judge: 0 }, byDay: {} }),
   transitions: z.array(z.object({ from: state.nullable(), to: state, at: time, revision, owner: botOwnerSchema, reason: text }).strict()).default([]),
   effects: z.array(botEffectSchema).default([]),
 }).strict().superRefine((item, ctx) => {

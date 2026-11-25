@@ -18,6 +18,19 @@ describe('bot session membership', () => {
     expect(result.chatSessions).toEqual([]);
   });
 
+  test('keeps an item conversation and its subagents out of the ordinary project list', () => {
+    // Given the item's root conversation carries the conversation marker in place of a stage.
+    const conversation = { openchamber: { automation: { source: 'bot', projectId: 'project-1', botId: 'bot-1', itemId: 'item-1', role: 'conversation' } } };
+    const sessions = [botSession('lead', { metadata: conversation }), botSession('subagent', { parentID: 'lead' }), botSession('plain')];
+
+    // When the shared partition is projected.
+    const result = partitionSidebarSessions(sessions, false);
+
+    // Then only the unrelated session remains an ordinary project session.
+    expect(result.projectSessions.map((session) => session.id)).toEqual(['plain']);
+    expect(botAutomation(sessions[0])?.itemId).toBe('item-1');
+  });
+
   test('re-evaluates same-ID metadata changes without retaining a former bot membership', () => {
     // Given a previously marked root loses its marker in an authoritative replacement.
     const previous = botSession('root', { metadata });

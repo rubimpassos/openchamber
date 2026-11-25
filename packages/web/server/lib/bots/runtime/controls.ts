@@ -13,10 +13,11 @@ import type { createRuntimeFeedback } from './feedback.js';
 import type { createRuntimeMergeAdmission } from './merge-admission.js';
 import type { createRuntimeServiceEffects } from './service-effects.js';
 import type { createRuntimeShared } from './shared.js';
+import type { createRuntimeConversations } from './conversations.js';
 
 export const createRuntimeControls = (
   { journal, itemFor, mutate, transition, now, effects, config, store, stages, pullRequests, questions, sessionIndex, activeProofs }: RuntimeContext,
-  { shared: { needsYou, projectFor, checkBudgets }, external, checkout: { cleanup }, mergeAdmission: { requestRevocation, settleRevocation }, feedback: { refuseUnsentQuestion, finishQuestionAnswer }, pump, detail }: {
+  { shared: { needsYou, projectFor, checkBudgets }, external, checkout: { cleanup }, mergeAdmission: { requestRevocation, settleRevocation }, feedback: { refuseUnsentQuestion, finishQuestionAnswer }, conversations, pump, detail }: {
     readonly shared: ReturnType<typeof createRuntimeShared>;
     readonly external: ReturnType<typeof createRuntimeServiceEffects>;
     readonly checkout: ReturnType<typeof createRuntimeCheckout>;
@@ -24,6 +25,7 @@ export const createRuntimeControls = (
     readonly feedback: ReturnType<typeof createRuntimeFeedback>;
     readonly pump: RuntimePump;
     readonly detail: RuntimeDetailReader;
+    readonly conversations: ReturnType<typeof createRuntimeConversations>;
   },
 ) => {
   const { saveData } = journal;
@@ -86,8 +88,13 @@ export const createRuntimeControls = (
   };
   const finishStop = async (projectId: string, project: RuntimeProject, bot: RuntimeBot, item: BotItem) => {
     const itemId = item.id;
+    const stops = await Promise.allSettled([
+      ...Object.values(item.sessions).map((sessionId) => stages.stop({ bot, sessionId: text.parse(sessionId), directory: text.parse(item.worktree) })),
+      conversations.stop(projectId, itemId),
+    ]);
+    const failure = stops.find((entry) => entry.status === 'rejected');
+    if (failure) throw failure.reason;
     await pullRequests.stop({ project, bot, item });
-    for (const sessionId of Object.values(item.sessions)) await stages.stop({ bot, sessionId: text.parse(sessionId), directory: text.parse(item.worktree) });
     let current = await itemFor(projectId, itemId);
     const execution = await journal.read(projectId, itemId);
     if (execution.data.pendingTool) {
@@ -116,8 +123,8 @@ export const createRuntimeControls = (
       const project = await projectFor(projectId);
       const item = await itemFor(projectId, itemId);
       if (TERMINAL_ITEM_STATES.includes(item.state)) return { item };
-      const bot = (await config.read(projectId)).definitions.find((entry) => entry.id === item.botId);
-      if (!bot) throw error('BOT_DEFINITION_REQUIRED');
+      const bot: RuntimeBot = (await config.read(projectId)).definitions.find((entry) => entry.id === item.botId)
+        ?? { id: item.botId, enabled: false };
       const admission = await requestRevocation(projectId, item, 'stop');
       await needsYou(projectId, itemId, 'BOT_STOP_REQUESTED');
       if (admission?.state === 'merged') {
@@ -132,6 +139,10 @@ export const createRuntimeControls = (
     if (!target) return;
     if (reason === 'idle') return pump(target.projectId);
     const item = await itemFor(target.projectId, target.itemId);
+    if (item.conversation?.sessionId === sessionId) {
+      if (reason === 'idle') return;
+      return needsYou(target.projectId, target.itemId, reason);
+    }
     const stage = item.state === 'investigating' ? 'investigation' : item.state === 'judging' ? 'judge' : 'fixing';
     if (item.sessions[stage] !== sessionId) return;
     return needsYou(target.projectId, target.itemId, reason);
@@ -143,6 +154,7 @@ export const createRuntimeControls = (
     if (!target) return;
     const { projectId, itemId } = target;
     const item = await itemFor(projectId, itemId);
+    if (item.conversation?.sessionId === sessionId) return conversations.recordUsage(projectId, itemId, total);
     if (TERMINAL_ITEM_STATES.includes(item.state)) return;
     const execution = await journal.read(projectId, itemId);
     const stage = (['investigation', 'fixing', 'judge'] as const).find((key) => item.sessions[key] === sessionId);
@@ -155,7 +167,7 @@ export const createRuntimeControls = (
     const updated = await mutate(projectId, itemId, (current) => {
       const stageTotal = Math.max(current.tokens.byStage[stage], z.number().parse(run.tokenBaseline?.byStage[stage]) + total);
       const delta = stageTotal - current.tokens.byStage[stage];
-      return { ...current, tokens: { total: current.tokens.total + delta, byStage: { ...current.tokens.byStage, [stage]: stageTotal }, byDay: { ...current.tokens.byDay, [day]: (current.tokens.byDay[day] ?? 0) + delta } } };
+      return { ...current, tokens: { ...current.tokens, total: current.tokens.total + delta, byStage: { ...current.tokens.byStage, [stage]: stageTotal }, byDay: { ...current.tokens.byDay, [day]: (current.tokens.byDay[day] ?? 0) + delta } } };
     });
     const bot = (await config.read(projectId)).definitions.find((entry) => entry.id === item.botId);
     if (!bot) return;
@@ -163,6 +175,7 @@ export const createRuntimeControls = (
     if (budget) {
       await saveData(projectId, itemId, { interruptedStage: stageInterruptionSchema.parse({ runId: latestRun?.[0], sessionId }) });
       await needsYou(projectId, itemId, budget);
+      await conversations.stop(projectId, itemId);
       await stages.stop({ bot, sessionId, directory: text.parse(item.worktree) });
     }
     return updated.tokens;

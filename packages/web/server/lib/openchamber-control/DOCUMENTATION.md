@@ -112,8 +112,18 @@ constructor retains its existing `Object.assign` behavior.
 - `usage-read.js` runs `usage.read` for the `openchamber_usage` agent tool, off by default. It reads `agentUsageToolEnabled` on every call (`403` while not `true`) and loads the quota module through the `loadQuota` dependency (absent: `503`). It runs the readers Settings → Usage runs, with the page's deadlines: the configured-provider list within 10 seconds, then every configured provider in parallel, each within 30 seconds. Only the providers the page reads are asked (`listUsagePageProviders`, `../quota/DOCUMENTATION.md`), so an agent never causes a request the page does not make. The result is `{ providers, notConfigured }`: each provider's result exactly as `GET /api/quota/:providerId` answers it, and the ids of the page's providers without a credential. A provider that throws or misses its deadline is its own failed entry (`ok: false`, `configured: true`, `usage: null`, `error`), and the others stay. A provider list that fails or times out does what the page does, asking every provider, and the result carries `listError` instead of `notConfigured`; it is never an empty list. `providerId` reads one provider without the list read; an id the page does not read is a `400` naming the ids it does. Nothing is cached: each call is a fresh read, under the readers' own limits (concurrent reads of one provider share a request; Claude answers from its last sample during a 429 cooldown, so `fetchedAt` can be newer than the numbers). A cancelled turn ends the wait with `499`; the shared reads finish for their other callers.
 - `terminal-read.js` runs `terminal.list` and `terminal.read` for the `openchamber_terminal` agent tool, off by default. It reads `agentTerminalToolEnabled` on every call (`403` while not `true`) and takes the terminal runtime through the `getTerminalRuntime` dependency (absent: `503`). Both actions only copy in-memory state from `../terminal/runtime.js`: `terminal.list` returns `{ terminals }` for the session's own folder, or for an explicit `directory`, and answers `400` when neither resolves rather than listing every terminal of the instance; `terminal.read` returns one terminal's `{ sessionId, cwd, status, exitCode, signal, createdAt, mode, purpose, text, truncated, retainedBytes }`, where `text` is plain text without VT control sequences, end-aligned to a line, with `maxBytes` (default 32,768, at most 262,144) capping it. An unknown id is a `404` naming `terminal.list`, because the ids are client-supplied. Nothing here types, starts or stops a PTY, moves `lastActivity` or publishes to an attached client. Both actions run only for the managed agent-tool callback (`../agent-tool/runtime.js`), which authenticates each OpenCode child: `POST /api/openchamber/control` answers them with `403` before the service is called, whatever the setting says.
 - `render-page.js` runs `render.page` for the `openchamber_render` agent tool. It takes `html` or `ui` (a program in the UI block language, which the chat draws with its own components; the server cannot parse it, so a client that cannot draw it answers the wait with `notDrawn` errors, and the agent gets them in its result). Only one of them is required: a page sent without a title is named after its own `<title>`, else its first h1 to h3, else "Page", with the same rule the chat uses (`renderedPage` in `packages/ui/src/lib/opencode/tools.ts`). Weaker models sent title and html in separate calls, each refused call costing the whole page again; a missing html now also asks for both in one call.
-  The chat draws the page from the call's own input, so the action stores
-  nothing: it checks `html` (at most 200,000 characters) and `title` (at most
+  `page-control.ts` composes its wait registry, inbox check, canonical projection,
+  recovery and action context. The control service retains caller and target
+  admission before entering the action.
+  The chat draws an ordinary page from the call's own input. When the host
+  supplies the `artifacts` execution owner, a recorded Bot session first captures
+  its immutable body and assets through the same action. The optional
+  `artifactKind` is `evidence` by default or `decision`; it does not prescribe the
+  body's representation. The result carries the stable artifact reference.
+  Worker renders refuse waits, later answers and sharing; conversations retain
+  the existing answer owners. Capture, publication and required composition are
+  documented in [Bot artifacts](../bots/artifacts.md).
+  Normal nonbot calls store nothing here. The action checks `html` (at most 200,000 characters) and `title` (at most
   120) and answers `403` while `agentRenderToolEnabled` is `false`. A call
   with `share` is refused first when sharing is unavailable (`403`,
   `code: 'enterprise_mode'`) and with `awaitAnswer` or `answerLater` (`400`), then makes its
@@ -212,6 +222,9 @@ constructor retains its existing `Object.assign` behavior.
   Failed reads fail the route and preserve existing pages. Only an unresolved
   `openchamber_render` await in the latest assistant content message can be
   promoted, while idle and without a live waiter or canonical form.
+  When Bot capture exists, recovery also checks its recorded producer binding.
+  A worker remains read-only even when canonical metadata omits the Bot hint.
+  A refused worker call cannot acquire a later-page lifecycle through recovery.
   A legacy running/idle await needs no additional metadata. An aborted await
   needs a current inactivity record or a restart cut naming its exact message,
   call and tool. A user Stop, a completed result, shared page, later chat or

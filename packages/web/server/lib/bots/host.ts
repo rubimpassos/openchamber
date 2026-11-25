@@ -14,6 +14,10 @@ import { createBotScheduler } from './scheduler.js';
 import { createBotEvents } from './events.js';
 import { createBotsRuntime } from './runtime.js';
 import { createBotHostSessions } from './host-sessions.js';
+import { createBotConversationSessions } from './conversation-sessions.js';
+import { createBotConversationHttpGuard } from './conversation-http.js';
+import { createHostArtifacts } from './host-artifacts.js';
+import { assertBotLeadAction } from '../session-lead/bot-guidance.js';
 import { registerBotRoutes } from './routes.js';
 import { createBotHostApi } from './host-api.js';
 import { createBotExecutionStore } from './execution-store.js';
@@ -44,7 +48,7 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
   permissionAutoAcceptRuntime, sessionKnowledgeRuntime: localKnowledge, readSessionDefaults: localDefaults,
   buildOpenCodeUrl, getOpenCodeAuthHeaders, getSpacesHost, getSpaceArchive, messageQueueRuntime,
   notificationCenter, notify, broadcast, getFixLoopRuntime, disposeInstance,
-  reviewApps = [], logger = console, fetchImpl, policyOptions, executionServices = null, withWatchAdmission }: HostOptions<NotifyResult>) {
+  reviewApps = [], logger = console, fetchImpl, policyOptions, executionServices = null, withWatchAdmission, updateMetadata, readArtifactPage }: HostOptions<NotifyResult>) {
   const config = createBotsConfig({ projectConfigRuntime });
   const store = createBotStore({ projectsDirPath: projectsDir });
   executionServices?.bindOwner({ dataDir, resolveProject, listProjects, store, config });
@@ -57,6 +61,11 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
   const attention = createBotAttention({ center: notificationCenter, notify });
   const activity = executionServices ? null : createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
   const readTokens = executionServices ? null : createTokenSnapshotReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+  const conversations = executionServices ? executionServices.conversations : (() => {
+    if (!activity || !readTokens || !localKnowledge) throw new TypeError('Local Bot conversation owners are unavailable');
+    return createBotConversationSessions({ dataDir, clientFor, activity, readTokens, knowledge: localKnowledge });
+  })();
+  if (!conversations) throw new TypeError('Bot conversations require their selected execution owner');
   const handleTool = async (request: Parameters<ReturnType<typeof createBotsRuntime>['handleTool']>[0]) => z.json().parse(await api.handleTool(request));
   const readToolOutcome = async (request: Parameters<ReturnType<typeof createBotsRuntime>['readToolOutcome']>[0]) => {
     const outcome = await runtime.readToolOutcome(request);
@@ -67,11 +76,14 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
   };
   const isolated = createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject, sessionKnowledgeRuntime,
     separated: Boolean(executionServices), resolveSpaceOptions: ({ bot, selection }) => readBotSpaceOptions(bot.space, selection),
-    handleTool, readToolOutcome });
+    handleTool, readToolOutcome, collectArtifacts: (sessionId) => artifacts.collect(sessionId) });
   const journal = createBotExecutionStore({ store });
   const placement = createBotPlacement({ dataDir, journal, isolated, getSpaceArchive });
+  const artifacts = createHostArtifacts({ dataDir, store, journal, placement, isolated, listProjects, resolveProject, clientFor, updateMetadata, readArtifactPage, executionServices, broadcast,
+    activity, dispatchConversationNative: (input, admissionId) => runtime.dispatchConversationNative(input, admissionId) });
   const assertStarted = () => lifecycle.assertStarted();
   const sessions = createBotHostSessions({ dataDir, isolated, clientFor, hostQueue: messageQueueRuntime,
+    conversations, resolveProject,
     hostExecution: executionServices?.hostSessions, resolvePlacement: placement.resolve,
     readHostTokens: readTokens, assertDispatch: (input) => { assertStarted(); return notices.assertDispatch(input); }, broadcast, sessionKnowledgeRuntime,
     isSessionArchived: (sessionId) => {
@@ -84,7 +96,7 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
   const { services, context, identities } = owners;
   const productionWorktrees = owners.worktrees;
   const { worktrees, proof } = createHostCheckouts({ dataDir, store, resolveProject, isolated, placement, productionWorktrees,
-    remoteSameTree: executionServices ? (request) => executionServices.worktrees.sameTree(request) : null });
+    remoteSameTree: executionServices ? (request) => executionServices.worktrees.sameTree(request) : null, collectArtifacts: artifacts.beforeRemove });
   const stages = createHostStages({ sessionService, readOnlySessionService, clientFor, permissionAutoAcceptRuntime,
     sessionKnowledgeRuntime: localKnowledge, readSessionDefaults, isolated, placement, sessions, execution: executionServices, activity, readTokens });
   const reportAttention: ReportHostAttention = async ({ projectId, botId, itemId, occurrence, reason }) => {
@@ -141,8 +153,21 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
     }
     return proof.run({ ...input, isolated: recorded.isolated }, options);
   };
-  const runtime: ReturnType<typeof createBotsRuntime> = createBotsRuntime({ config, store, resolveProject, listProjects, stages, worktrees, services,
+  const runtime: ReturnType<typeof createBotsRuntime> = createBotsRuntime({ config, store, resolveProject, listProjects, stages, conversations, worktrees, services,
     serviceContext: context.serviceContext, runProof, pullRequests, sources, attention, notices, scheduler, events, questions, readPolicy });
+  const admitConversationMessage: typeof runtime.admitConversationMessage = async (input) => {
+    if (executionServices && !await runtime.isConversationSession(input.sessionId)) throw new BotServiceError('BOT_CONVERSATION_SCOPE_MISMATCH', 'The owner queue requires a recorded Bot conversation.');
+    if (await runtime.isConversationSession(input.sessionId)) assertStarted();
+    return runtime.admitConversationMessage(input);
+  };
+  sessionService?.setDispatchAdmission?.(admitConversationMessage);
+  messageQueueRuntime?.setDispatchAdmission(admitConversationMessage);
+  messageQueueRuntime?.setNativeDispatch(async ({ admissionId, ...input }) => {
+    if (!await runtime.isConversationSession(input.sessionId)) return undefined;
+    assertStarted();
+    return runtime.dispatchConversationNative(input, admissionId);
+  });
+  const conversationGuard = createBotConversationHttpGuard({ runtime, assertStarted, queue: messageQueueRuntime });
   const providerOptions = { dataDir, config, store, identities, services, runtime, listProjects, resolveProject,
     serviceContext: context.serviceContext, onNeedsYou: reportAttention, readPolicy };
   const providers: ReturnType<typeof createBotProviderRuntime> = owners.kind === 'separated'
@@ -152,15 +177,19 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
     const settings = await config.read(projectId);
     for (const item of (await store.read(projectId)).items) {
       const bot = settings.definitions.find((entry) => entry.id === item.botId);
-      if (bot) await sessions.trackItem(projectId, item, bot);
+      await sessions.trackItem(projectId, item, bot);
     }
   };
   const release = events.subscribe((event) => {
     if (event.projectId) broadcast({ type: 'openchamber:bots-changed', properties: { projectId: event.projectId } });
-    if ('item' in event && event.item) lifecycle.observe(refreshIndex(event.projectId));
+    if ('item' in event && event.item) lifecycle.observe((async () => {
+      await refreshIndex(event.projectId);
+      if (event.item.conversation) await runtime.syncConversationProgress(event.projectId, event.item.id);
+      if (event.item.conversation && artifacts.hasPendingDelivery(event.item.conversation.sessionId)) await artifacts.collect(event.item.conversation.sessionId);
+    })());
   });
-  const lifecycle = createHostLifecycle({ runtime, isolated, sessions, providers, discovery, hostTools, listProjects, refreshIndex, reportAttention, release, logger });
-  const processPayload = createHostPayloadProcessor({ lifecycle, runtime, sessions, isolated, discovery, hostTools, reportAttention });
+  const lifecycle = createHostLifecycle({ runtime, isolated, sessions, providers, discovery, hostTools, artifacts, listProjects, refreshIndex, reportAttention, release, logger });
+  const processPayload = createHostPayloadProcessor({ lifecycle, runtime, sessions, isolated, discovery, hostTools, artifacts, reportAttention });
   const api = createBotHostApi({ runtime, placement, sessions, providers, discovery, runScheduled,
     assertStarted, refreshIndex, broadcast, reportAttention, failureCode: (error) => failureCode.parse(error) });
   type Identities = ReturnType<typeof createBotIdentityStore>;
@@ -170,6 +199,20 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
     remove: async (...args: Parameters<Identities['remove']>) => { const result = await identities.remove(...args); await providers.reconfigure(); return result; },
   };
   return {
+    artifacts, isConversationSession: runtime.isConversationSession,
+    reconnect: (spaceId?: string) => { if (lifecycle.started && !lifecycle.stopping) lifecycle.observe(artifacts.recover(spaceId)); },
+    conversationGuard, admitConversationMessage,
+    assertConversationControlTarget: async (action: string, sessionId: string | undefined) => {
+      if (sessionId && await runtime.isConversationSession(sessionId)) assertBotLeadAction(action);
+    },
+    conversationQueueSnapshot: async () => {
+      if (!messageQueueRuntime) throw new BotServiceError('BOT_CONVERSATION_QUEUE_UNAVAILABLE', 'The conversation queue owner is unavailable.');
+      await messageQueueRuntime.load();
+      const snapshot = messageQueueRuntime.snapshot();
+      const owned = await Promise.all(snapshot.sessions.map(async (session) =>
+        await runtime.isConversationSession(session.sessionId) ? session : null));
+      return { revision: snapshot.revision, sessions: owned.filter((session) => session !== null) };
+    },
     runtime: api, botWatch, assertDispatch: (input: Parameters<typeof notices.assertDispatch>[0]) => { assertStarted(); return notices.assertDispatch(input); }, handleTool: api.handleTool,
     processPayload: (...args: Parameters<typeof processPayload>) => lifecycle.observe(processPayload(...args)),
     isSessionWorking: (sessionId: string) => sessions.isWorking(sessionId), readTokenSnapshot: sessions.tokenSnapshot, queueForSession: sessions.queueForSession,
@@ -184,6 +227,8 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
       })());
     },
     registerRoutes: (app: Application) => {
+      app.use(conversationGuard);
+      artifacts.registerRoutes(app);
       app.use('/api/openchamber/bots/isolated-tools', (_req, res) => res.status(403).json({ code: 'BOT_ISOLATED_CHILD_REQUIRED' }));
       registerBotRoutes(app, { botsRuntime: api, identities: publicIdentities });
     },

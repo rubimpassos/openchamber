@@ -19,7 +19,7 @@ export const createRuntimeFeedback = (
   },
 ) => {
   const { saveData } = journal;
-  const deliverFeedback = async (projectId: string, itemId: string, raw: { readonly eventId: string; readonly text: string }) => {
+  const deliverFeedback = async (projectId: string, itemId: string, raw: { readonly eventId: string; readonly text: string }, { workerOptional = false } = {}) => {
     const feedback = z.object({ eventId: text, text }).strict().parse(raw);
     const item = await itemFor(projectId, itemId);
     if (TERMINAL_ITEM_STATES.includes(item.state)) return { ignored: true };
@@ -37,7 +37,7 @@ export const createRuntimeFeedback = (
     }
     if (execution.data.stopRequested || (await admissionFor(projectId, item))?.state === 'merged') throw error('BOT_ADMISSION_REVOKED');
     if (!(await config.read(projectId)).definitions.some((bot) => bot.id === item.botId && bot.enabled)) throw error('BOT_NOT_ENABLED');
-    await notices.deliver({ projectId, item, ...feedback });
+    if (!workerOptional || Object.keys(item.sessions).length) await notices.deliver({ projectId, item, ...feedback });
     const latest = await journal.read(projectId, itemId);
     await saveData(projectId, itemId, { delivered: { ...latest.data.delivered, [feedback.eventId]: true } });
     return { delivered: true };
@@ -63,12 +63,13 @@ export const createRuntimeFeedback = (
     await saveData(projectId, itemId, { questionAnswer: null });
     return true;
   };
-  const answer = async (projectId: string, itemId: string, input: { readonly eventId: string; readonly text: string }, { questionKey }: { readonly questionKey?: string } = {}) => {
+  const answer = async (projectId: string, itemId: string, input: { readonly eventId: string; readonly text: string }, { questionKey, explicit = false }: { readonly questionKey?: string; readonly explicit?: boolean } = {}) => {
     let progressed = false;
     await withSourceControlFileLock(`${store.filePathFor(projectId)}.owner.lock`, async () => {
       const item = await itemFor(projectId, itemId);
       const feedback = z.object({ eventId: text, text }).strict().parse(input);
       const previous = await journal.read(projectId, itemId);
+      if (explicit && previous.data.pendingQuestion && questionKey === undefined) throw error('BOT_QUESTION_KEY_REQUIRED');
       if (questionKey !== undefined && questionKey !== (previous.data.pendingQuestion ?? previous.data.questionAnswer?.key)) return;
       if (Object.hasOwn(previous.data.feedbackQuestions ?? {}, feedback.eventId)
         && previous.data.feedbackQuestions?.[feedback.eventId] !== (previous.data.pendingQuestion ?? previous.data.questionAnswer?.key ?? null)) return;
@@ -104,5 +105,5 @@ export const createRuntimeFeedback = (
     if (progressed) await pump(projectId);
     return detail(projectId, itemId);
   };
-  return { receiveFeedback, refuseUnsentQuestion, finishQuestionAnswer, answer };
+  return { receiveFeedback, receiveConversationFeedback: (projectId: string, itemId: string, raw: { readonly eventId: string; readonly text: string }) => deliverFeedback(projectId, itemId, raw, { workerOptional: true }), refuseUnsentQuestion, finishQuestionAnswer, answer };
 };

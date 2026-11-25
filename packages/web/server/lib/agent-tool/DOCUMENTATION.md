@@ -50,8 +50,11 @@ the user can want independently:
 - `openchamber_render` — `render.page`, a self-contained HTML page (`html`,
   `title`) the chat draws inline above the agent's answer, such as a chart or
   table. The page travels in the call's input, which OpenCode stores and
-  syncs, so the server keeps no copy: `../openchamber-control/render-page.js`
-  only checks the input (`html` at most 200,000 characters so the callback
+  syncs. Ordinary calls keep no server copy; recorded Bot sessions use the
+  same action's durable [artifact capture](../bots/artifacts.md), with optional
+  `artifactKind: evidence | decision` and evidence as the default. The body stays
+  arbitrary HTML or OpenUI. `../openchamber-control/render-page.js`
+  checks the input (`html` at most 200,000 characters so the callback
   body stays under its 1 MB limit, `title` at most 120) and the setting.
   On by default: enabled while `agentRenderToolEnabled` is not `false`, and the
   control service refuses the action when it is, so a stale plugin cannot
@@ -515,6 +518,22 @@ error state. No output schema is declared, so the envelope travels as text
 content and a result never carries an `output` field: OpenCode rejects a result
 that declares output without a schema.
 
+The managed render tool requests `application/x-openchamber-render+ndjson`
+on its existing authenticated callback. Only a Bot capture starts that response:
+one `{ artifact: BotArtifactReference }` line precedes the final `{ result }`
+envelope. The route disables compression buffering with `no-transform`.
+Ordinary nonbot renders and callers without that Accept header retain JSON.
+
+The plugin writes the capture through native `context.progress` as
+`metadata.openchamber.artifact` before awaiting the final result. Its surrounding
+metadata has the usual `schemaVersion`, `action` and `description`, with no
+`ok` or `answer` until the call settles. The final result metadata retains the
+reference alongside the existing answer, including when chat closes the wait.
+A user Stop still throws and keeps the progress reference on the native call.
+`message-shells.ts` preserves it when paging removes result text.
+Session, call and optional message IDs come from authenticated plugin context;
+model input cannot supply the callback or reference.
+
 ## Runtime parity
 
 ### Direct MCP aliases
@@ -645,6 +664,11 @@ with the adapter and tool-specific fields. Execution options and successful
 results come from `../openchamber-control/service.js`; partial failure fields
 retain the unchecked types exported by `../openchamber-control/error.js`.
 Express uses `../shared/http-contracts.js`.
+
+`callback.ts` owns the admitted HTTP call's cancellation, in-flight registration
+and final response. The runtime authenticates before invoking it.
+`render-capture.ts` owns capture progress framing and the generated plugin's
+reader. Both progress and final results use the existing tool envelope.
 
 The injected execution and directory-resolution callbacks are optional typed
 functions, so their presence checks no longer repeat `typeof`. Every `typeof`

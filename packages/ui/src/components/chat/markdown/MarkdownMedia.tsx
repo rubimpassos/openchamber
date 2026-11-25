@@ -321,7 +321,7 @@ export function MarkdownVideo(props: VideoProps) {
   const context = useMarkdownMedia();
   const owner = context?.owner;
   const linked = React.useContext(MarkdownMediaLinkContext);
-  const remote = remoteSource(source);
+  const remote = remoteSource(source) && !owner?.options.retained;
   const { setRef, near } = useNearMedia(context?.mode === 'assistant' && !remote);
   React.useEffect(() => !remote ? owner?.register(source) : undefined, [owner, source, remote]);
   const { url, fail, retry } = useMediaSource(source, Boolean(context && !remote && !linked && (context.mode !== 'assistant' || context.settled && near)), true);

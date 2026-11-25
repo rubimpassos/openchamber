@@ -12,6 +12,7 @@ import { createAgentUpstream } from '../agent-server/agent-upstream.js';
 import { botEffectInputDigest } from '../agent-server/bot-service-contract.js';
 import { registerBotServiceRoutes } from '../agent-server/bot-service-routes.js';
 import { createBotStore } from './store.js';
+import { createBotChildServer } from './host-child.js';
 
 const BASE = 'a'.repeat(40); const TEST = 'b'.repeat(40); const HEAD = 'c'.repeat(40);
 const cleanups = [];
@@ -103,13 +104,25 @@ async function fixture(isolated, loseOpen = false, enableIsolationWhileFixing = 
     },
   };
   const clientFor = () => ({ session: { get: async ({ sessionID }) => ({ data: sessions.get(sessionID) }),
-    update: async () => {}, interrupt: async () => {}, synthetic: async () => {} },
+    create: async (input) => { const info = { ...input, id: input.id }; sessions.set(info.id, info); messages.set(info.id, []); return info; },
+    update: async () => {}, interrupt: async () => {}, synthetic: async () => {},
+    prompt: async (input) => ({ id: input.id }), command: async () => {},
+    switchModel: async ({ sessionID, model }) => { sessions.get(sessionID).model = model; },
+    switchAgent: async ({ sessionID, agent }) => { sessions.get(sessionID).agent = agent; } },
   message: { list: async ({ sessionID }) => ({ data: messages.get(sessionID) ?? [] }) } });
   const knowledge = { collect: async () => ({ notes: [], plans: [], memory: { enabled: false, complete: true, global: [], project: [] },
     linking: false, naming: false, rendering: false, secrets: false, workflows: false, directTools: false, readAloud: false, checkout: null }), sync: async () => {} };
   const proofResult = (input) => ({ status: 'passed', testSha: input.testSha, fixSha: input.fixSha, command: input.command,
     args: input.args, testExitCode: 1, fixExitCode: 0 });
-  const execution = createBotExecutionServices({ agentServer: true, dataDir: path.join(root, 'agent'),
+  let runningHost; let wakes = true; const notifications = [];
+  const updateMetadata = async (sessionId, patch) => {
+    const info = sessions.get(sessionId);
+    info.metadata = { ...info.metadata, openchamber: { ...info.metadata.openchamber, ...patch.openchamber } };
+    if (wakes && runningHost) notifications.push(runningHost.processPayload({ type: 'session.updated', properties: { info: { ...info, sessionID: sessionId } } },
+      { spaceId: info.location.directory.startsWith('/spaces/') ? 'abcdef123456' : null }));
+  };
+  const child = createBotChildServer({ dataDir: path.join(root, 'space'), updateMetadata, readSession: async (id) => sessions.get(id) });
+  const execution = createBotExecutionServices({ agentServer: true, dataDir: path.join(root, 'agent'), updateMetadata,
     readSettings: async () => ({ projects: [project] }), listProjects, clientFor, sessionService, sessionKnowledgeRuntime: knowledge,
     readSessionDefaults: async () => ({ providerID: 'controlled', modelID: 'model' }),
     readTokens: async () => 2, activity: { fetchActiveSessionStatuses: async () => ({}), hasWorkingChildren: async () => false, hasWorkingDescendants: async () => false },
@@ -123,6 +136,7 @@ async function fixture(isolated, loseOpen = false, enableIsolationWhileFixing = 
   const app = express();
   app.post('/auth/session', express.json(), (_req, res) => res.set('Set-Cookie', 'oc_ui_session=controlled; Max-Age=3600; Path=/').json({ ok: true }));
   app.use('/api', (req, res, next) => req.headers.cookie === 'oc_ui_session=controlled' ? next() : res.sendStatus(401));
+  execution.artifacts.registerRoutes(app, 'agent');
   registerBotServiceRoutes(app, { agentServer: true, services: { ...execution, execute: async (...args) => {
     calls.operations.push(args[0]);
     try { return await execution.execute(...args); }
@@ -143,6 +157,13 @@ async function fixture(isolated, loseOpen = false, enableIsolationWhileFixing = 
     exec: async (_id, _args, options) => { const input = JSON.parse(options.stdin); calls.proof.push(input); return { code: 0, stdout: JSON.stringify(proofResult(input)) }; } },
   dispatcher: { requestInside: async (_spaceId, request) => {
     const url = new URL(request.path, 'http://controlled.invalid'); let body = {};
+    if (url.pathname.startsWith('/api/openchamber/bots/artifacts/')) {
+      const input = JSON.parse(String(request.body));
+      const result = url.pathname.endsWith('/pull') ? await child.artifacts.service.pull(input)
+        : url.pathname.endsWith('/drain') ? await child.artifacts.service.drain(input) : await child.artifacts.service.chunk(input);
+      const response = Readable.from([Buffer.from(JSON.stringify(result))]);
+      response.statusCode = 200; response.complete = true; return response;
+    }
     if (request.path === '/api/session' && request.method === 'POST') { body = JSON.parse(String(request.body)); sessions.set(body.id, body); messages.set(body.id, []); }
     else if (request.path === '/api/session/active') body = {};
     else if (url.pathname.endsWith('/message')) body = messages.get(url.pathname.split('/')[3]) ?? [];
@@ -162,7 +183,7 @@ async function fixture(isolated, loseOpen = false, enableIsolationWhileFixing = 
     getSpacesHost: () => spaces, notificationCenter: { upsertBot: async () => ({ changed: true }), resolveBot: async () => ({ changed: true }) }, notify: async () => {}, broadcast: () => {},
     getFixLoopRuntime: () => ({ createBotWatch: async (input) => { calls.watches.push(input); }, stopBotWatch: async () => {} }),
     logger: { warn() {} } });
-  const hosts = []; const build = () => { const host = buildHost(); hosts.push(host); return host; };
+  const hosts = []; const build = () => { const host = buildHost(); runningHost = host; hosts.push(host); return host; };
   cleanups.push(async () => { for (const host of hosts) await host.stop(); });
   const host = build(); await host.start();
   const definition = { id: 'bot', name: 'Controlled Bot', mission: 'Fix a verified bug', isolated,
@@ -172,7 +193,17 @@ async function fixture(isolated, loseOpen = false, enableIsolationWhileFixing = 
   await host.runtime.saveConfig(project.id, { definitions: [definition] });
   const policy = await host.runtime.getPolicy(project.id);
   await host.runtime.approvePolicy(project.id, { file: policy.areas[0].file, fingerprint: policy.areas[0].fingerprint });
-  return { host, build, calls, project, source: () => source };
+  return { host, build, calls, project, source: () => source,
+    setWakes: (enabled) => { wakes = enabled; },
+    capture: async (sessionId, callId = 'call_retained') => {
+      const owner = isolated ? child : execution;
+      const reference = await owner.artifacts.capture.capture({ body: { format: 'ui', content: 'root = Text("Recorded evidence")' }, title: 'Evidence' },
+        { sessionId, directory: sessions.get(sessionId).location.directory, callId, messageId: 'msg_retained' });
+      await Promise.all(notifications);
+      return reference;
+    },
+    removeCapture: () => fs.rm(path.join(root, isolated ? 'space' : 'agent', 'bots', 'artifact-captures'), { recursive: true, force: true }),
+  };
 }
 
 it.each([false, true])('composes normal publication and restart for isolated=%s without owner project execution', async (isolated) => {
@@ -190,11 +221,21 @@ it.each([false, true])('composes normal publication and restart for isolated=%s 
       botId: 'bot', itemId: item.id, checkoutKey: `${item.id}:worktree` });
     expect(f.calls.adoptions.every((entry) => entry.spaceId === 'abcdef123456')).toBe(true);
   } else expect(f.calls.spaces).toEqual([]);
+  const artifact = await f.capture(item.sessions.fixing);
+  await f.host.artifacts.flush();
+  expect((await f.host.artifacts.artifacts.list({ projectId: f.project.id, itemId: item.id })).artifacts.map((entry) => entry.id)).toEqual([artifact.id]);
   await f.host.stop(); const fresh = f.build(); await fresh.start();
   expect((await fresh.runtime.detail(f.project.id, item.id)).item.pr.number).toBe(42);
   expect(f.calls.writes).toHaveLength(2);
+  await fresh.artifacts.recover();
+  f.setWakes(false);
+  const finalArtifact = await f.capture(item.sessions.fixing, 'call_final');
+  expect((await fresh.artifacts.artifacts.list({ projectId: f.project.id, itemId: item.id })).artifacts.map((entry) => entry.id)).toEqual([artifact.id]);
   await fresh.runtime.stopItem(f.project.id, item.id);
   expect(f.calls.removed).toEqual([item.id]);
+  await f.removeCapture();
+  expect((await fresh.artifacts.artifacts.read({ projectId: f.project.id, itemId: item.id }, artifact.id)).payload.body.content).toBe('root = Text("Recorded evidence")');
+  expect((await fresh.artifacts.artifacts.read({ projectId: f.project.id, itemId: item.id }, finalArtifact.id)).payload.body.content).toBe('root = Text("Recorded evidence")');
 });
 
 it('reconciles a lost remote publication result through a fresh owner without repeating its write', async () => {

@@ -8,6 +8,7 @@ import { createBotsRuntime } from './runtime.js';
 import { createBotEvents } from './events.js';
 import { createBotQuestions } from './questions.js';
 import { operations } from './services/contracts.js';
+import { createBotConversationSessions } from './conversation-sessions.js';
 
 const TEST_BASE = 'a'.repeat(40);
 export const TEST_HEAD = 'b'.repeat(40);
@@ -26,7 +27,7 @@ export const createBotDriver = async (root, options = {}) => {
   } });
   const clock = () => options.now ?? 1_792_700_000_000;
   const store = createBotStore({ projectsDirPath: path.join(root, 'personal'), now: clock });
-  const calls = { sessions: [], prompts: [], permissions: [], modes: [], knowledge: [], effects: [], worktrees: [], removed: [], proofs: [], notices: [], attention: [], schedules: [], loops: [], published: [], publications: [] };
+  const calls = { sessions: [], prompts: [], permissions: [], modes: [], knowledge: [], effects: [], worktrees: [], removed: [], proofs: [], notices: [], attention: [], schedules: [], loops: [], published: [], publications: [], conversationNotices: [], interrupts: [], nativePrompts: [] };
   const records = new Map();
   const sessions = new Map();
   const held = new Set(options.held ?? []);
@@ -47,24 +48,32 @@ export const createBotDriver = async (root, options = {}) => {
   };
   const client = {
     session: {
-      async create(input) { const id = `ses_bot_${sessions.size + 1}`; const info = { ...input, id }; sessions.set(id, info); records.set(id, []); calls.sessions.push(input); return info; },
+      async create(input) { const id = input.id ?? `ses_bot_${sessions.size + 1}`; const info = { ...input, id }; sessions.set(id, info); records.set(id, []); calls.sessions.push(input); return info; },
       async get({ sessionID }) { const info = sessions.get(sessionID); if (!info) throw new Error('Missing session'); return { data: info }; },
       async update({ sessionID, permissions }) { calls.permissions.push({ sessionID, permissions }); },
       async switchModel({ sessionID, model }) { sessions.get(sessionID).model = model; },
       async switchAgent({ sessionID, agent }) { sessions.get(sessionID).agent = agent; },
-      async prompt({ sessionID, text }) {
+      async prompt(input) {
+        const { sessionID, text } = input;
         const info = sessions.get(sessionID);
         const stage = info.metadata.openchamber.automation.stage;
         const itemId = info.metadata.openchamber.automation.itemId;
         const item = (await store.read(project.id)).items.find((entry) => entry.id === itemId);
+        if (info.metadata.openchamber.automation.role === 'conversation') {
+          if (item.conversation?.sessionId !== sessionID) throw new Error('Conversation preceded durable admission');
+          calls.prompts.push({ sessionID, text, model: info.model });
+          calls.nativePrompts.push(input);
+          return { id: input.id ?? `msg_${sessionID}` };
+        }
         if (item.sessions[stage] !== sessionID || !item.effects.some((effect) => effect.kind === 'session.prompt' && effect.state === 'dispatching')) throw new Error('Prompt preceded durable admission');
         calls.prompts.push({ sessionID, text, model: info.model });
         if (controls.failStage === stage) throw new Error('Lost prompt response');
         if (!held.has(stage)) complete(sessionID);
         return { id: `msg_${sessionID}` };
       },
-      async interrupt({ sessionID }) { held.delete(sessions.get(sessionID).metadata.openchamber.automation.stage); },
-      async synthetic() { return { id: 'msg_goal' }; },
+      async interrupt({ sessionID }) { calls.interrupts.push(sessionID); held.delete(sessions.get(sessionID).metadata.openchamber.automation.stage); },
+      async synthetic(input) { calls.conversationNotices.push(input); return { id: input.id ?? 'msg_goal' }; },
+      async command(input) { calls.nativePrompts.push(input); },
     },
     message: { async list({ sessionID }) { return { data: records.get(sessionID) ?? [] }; } },
     model: { async list() { return { data: controls.availableModels }; } },
@@ -130,6 +139,9 @@ export const createBotDriver = async (root, options = {}) => {
     },
   };
   const dependencies = { config, store, resolveProject: async (id) => { if (id !== project.id) throw Object.assign(new Error('Missing project'), { status: 404 }); return project; }, listProjects: async () => [project], stages, services, serviceContext,
+    conversations: createBotConversationSessions({ dataDir: path.join(root, 'conversation-execution'), clientFor: () => client,
+      knowledge, readTokens: async () => controls.conversationTokens ?? 0,
+      activity: { fetchActiveSessionStatuses: async () => ({}), hasWorkingDescendants: async () => false } }),
     worktrees: {
       async bindPublication({ item, branch }) { calls.publications.push({ itemId: item.id, branch }); return { publicationBranch: branch }; },
       async create(request) { const directory = path.join(root, 'worktrees', request.item.id); await fs.mkdir(directory, { recursive: true }); calls.worktrees.push(request.item.id); return { directory, branch: `bot/${request.item.id}`, baseBranch: 'main', baseSha: TEST_BASE }; },
@@ -150,7 +162,7 @@ export const createBotDriver = async (root, options = {}) => {
   } });
   const runtime = createBotsRuntime(dependencies);
   const admit = (source = { kind: 'manual', id: 'manual-1' }) => runtime.admit(project.id, 'bugs', { source, title: 'Fix a verified defect' });
-  return { runtime, dependencies, project, config, store, calls, controls, sessions, stages, records, held, admit,
+  return { runtime, dependencies, project, config, store, calls, controls, sessions, stages, records, held, admit, client, sessionService,
     complete: (stage) => { for (const [id, info] of sessions) if (info.metadata.openchamber.automation.stage === stage) complete(id); held.delete(stage); },
     restart: () => createBotsRuntime(dependencies),
   };

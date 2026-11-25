@@ -8,6 +8,7 @@ import type { evaluateRepositoryPolicy, readRepositoryPolicy } from '../reposito
 import { admissionSchema, checkoutSchema, projectSchema, questionAnswerSchema, snapshotSchema, stageInterruptionSchema, pendingToolSchema } from './input-contracts.js';
 import type { createBotExecutionStore } from '../execution-store.js';
 import type { BotStageSelectionInput } from '../stage-sessions.js';
+import { conversationCaptureSchema, conversationSelectionSchema } from '../conversation-contract.js';
 
 const jsonRecord = z.record(z.string(), z.json());
 const stage = z.enum(['investigation', 'fixing', 'judge']);
@@ -28,6 +29,8 @@ const questionInputSchema = z.object({ eventId: z.string(), questions: z.array(z
 const questionSchema = z.object({ input: questionInputSchema }).catchall(z.json());
 const bindingSchema = z.object({ identityId: z.string(), identityRevision: z.number(), target: z.json() });
 export const dataSchema = z.object({
+  conversationCapture: conversationCaptureSchema.optional(),
+  conversationSends: z.record(z.string(), z.object({ digest: z.string(), selection: conversationSelectionSchema, at: z.number() })).optional(),
   round: z.number().optional(), runs: z.record(z.string(), runSchema).optional(), outcomes: z.record(z.string(), outcomeSchema).optional(),
   checkout: checkoutSchema.optional(), snapshot: snapshotSchema.optional(), investigation: investigationSchema.optional(), fixing: fixingSchema.optional(),
   admission: admissionSchema.optional(), pendingTool: pendingToolSchema.nullable().optional(), pendingQuestion: z.string().nullable().optional(),

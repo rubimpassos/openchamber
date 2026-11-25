@@ -12,7 +12,7 @@ import { generatedImagePaths, proposedWorkflowRunId, renderedPage, requestedSecr
 import { WorkflowRunCard } from '@/components/chat/workflows/WorkflowRunCard';
 import type { ToolPopupContent } from '../types';
 import { GeneratedImages } from './GeneratedImages';
-import { ShownPage } from './HtmlRenderFrame';
+import { ShownPage } from './ShownPage';
 import { SecretForgetCard, SecretRequestCard, SecretRunCard } from './SecretRequestCard';
 import { usePageAsk } from '@/hooks/usePageAsk';
 

@@ -1,5 +1,6 @@
 import { settingsDict } from './tr.settings';
 import { botsI18n } from './bots.i18n';
+import { botWorkspaceI18n } from './bot-workspace.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -190,6 +191,7 @@ export const dict = {
   ...settingsDict,
   ...selectionApprovalI18n.tr,
   ...botsI18n.tr,
+  ...botWorkspaceI18n.tr,
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...prStacksI18n.tr,

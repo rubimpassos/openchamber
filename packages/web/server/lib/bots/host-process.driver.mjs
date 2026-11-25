@@ -17,8 +17,12 @@ await fs.mkdir(repository);
 await botGit(repository, ['init', '--quiet', '--initial-branch=main']);
 await botGit(repository, ['-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Fixture']);
 await botGit(repository, ['remote', 'add', 'origin', 'https://github.com/fixture/repository.git']);
-const upstream = http.createServer((req, res) => {
+const sessions = new Map();
+const prompts = [];
+const requests = [];
+const upstream = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://opencode.test');
+  requests.push({ method: req.method, path: url.pathname + url.search });
   if (url.pathname === '/api/event') {
     res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': connected\n\n');
     streams.add(res); res.on('close', () => streams.delete(res)); return;
@@ -26,7 +30,27 @@ const upstream = http.createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
   if (url.pathname === '/api/info') return res.end(JSON.stringify({ version: '2.2.5' }));
   if (url.pathname === '/api/session/active') return res.end(JSON.stringify({ data: {} }));
-  if (url.pathname === '/api/session') return res.end(JSON.stringify({ data: [], cursor: {} }));
+  let body;
+  if (req.method === 'POST' || req.method === 'PATCH') {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const text = Buffer.concat(chunks).toString('utf8');
+    body = text ? JSON.parse(text) : {};
+  }
+  if (url.pathname === '/api/session' && req.method === 'POST') {
+    const record = { ...body, id: body.id ?? `ses_fixture${sessions.size}`, time: { created: Date.now(), updated: Date.now() } };
+    sessions.set(record.id, record); return res.end(JSON.stringify({ data: record }));
+  }
+  if (url.pathname === '/api/session') return res.end(JSON.stringify({ data: [...sessions.values()], cursor: {} }));
+  const id = url.pathname.split('/')[3];
+  if (/^\/api\/session\/[^/]+$/.test(url.pathname)) {
+    const record = sessions.get(id);
+    if (body && record) { Object.assign(record, body); res.statusCode = 204; return res.end(); }
+    return res.end(JSON.stringify({ data: record }));
+  }
+  if (url.pathname.endsWith('/prompt')) { prompts.push({ sessionId: id, body }); return res.end(JSON.stringify({ data: { id: body.id } })); }
+  if (url.pathname.endsWith('/message')) return res.end(JSON.stringify({ data: [], cursor: {} }));
+  if (/\/(?:model|agent)$/.test(url.pathname) || url.pathname.includes('/instructions/entry/')) { res.statusCode = 204; return res.end(); }
   if (url.pathname === '/api/model/default') return res.end(JSON.stringify({ data: { providerID: 'fixture', id: 'model' } }));
   return res.end(JSON.stringify({ data: [] }));
 });
@@ -107,8 +131,21 @@ try {
   } while (Date.now() < deadline);
   assert.equal(configured.status, 200, `${JSON.stringify(configured.body)}\n${host.logs()}`);
   const item = await host.request(`${base}/items`, 'POST', { botId: 'bugs', title: 'Fixture issue', source: { kind: 'manual', id: 'fixture' } });
-  assert.equal(item.status, 200); assert.equal(item.body.item.state, 'needs-you');
+  assert.equal(item.status, 200, `${JSON.stringify(item.body)}\n${host.logs()}\n${JSON.stringify(requests)}`); assert.equal(item.body.item.state, 'needs-you');
   assert.equal(item.body.item.wait.reason, 'BOT_IDENTITY_REQUIRED');
+  const conversation = item.body.item.conversation;
+  assert(conversation?.sessionId, `Missing root conversation: ${JSON.stringify(item.body)}`);
+  const native = { id: 'msg_nativefixture1', text: 'Explain the evidence', files: [{ uri: 'file:///proof.txt', name: 'proof.txt' }] };
+  assert.equal((await host.request(`/api/session/${conversation.sessionId}/prompt`, 'POST', native)).status, 200);
+  assert.deepEqual(prompts, [{ sessionId: conversation.sessionId, body: native }]);
+  assert.equal((await host.request(`/api/session/${conversation.sessionId}`, 'PATCH', { permissions: [] })).status, 403);
+  assert.equal((await host.request('/api/openchamber/control', 'POST', {
+    action: 'session.send', input: { sessionId: conversation.sessionId, prompt: 'Bypass' },
+  })).status, 403);
+  assert.equal((await host.request(`${base}/items/${item.body.item.id}/artifacts`)).status, 200);
+  await host.request(`${base}/items/${item.body.item.id}/stop`, 'POST');
+  assert.notEqual((await host.request(`/api/session/${conversation.sessionId}/prompt`, 'POST', { ...native, id: 'msg_nativefixture2' })).status, 200);
+  assert.equal(prompts.length, 1);
   const timeout = setTimeout(() => eventsAbort.abort(), 5_000);
   assert.equal(await received, true); clearTimeout(timeout); eventsAbort.abort();
   const center = await host.request('/api/notification-center?version=2');
@@ -119,6 +156,8 @@ try {
   await host.close();
   const child = await launch(true);
   assert.equal((await child.request('/api/openchamber/bots/isolated-tools?sessionId=ses_child')).status, 200);
+  assert.equal((await fetch(`${child.baseUrl}/api/openchamber/bots/artifacts/pull`, { method: 'POST' })).status, 401);
+  assert.equal((await child.request('/api/openchamber/bots/artifacts/pull', 'POST', {})).status, 400);
   assert.equal((await child.request(base)).status, 501);
   await assert.rejects(fs.stat(path.join(child.dataDir, 'bot-identities.json')), { code: 'ENOENT' });
   await child.close();

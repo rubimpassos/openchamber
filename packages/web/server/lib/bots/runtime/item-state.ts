@@ -5,7 +5,7 @@ import type { createBotAttention } from '../attention.js';
 import type { createBotStore } from '../store.js';
 
 export const humanStates: ReadonlySet<BotItemState> = new Set(['needs-you', 'waiting-answer', 'in-review']);
-type SessionTarget = { readonly projectId: string; readonly itemId: string };
+type SessionTarget = { readonly projectId: string; readonly itemId: string; readonly role?: 'conversation' };
 type ItemStateOptions = {
   readonly store: Pick<ReturnType<typeof createBotStore>, 'read' | 'update'>;
   readonly attention: Pick<ReturnType<typeof createBotAttention>, 'sync'>;
@@ -24,6 +24,7 @@ export const createRuntimeItemState = ({ store, attention, events }: ItemStateOp
     const item = snapshot.items.find((entry) => entry.id === itemId);
     if (!item) throw runtimeError('BOT_ITEM_NOT_FOUND', 404);
     for (const sessionId of Object.values(item.sessions)) sessionIndex.set(sessionId, { projectId, itemId });
+    if (item.conversation) sessionIndex.set(item.conversation.sessionId, { projectId, itemId, role: 'conversation' });
     await attention.sync({ projectId, item });
     events.publish({ type: 'bot.item.changed', projectId, item });
     return item;

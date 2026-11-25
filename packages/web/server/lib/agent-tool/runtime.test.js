@@ -14,6 +14,9 @@ import { createProjectContextRuntime } from '../project-context/runtime.js';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import { createMcpToolsRuntime } from '../mcp-tools/runtime.js';
 import { OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, OPENCHAMBER_CONTROL_ACTION_DEFINITIONS } from '../openchamber-control/actions.js';
+import { createBotArtifactCapture } from '../bots/artifacts-capture.js';
+import { botArtifactBindingFromSession } from '../bots/artifacts-contract.js';
+import { shellMessagePage } from '../opencode/message-shells.js';
 
 const temporaryDirectories = [];
 const pluginCleanups = [];
@@ -54,6 +57,13 @@ const createPageWaitSignals = () => {
     onPageWaitChange: (change) => { if (change.type === 'waiting') forCall(change.callId).resolve(); },
     ready: (id) => forCall(id).promise,
   };
+};
+const callerClient = () => ({ session: {
+  get: async ({ sessionID }) => ({ id: sessionID, location: { directory: '/repo' }, metadata: {} }),
+  inbox: { list: async () => [] },
+} });
+const callerControlOptions = {
+  buildOpenCodeUrl: () => 'http://controlled.invalid/api/info', getOpenCodeAuthHeaders: () => ({}), createClient: callerClient,
 };
 
 /** What a managed OpenCode child start does: write the plugin, mint a token. */
@@ -417,6 +427,7 @@ describe('managed agent tool runtime', () => {
       createId: () => 'note-1', onChanged,
     });
     const service = createOpenChamberControlService({
+      ...callerControlOptions,
       projectContextRuntime,
       resolveProjectContextId: async (directory) => directory === '/repo' ? owner : '',
       sessionService: { resolveDirectory: async () => '/repo' },
@@ -460,6 +471,7 @@ describe('managed agent tool runtime', () => {
       resolveSharedPlansDir: async () => path.join(dataDir, 'shared-plans'),
     });
     const service = createOpenChamberControlService({
+      ...callerControlOptions,
       projectContextRuntime,
       resolveProjectContextId: async (resolved) => resolved === directory ? owner : '',
       sessionService: { resolveDirectory: async () => directory },
@@ -631,9 +643,9 @@ describe('managed agent tool runtime', () => {
     const { runtime, executeAction } = await createRuntime({ resolveSessionDirectory: async (id) => id === 'ses_real' ? '/real' : null });
     const input = { action: 'knowledge.save', kind: 'note', body: 'Note', origin: { sessionId: 'spoof' }, sessionId: 'spoof' };
     await runtime.execute({ tool: 'openchamber_knowledge', input, sessionID: 'ses_real', contextDirectory: '/spoof', contextSessionId: 'spoof' });
-    expect(executeAction).toHaveBeenCalledWith('knowledge.save', input, '/real', { contextSessionId: 'ses_real' });
+    expect(executeAction).toHaveBeenCalledWith('knowledge.save', input, '/real', { contextSessionId: 'ses_real', callerSessionId: 'ses_real' });
     await runtime.execute({ tool: 'openchamber_knowledge', input, sessionID: 'missing', contextDirectory: '/spoof' });
-    expect(executeAction).toHaveBeenLastCalledWith('knowledge.save', input, undefined, { contextSessionId: 'missing' });
+    expect(executeAction).toHaveBeenLastCalledWith('knowledge.save', input, undefined, { contextSessionId: 'missing', callerSessionId: 'missing' });
     const rejected = await runtime.execute({ tool: 'openchamber_memory', input });
     expect(rejected.ok).toBe(false);
     expect(executeAction).toHaveBeenCalledTimes(2);
@@ -1040,7 +1052,7 @@ describe('managed agent tool runtime', () => {
     await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: true });
     const shared = await loadTools(dataDir, 'render-share');
     const parameters = shared.openchamber_render.input.properties.parameters.properties;
-    expect(Object.keys(parameters).sort()).toEqual(['answerLater', 'awaitAnswer', 'html', 'share', 'title', 'ui']);
+    expect(Object.keys(parameters).sort()).toEqual(['answerLater', 'artifactKind', 'awaitAnswer', 'html', 'share', 'title', 'ui']);
     expect(parameters.share.required).toEqual(['recipients']);
     expect(shared.openchamber_render.description).toContain('share sends the page');
     expect(shared.openchamber_render.description.length).toBeLessThanOrEqual(2048);
@@ -1057,7 +1069,7 @@ describe('managed agent tool runtime', () => {
     const tool = await loadTools(dataDir, 'render');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['answerLater', 'awaitAnswer', 'html', 'title', 'ui']);
+    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['answerLater', 'artifactKind', 'awaitAnswer', 'html', 'title', 'ui']);
     expect(tool.openchamber_render.input.properties.parameters.properties.answerLater.type).toBe('boolean');
     // It names the clients that cannot answer such a page, and where the question must be.
     const later = tool.openchamber_render.input.properties.parameters.properties.answerLater.description;
@@ -1362,7 +1374,15 @@ describe('managed agent tool runtime', () => {
 
   it('returns the answer a page waited for, or ends the wait when the user writes in the chat', async () => {
     const pageWaits = createPageWaitSignals();
-    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' }, onPageWaitChange: pageWaits.onPageWaitChange });
+    const captureDirectory = await fs.mkdtemp('/tmp/opencode/tool-page-origin-'); temporaryDirectories.push(captureDirectory);
+    const canonical = { id: 'ses_caller', location: { directory: '/repo' }, metadata: { openchamber: {
+      lead: { at: 1 }, automation: { source: 'bot', role: 'conversation', projectId: 'project', botId: 'bot', itemId: 'item' },
+    } } };
+    const artifacts = createBotArtifactCapture({ dataDir: captureDirectory,
+      resolveSession: async () => botArtifactBindingFromSession(canonical), onCaptured: async () => {} });
+    const service = createOpenChamberControlService({ ...callerControlOptions, artifacts,
+      createClient: () => ({ session: { get: async () => canonical, inbox: { list: async () => [] } } }),
+      sessionService: { resolveDirectory: async () => '/repo' }, onPageWaitChange: pageWaits.onPageWaitChange });
     const { runtime, dataDir } = await createRuntime({
       resolveSessionDirectory: async () => '/repo',
       executeAction: (...args) => service.execute(...args),
@@ -1379,17 +1399,41 @@ describe('managed agent tool runtime', () => {
     const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
     process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
     process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const metadata = new Map();
     const ask = (id, awaitAnswer = true, signal = new AbortController().signal) => tools.openchamber_render.execute(
-      { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer } },
-      { sessionID: 'ses_caller', id, signal, progress: async () => {} },
+      { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer,
+        artifact: { id: 'forged' }, contextMessageId: 'msg_forged' } },
+      { sessionID: 'ses_caller', messageID: `msg_${id}`, id, signal,
+        progress: async (value) => { metadata.set(id, value); } },
     );
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
+      await request(app).post('/api/openchamber/agent-tool').set('Accept', 'application/x-openchamber-render+ndjson')
+        .send({ tool: 'openchamber_render', sessionID: 'ses_caller', callID: 'call_unauthorized',
+          input: { action: 'render.page', html: '<p>Unauthorized</p>' } }).expect(401);
+      expect((await artifacts.list(botArtifactBindingFromSession(canonical))).entries).toEqual([]);
       const answered = ask('call_1');
-      await vi.waitFor(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_1', summary: 'Layout B', data: { layout: 'b' } }));
+      void answered.catch(() => {});
+      await pageWaits.ready('call_1');
+      await vi.waitFor(() => expect(metadata.get('call_1')?.openchamber?.artifact).toMatchObject({
+        publication: 'captured', interaction: 'awaitAnswer',
+        source: { sessionId: 'ses_caller', callId: 'call_1', messageId: 'msg_call_1' },
+      }));
+      const live = metadata.get('call_1').openchamber;
+      expect(live).not.toHaveProperty('ok');
+      expect(live).not.toHaveProperty('answer');
+      const captured = await artifacts.list(botArtifactBindingFromSession(canonical));
+      expect(live.artifact.id).toBe(captured.entries[0].metadata.id);
+      service.answerPage({ sessionId: 'ses_caller', callId: 'call_1', summary: 'Layout B', data: { layout: 'b' } });
       const result = await answered;
       expect(JSON.parse(result.content)).toMatchObject({ ok: true, data: { answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } } });
+      expect(JSON.parse(result.content).data.artifact.source).toMatchObject({ sessionId: 'ses_caller', callId: 'call_1', messageId: 'msg_call_1' });
       expect(result.metadata.openchamber).toMatchObject({ ok: true, answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } });
+      expect(result.metadata.openchamber.artifact).toEqual(live.artifact);
+      const history = shellMessagePage({ data: [{ id: 'msg_call_1', content: [{ type: 'tool', id: 'call_1', name: 'openchamber_render',
+        state: { status: 'completed', content: [{ type: 'text', text: result.content }], metadata: result.metadata } }] }] }, new Set());
+      expect(history.data[0].content[0].state.content).toEqual([{ type: 'text', text: '' }]);
+      expect(history.data[0].content[0].state.metadata.openchamber).toMatchObject({ artifact: live.artifact, answer: { answered: true, summary: 'Layout B' } });
       // Bun would otherwise end the waiting request after about six minutes;
       // a page that only shows keeps the default.
       expect(fetchSpy.mock.lastCall?.[1]).toMatchObject({ timeout: false });
@@ -1398,11 +1442,13 @@ describe('managed agent tool runtime', () => {
 
       const closed = ask('call_2');
       await pageWaits.ready('call_2');
+      await vi.waitFor(() => expect(metadata.get('call_2')?.openchamber?.artifact?.source.callId).toBe('call_2'));
       await hooks.prompt({ sessionID: 'ses_other' });
       await hooks.prompt({ sessionID: 'ses_caller' });
       const closedResult = await closed;
       expect(JSON.parse(closedResult.content)).toMatchObject({ ok: true, data: { answer: { answered: false, reason: 'chat' } } });
       expect(closedResult.metadata.openchamber).toMatchObject({ ok: true, answer: { answered: false, reason: 'chat' } });
+      expect(closedResult.metadata.openchamber.artifact.source.messageId).toBe('msg_call_2');
       // The server let go of the page too, so a late answer finds nothing.
       await vi.waitFor(() => expect(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_2', summary: 'B' }))
         .toThrow(expect.objectContaining({ statusCode: 404 })));
@@ -1413,21 +1459,35 @@ describe('managed agent tool runtime', () => {
       const stop = new AbortController();
       const stopped = ask('call_3', true, stop.signal);
       await pageWaits.ready('call_3');
+      await vi.waitFor(() => expect(metadata.get('call_3')?.openchamber?.artifact?.source.messageId).toBe('msg_call_3'));
       stop.abort();
       await expect(stopped).rejects.toThrow();
+      expect(metadata.get('call_3').openchamber).not.toHaveProperty('ok');
+      expect(metadata.get('call_3').openchamber).not.toHaveProperty('answer');
+      const interrupted = shellMessagePage({ data: [{ id: 'msg_call_3', content: [{ type: 'tool', id: 'call_3', name: 'openchamber_render',
+        state: { status: 'error', content: [], metadata: metadata.get('call_3') } }] }] }, new Set());
+      expect(interrupted.data[0].content[0].state.metadata.openchamber.artifact.source.messageId).toBe('msg_call_3');
+
+      canonical.metadata = {};
+      const ordinary = await ask('call_ordinary', false);
+      expect(ordinary.metadata.openchamber).toMatchObject({ ok: true, action: 'render.page' });
+      expect(ordinary.metadata.openchamber).not.toHaveProperty('artifact');
+      expect(JSON.parse(ordinary.content).data).not.toHaveProperty('artifact');
+      expect((await fetchSpy.mock.results.at(-1).value).headers.get('content-type')).toContain('application/json');
     } finally {
       fetchSpy.mockRestore();
       if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
       else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
       if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
       else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+      server.closeAllConnections();
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   });
 
   it('keeps a page waiting through a prompt an agent sent or one queued for after the turn', async () => {
     const pageWaits = createPageWaitSignals();
-    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' }, onPageWaitChange: pageWaits.onPageWaitChange });
+    const service = createOpenChamberControlService({ ...callerControlOptions, sessionService: { resolveDirectory: async () => '/repo' }, onPageWaitChange: pageWaits.onPageWaitChange });
     const { runtime, dataDir } = await createRuntime({
       resolveSessionDirectory: async () => '/repo',
       executeAction: (...args) => service.execute(...args),
@@ -1575,7 +1635,7 @@ describe('managed agent tool runtime', () => {
       'session.create',
       { action: 'session.create', prompt: 'x', returnResult: true },
       undefined,
-      { contextSessionId: 'ses_1' },
+      { contextSessionId: 'ses_1', callerSessionId: 'ses_1' },
     );
   });
 
@@ -1635,7 +1695,7 @@ describe('managed agent tool runtime', () => {
       'session.messages',
       { action: 'session.messages', sessionId: 'ses_1' },
       '/work/other-worktree',
-      { contextSessionId: 'ses_1' },
+      { contextSessionId: 'ses_1', callerSessionId: 'ses_1' },
     );
   });
 
@@ -1648,7 +1708,7 @@ describe('managed agent tool runtime', () => {
 
     await runtime.execute({ input: { action: 'projects.list' }, sessionID: 'ses_1' });
 
-    expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, undefined, { contextSessionId: 'ses_1' });
+    expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, undefined, { contextSessionId: 'ses_1', callerSessionId: 'ses_1' });
   });
 
   it('keeps service failures as structured tool results', async () => {

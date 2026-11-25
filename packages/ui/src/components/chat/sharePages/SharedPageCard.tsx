@@ -31,7 +31,7 @@ import { useRenderPageHtml } from '../message/parts/renderPageImages';
 import { buildSharePageDocument } from './shareDocument';
 import { useSharePageGroup } from './useSharePageGroup';
 
-type SharedPage = { html: string; ui?: string; title: string; share: RenderedPageShare };
+type SharedPage = { html: string; ui?: string; title: string; share: RenderedPageShare; retainedHtml?: string };
 
 type Translate = ReturnType<typeof useI18n>['t'];
 
@@ -155,7 +155,8 @@ function uploadDocument(part: ToolPart, page: SharedPage, html: string | null): 
 }
 
 function WithPageHtml({ part, page, children }: { part: ToolPart; page: SharedPage; children: (html: string) => React.ReactNode }) {
-  const html = useRenderPageHtml(part, page.ui ? '' : page.html);
+  const liveHtml = useRenderPageHtml(part, page.ui || page.retainedHtml !== undefined ? '' : page.html);
+  const html = page.retainedHtml ?? liveHtml;
   return html === null ? null : <>{children(html)}</>;
 }
 

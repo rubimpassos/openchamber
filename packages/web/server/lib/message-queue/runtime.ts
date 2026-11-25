@@ -17,7 +17,12 @@ import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { botNoticeIds, botNoticeSchema, requireBotNotice } from './bot-notice.js';
 import type { createAutomationAdmission } from '../session-automation/runtime.js';
-import { parseAttachment, toPublicAttachment, type PublicQueuedAttachment, type QueuedAttachment } from './attachments.js';
+import { parseAttachment, type QueuedAttachment } from './attachments.js';
+import type { SessionDispatchAdmission, SessionNativeDispatch } from '../openchamber-sessions/dispatch-admission.js';
+import { createQueuedSessionDispatch } from './dispatch-admission.js';
+import { createQueueSessionSnapshot } from './snapshots.js';
+import type { MessageQueueSessionSnapshot } from './snapshots.js';
+export type { MessageQueueSessionSnapshot, PublicQueuedItem } from './snapshots.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -83,16 +88,14 @@ export interface QueuedItem extends QueuedItemInput {
   syntheticIds?: string[];
 }
 
-export interface PublicQueuedItem extends Omit<QueuedItem, 'context' | 'syntheticIds' | 'attachments'> {
-  attachments: PublicQueuedAttachment[];
-}
-
 export interface SessionQueue {
   directory: string;
   items: QueuedItem[];
 }
 
 export interface MessageQueueOptions {
+  readonly queueOwner?: 'bot-conversation';
+  readonly assertDispatchAdmission?: SessionDispatchAdmission;
   globalEventHub: Pick<GlobalMessageStreamHub, 'subscribeEvent' | 'subscribeStatus'>;
   buildOpenCodeUrl: (route: string, query: string) => string | URL;
   getOpenCodeAuthHeaders: () => Record<string, string>;
@@ -133,13 +136,6 @@ export interface MessageQueueOptions {
   dispatchQuietMs?: number;
   abortHoldMs?: number;
   retryDelayMs?: (failures: number) => number;
-}
-
-export interface MessageQueueSessionSnapshot {
-  sessionId: string;
-  directory: string;
-  items: PublicQueuedItem[];
-  sendingId: string | null;
 }
 
 const getQueuedSendRetryDelayMs = (failures: number) =>
@@ -327,26 +323,6 @@ const storedItemSchema = z.unknown().transform((value): QueuedItem | null => {
 });
 const parseStoredItem = storedItemSchema.parse;
 
-const toPublicItem = (item: QueuedItem) => {
-  const publicItem: Omit<PublicQueuedItem, 'attachments' | 'sendConfig'> & Partial<Pick<PublicQueuedItem, 'attachments' | 'sendConfig'>> = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
-  if (item.agentMention) publicItem.agentMention = item.agentMention;
-  publicItem.attachments = item.attachments.map(toPublicAttachment);
-  const contextPreview = item.contextPreview || item.context
-    .filter((part) => part.kind !== 'instruction')
-    .map((part) => asNonEmptyString(asRecord(part.metadata?.openchamberContext)?.text) || part.text.trim())
-    .find(Boolean);
-  if (contextPreview) {
-    const [firstLine = ''] = contextPreview.split('\n', 1);
-    publicItem.contextPreview = firstLine.slice(0, 100)
-      + (contextPreview.length > firstLine.length || firstLine.length > 100 ? '...' : '');
-  }
-  publicItem.sendConfig = { ...item.sendConfig };
-  if (item.goal) publicItem.goal = { ...item.goal };
-  if (item.scheduledTask) publicItem.scheduledTask = { ...item.scheduledTask };
-  if (item.origin) publicItem.origin = { ...item.origin };
-  return Object.assign(publicItem, { attachments: publicItem.attachments, sendConfig: publicItem.sendConfig });
-};
-
 const extractSessionStatus = (payload: QueueRecord) => {
   if (payload.type !== 'session.status') return null;
   const properties = asRecord(payload.properties) ?? {};
@@ -394,6 +370,7 @@ const extractSessionDirectoryUpdate = (payload: QueueRecord) => {
 };
 
 export function createMessageQueueRuntime({
+  queueOwner,
   globalEventHub,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -404,6 +381,7 @@ export function createMessageQueueRuntime({
   validateScheduledTaskTarget,
   assertFixLoopHostDispatch,
   assertBotDispatch,
+  assertDispatchAdmission,
   // True only for a queue whose transport and persistence belong to that space.
   botDispatchIsolated = false,
   // Dedicated owner Bot queues use bounded execution operations across accounts.
@@ -421,6 +399,8 @@ export function createMessageQueueRuntime({
   abortHoldMs = ABORT_HOLD_MS,
   retryDelayMs = getQueuedSendRetryDelayMs,
 }: MessageQueueOptions) {
+  let dispatchAdmission = assertDispatchAdmission;
+  let nativeDispatch: SessionNativeDispatch | undefined;
   const filePath = path.join(dataDir, QUEUE_FILE_NAME);
 
   const queues = new Map<string, SessionQueue>();
@@ -506,15 +486,7 @@ export function createMessageQueueRuntime({
     return writeResult;
   };
 
-  const sessionSnapshot = (sessionId: string): MessageQueueSessionSnapshot => {
-    const queue = queues.get(sessionId);
-    return {
-      sessionId,
-      directory: queue?.directory ?? directories.get(sessionId) ?? '',
-      items: (queue?.items ?? []).map(toPublicItem),
-      sendingId: sending.get(sessionId) ?? null,
-    };
-  };
+  const sessionSnapshot = createQueueSessionSnapshot({ queues, directories, sending, queueOwner });
 
   const snapshot = () => ({
     revision,
@@ -644,19 +616,14 @@ export function createMessageQueueRuntime({
     }
   };
 
+  const sessionDispatch = createQueuedSessionDispatch({
+    getAdmission: () => dispatchAdmission, getNative: () => nativeDispatch,
+    isHeld: (sessionId) => stopped || isDeliveryHeld(sessionId), assertFixLoopHostDispatch,
+    write: async (route, request) => { await openCodeFetch(route, request); },
+  });
   const sendItem = async (sessionId: string, directory: string, item: QueuedItem) => {
     if (botTransport && item.origin?.kind !== 'bot') throw httpError('A dedicated Bot queue accepts Bot notices only', 409);
-    const assertAdmission = async () => {
-      if (item.origin?.kind === 'pr-fix-loop') {
-        if (!assertFixLoopHostDispatch) throw httpError('Fix-loop host dispatch authority is unavailable', 409);
-        await assertFixLoopHostDispatch(sessionId, directory, item.origin);
-      }
-      if (stopped || isDeliveryHeld(sessionId)) throw httpError('Queued delivery is held', 409);
-    };
-    const write = async (fetchPath: string, options: Parameters<typeof openCodeFetch>[1]) => {
-      await assertAdmission();
-      return openCodeFetch(fetchPath, options);
-    };
+    const { assertAdmission, write } = sessionDispatch(sessionId, directory, item);
     await assertAdmission();
     if (item.origin?.kind === 'bot') {
       const policy = await assertBotAuthority(sessionId, directory, item);
@@ -1162,6 +1129,8 @@ export function createMessageQueueRuntime({
   };
 
   return {
+    setDispatchAdmission: (admission: SessionDispatchAdmission) => { dispatchAdmission = admission; },
+    setNativeDispatch: (dispatch: SessionNativeDispatch) => { nativeDispatch = dispatch; },
     load,
     snapshot,
     sessionSnapshot,

@@ -60,6 +60,8 @@ import { mcpToolAliasName } from './mcp-alias.js';
 import { BOT_TOOL_ACTIONS, BOT_TOOL_PARAMETERS } from '../bots/tool.js';
 import { LEAD_COMPACTION_HOOK } from '../session-lead/agent-tool-plugin.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
+import { RENDER_CAPTURE_MEDIA_TYPE, RENDER_CAPTURE_SETUP } from './render-capture.js';
+import { createAgentToolCallback } from './callback.js';
 import type { McpToolReport, createMcpToolsRuntime } from '../mcp-tools/runtime.js';
 import type { ControlInput } from '../openchamber-control/contracts.js';
 import type { ControlOptions, createOpenChamberControlService } from '../openchamber-control/service.js';
@@ -103,6 +105,7 @@ export interface AgentToolPayload {
   sessionID?: unknown;
   contextSessionId?: unknown;
   callID?: unknown;
+  messageID?: unknown;
 }
 
 export interface PluginOptions {
@@ -377,6 +380,7 @@ const RENDER_PARAMETER_PROPERTIES = {
   ui: { type: 'string', description: RENDER_PAGE_UI_DESCRIPTION },
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
+  artifactKind: { type: 'string', enum: ['evidence', 'decision'], description: "For a recorded bot session, categorize this durable page as evidence or decision. Defaults to evidence. Choose any HTML or OpenUI representation; this category does not prescribe its content. Worker sessions can only show read-only pages; the item's conversation can ask through the normal page controls." },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
   answerLater: { type: 'boolean', description: RENDER_PAGE_LATER_DESCRIPTION },
 };
@@ -560,12 +564,12 @@ const ANSWER_WAIT_RELEASE = String.raw` finally {
           releaseWait()
         }`;
 
-const answerClosedInChat = (note: string) => String.raw`
+const answerClosedInChat = (note: string, artifactFields: string) => String.raw`
           if (chatController.signal.aborted && !context.signal?.aborted) {
             const answer = { answered: false, reason: "chat" }
             const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(note)} } }
             await progress({ ok: true })
-            return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
+            return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer${artifactFields} } } }
           }`;
 
 const booleanNormalizationBlock = (parameters: Record<string, ParameterSchema>) => {
@@ -648,6 +652,8 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
   const [definition] = definitions;
   const actionSchema = definitions.length === 1 && definition ? singleActionSchema(definition) : multiActionSchema(definitions);
   const secretRunNormalize = secretRun ? '        if (args.action === "run") args.action = "secret.run"\n' : '';
+  const render = name === 'openchamber_render';
+  const artifactFields = render ? ', ...capturedFields' : '';
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
@@ -683,13 +689,14 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
         }
 ${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
         const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
-        const progress = (extra) => context.progress({
+${render ? RENDER_CAPTURE_SETUP : ''}        const progress = (extra) => context.progress({
           ${name}: {
             schemaVersion: ${TOOL_SCHEMA_VERSION},
             action: args.action,
             description: title,
             ...extra,
           },
+          ${render ? `...(capturedFields.artifact ? { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ...capturedFields, ...extra } } : {}),` : ''}
         })
         await progress()
         const connection = resolveConnection()
@@ -700,7 +707,7 @@ ${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${normalizeBoole
         // without an output schema". The envelope travels as text content.
         const failure = (payload) => ({
           content: JSON.stringify(payload),
-          metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } },
+          metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false${artifactFields} } },
         })
         if (!endpoint || !token) {
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
@@ -712,20 +719,21 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
             headers: {
               authorization: "Bearer " + token,
               "content-type": "application/json",
+              ${render ? `accept: ${JSON.stringify(RENDER_CAPTURE_MEDIA_TYPE)},` : ''}
             },
             // OpenCode 2 no longer hands a tool its session directory, so the
             // session id goes over instead and OpenChamber resolves the
             // directory on its own side. The signal fires when the session is
             // aborted, so the OpenChamber side stops the action too.
-            body: JSON.stringify({ input: args, sessionID: context.sessionID, callID: context.id, tool: ${JSON.stringify(name)} }),
+            body: JSON.stringify({ input: args, sessionID: context.sessionID, messageID: context.messageID, callID: context.id, tool: ${JSON.stringify(name)} }),
             signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}${name === 'openchamber_web' ? '\n            ...(args.action === "browser.requestHelp" ? { timeout: false } : {}),' : ''}
           })
-          const content = await response.text()
+          const content = await ${render ? 'readRenderResponse(response)' : 'response.text()'}
           let result = null
           try { result = JSON.parse(content) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
           await progress({ ok: valid && result.ok === true })
-          if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
+          if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${artifactFields}${answers ? ANSWER_METADATA : ''} } } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
         } catch (error) {
           // A stopped call stays a stopped call. Since OpenCode 2.3.0 a tool
@@ -733,7 +741,7 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
           // is recorded as the call's result: an ok:false envelope here would
           // read as an ordinary completed call, and the chat would drop the
           // page or secret card the user stopped.
-          if (context.signal?.aborted) throw error${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
+          if (context.signal?.aborted) throw error${answers ? answerClosedInChat(answers.closedInChatNote, artifactFields) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },
@@ -1067,12 +1075,15 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
     }
     try {
       const secretAction = OPENCHAMBER_SECRET_ACTIONS.includes(action);
-      const contextSessionId = knowledgeAction || secretAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
+      const contextSessionId = knowledgeAction || secretAction || action === 'render.page' ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
       const contextCallId = asNonEmptyString(payload.callID);
       const actionOptions: ControlOptions = { ...options };
       if (action === 'secret.run' && payload.tool === 'openchamber_secret') actionOptions.secretRunAuthorized = true;
       if (contextSessionId) actionOptions.contextSessionId = contextSessionId;
       if (contextCallId) actionOptions.contextCallId = contextCallId;
+      if (sessionID) actionOptions.callerSessionId = sessionID;
+      const messageId = asNonEmptyString(payload.messageID);
+      if (messageId) actionOptions.contextMessageId = messageId;
       const input = { ...payload.input, action };
       const data = await executeAction(action, input, contextDirectory, actionOptions);
       return createResult({ ok: true, action, data });
@@ -1126,28 +1137,10 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
         return res.status(typeof status === 'number' && Number.isInteger(status) ? status : 500).json({ error: 'Invalid MCP tool catalog report' });
       }
     });
-    app.post<AgentToolPayload>('/api/openchamber/agent-tool', express.json({ limit: '1mb' }), async (req, res) => {
+    const callback = createAgentToolCallback({ execute, createResult, trackInflight });
+    app.post<AgentToolPayload>('/api/openchamber/agent-tool', express.json({ limit: '1mb' }), (req, res, next) => {
       if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
-      const controller = new AbortController();
-      const abortOnDisconnect = () => {
-        if (!res.writableEnded) controller.abort();
-      };
-      req.once('aborted', abortOnDisconnect);
-      res.once('close', abortOnDisconnect);
-      const untrack = trackInflight(asNonEmptyString(req.body?.sessionID), controller);
-      try {
-        return res.json(await execute(req.body, { signal: controller.signal }));
-      } catch (error) {
-        return res.json(createResult({
-          ok: false,
-          action: req.body?.input?.action,
-          error: { message: error instanceof Error ? error.message : String(error), kind: 'runtime' },
-        }));
-      } finally {
-        untrack();
-        req.off('aborted', abortOnDisconnect);
-        res.off('close', abortOnDisconnect);
-      }
+      return callback(req, res, next);
     });
   };
 

@@ -23,7 +23,7 @@ agent. Both placements keep owner queues; host queues send through bounded
 execution operations. [Separated authority](separated-boundary.md) owns that
 contract. Single-account installations retain local execution adapters.
 
-`server/index.js` distinguishes a space server with the existing `OPENCHAMBER_SPACE_IDLE_STOP_FILE` marker. That process constructs `createBotChildServer` only. Its persistent inbox uses the authenticated agent-tool call context and existing UI-authenticated listener. It has no bot identities, service executor or coordinator. Host requests to the child inbox are explicitly refused before the OpenCode proxy.
+`server/runtime.ts` distinguishes a space server with the existing `OPENCHAMBER_SPACE_IDLE_STOP_FILE` marker. That process constructs `createBotChildServer` only. Its persistent inbox and artifact capture use the authenticated tool context and existing UI-authenticated listener. It has no bot identities or coordinator. Host requests to the child inbox are explicitly refused before the OpenCode proxy.
 
 | Runtime | Behavior |
 |---|---|

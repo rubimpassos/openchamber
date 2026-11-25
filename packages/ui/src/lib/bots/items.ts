@@ -11,6 +11,7 @@ const authority = z.object({
   service: z.enum(['local', 'opencode', 'git', 'github', 'jira', 'discord']),
   identityId: text, revision: z.union([text, time]), target: text,
 });
+export const botConversationSchema = z.object({ sessionId: text, directory: text, createdAt: time });
 const effectFields = {
   key: text, kind: text, inputDigest: text, authority, createdAt: time, updatedAt: time,
 };
@@ -27,6 +28,7 @@ export const botItemSchema = z.object({
   state, revision: time, createdAt: time, updatedAt: time, finishedAt: time.optional(), owner: owner.nullable(),
   worktree: text.optional(), branch: text.optional(), publicationBranch: text.optional(),
   sessions: z.object({ investigation: text.optional(), fixing: text.optional(), judge: text.optional() }),
+  conversation: botConversationSchema.optional(),
   pr: z.object({ number: z.number().int().positive(), url: text, headSha: text, baseSha: text.optional() }).optional(),
   evidence: z.array(botEvidenceSchema),
   proof: z.discriminatedUnion('status', [
@@ -39,13 +41,14 @@ export const botItemSchema = z.object({
     reviewers: z.array(text), questions: z.array(text),
   }).optional(),
   wait: z.object({ reason: text, since: time, channel: z.enum(['ui', 'jira', 'discord', 'github']), people: z.array(text) }).optional(),
-  tokens: z.object({ total: time, byStage: z.object({ investigation: time, fixing: time, judge: time }), byDay: z.record(z.string(), time) }),
+  tokens: z.object({ total: time, conversation: time.optional(), byStage: z.object({ investigation: time, fixing: time, judge: time }), byDay: z.record(z.string(), time) }),
   transitions: z.array(z.object({ from: state.nullable(), to: state, at: time, revision: time, owner, reason: text })),
   effects: z.array(effectSchema),
 });
 
 export type BotItem = z.infer<typeof botItemSchema>;
 export type BotState = BotItem['state'];
+export type BotConversation = z.infer<typeof botConversationSchema>;
 export type BotEvidence = z.infer<typeof botEvidenceSchema>;
 export type BotSource = z.infer<typeof botSourceSchema>;
 export const isTerminalBotItem = (item: BotItem): boolean => ['done', 'failed', 'stopped'].includes(item.state);

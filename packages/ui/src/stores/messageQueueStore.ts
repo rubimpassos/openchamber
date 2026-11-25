@@ -6,12 +6,12 @@ import { createInputHistoryIdentity, createInputHistorySubmission, useInputHisto
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { serverAttachmentSchema, toAttachedFile, toServerAttachment, type ServerQueueAttachmentInput } from './messageQueueAttachments';
+import { CONVERSATION_QUEUE_OWNER, createMessageQueueOwners, ownerSnapshotDirectory, snapshotOwning } from './messageQueueOwners';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch, type RuntimeFetchOptions } from '@/lib/runtime-fetch';
-import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 import { SessionCreationError, waitForFirstSessionSubmission, waitForSessionCreation } from '@/sync/pending-session-creation';
@@ -177,16 +177,18 @@ const serverItemSchema = z.union([
 ]);
 
 const serverSessionSchema = z.object({
+    queueOwner: z.literal(CONVERSATION_QUEUE_OWNER).optional(),
     sessionId: z.string().min(1),
     directory: z.string(),
     items: z.array(serverItemSchema),
     sendingId: z.string().nullable(),
 });
 
-const serverSnapshotSchema = z.object({
+const ownerSnapshotSchema = z.object({
     revision: z.number(),
     sessions: z.array(serverSessionSchema),
 });
+const serverSnapshotSchema = ownerSnapshotSchema.extend({ conversation: ownerSnapshotSchema.optional() });
 
 const serverSessionResponseSchema = z.object({
     revision: z.number(),
@@ -289,15 +291,12 @@ const jsonInit = (method: string, body?: ServerQueueRequestBody): RequestInit =>
 
 const sessionPath = (sessionId: string) => `/api/message-queue/sessions/${encodeURIComponent(sessionId)}`;
 
-const queueOwnerOf = (directory: string): string => spaceIdOfDirectory(directory) ?? '';
-const ownerRevisionKey = (runtimeKey: string, owner: string): string => `${runtimeKey}\n${owner}`;
-
 const toOwner = (target: MessageQueueTarget, init: RequestInit): RuntimeFetchOptions => ({ ...init, directory: target.directory });
 
 const readOwnerSnapshot = (owner: string, signal?: AbortSignal) => requestJson(
     serverSnapshotSchema,
     '/api/message-queue',
-    { directory: owner ? `/spaces/${owner}` : null, signal },
+    { directory: ownerSnapshotDirectory(owner), signal },
 );
 
 const serverOwnedRuntimeKeys = new Set<string>();
@@ -307,8 +306,8 @@ type LegacyQueueMigration = {
 };
 const legacyMigrations = new Map<string, LegacyQueueMigration>();
 
-const appliedRevisions = new Map<string, number>();
-const snapshotRevisions = new Map<string, number>();
+const queueOwners = createMessageQueueOwners(parseMessageQueueKey);
+const { appliedRevisions, ownerOf: queueOwnerOf, newestSessionRevision } = queueOwners;
 let hydrationGeneration = 0;
 
 interface MessageQueueState {
@@ -400,25 +399,13 @@ const clearSessionProjection = (
     for (const key of new Set([...Object.keys(queuedMessages), ...Object.keys(sendingIds)])) {
         const parsed = parseMessageQueueKey(key);
         if (parsed?.runtimeKey !== runtimeKey || parsed.sessionId !== sessionId) continue;
-        if (owner !== undefined && queueOwnerOf(parsed.directory) !== owner) continue;
+        if (owner !== undefined && queueOwnerOf(parsed.directory, parsed.sessionId, runtimeKey) !== owner) continue;
         if ((appliedRevisions.get(key) ?? -1) > revision) continue;
         appliedRevisions.set(key, revision);
         queuedMessages = withoutKey(queuedMessages, key);
         sendingIds = withoutKey(sendingIds, key);
     }
     return { queuedMessages, sendingIds };
-};
-
-const newestSessionRevision = (runtimeKey: string, owner: string, sessionId: string): number => {
-    let newest = -1;
-    for (const [key, revision] of appliedRevisions) {
-        if (revision <= newest) continue;
-        const parsed = parseMessageQueueKey(key);
-        if (parsed?.runtimeKey === runtimeKey && parsed.sessionId === sessionId && queueOwnerOf(parsed.directory) === owner) {
-            newest = revision;
-        }
-    }
-    return newest;
 };
 
 export const useMessageQueueStore = create<MessageQueueStore>()(
@@ -429,8 +416,10 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 let resyncRequested = false;
                 const applyServerSession = (session: ServerQueueSession, revision: number, expectedRuntimeKey: string, owner = '') => {
                     if (expectedRuntimeKey !== getRuntimeKey()) return;
-                    if (queueOwnerOf(session.directory) !== owner) return;
-                    if ((snapshotRevisions.get(ownerRevisionKey(expectedRuntimeKey, owner)) ?? -1) > revision) return;
+                    if (session.queueOwner) queueOwners.adoptConversationSession(expectedRuntimeKey, session.sessionId);
+                    const revisionOwner = session.queueOwner ?? owner;
+                    if (queueOwnerOf(session.directory, session.sessionId, expectedRuntimeKey) !== revisionOwner) return;
+                    if (queueOwners.snapshotRevision(expectedRuntimeKey, revisionOwner) > revision) return;
                     const target = createMessageQueueTarget(session.sessionId, session.directory, expectedRuntimeKey);
                     if (!target) {
                         if (session.items.length > 0) return;
@@ -438,9 +427,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         return;
                     }
                     const key = getMessageQueueKey(target);
-                    if (newestSessionRevision(expectedRuntimeKey, owner, session.sessionId) > revision) return;
+                    if (newestSessionRevision(expectedRuntimeKey, revisionOwner, session.sessionId) > revision) return;
                     set((state) => {
-                        const cleared = clearSessionProjection(state, expectedRuntimeKey, session.sessionId, revision, owner);
+                        const cleared = clearSessionProjection(state, expectedRuntimeKey, session.sessionId, revision, revisionOwner);
                         appliedRevisions.set(key, revision);
                         const queue = session.items.map(toQueuedMessage);
                         const queuedMessages = queue.length > 0
@@ -454,12 +443,13 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 };
 
                 const refreshSession = async (target: MessageQueueTarget) => {
-                    const owner = queueOwnerOf(target.directory);
+                    const owner = queueOwnerOf(target.directory, target.sessionId, target.runtimeKey);
                     try {
                         const snapshot = await readOwnerSnapshot(owner);
-                        const session = snapshot.sessions.find((entry) => entry.sessionId === target.sessionId)
+                        const ownedSnapshot = snapshotOwning(snapshot, owner, target.sessionId);
+                        const session = ownedSnapshot.sessions.find((entry) => entry.sessionId === target.sessionId)
                             ?? { sessionId: target.sessionId, directory: target.directory, items: [], sendingId: null };
-                        applyServerSession(session, snapshot.revision, target.runtimeKey, owner);
+                        applyServerSession(session, ownedSnapshot.revision, target.runtimeKey, owner);
                     } catch {
                         // Offline: keep the optimistic projection; the next broadcast or hydration corrects it.
                     }
@@ -472,7 +462,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 ) => {
                     try {
                         const result = await requestJson(serverSessionResponseSchema, path, toOwner(target, init));
-                        applyServerSession(result.session, result.revision, target.runtimeKey, queueOwnerOf(target.directory));
+                        applyServerSession(result.session, result.revision, target.runtimeKey, queueOwnerOf(target.directory, target.sessionId, target.runtimeKey));
                     } catch (error) {
                         if (error instanceof SessionCreationError) return;
                         console.warn('[queue] server update failed:', error);
@@ -481,14 +471,17 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 };
 
                 const applyOwnerSnapshot = (snapshot: z.infer<typeof serverSnapshotSchema>, runtimeKey: string, owner: string): boolean => {
-                    const revisionKey = ownerRevisionKey(runtimeKey, owner);
-                    if ((snapshotRevisions.get(revisionKey) ?? -1) > snapshot.revision) return false;
-                    snapshotRevisions.set(revisionKey, snapshot.revision);
+                    if (snapshot.conversation) {
+                        for (const session of snapshot.conversation.sessions) queueOwners.adoptConversationSession(runtimeKey, session.sessionId);
+                        applyOwnerSnapshot(snapshot.conversation, runtimeKey, CONVERSATION_QUEUE_OWNER);
+                    }
+                    if (queueOwners.snapshotRevision(runtimeKey, owner) > snapshot.revision) return false;
+                    queueOwners.recordSnapshotRevision(runtimeKey, owner, snapshot.revision);
                     set((state) => {
                         const isNewerThanSnapshot = (key: string) => (appliedRevisions.get(key) ?? -1) > snapshot.revision;
                         const isOwned = (key: string) => {
                             const parsed = parseMessageQueueKey(key);
-                            return parsed?.runtimeKey === runtimeKey && queueOwnerOf(parsed.directory) === owner;
+                            return parsed?.runtimeKey === runtimeKey && queueOwnerOf(parsed.directory, parsed.sessionId, runtimeKey) === owner;
                         };
                         const keep = (key: string) => !isOwned(key) || isNewerThanSnapshot(key);
                         const queuedMessages: Record<string, QueuedMessage[]> = {};
@@ -500,7 +493,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             if (keep(key)) sendingIds[key] = ids;
                         }
                         for (const session of snapshot.sessions) {
-                            if (queueOwnerOf(session.directory) !== owner) continue;
+                            if (queueOwnerOf(session.directory, session.sessionId, runtimeKey) !== owner) continue;
                             const target = createMessageQueueTarget(session.sessionId, session.directory, runtimeKey);
                             if (!target) continue;
                             const key = getMessageQueueKey(target);
@@ -572,7 +565,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                                 item: toServerItemInput(message, message.sendConfig),
                             })));
                             set((state) => removeMessageLocally(state, key, id));
-                            applyServerSession(result.session, result.revision, target.runtimeKey, queueOwnerOf(confirmedTarget.directory));
+                            applyServerSession(result.session, result.revision, target.runtimeKey, queueOwnerOf(confirmedTarget.directory, target.sessionId, target.runtimeKey));
                             if (historyIdentity) {
                                 useInputHistoryStore.getState().appendSubmissions(historyIdentity, [historySubmission]);
                             }
@@ -624,7 +617,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         const key = getMessageQueueKey(target);
                         if (isServerOwnedMessageQueue()) {
                             try {
-                                const owner = queueOwnerOf(target.directory);
+                                const owner = queueOwnerOf(target.directory, target.sessionId, target.runtimeKey);
                                 if (messageId) {
                                     const result = await requestJson(
                                         serverTakeResponseSchema,
@@ -846,14 +839,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         hydrationGeneration += 1;
                         hydration = null;
                         resyncRequested = false;
-                        if (previousRuntimeKey) {
-                            for (const key of snapshotRevisions.keys()) {
-                                if (key.startsWith(`${previousRuntimeKey}\n`)) snapshotRevisions.delete(key);
-                            }
-                            for (const key of appliedRevisions.keys()) {
-                                if (parseMessageQueueKey(key)?.runtimeKey === previousRuntimeKey) appliedRevisions.delete(key);
-                            }
-                        }
+                        if (previousRuntimeKey) queueOwners.forgetRuntime(previousRuntimeKey);
                         if (!previousRuntimeKey || !serverOwnedRuntimeKeys.has(previousRuntimeKey)) return;
                         set((state) => {
                             const queuedMessages: Record<string, QueuedMessage[]> = {};

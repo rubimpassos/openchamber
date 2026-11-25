@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import type { Session } from '@/lib/opencode/model';
 
-const automationSchema = z.object({ openchamber: z.object({ automation: z.object({
-  source: z.literal('bot'), projectId: z.string().min(1), botId: z.string().min(1), itemId: z.string().min(1),
-  stage: z.enum(['investigation', 'fixing', 'judge']),
-}) }) });
+const scope = { source: z.literal('bot'), projectId: z.string().min(1), botId: z.string().min(1), itemId: z.string().min(1) };
+const automationSchema = z.object({ openchamber: z.object({ automation: z.union([
+  z.object({ ...scope, stage: z.enum(['investigation', 'fixing', 'judge']) }),
+  z.object({ ...scope, role: z.literal('conversation') }),
+]) }) });
 
 export const botAutomation = (session: Session | undefined) => automationSchema.safeParse(session?.metadata).data?.openchamber.automation ?? null;
 

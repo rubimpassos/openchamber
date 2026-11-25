@@ -22,6 +22,13 @@ const definition = { id: 'bugs', name: 'Bug bot', mission: 'Fix verified bugs.' 
 const fixtures = [];
 afterEach(async () => { for (const fixture of fixtures.splice(0)) await fixture.close(); });
 const fixture = async (options) => { const value = await createHostFixture(options); fixtures.push(value); return value; };
+// Each item's root lead lives on the host project, so worker-isolation assertions exclude it.
+const conversations = (f) => [...f.records.values()].filter((record) => record.metadata?.openchamber?.automation?.role === 'conversation');
+const workerRecords = (f) => [...f.records.values()].filter((record) => record.metadata?.openchamber?.automation?.role !== 'conversation');
+const workerHttp = (f) => f.calls.http.filter(({ path: route }) => route !== '/api/session/active'
+  && !conversations(f).some((record) => route.includes(record.id)));
+const withConversations = (f, directories) => ({ ...directories,
+  ...Object.fromEntries(conversations(f).map((record) => [record.id, record.location.directory])) });
 
 // Spaces calls use controlled peers. Host composition, durable effects,
 // binding ownership and checkout removal use their production implementations.
@@ -43,7 +50,10 @@ const isolatedLifecycle = async () => {
     else if (input.path === '/api/session/active') result = {};
     else if (input.path.startsWith('/api/session/') && input.method === 'GET') result = sessions.get(input.path.split('/').at(-1)) ?? [];
     else if (input.path.includes('/isolated-tools?')) result = { requests: [] };
-    const response = Readable.from([Buffer.from(JSON.stringify(input.path.includes('/isolated-tools') ? result : { data: result }))]); response.complete = true;
+    else if (input.path === '/api/openchamber/bots/artifacts/pull') result = { entries: [], nextOffset: null };
+    else if (input.path === '/api/openchamber/bots/artifacts/drain') result = { drained: true };
+    else if (new URL(input.path, 'http://space.invalid').pathname === '/api/session' && input.method === 'GET') result = [];
+    const response = Readable.from([Buffer.from(JSON.stringify(input.path.includes('/isolated-tools') || input.path.includes('/bots/artifacts/') ? result : { data: result }))]); response.complete = true;
     response.statusCode = input.method === 'PATCH' || /\/(?:model|agent)$/.test(input.path) || input.path.includes('/instructions/entry/') ? 204 : 200;
     return response;
   } } };
@@ -92,7 +102,7 @@ describe('production bot host composition', () => {
     expect(after.state).toBe('fixing');
     expect(after.evidence).toContainEqual(evidence[0]);
     expect(after.effects).toEqual(before.effects);
-    expect(f.calls.http).toEqual([]);
+    expect(workerHttp(f)).toEqual([]);
   });
 
   it('resumes a budget-interrupted item in its captured space through a fresh production host', async () => {
@@ -113,13 +123,13 @@ describe('production bot host composition', () => {
       expect(result.item.sessions.fixing).not.toBe(f.sessionId);
       expect(await fresh.isSessionWorking(result.item.sessions.fixing)).toBe(false);
       expect(await fresh.isSessionWorking(f.sessionId)).toBeUndefined();
-      expect((await fresh.runtime.detail('project', f.itemId)).sessionDirectories).toEqual({ [result.item.sessions.fixing]: '/spaces/abcdef123456/worktree' });
+      expect((await fresh.runtime.detail('project', f.itemId)).sessionDirectories).toEqual(withConversations(f, { [result.item.sessions.fixing]: '/spaces/abcdef123456/worktree' }));
       expect((await isolated.readBinding(f.run)).spaceId).toBe('abcdef123456');
       expect(Object.values((await isolated.readBinding(f.run)).sessions).map((session) => session.id)).toContain(f.sessionId);
       expect(f.spaceCalls.filter((call) => Array.isArray(call) && call[0] === 'start')).toEqual([['start', 'abcdef123456']]);
       expect(f.spaceCalls.filter((call) => Array.isArray(call) && call[0] === 'grant')).toEqual([['grant', 'abcdef123456', { kind: 'custom', provider: 'controlled' }]]);
       expect(f.spaceCalls.filter((call) => call === 'create')).toHaveLength(1);
-      expect(f.calls.http).toHaveLength(0);
+      expect(workerHttp(f)).toHaveLength(0);
     } finally { await fresh.stop(); }
   });
 
@@ -138,7 +148,7 @@ describe('production bot host composition', () => {
       expect(f.spaceCalls.filter((call) => call === 'remove')).toHaveLength(1);
       expect(f.spaceCalls.filter((call) => call === 'stop')).toHaveLength(1);
       expect(f.spaceCalls.filter((call) => call === 'create')).toHaveLength(1);
-      expect(f.calls.http).toHaveLength(0);
+      expect(workerHttp(f)).toHaveLength(0);
     } finally { await fresh.stop(); }
   });
 
@@ -165,7 +175,7 @@ describe('production bot host composition', () => {
       expect(f.spaceCalls.filter((call) => call === 'remove')).toHaveLength(1);
       expect(f.spaceCalls.filter((call) => call === 'stop')).toHaveLength(1);
       expect(f.spaceCalls.filter((call) => call === 'create')).toHaveLength(1);
-      expect(f.calls.http).toHaveLength(0);
+      expect(workerHttp(f)).toHaveLength(0);
     } finally { await fresh.stop(); }
   });
 
@@ -185,7 +195,7 @@ describe('production bot host composition', () => {
     expect(await f.projectConfigRuntime.listScheduledTasks('project')).toEqual(expect.arrayContaining([expect.objectContaining({ botId: 'bugs', botManaged: true })]));
     expect((await f.request('/identities')).body).toEqual({ identities: [] });
     await expect(f.host.handleTool({ sessionId: 'ses_foreign', action: 'item.report', input: { evidence: [] } })).rejects.toMatchObject({ code: 'BOT_SESSION_REQUIRED' });
-    expect(f.calls.http).toHaveLength(0);
+    expect(workerHttp(f)).toHaveLength(0);
   });
 
   it('returns source discovery as 202, resumes the same occurrence, counts caches once, and skips normal token events', async () => {
@@ -195,7 +205,7 @@ describe('production bot host composition', () => {
     expect(pending.status).toBe(202);
     expect(pending.body).toMatchObject({ pending: true, occurrence: 'same-occurrence' });
     const sessionId = pending.body.sessionId;
-    expect(f.records.size).toBe(1);
+    expect(workerRecords(f)).toHaveLength(1);
     const before = f.calls.http.length;
     for (let index = 0; index < 100; index++) await f.host.processPayload({ type: 'message.part.delta', properties: { sessionID: 'ses_normal' } });
     for (let index = 0; index < 100; index++) await f.host.processPayload({ type: 'message.part.delta', properties: { sessionID: sessionId } });
@@ -206,7 +216,7 @@ describe('production bot host composition', () => {
     const budget = await f.request('/bugs/run', 'POST', { occurrence: 'new-occurrence' });
     expect(budget.status).toBe(409);
     expect(budget.body.code).toBe('BOT_DAILY_TOKEN_BUDGET');
-    expect(f.records.size).toBe(1);
+    expect(workerRecords(f)).toHaveLength(1);
     const rows = (await f.request('/items')).body.items;
     expect(rows.some((item) => item.wait?.reason === 'BOT_DAILY_TOKEN_BUDGET')).toBe(true);
   });
@@ -222,7 +232,7 @@ describe('production bot host composition', () => {
     const stopped = await f.request(`/items/${itemId}/stop`, 'POST', {});
     expect(stopped.status).toBe(200);
     expect(stopped.body.item).toMatchObject({ state: 'stopped', effects: [], sessions: {} });
-    expect(f.calls.http).toHaveLength(0);
+    expect(workerHttp(f)).toHaveLength(0);
     expect(await fs.readdir(path.join(f.dataDir, 'bot-worktrees')).catch((error) => {
       if (error.code === 'ENOENT') return [];
       throw error;
@@ -239,7 +249,7 @@ describe('production bot host composition', () => {
     await f.host.processPayload({ type: 'session.idle', properties: { sessionID: sessionId } });
     const resumed = await f.host.runScheduled('project', 'bugs', 'scheduled:1');
     expect(resumed).toMatchObject({ items: [], skipped: true });
-    expect(f.records.size).toBe(1);
+    expect(workerRecords(f)).toHaveLength(1);
   });
 
   it('preserves suggestion files and evidence on the stable admitted source', async () => {
@@ -269,10 +279,10 @@ describe('production bot host composition', () => {
       hostDirectory: '/owned/worktree', state: 'stopped', spaceId: 'abcdef123456', directory: '/spaces/abcdef123456/worktree',
       sessions: { fixing: { id: 'ses_recorded_fixing', stage: 'fixing', directory: '/spaces/abcdef123456/worktree' } } }));
     await f.host.start();
-    expect((await f.host.runtime.detail('project', item.id)).sessionDirectories).toEqual({ ses_recorded_fixing: '/spaces/abcdef123456/worktree' });
+    expect((await f.host.runtime.detail('project', item.id)).sessionDirectories).toEqual(withConversations(f, { ses_recorded_fixing: '/spaces/abcdef123456/worktree' }));
     await expect(f.host.isSessionWorking('ses_recorded_fixing')).rejects.toMatchObject({ code: 'BOT_ISOLATED_CREATE_UNKNOWN' });
     await expect(f.host.runtime.stopItem('project', item.id)).rejects.toMatchObject({ code: 'BOT_ISOLATION_UNAVAILABLE' });
-    expect(f.calls.http).toHaveLength(0);
+    expect(workerHttp(f)).toHaveLength(0);
   });
 
   it('restores host placement after isolation is enabled and keeps notices and links on that host session', async () => {
@@ -291,7 +301,7 @@ describe('production bot host composition', () => {
       metadata: { openchamber: { automation: { source: 'bot', projectId: 'project', botId: 'bugs', itemId: item.id, stage: 'fixing' } } } });
     await f.host.start();
     expect(await f.host.isSessionWorking('ses_host_fixing')).toBeUndefined();
-    expect((await f.host.runtime.detail('project', item.id)).sessionDirectories).toEqual({ ses_host_fixing: '/owned/host' });
+    expect((await f.host.runtime.detail('project', item.id)).sessionDirectories).toEqual(withConversations(f, { ses_host_fixing: '/owned/host' }));
     await expect(f.host.assertDispatch({ sessionId: 'ses_host_fixing', directory: '/owned/host',
       origin: { kind: 'bot', id: item.id }, isolated: false,
       notice: { source: 'openchamber-notice', kind: 'bot', projectId: 'project', itemId: item.id, eventId: 'review:1' },
@@ -308,7 +318,7 @@ describe('production bot host composition', () => {
     const items = (await f.request('/items')).body.items;
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ state: 'needs-you', wait: { reason: 'BOT_IDENTITY_REQUIRED' }, sessions: {} });
-    expect(f.calls.http).toHaveLength(0);
+    expect(workerHttp(f)).toHaveLength(0);
   });
 
   it('turns a settled bot PR watch failure into item attention without awaiting the originating loop', async () => {

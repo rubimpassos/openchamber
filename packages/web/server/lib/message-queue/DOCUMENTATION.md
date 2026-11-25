@@ -31,6 +31,17 @@ Scheduled items may omit their provider and model to retain the session's
 selection. Goal creation accepts numeric budgets and omitted unused fields
 through the declaration on `../session-goal/create.js`.
 
+`dispatch-admission.ts` owns per-item admission and native dispatch. It reads the
+current admission and native ports before each write, preserving Stop and
+replacement hooks during asynchronous sends. Native dispatch retains the queue
+item's admission ID and each operation's own ID. The queue runtime still owns
+selection, persistence, retry and completion.
+
+`snapshots.ts` owns public item redaction and session projection. It omits
+attachment bytes, private context and synthetic IDs while retaining directory,
+in-flight identity and the queue revision owner's marker. Existing imports of
+the public snapshot types through `runtime.ts` remain supported.
+
 ### Why active-map lookups retain their object check
 
 A session id can name an inherited property such as `constructor`. Only a

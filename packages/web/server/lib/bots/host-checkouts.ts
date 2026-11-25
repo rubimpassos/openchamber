@@ -17,9 +17,10 @@ type CheckoutOptions = Pick<RuntimeOptions, 'store' | 'resolveProject'> & {
   readonly dataDir: string; readonly isolated: HostIsolated; readonly placement: HostPlacement;
   readonly productionWorktrees: HostWorktrees;
   readonly remoteSameTree: ((request: TreeRequest & { readonly left: string; readonly right: string }) => Promise<boolean>) | null;
+  readonly collectArtifacts?: (scope: { readonly projectId: string; readonly itemId: string }) => Promise<void>;
 };
 
-export function createHostCheckouts({ dataDir, isolated, placement, productionWorktrees, remoteSameTree, store, resolveProject }: CheckoutOptions) {
+export function createHostCheckouts({ dataDir, isolated, placement, productionWorktrees, remoteSameTree, store, resolveProject, collectArtifacts }: CheckoutOptions) {
   const publications = createBotAdapterState({ dataDir, name: 'published-snapshots', schema: publicationSchema });
   const keyFor = ({ project, item }: { readonly project: { readonly id: string }; readonly item: { readonly id: string } }) => ({ projectId: project.id, itemId: item.id });
   const sameTree = async (request: TreeRequest, left: string, right: string) => {
@@ -29,6 +30,7 @@ export function createHostCheckouts({ dataDir, isolated, placement, productionWo
       === (await botGit(request.item.worktree, ['rev-parse', `${right}^{tree}`])).trim();
   };
   const remove: HostWorktrees['remove'] = async (request) => {
+    await collectArtifacts?.({ projectId: request.project.id, itemId: request.item.id });
     await isolated.remove(request);
     return productionWorktrees.remove(request);
   };

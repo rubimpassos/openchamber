@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { z } from 'zod';
 import { createMessageQueueRuntime } from '../message-queue/runtime.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { BotServiceError } from './services/contracts.js';
@@ -7,67 +6,16 @@ import { TERMINAL_ITEM_STATES } from './schema.js';
 import { isJsonObject, isString } from '../event-stream/guards.js';
 import type { BotItem } from './schema.js';
 import type { BotDefinition } from './config.js';
-import type { createBotPlacement } from './placement.js';
-import type { BotServiceReply } from '../agent-server/bot-service-contract.js';
 import type { MessageQueueOptions } from '../message-queue/runtime.js';
 import type { GlobalStreamEvent } from '../event-stream/global-hub.js';
 import type { JsonObject } from '../event-stream/contracts.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
-import type { SessionActivityProbe } from '../opencode/session-activity.js';
-import type { createTokenSnapshotReader } from '../pr-fix-loop/token-usage.js';
-import type { KnowledgeCollector, KnowledgeSyncOptions } from '../session-knowledge/contracts.js';
-import type { JsonValue } from '../shared/json-values.js';
-
-type SessionEntry = {
-  readonly projectId: string; readonly itemId: string; readonly botId: string;
-  readonly sessionId: string; readonly stage: keyof BotItem['sessions'];
-  readonly directory: string; readonly isolated: boolean;
-};
-type QueueTarget = Omit<SessionEntry, 'botId'>;
-type Queue = ReturnType<typeof createMessageQueueRuntime>;
-type TokenReader = ReturnType<typeof createTokenSnapshotReader>;
-type TokenOptions = Parameters<TokenReader>[2];
-type Notice = Parameters<NonNullable<MessageQueueOptions['botTransport']>['deliverNotice']>[0];
-type SessionInfo = z.output<typeof sessionInfoSchema>;
-type IsolatedOwner = {
-  readonly binding: { readonly projectId: string; readonly itemId: string; readonly botId: string;
-    readonly hostDirectory: string; readonly directory: string; readonly spaceId: string };
-  readonly info: SessionInfo;
-  readonly fetchImpl: NonNullable<MessageQueueOptions['fetchImpl']>;
-  readonly tokens: TokenReader;
-  readonly probe: Pick<SessionActivityProbe, 'fetchActiveSessionStatuses' | 'hasWorkingDescendants'>;
-  readonly client: { readonly session: { readonly instructions: { readonly entry: {
-    put(input: { readonly sessionID: string; readonly key: string; readonly value: string }): Promise<void>;
-  } } } };
-};
-type HostExecution = {
-  readSession(entry: SessionEntry): Promise<BotServiceReply<'session'>>;
-  isWorking(entry: SessionEntry): Promise<boolean | null>;
-  readTokens(entry: SessionEntry, options?: TokenOptions): Promise<number | null>;
-  syncKnowledge(entry: SessionEntry, options?: KnowledgeSyncOptions): Promise<BotServiceReply<'knowledge-sync'> | void>;
-  deliverNotice(entry: SessionEntry & Notice): Promise<BotServiceReply<'synthetic-deliver'> | void>;
-};
-type HostSessionsOptions = {
-  readonly dataDir: string;
-  readonly isolated: { sessionOwner(input: { readonly sessionId: string }): Promise<IsolatedOwner> };
-  readonly clientFor: (directory: string) => { readonly session: { get(input: { readonly sessionID: string }): Promise<JsonValue | undefined> } };
-  readonly hostQueue: Queue | null;
-  readonly readHostTokens: TokenReader | null;
-  readonly assertDispatch: NonNullable<MessageQueueOptions['assertBotDispatch']>;
-  readonly broadcast: NonNullable<MessageQueueOptions['broadcastGlobalUiEvent']>;
-  readonly sessionKnowledgeRuntime: KnowledgeCollector;
-  readonly isSessionArchived: (sessionId: string) => Promise<boolean>;
-  readonly resolvePlacement: ReturnType<typeof createBotPlacement>['resolve'];
-  readonly hostExecution?: HostExecution | null | undefined;
-};
-type QueueEntry = { readonly queue: Queue; readonly listeners: Set<(event: GlobalStreamEvent) => void>;
-  readonly spaceId: string | null; release?: () => void };
-const sessionInfoSchema = z.object({ id: z.string(), location: z.object({ directory: z.string().optional() }).nullish(),
-  time: z.object({ archived: z.unknown().optional() }).nullish(), metadata: z.unknown().optional() });
+import { sessionInfoSchema } from './host-session-contracts.js';
+import type { SessionEntry, QueueTarget, Queue, TokenOptions, SessionInfo, HostSessionsOptions, QueueEntry } from './host-session-contracts.js';
 const refuse: () => never = () => { throw new BotServiceError('BOT_ISOLATED_SESSION_MISMATCH', 'The recorded bot session runtime is unavailable.'); };
 
 export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
-  readHostTokens, assertDispatch, broadcast, sessionKnowledgeRuntime, isSessionArchived, resolvePlacement, hostExecution = null }: HostSessionsOptions) {
+  readHostTokens, assertDispatch, broadcast, sessionKnowledgeRuntime, isSessionArchived, resolvePlacement, hostExecution = null, conversations, resolveProject }: HostSessionsOptions) {
   const sessions = new Map<string, SessionEntry>();
   const queues = new Map<string, QueueEntry>();
   const transfers = new Set<Promise<unknown>>();
@@ -79,11 +27,14 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
   let started = false;
   let stopped = false;
   const track = (request: SessionEntry) => sessions.set(request.sessionId, request);
-  const trackItem = async (projectId: string, item: BotItem, bot: BotDefinition) => {
+  const trackItem = async (projectId: string, item: BotItem, bot?: BotDefinition) => {
     for (const [sessionId, entry] of sessions) {
-      if (entry.projectId === projectId && entry.itemId === item.id && (TERMINAL_ITEM_STATES.includes(item.state) || !Object.values(item.sessions).includes(sessionId))) sessions.delete(sessionId);
+      if (entry.role !== 'conversation' && entry.projectId === projectId && entry.itemId === item.id && (TERMINAL_ITEM_STATES.includes(item.state) || !Object.values(item.sessions).includes(sessionId))) sessions.delete(sessionId);
     }
+    if (item.conversation) track({ projectId, itemId: item.id, botId: item.botId, role: 'conversation', conversation: item.conversation,
+      sessionId: item.conversation.sessionId, directory: item.conversation.directory, isolated: false });
     if (TERMINAL_ITEM_STATES.includes(item.state)) return;
+    if (!bot) return;
     if (!Object.keys(item.sessions).length) return;
     if (item.worktree === undefined) refuse();
     const placement = await resolvePlacement({ projectId, itemId: item.id, bot, directory: item.worktree, sessions: item.sessions });
@@ -110,7 +61,7 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
   }) => {
     await trackItem(projectId, item, bot);
     const entry = sessions.get(sessionId);
-    if (!entry || entry.projectId !== projectId || entry.itemId !== item.id || entry.botId !== bot.id) refuse();
+    if (!entry || entry.role === 'conversation' || entry.projectId !== projectId || entry.itemId !== item.id || entry.botId !== bot.id) refuse();
     if (entry.isolated) return normalize((await owner(sessionId)).info, true);
     if (hostExecution) return hostExecution.readSession(entry);
     const info = sessionInfoSchema.parse(unwrapOpenCodeResponse(await clientFor(entry.directory).session.get({ sessionID: sessionId })));
@@ -122,7 +73,7 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
       return hostQueue;
     }
     const entry = sessions.get(target.sessionId);
-    if (!entry || entry.isolated !== target.isolated || entry.projectId !== target.projectId || entry.itemId !== target.itemId) refuse();
+    if (!entry || entry.role === 'conversation' || entry.isolated !== target.isolated || entry.projectId !== target.projectId || entry.itemId !== target.itemId) refuse();
     const recorded = target.isolated ? await owner(target.sessionId) : null;
     const spaceId = recorded?.binding.spaceId ?? null;
     if ((recorded?.binding.directory ?? entry.directory) !== target.directory) refuse();
@@ -134,7 +85,7 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
     const listeners = new Set<(event: GlobalStreamEvent) => void>();
     const hostEntry = () => {
       const current = sessions.get(target.sessionId);
-      if (stopped || !current || current.isolated || current.directory !== target.directory
+      if (stopped || !current || current.role === 'conversation' || current.isolated || current.directory !== target.directory
         || current.projectId !== entry.projectId || current.itemId !== entry.itemId || current.botId !== entry.botId) refuse();
       return current;
     };
@@ -186,6 +137,7 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
   const queueForSession = async (sessionId: string) => {
     const entry = sessions.get(sessionId);
     if (!entry) return hostQueue;
+    if (entry.role === 'conversation') return hostQueue;
     if (!entry.isolated) return hostExecution ? queueFor(entry) : hostQueue;
     const { binding } = await owner(sessionId);
     return queueFor({ ...entry, directory: binding.directory });
@@ -193,7 +145,7 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
   const restore = async (onFailure: (entry: SessionEntry, cause: unknown) => void | Promise<void>) => {
     started = true;
     stopped = false;
-    for (const entry of sessions.values()) if ((entry.isolated || hostExecution) && !entry.itemId.startsWith('discovery_')) {
+    for (const entry of sessions.values()) if (entry.role !== 'conversation' && (entry.isolated || hostExecution) && !entry.itemId.startsWith('discovery_')) {
       try {
         const directory = entry.isolated ? (await owner(entry.sessionId)).binding.directory : entry.directory;
         await queueFor({ ...entry, directory });
@@ -208,6 +160,7 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
       const sessionId = properties.sessionID ?? (isJsonObject(properties.info) ? properties.info.id : undefined);
       if (!isString(sessionId)) return;
       const entry = sessions.get(sessionId);
+      if (entry?.role === 'conversation') return undefined;
       if (!entry || entry.isolated !== Boolean(spaceId)) return;
       const recorded = queues.get(sessionId);
       if (!recorded || recorded.spaceId !== (spaceId ?? null)) return;
@@ -216,6 +169,7 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
     },
     async isWorking(sessionId: string) {
       const entry = sessions.get(sessionId);
+      if (entry?.role === 'conversation') return undefined;
       if (!entry) return undefined;
       if (!entry.isolated) return hostExecution ? hostExecution.isWorking(entry) : undefined;
       const { probe } = await owner(sessionId);
@@ -225,6 +179,11 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
     },
     async tokenSnapshot(sessionId: string, directory: string | null, options?: TokenOptions) {
       const entry = sessions.get(sessionId);
+      if (entry?.role === 'conversation') {
+        if (!conversations || !resolveProject || entry.directory !== directory) refuse();
+        return conversations.tokens({ project: await resolveProject(entry.projectId), botId: entry.botId,
+          itemId: entry.itemId, conversation: entry.conversation });
+      }
       if (!entry?.isolated) {
         if (hostExecution) {
           if (!entry || entry.directory !== directory) refuse();

@@ -7,8 +7,8 @@ import { OpenChamberControlError, asControlError, controlErrorFields } from './e
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
-import { createPageAnswers, createRenderPageAction, isAgentPrompt } from './render-page.js';
-import { createPageRecovery } from './page-recovery.js';
+import type { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createPageControl } from './page-control.js';
 import { completeFormAnswer } from './form-answer.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
@@ -47,6 +47,8 @@ import type { BrowserDialogParameters } from '@openchamber/sdk';
 import type { createAgentMemoryActions } from '../agent-memory/actions.js';
 import type { createWorkflowRuntime } from '../workflows/runtime.js';
 import type { createLeadActions } from '../session-lead/actions.js';
+import { assertBotLeadControl } from '../session-lead/bot-guidance.js';
+import type { RenderPageDependencies, RenderPageContext } from './render-page.js';
 
 interface ControlSettings {
   projects?: unknown;
@@ -67,11 +69,16 @@ export interface ControlOptions {
   signal?: AbortSignal | undefined;
   contextSessionId?: string;
   contextCallId?: string;
+  contextMessageId?: string;
+  onArtifactCaptured?: RenderPageContext['onArtifactCaptured'];
+  callerSessionId?: string;
   startedByExtension?: string;
   secretRunAuthorized?: boolean;
 }
 
 export interface ControlDependencies {
+  readonly artifacts?: RenderPageDependencies['artifacts'];
+  readonly assertConversationControlTarget?: (action: string, sessionId: string | undefined) => Promise<void>;
   readSettingsFromDiskMigrated: () => Promise<ControlSettings | null>;
   sanitizeProjects: (projects: ControlSettings['projects']) => { id: string; path: string; label?: string }[];
   buildOpenCodeUrl: (route: string, query: string) => string | URL;
@@ -537,20 +544,8 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     resolveDirectory: (input) => sessionService.resolveDirectory(input),
   });
 
-  const hasUnreadChat = async (sessionID: string) => {
-    try {
-      const client = await getClient();
-      const items = await client.session.inbox.list({ sessionID });
-      return items.some((item) => item.type === 'user' && item.delivery === 'steer' && !isAgentPrompt(item.payload?.metadata));
-    } catch (error) {
-      console.warn('[render.page] could not read the session inbox:', controlErrorFields(error)?.message ?? error);
-      return false;
-    }
-  };
-  const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
-  const { recover: recoverPage, answer: answerPage } = createPageRecovery({ getClient, pageAnswers, laterPages });
-  const readSession = async (sessionID: string) => (await getClient()).session.get({ sessionID });
-  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, readSession, laterPages, sharePages });
+  const pages = createPageControl({ getClient, isEnabled: isRenderToolEnabled, onPageWaitChange, laterPages, sharePages, artifacts: dependencies.artifacts });
+  const { hasUnreadChat, readSession, readPageProjection, recoverPage, answerPage } = pages;
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, saved: savedSecrets, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({
     getClient,
@@ -1201,6 +1196,12 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       if (!CONTROL_ACTIONS.has(action)) {
         throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
       }
+      const callerSessionId = options.callerSessionId ?? options.contextSessionId;
+      if (callerSessionId) assertBotLeadControl((await readSession(callerSessionId)).metadata, action);
+      const targetSessionId = asNonEmptyString(input.sessionId) || asNonEmptyString(input.targetSessionId)
+        || asNonEmptyString(input.leadId) || options.contextSessionId;
+      if (callerSessionId && callerSessionId !== targetSessionId) await dependencies.assertConversationControlTarget?.(action, callerSessionId);
+      await dependencies.assertConversationControlTarget?.(action, targetSessionId || undefined);
       if (OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action)) {
         return await knowledgeActions.execute(action, input, contextDirectory, options.contextSessionId);
       }
@@ -1240,12 +1241,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
         });
       }
       if (action === 'render.page') {
-        return await renderPage(input, {
-          sessionId: asNonEmptyString(options.contextSessionId),
-          callId: asNonEmptyString(options.contextCallId),
-          directory: asNonEmptyString(contextDirectory),
-          signal: options.signal,
-        });
+        return await pages.render(input, contextDirectory, options);
       }
       if (action === 'image.generate') {
         return await generateImage(input, { directory: asNonEmptyString(contextDirectory), signal: options.signal });
@@ -1437,7 +1433,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
   };
 
   const releaseAnswerWaits = (sessionId: string) => {
-    pageAnswers.release(sessionId);
+    pages.release(sessionId);
     secretRequests.release(sessionId);
   };
   return {
@@ -1445,6 +1441,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     resolveSessionDirectory,
     answerPage,
     recoverPage,
+    readPageProjection,
     answerSecret: secretRequests.answer,
     secretFields: secretRequests.fields,
     forgetSavedSecret: secretRequests.forgetSaved,

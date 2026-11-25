@@ -13,6 +13,26 @@ const setup = async () => {
   return { directory, runtime, config: createBotsConfig({ projectConfigRuntime: runtime }) };
 };
 const definition = () => ({ id: 'bugs', name: 'Bugs', mission: 'Fix verified bugs' });
+const photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxioAAAAASUVORK5CYII=';
+
+it.each([['photo', photo], ['removed photo', null], ['legacy definition', undefined]])('preserves the %s when the bot configuration is reopened', async (_label, avatar) => {
+  const { config, runtime } = await setup();
+  await config.update('p', { definitions: [{ ...definition(), avatar }] });
+  const reopened = createBotsConfig({ projectConfigRuntime: runtime });
+  expect((await reopened.read('p')).definitions[0].avatar).toBe(avatar);
+});
+
+it.each([
+  'https://example.com/photo.png',
+  'data:image/svg+xml;base64,PHN2Zy8+',
+  'data:image/jpeg;base64,aVBORw0KGgo=',
+  `data:image/png;base64,${'A'.repeat(32768)}`,
+])('rejects an invalid photo without replacing the saved bot', async (avatar) => {
+  const { config } = await setup();
+  await config.update('p', { definitions: [definition()] });
+  await expect(config.update('p', { definitions: [{ ...definition(), name: 'Replacement', avatar }] })).rejects.toThrow();
+  expect((await config.read('p')).definitions[0].name).toBe('Bugs');
+});
 
 it('defaults old projects and roundtrips all definition fields without accepting user approvals', async () => {
   const { config, runtime } = await setup();

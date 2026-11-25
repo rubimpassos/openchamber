@@ -72,6 +72,7 @@ export const createRuntimeStageRunner = ({ journal, itemFor, mutate, effects, st
       const stageTotal = Math.max(current.tokens.byStage[stage], z.number().parse(run.tokenBaseline?.byStage[stage]) + usage);
       const delta = stageTotal - current.tokens.byStage[stage];
       return { ...current, evidence: mergeEvidence(current.evidence, 'evidence' in output ? output.evidence : []), tokens: {
+        ...current.tokens,
         total: current.tokens.total + delta,
         byStage: { ...current.tokens.byStage, [stage]: stageTotal },
         byDay: { ...current.tokens.byDay, [day]: (current.tokens.byDay[day] ?? 0) + delta },

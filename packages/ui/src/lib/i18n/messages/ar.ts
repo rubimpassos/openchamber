@@ -1,6 +1,7 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ar.settings';
 import { botsI18n } from './bots.i18n';
+import { botWorkspaceI18n } from './bot-workspace.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -4061,6 +4062,7 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...selectionApprovalI18n.ar,
   ...botsI18n.ar,
+  ...botWorkspaceI18n.ar,
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...prStacksI18n.ar,

@@ -19,7 +19,7 @@ export async function createHostFixture({ fetchImpl, policyOptions, getSpaceArch
   await botGit(project.path, ['-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Fixture']);
   await botGit(project.path, ['remote', 'add', 'origin', 'https://github.com/fixture/repository.git']);
   const records = new Map();
-  const calls = { http: [], knowledge: [], alerts: [], events: [], modes: [] };
+  const calls = { http: [], knowledge: [], alerts: [], events: [], modes: [], synthetics: [] };
   const state = { active: {}, output: null };
   const upstream = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://inference.test');
@@ -28,7 +28,8 @@ export async function createHostFixture({ fetchImpl, policyOptions, getSpaceArch
     if (url.pathname === '/api/session/active') return res.end(JSON.stringify({ data: state.active }));
     if (url.pathname === '/api/session') return res.end(JSON.stringify({ data: [], cursor: {} }));
     if (url.pathname.endsWith('/message')) {
-      const messages = state.output === null ? [] : [
+      const conversation = records.get(url.pathname.split('/')[3])?.metadata?.openchamber?.automation?.role === 'conversation';
+      const messages = state.output === null || conversation ? [] : [
         { id: 'idle_fixture', type: 'idle', outcome: 'succeeded', time: { created: Date.now() } },
         { id: 'msg_fixture', type: 'assistant', content: [{ type: 'text', text: JSON.stringify(state.output) }],
           tokens: { input: 3, output: 2, reasoning: 1, cache: { read: 4, write: 5 } }, time: { created: Date.now(), completed: Date.now() } },
@@ -53,7 +54,15 @@ export async function createHostFixture({ fetchImpl, policyOptions, getSpaceArch
   }) };
   const client = { session: {
     get: async ({ sessionID }) => ({ data: records.get(sessionID) }),
+    create: async (input) => { const id = input.id ?? `ses_native_${records.size}`;
+      const info = { ...input, id }; records.set(id, info); return info; },
     update: async () => {},
+    interrupt: async ({ sessionID }) => { delete state.active[sessionID]; },
+    synthetic: async (input) => { calls.synthetics.push(input); return { id: input.id }; },
+    prompt: async (input) => ({ id: input.id }),
+    command: async () => {},
+    switchModel: async ({ sessionID, model }) => { records.get(sessionID).model = model; },
+    switchAgent: async ({ sessionID, agent }) => { records.get(sessionID).agent = agent; },
   }, message: { list: async ({ sessionID }) => (await fetch(buildOpenCodeUrl(`/api/session/${sessionID}/message`))).json() } };
   const sessionService = {
     sessionArchive: { isArchived: async () => false },

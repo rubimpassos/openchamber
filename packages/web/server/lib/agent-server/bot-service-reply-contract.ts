@@ -16,6 +16,12 @@ function assertBinding(returned: Binding | undefined, identity: z.output<typeof 
 
 export function assertBotServiceReply(...[operation, input, result]: ReplyArguments): void {
   switch (operation) {
+    case 'conversation-ensure':
+      if (JSON.stringify(result) !== JSON.stringify(input.capture.conversation)) refuse();
+      return;
+    case 'conversation-read': case 'conversation-prepare': case 'conversation-tokens': case 'conversation-stop': case 'conversation-notice':
+    case 'conversation-native':
+      return;
     case 'identity-update':
       if (result.id !== input.id || result.revision !== input.expectedRevision + 1) refuse();
       return;

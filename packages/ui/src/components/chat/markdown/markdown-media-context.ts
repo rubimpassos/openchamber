@@ -28,7 +28,11 @@ type MediaOwner = {
   messageId?: string;
   directory: string;
   documentAssets?: Pick<MarkdownDocumentAssets, 'filePath' | 'workspaceRoot'>;
+  retained?: RetainedMarkdownImages;
 };
+
+export type RetainedMarkdownImages = ReadonlyMap<string, string>;
+export const RetainedMarkdownImagesContext = React.createContext<RetainedMarkdownImages | null>(null);
 
 export class MarkdownMediaOwner {
   controller = new AbortController();
@@ -60,7 +64,13 @@ export class MarkdownMediaOwner {
   async resolve(source: string, video = false, refresh = false): Promise<string> {
     const signal = this.controller.signal;
     this.check(signal);
-    const { mode, directory, sessionId, messageId, documentAssets } = this.options;
+    const { mode, directory, sessionId, messageId, documentAssets, retained } = this.options;
+    if (retained) {
+      if (/^data:/i.test(source)) return resolveMarkdownImageSource(source, signal);
+      const url = retained.get(source);
+      if (!url) throw new Error('Image was not retained');
+      return url;
+    }
     if (mode === 'assistant') {
       await Promise.resolve();
       this.check(signal);
@@ -144,8 +154,8 @@ export class MarkdownMediaOwner {
 
   async load(source: string): Promise<Blob> {
     const signal = this.controller.signal;
-    const { mode, directory, sessionId, messageId } = this.options;
-    if (mode === 'assistant' && !isVSCodeRuntime() && isLocalMarkdownImageSource(source)) {
+    const { mode, directory, sessionId, messageId, retained } = this.options;
+    if (!retained && mode === 'assistant' && !isVSCodeRuntime() && isLocalMarkdownImageSource(source)) {
       if (!sessionId || !messageId) throw new Error('Missing media owner');
       return loadMessageImageBlob({ source, directory, sessionId, messageId, signal });
     }

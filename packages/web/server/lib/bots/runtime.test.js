@@ -16,6 +16,7 @@ import { admitBotJudgment } from './judge-policy.js';
 import { createBotDriver, TEST_HEAD } from './runtime.test-support.js';
 
 const directories = [];
+const stageSessions = (driver) => driver.calls.sessions.filter((session) => session.metadata.openchamber.automation.role !== 'conversation');
 const fixture = async (options) => {
   const root = await fs.mkdtemp('/tmp/opencode/bot-runtime-'); directories.push(root);
   return createBotDriver(root, options);
@@ -45,8 +46,8 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     expect(current.transitions.slice(-2).map((entry) => entry.to)).toEqual(['closing', 'done']);
     expect(driver.calls.effects.map((entry) => entry.operation)).toEqual(['git.push', 'pr.open', 'pr.auto-merge', 'jira.comment', 'jira.transition']);
     expect(driver.calls.removed).toEqual([item.id]);
-    expect(driver.calls.sessions).toHaveLength(3);
-    for (const session of driver.calls.sessions) expect(session.metadata.openchamber).toMatchObject({ kind: 'scheduled', automation: { source: 'bot', botId: 'bugs', itemId: item.id, notify: 'attention' } });
+    expect(stageSessions(driver)).toHaveLength(3);
+    for (const session of stageSessions(driver)) expect(session.metadata.openchamber).toMatchObject({ kind: 'scheduled', automation: { source: 'bot', botId: 'bugs', itemId: item.id, notify: 'attention' } });
   });
 
   it('does not replay a PR whose write response was lost and recovers its original key', async () => {
@@ -156,7 +157,7 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     const item = await driver.admit();
     await driver.runtime.pump('project');
     expect((await driver.runtime.detail('project', item.id)).item.state).toBe('needs-you');
-    expect(driver.calls.sessions).toEqual([]);
+    expect(stageSessions(driver)).toEqual([]);
     expect(driver.calls.proofs).toEqual([]);
   });
 
@@ -195,9 +196,9 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     const after = await journal.read('project', item.id);
     expect(after.data.runs[`${stage}:0`]).toEqual(before.data.runs[`${stage}:0`]);
     expect(after.data.round).toBe(1);
-    const sessions = driver.calls.sessions.length;
+    const sessions = stageSessions(driver).length;
     await driver.restart().pump('project');
-    expect(driver.calls.sessions).toHaveLength(sessions);
+    expect(stageSessions(driver)).toHaveLength(sessions);
     expect(driver.calls.effects.filter((entry) => entry.operation === 'git.push')).toHaveLength(1);
   });
 
@@ -227,7 +228,7 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     const items = (await driver.runtime.getItems('project')).items;
     expect(items.filter((item) => item.state === 'investigating')).toHaveLength(2);
     expect(items.filter((item) => item.state === 'queued')).toHaveLength(3);
-    expect(driver.calls.sessions).toHaveLength(2);
+    expect(stageSessions(driver)).toHaveLength(2);
   });
 
   it('checks token budgets again before starting the next stage', async () => {
@@ -249,7 +250,7 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     const second = await driver.admit({ kind: 'manual', id: 'second' });
     await driver.runtime.pump('project');
     expect((await driver.runtime.detail('project', second.id)).item.state).toBe('queued');
-    expect(driver.calls.sessions).toHaveLength(3);
+    expect(stageSessions(driver)).toHaveLength(3);
   });
 
   it('deduplicates sources and feedback, and carries answers to the fixing prompt', async () => {
@@ -271,7 +272,7 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     await driver.runtime.pump('project');
     expect((await driver.runtime.detail('project', item.id)).item.sessions.investigation).toBeDefined();
     await driver.restart().resume('project', item.id);
-    expect(driver.calls.sessions).toHaveLength(1);
+    expect(stageSessions(driver)).toHaveLength(1);
     expect(driver.calls.prompts).toHaveLength(1);
   });
 
@@ -468,7 +469,7 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     expect(current.state).toBe('needs-you');
     expect(current.evidence).toEqual([]);
     expect(current.sessions.investigation).toBeDefined();
-    expect(driver.calls.sessions).toHaveLength(1);
+    expect(stageSessions(driver)).toHaveLength(1);
     expect(driver.calls.effects).toEqual([]);
   });
 });

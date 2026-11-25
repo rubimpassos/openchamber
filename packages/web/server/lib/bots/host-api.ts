@@ -29,12 +29,17 @@ export function createBotHostApi({ runtime, placement, sessions, providers, disc
   assertStarted, refreshIndex, broadcast, reportAttention, failureCode }: ApiOptions) {
   const detail = async (...args: Parameters<Runtime['detail']>) => {
     const result = await runtime.detail(...args);
-    return { ...result, sessionDirectories: await placement.sessionDirectories({ projectId: args[0], item: result.item }) };
+    const sessionDirectories = { ...await placement.sessionDirectories({ projectId: args[0], item: result.item }) };
+    if (result.item.conversation) sessionDirectories[result.item.conversation.sessionId] = result.item.conversation.directory;
+    return { ...result, sessionDirectories };
   };
   return {
     ...runtime,
     runScheduled,
     detail,
+    ensureConversation(...args: Parameters<Runtime['ensureConversation']>) {
+      assertStarted(); return runtime.ensureConversation(...args);
+    },
     async saveConfig(...args: Parameters<Runtime['saveConfig']>) {
       assertStarted();
       const result = await runtime.saveConfig(...args);

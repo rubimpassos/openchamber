@@ -239,11 +239,16 @@ describe('sleep compaction', () => {
       expect(requests.some((request) => request.route.endsWith('/compact'))).toBe(false);
       expect(await runtime.sleepSummary('ses_lead')).toBeNull();
     }
-    const plain = setup({ metadata: {} });
-    plain.runtime.processPayload({ type: 'session.idle', properties: { sessionID: 'ses_lead' } }, '/repo');
-    await vi.waitFor(() => expect(plain.metadataReads()).toBe(1));
-    await Promise.resolve();
-    expect(plain.timers).toEqual([]);
+    for (const metadata of [{}, { openchamber: { ...LEAD.openchamber, automation: {
+      source: 'bot', role: 'conversation', projectId: 'project', botId: 'bot', itemId: 'item',
+    } } }]) {
+      const plain = setup({ metadata });
+      plain.runtime.processPayload({ type: 'session.idle', properties: { sessionID: 'ses_lead' } }, '/repo');
+      await vi.waitFor(() => expect(plain.metadataReads()).toBe(1));
+      await new Promise(setImmediate);
+      expect(plain.timers).toEqual([]);
+      expect(plain.requests).toEqual([]);
+    }
   });
 
   it('stands down when a turn starts while it is checking', async () => {

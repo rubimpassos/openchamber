@@ -665,6 +665,16 @@ the host announces `openchamber:space-queue-stream` after following that
 space's queue again, and on every reconnect of the control stream. A space
 that cannot be read keeps what was last known of its queue.
 
+A bot item's conversation has its queue in a third owner on the host. The host
+snapshot carries it as `conversation`, with its own revisions, and its sessions
+and events are marked `queueOwner: 'bot-conversation'`. `messageQueueOwners.ts`
+owns which owner a session's queue belongs to and the revisions applied per
+queue and per owner snapshot: a session first seen under the conversation owner
+drops the revisions recorded for it under the native numbering, a re-read after
+a failed round-trip takes the conversation's snapshot for such a session, and a
+runtime switch forgets that runtime's owners and revisions. A native snapshot
+therefore never clears or overwrites a conversation queue, and the reverse.
+
 Mutations are optimistic and then settled on the server's copy; failed
 round-trips re-read instead of guessing. Empty legacy events without a directory
 clear all projections of their session in that runtime. Projection items carry

@@ -23,6 +23,13 @@ export function checkedBotServiceReply<Operation extends BotServiceOperation, Re
 
 type Validators = { readonly [Operation in BotServiceOperation]: (input: BotServiceInput<Operation>, result: BotServiceReply<Operation>) => void };
 const validators: Validators = {
+  'conversation-ensure': (i, r) => assertBotServiceReply('conversation-ensure', i, r),
+  'conversation-read': (i, r) => assertBotServiceReply('conversation-read', i, r),
+  'conversation-prepare': (i, r) => assertBotServiceReply('conversation-prepare', i, r),
+  'conversation-tokens': (i, r) => assertBotServiceReply('conversation-tokens', i, r),
+  'conversation-stop': (i, r) => assertBotServiceReply('conversation-stop', i, r),
+  'conversation-notice': (i, r) => assertBotServiceReply('conversation-notice', i, r),
+  'conversation-native': (i, r) => assertBotServiceReply('conversation-native', i, r),
   'identity-list': (i, r) => assertBotServiceReply('identity-list', i, r),
   'identity-create': (i, r) => assertBotServiceReply('identity-create', i, r),
   'identity-update': (i, r) => assertBotServiceReply('identity-update', i, r),

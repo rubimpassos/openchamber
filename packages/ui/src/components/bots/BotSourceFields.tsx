@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import type { BotDefinition } from '@/lib/bots/config';
 import { BotSelectField } from './BotFields';
+import { BotAvatarField } from './BotAvatar';
 
 type Props = { readonly bot: BotDefinition; readonly onChange: (patch: Partial<BotDefinition>) => void };
 
@@ -16,6 +17,7 @@ export function BotSourceFields({ bot, onChange }: Props) {
   const updateSchedule = (patch: Partial<BotDefinition['schedule']>) => onChange({ schedule: { ...schedule, ...patch } });
   return <>
     <SettingsSection title={t('bots.mission')} divider={false} contentClassName="space-y-4">
+      <BotAvatarField name={bot.name} value={bot.avatar} onChange={(avatar) => onChange({ avatar })} />
       <SettingsStackedField label={t('bots.name')}><Input required aria-label={t('bots.name')} value={bot.name} onChange={(event) => onChange({ name: event.target.value })} /></SettingsStackedField>
       <SettingsStackedField label={t('bots.mission')} controlClassName="max-w-none w-full">
         <Textarea required aria-label={t('bots.mission')} value={bot.mission} onChange={(event) => onChange({ mission: event.target.value })} />

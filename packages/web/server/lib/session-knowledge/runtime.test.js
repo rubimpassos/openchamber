@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { BOT_LEAD_GUIDANCE } from '../session-lead/bot-guidance.js';
 import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, TABLE_SPEECH_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance, measureMemoryIndex } from './runtime.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
@@ -714,6 +715,20 @@ describe('lead', () => {
     const unreadableBrief = buildKnowledgeEntries({ ...base, linking: true, lead: { brief: undefined } });
     expect(unreadableBrief[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('This session is a lead');
     expect(KNOWLEDGE_ENTRY_KEYS.leadBrief in unreadableBrief).toBe(false);
+  });
+
+  test('gives a Bot conversation its coordinator guidance with rendering and no session or workflow controls', async () => {
+    const writes = new Map();
+    const runtime = createRuntime({
+      readSessionMetadata: async () => ({ openchamber: { lead: { at: 1 }, automation: {
+        source: 'bot', role: 'conversation', projectId: PROJECT_ID, botId: 'bot', itemId: 'item' } } }),
+      isSessionLinkingAvailable: async () => true, isPageRenderingAvailable: async () => true, isWorkflowAvailable: async () => true,
+      instructionEntries: { put: async (_session, _directory, key, text) => { writes.set(key, text); }, remove: async () => {} },
+    });
+    expect(await runtime.sync('ses_bot_lead', DIRECTORY, { includeMemorySaveRule: false })).toBe(true);
+    expect(writes.get(KNOWLEDGE_ENTRY_KEYS.lead)).toBe(BOT_LEAD_GUIDANCE);
+    expect(writes.get(GUIDANCE)).toContain(RENDER_PAGE_GUIDANCE);
+    for (const control of [DISPATCH_GUIDANCE, WORKFLOW_GUIDANCE, SESSION_LINK_GUIDANCE]) expect(writes.get(GUIDANCE)).not.toContain(control);
   });
 });
 

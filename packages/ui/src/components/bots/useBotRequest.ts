@@ -1,6 +1,8 @@
 import React from 'react';
 import { z } from 'zod';
-import { BotsApiError } from '@/lib/botsApi';
+import { BotsApiError, ensureBotConversation, fetchBotItem } from '@/lib/botsApi';
+import { fetchBotArtifacts, type BotArtifact } from '@/lib/bots/artifacts';
+import type { BotConversation, BotItem } from '@/lib/bots/items';
 import { getBotsRuntime } from '@/lib/botsRuntime';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
@@ -41,6 +43,44 @@ export function useBotResource<T>(load: () => Promise<T>) {
     setRead({ owner: load, data, busy: false, error: false });
   };
   return { data: read.owner === load ? read.data : null, busy: read.owner !== load || read.busy, error: read.owner === load && read.error, refresh, replace };
+}
+
+export function useBotItemRead(projectId: string, initial: BotItem, archived: boolean) {
+  const load = React.useCallback(() => fetchBotItem(projectId, initial.id), [projectId, initial.id]);
+  const read = useBotResource(load);
+  useBotsRefresh(projectId, read.refresh, !archived);
+  return { read, item: read.data?.item ?? initial };
+}
+
+export function useBotConversation(projectId: string, item: BotItem, canCreate: boolean) {
+  const [adopted, setAdopted] = React.useState<BotConversation | null>(item.conversation ?? null);
+  const needed = !adopted && !item.conversation && canCreate;
+  const load = React.useCallback(
+    () => needed ? ensureBotConversation(projectId, item.id).then((result) => result.conversation) : Promise.resolve(null),
+    [needed, projectId, item.id],
+  );
+  const read = useBotResource(load);
+  const conversation = adopted ?? item.conversation ?? read.data;
+  if (!adopted && conversation) setAdopted(conversation);
+  return { conversation, busy: needed && read.busy, error: needed && read.error, retry: read.refresh };
+}
+
+export function useBotArtifacts(scope: { readonly projectId: string; readonly itemId: string }, wanted: boolean, live: boolean) {
+  const { projectId, itemId } = scope;
+  const load = React.useCallback(async () => {
+    if (!wanted) return null;
+    const artifacts: BotArtifact[] = [];
+    for (let offset: number | null = 0; offset !== null;) {
+      const page = await fetchBotArtifacts({ projectId, itemId }, { offset });
+      artifacts.push(...page.artifacts);
+      if (page.nextOffset !== null && page.nextOffset <= offset) throw new BotsApiError(502, 'BOT_ARTIFACT_READ_FAILED');
+      offset = page.nextOffset;
+    }
+    return artifacts;
+  }, [projectId, itemId, wanted]);
+  const read = useBotResource(load);
+  useBotsRefresh(projectId, read.refresh, wanted && live);
+  return read;
 }
 
 /** Serializes explicit user actions and rejects navigation from a retired runtime or visit. */

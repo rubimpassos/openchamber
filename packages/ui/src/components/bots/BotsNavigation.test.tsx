@@ -21,6 +21,10 @@ let config = botsConfig();
 const project = { id: 'project-1', path: '/repo' };
 let saved = deferred<void>();
 let wrote: z.infer<typeof botsConfigSchema> | null = null;
+let conversationAsks = 0;
+// A 1x1 JPEG header is enough for the client schema; the server inspects real bytes.
+const photo = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+const archived = botItem({ id: 'item-old', title: 'Old repair', state: 'done', finishedAt: 2, sessions: { fixing: 'ses_old' } });
 
 function handle(request: Request): Response | Promise<Response> {
   const path = new URL(request.url).pathname;
@@ -30,6 +34,9 @@ function handle(request: Request): Response | Promise<Response> {
     saved.resolve();
     return Response.json({ config });
   });
+  if (path.endsWith('/conversation')) { conversationAsks += 1; return Response.json({}, { status: 503 }); }
+  if (path.endsWith('/archive')) return Response.json({ items: [archived] });
+  if (path.endsWith(`/items/${archived.id}`)) return Response.json({ item: archived, reports: {}, snapshot: null, sessionDirectories: { ses_old: '/repo' } });
   if (path.endsWith('/items/item-1')) return Response.json({ item: botItem(), reports: {}, snapshot: null });
   if (path.endsWith('/identities')) return Response.json({ identities: [] });
   if (path.endsWith('/bots')) return Response.json({ config, revision: 1, items: [botItem()], presets: [] });
@@ -37,7 +44,7 @@ function handle(request: Request): Response | Promise<Response> {
 }
 
 beforeEach(() => {
-  config = botsConfig(); wrote = null; saved = deferred<void>();
+  config = botsConfig(); wrote = null; saved = deferred<void>(); conversationAsks = 0;
   useUIStore.getState().closeMainSurfaces();
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
@@ -146,6 +153,76 @@ describe('Bots navigation and forms', () => {
     await act(async () => button('Execution').click());
     expect(document.querySelector<HTMLInputElement>('input[aria-label="Server ID"]')?.value).toBe('223456789012345678');
     expect(document.querySelector<HTMLInputElement>('input[aria-label="Channel ID"]')?.value).toBe('887654321098765432');
+  });
+
+  test('keeps a bot photo through an unrelated edit and removes it on request', async () => {
+    // Given a bot whose saved definition has a photo.
+    config.definitions = [{ ...configuredBot(), avatar: photo }];
+    await act(async () => root.render(<I18nProvider><BotsProject project={project} onLeave={() => {}} /></I18nProvider>));
+    await waitFor(() => !button('New bot').disabled);
+    expect(document.querySelector(`img[src="${photo}"]`)).not.toBeNull();
+
+    // When the mission changes and the form is saved.
+    await act(async () => button('Edit').click());
+    await input('Mission', 'Maintain the repository carefully');
+    await act(async () => button('Save changes').click());
+    await saved.promise;
+    await waitFor(() => document.body.textContent?.includes('Run now') === true);
+
+    // Then the photo is written back with the definition.
+    expect(wrote?.definitions[0]?.avatar).toBe(photo);
+
+    // When the user chooses initials.
+    saved = deferred<void>();
+    await act(async () => button('Edit').click());
+    await act(async () => button('Use initials').click());
+    await act(async () => button('Save changes').click());
+    await saved.promise;
+    await waitFor(() => document.body.textContent?.includes('Run now') === true);
+
+    // Then the definition records the removal and the initials stand in.
+    expect(wrote?.definitions[0]?.avatar).toBeNull();
+    expect(document.querySelector('img')).toBeNull();
+  });
+
+  test('opens a bot page from the navigation and starts a demand for that bot', async () => {
+    // Given two bots, the second of which has the listed work.
+    config.definitions = [{ ...configuredBot(), id: 'bot-0', name: 'Docs bot' }, configuredBot()];
+    await act(async () => root.render(<RuntimeAPIContext.Provider value={apis}><I18nProvider><BotsProject project={project} onLeave={() => {}} /></I18nProvider></RuntimeAPIContext.Provider>));
+    await waitFor(() => !button('New bot').disabled);
+
+    // When its row in the bot navigation is opened.
+    const row = document.querySelector<HTMLButtonElement>('nav button[title="Repository bot"]');
+    await act(async () => row?.click());
+
+    // Then the page names the bot, its purpose and its work, and marks it current.
+    expect(row?.getAttribute('aria-current')).toBe('page');
+    expect(document.querySelector('h2')?.textContent).toBe('Repository bot');
+    expect(document.body.textContent).toContain('Maintain the repository');
+    expect(document.body.textContent).toContain('Repair parser');
+
+    // When a demand starts from that page.
+    const start = [...document.querySelectorAll('button')].filter((entry) => entry.textContent === 'New demand' && !entry.closest('nav'))[0];
+    await act(async () => start?.click());
+
+    // Then the form already names this bot.
+    expect(document.querySelector('button[aria-label="Bots"]')?.textContent).toContain('Repository bot');
+  });
+
+  test('opens an ended item that has only stage sessions as its record', async () => {
+    // Given an archived item from before conversations existed.
+    await act(async () => root.render(<I18nProvider><BotsProject project={project} onLeave={() => {}} /></I18nProvider>));
+    await waitFor(() => !button('New bot').disabled);
+    await act(async () => button('Archive').click());
+    await waitFor(() => document.body.textContent?.includes('Old repair') === true);
+
+    // When it opens.
+    await act(async () => button('Old repair').click());
+    await waitFor(() => !button('ses_old').disabled);
+
+    // Then its stage session stays reachable at the server's address and no conversation is asked for.
+    expect(document.body.textContent).toContain('Stage sessions');
+    expect(conversationAsks).toBe(0);
   });
 
   test('opens the exact managed bot target once', async () => {

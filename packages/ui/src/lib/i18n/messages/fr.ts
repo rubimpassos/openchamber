@@ -1,5 +1,6 @@
 import { settingsDict } from './fr.settings';
 import { botsI18n } from './bots.i18n';
+import { botWorkspaceI18n } from './bot-workspace.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -190,6 +191,7 @@ export const dict: Readonly<Record<string, string>> = {
   ...settingsDict,
   ...selectionApprovalI18n.fr,
   ...botsI18n.fr,
+  ...botWorkspaceI18n.fr,
   'gitView.operation.title': 'Opération Git',
   'gitView.operation.recovery.storage': 'OpenChamber ne peut pas enregistrer ici l’état des transferts Git. Autorisez le stockage du site et rechargez ; d’ici là, push et pull sont en pause.',
   'gitView.operation.recovery.capacity': 'Trop de transferts Git inachevés sont enregistrés. Vérifiez ceux ci-dessous avant d’en lancer un autre.',

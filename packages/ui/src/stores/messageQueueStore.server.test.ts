@@ -43,6 +43,7 @@ type ServerSession = MessageQueueUpdatedEvent["properties"]["session"]
 
 type ServerReply = {
   revision: number
+  conversation?: { revision: number; sessions: ServerSession[] }
   session?: ServerSession
   sessions?: ServerSession[]
   item?: ServerItem
@@ -110,6 +111,38 @@ beforeEach(() => {
 })
 
 describe("server-owned message queue", () => {
+  test('keeps conversation-owner and native queue revisions independent across snapshots and events', async () => {
+    activateRuntime('runtime-conversation-queues')
+    const leadTarget = createMessageQueueTarget('session-1', '/repo', activeRuntimeKey)
+    if (!leadTarget) throw new Error('Lead target is required')
+    const leadKey = getMessageQueueKey(leadTarget)
+    const lead = { ...session([serverItem('owner-4', 'Owner snapshot')]), queueOwner: 'bot-conversation' as const }
+    const ordinary = { ...session([serverItem('native-1000', 'Native snapshot')]), sessionId: 'session-native' }
+    respond = () => json({ revision: 1000, sessions: [ordinary], conversation: { revision: 4, sessions: [lead] } })
+    await useMessageQueueStore.getState().hydrate()
+    applyMessageQueueUpdatedEvent(updated(5, { ...lead, items: [serverItem('owner-5', 'Owner event')] }), activeRuntimeKey)
+    respond = () => json({ revision: 1001, sessions: [], conversation: { revision: 4, sessions: [] } })
+    await useMessageQueueStore.getState().resync()
+    expect(useMessageQueueStore.getState().queuedMessages[leadKey]?.map((item) => item.id)).toEqual(['owner-5'])
+    const nativeTarget = createMessageQueueTarget('session-native', '/repo', activeRuntimeKey)
+    if (!nativeTarget) throw new Error('Native target is required')
+    expect(useMessageQueueStore.getState().queuedMessages[getMessageQueueKey(nativeTarget)]).toBeUndefined()
+    applyMessageQueueUpdatedEvent(updated(6, { ...lead, items: [] }), activeRuntimeKey)
+    expect(useMessageQueueStore.getState().queuedMessages[leadKey]).toBeUndefined()
+  })
+  test('a failed take in a conversation re-reads the conversation queue, not the native one', async () => {
+    activateRuntime('runtime-conversation-refresh')
+    const leadTarget = createMessageQueueTarget('session-1', '/repo', activeRuntimeKey)
+    if (!leadTarget) throw new Error('Lead target is required')
+    const lead = { ...session([serverItem('owner-4', 'Owner snapshot')]), queueOwner: 'bot-conversation' as const }
+    respond = () => json({ revision: 1000, sessions: [], conversation: { revision: 4, sessions: [lead] } })
+    await useMessageQueueStore.getState().hydrate()
+    respond = (call) => (call.path.endsWith('/take')
+      ? new Response(JSON.stringify({ error: 'queued message not found' }), { status: 404 })
+      : json({ revision: 1001, sessions: [], conversation: { revision: 5, sessions: [{ ...lead, items: [serverItem('owner-5', 'Owner refresh')] }] } }))
+    await expect(useMessageQueueStore.getState().takeForSend(leadTarget, 'owner-4')).rejects.toThrow()
+    expect(useMessageQueueStore.getState().queuedMessages[getMessageQueueKey(leadTarget)]?.map((item) => item.id)).toEqual(['owner-5'])
+  })
   test('waits for the first prompt before admitting a pending session follow-up', async () => {
     // Given a confirmed create whose first prompt is still preparing context.
     const submitted = deferSessionOperation<boolean>()

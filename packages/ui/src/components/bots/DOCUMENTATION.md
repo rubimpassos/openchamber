@@ -2,9 +2,14 @@
 
 ## Ownership
 
-This module owns the project Bots page, editable definitions, item admission and
-detail, archive, repository-policy review, identities, and the attention-only
-sidebar section. The server owns execution, approvals, credentials, item state
+This module owns the project Bots page: bot identity and navigation, editable
+definitions, demand admission, an item's conversation workspace and work context,
+archive, repository-policy review, identities, and the attention-only sidebar
+section. The chat column (`components/chat`) owns the transcript, composer and
+lead digest shown inside the workspace. `BotRenderArtifactView` draws a retained
+page in the work record with the chat's own page renderers and the read the
+transcript uses (`components/chat/message/parts/DOCUMENTATION.md`, `ShownPage.tsx`);
+this module lists page metadata and chooses which one to open. The server owns execution, approvals, credentials, item state
 and recorded operations; see `packages/web/server/lib/bots/DOCUMENTATION.md` and
 `runtime-contract.md`. Network parsing and session membership are described in
 `packages/ui/src/lib/bots/DOCUMENTATION.md`. Visual constraints live in `DESIGN.md`.
@@ -16,6 +21,42 @@ open the same feature inside the mobile full-screen surface. VS Code has no
 Bots server: its entry is absent, and direct view/API use reports unsupported.
 
 ## Invariants
+
+- An item's conversation is `item.conversation` and nothing else. `useBotConversation`
+  adopts the first address the server gives and keeps it for the visit, so a
+  running or finished stage never changes the shown session. A missing
+  conversation is asked for once through the ensure route while the item is
+  active; failure shows the cause with a retry. No session ID or directory is
+  built on the client.
+- An ended or archived item without a conversation opens as its record
+  (`BotItemDetail`), with stage links bound to validated addresses. With a
+  conversation it opens read-only.
+- Chat messages are ordinary input to the conversation. Only the answer field in
+  Work answers the coordinator, naming `questionKey` when the detail reported one.
+  Resume and Stop stay explicit controls there.
+- The workspace uses the native pinned chat column with `leadDigest`. It adds no
+  transcript, composer, model, attachment, permission or render code of its own.
+- A retained page in the record is the document the conversation draws for the
+  same call: one owner read, the captured images and no live file or network
+  read. While that read is in flight the record shows a loading row, and when it
+  fails an error row with a retry (`RetainedPagePending`, `RetainedPageFailure`),
+  the same rows the conversation shows. Its question opens only while the server lists the call as waiting or
+  keeps an open later page; otherwise the record shows how the owner read it
+  settled. A read-only record (an archived or ended item) never answers,
+  declines or reports a page, and says the answer belongs in the conversation.
+- Evidence and Decisions show recorded proof and verdict above the bot's pages of
+  that kind. The page list depends on `id`, `kind`, `title` and `createdAt` only.
+  It is read while one of those tabs is open, and a failed read never reads as
+  an empty list.
+- A retained page remains readable when its canonical answer projection fails.
+  `pageError` disables its answer controls, including while the live index still
+  reports a waiting call.
+- A photo is downsampled in the browser to a JPEG of about 96px under the
+  definition's size cap, and saved with the definition. A failed pick leaves the
+  draft unchanged. Files over 10 MB and other types are refused before decoding.
+- On a desktop the project picker sits at the top of the bot navigation and the
+  snapshot follows the project while any view is open, because the navigation
+  shows every item's state. On a phone it follows only while a list is shown.
 
 - Definitions expose the editable server configuration, including independent
   stage models and MCP rules. Machine approvals never enter a config write.
@@ -30,8 +71,9 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
   that owner's last result with an error; changing the owner hides old data
   immediately. A confirmed replacement invalidates older in-flight reads.
 - Refreshes come from the shared control stream and explicit user actions.
-  The visible detail owns its refresh subscription while the parent list is
-  hidden. No bot polling or background per-project fan-out is introduced.
+  An open item owns the refresh of its own detail and, while Evidence or
+  Decisions is shown, of its page list. No bot polling or background
+  per-project fan-out is introduced.
 - Mutations are explicit and serial per form. Failure leaves the editable draft
   on screen. Config persistence can succeed before scheduler synchronization
   fails, so errors tell the user to refresh before retrying.
@@ -48,11 +90,12 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
   entry for that exact session ID. Missing addresses disable the link, including
   before detail loads and in archive views without a valid projection. An initial
   detail failure grants no navigation authority.
-- The mobile Bots body owns vertical scroll. A project or view-identity change
-  starts it at the top before paint, including the project picker. Editor/item
-  IDs, archive mode, create mode and the selected list tab define navigation;
-  resource refreshes and edits within the same form preserve scroll. Desktop
-  retains the shared `ProjectRailPage` scroll behavior.
+- The page body owns vertical scroll on both layouts. A project or view-identity
+  change starts it at the top before paint, including the phone's project picker.
+  Bot, editor and item IDs, archive mode, create mode and the selected list tab
+  define navigation; resource refreshes and edits within the same form preserve
+  scroll. A conversation has no page scroll: the chat column and the work context
+  body each scroll inside it.
 - Policy approval requires a reviewed fingerprint and visible content. Missing
   reviewable people content blocks approval rather than trusting an empty list.
 - `useUIStore.botsPageTarget` is a one-shot `{ projectId, itemId?, botId? }`
@@ -61,6 +104,37 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
   target, and main-page transitions close Bots atomically.
 
 ## Decisions
+
+### Why the project picker moved into the bot navigation
+
+Bot navigation, conversation and work context already fill the page. Keeping
+`ProjectRailPage`'s project column as well left the conversation narrower than
+a readable line on a laptop. The picker is the one the phone already used.
+
+### Why the workspace loads the chat column on demand
+
+The Bots pages are their own chunk and most visits never open a conversation.
+Asking for `ChatView` when a conversation exists keeps the chat's module graph
+out of the Bots pages; in the running app the module is already loaded, so the
+conversation appears on the next frame.
+
+### Why width is measured and not left to container queries
+
+When the work context covers the conversation, the conversation must also leave
+the focus order (`inert`). CSS can hide it but cannot do that, so the workspace
+measures its own width and renders one arrangement.
+
+### Why pages open in a dialog and not inside the panel
+
+A page is authored for the width of a chat reply. The panel is narrower than
+that on a desktop, so the dialog gives the page its intended width while the
+list stays where the user left it.
+
+### Why the page list reads every page of results
+
+The server returns at most 100 entries per read and both tabs filter one list by
+kind. Reading until `nextOffset` is null keeps a kind from looking empty because
+its pages sit on a later read. A `nextOffset` that does not advance fails the read.
 
 ### Why the mobile scroll owner receives view changes
 
@@ -116,8 +190,12 @@ managed row sets `botsPageTarget` and opens the desktop page or mobile Bots
 action instead of editing the server-managed scheduled definition.
 
 Focused tests cover the HTTP boundary, membership, read authority, evidence,
-atomic page transitions, managed targets, archive waits, and real form-to-HTTP
-bot creation/editing. Combined runtime QA still needs the coordinator's server:
+atomic page transitions, managed targets, archive waits, real form-to-HTTP
+bot creation/editing, the photo round-trip and removal, bot-page navigation,
+conversation failure and retry, the page lists by kind, and the phone's
+conversation and work-context views. No unit test mounts the chat column inside
+the workspace: a ready conversation with its digest, sending, and an opened page
+need the running app. Combined runtime QA still needs the coordinator's server:
 create/edit a bot and source item, review and approve policy content, create and
 replace redacted identities, answer/stop/resume an item, navigate stage sessions,
 and observe sidebar attention appear and clear. Verify desktop, narrow mobile,

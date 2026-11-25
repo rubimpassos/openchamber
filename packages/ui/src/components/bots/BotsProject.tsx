@@ -1,60 +1,64 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
-import { Icon } from '@/components/icon/Icon';
-import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { SettingsSection, SettingsStackedField, SettingsTwoColumn } from '@/components/sections/shared/SettingsSection';
-import { NumberInput } from '@/components/ui/number-input';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { fetchBots, runBot, saveBotsConfig, type BotsSnapshot } from '@/lib/botsApi';
-import { botDefinitionSchema, newBotDraft, type BotDefinition } from '@/lib/bots/config';
+import { fetchBots, runBot, saveBotsConfig } from '@/lib/botsApi';
+import type { BotDefinition } from '@/lib/bots/config';
 import type { ProjectEntry } from '@/lib/api/types';
-import type { BotItem } from '@/lib/bots/items';
-import { useI18n, type I18nKey } from '@/lib/i18n';
+import { isTerminalBotItem, type BotItem } from '@/lib/bots/items';
+import { useI18n } from '@/lib/i18n';
 import { getBotsRuntime } from '@/lib/botsRuntime';
 import { useUIStore } from '@/stores/useUIStore';
 import { BotEditor } from './BotEditor';
-import { BotItemList } from './BotItemList';
 import { BotItemDetail } from './BotItemDetail';
 import { BotItemCreate } from './BotItemCreate';
-import { BotPolicy } from './BotPolicy';
 import { BotIdentities } from './BotIdentities';
-import { BotArchive } from './BotArchive';
+import { BotWorkspace } from './BotWorkspace';
+import { BotPage, BotsOverview } from './BotsOverview';
+import { BotsNav, BotsShell, NewDemandButton, type BotsPlace } from './BotsShell';
 import { useBotAction, useBotResource, useBotsRefresh } from './useBotRequest';
 
-type Detail = { readonly item: BotItem; readonly archived: boolean };
-const presetLabels = new Map<string, I18nKey>([
-  ['jira-bugs', 'bots.preset.jira-bugs'], ['security-infra', 'bots.preset.security-infra'],
-  ['dependencies', 'bots.preset.dependencies'], ['performance', 'bots.preset.performance'], ['repository-rules', 'bots.preset.repository-rules'],
-]);
-export function BotsProject({ project, onLeave, initialItemId, initialBotId, onViewChange }: {
+type Origin = { readonly kind: 'home' } | { readonly kind: 'bot'; readonly botId: string };
+type View = Origin
+  | { readonly kind: 'editor'; readonly bot: BotDefinition; readonly from: Origin }
+  | { readonly kind: 'create'; readonly botId?: string; readonly from: Origin }
+  | { readonly kind: 'item'; readonly item: BotItem; readonly archived: boolean; readonly from: Origin };
+const HOME: Origin = { kind: 'home' };
+const originOf = (view: View): Origin => view.kind === 'home' || view.kind === 'bot' ? view : view.from;
+const identityOf = (view: View): string => {
+  switch (view.kind) {
+    case 'home': return 'home';
+    case 'bot': return `bot:${view.botId}`;
+    case 'editor': return `editor:${view.bot.id}`;
+    case 'create': return 'create';
+    case 'item': return `item:${view.item.id}:${view.archived}`;
+  }
+};
+
+export function BotsProject({ project, onLeave, initialItemId, initialBotId, layout = 'page', picker }: {
   readonly project: ProjectEntry; readonly onLeave: () => void; readonly initialItemId?: string; readonly initialBotId?: string;
-  readonly onViewChange?: () => void;
+  readonly layout?: 'page' | 'mobile'; readonly picker?: React.ReactNode;
 }) {
   const { t } = useI18n();
   const load = React.useCallback(() => fetchBots(project.id), [project.id]);
   const read = useBotResource(load);
   const snapshot = read.data;
   const [tab, setTab] = React.useState('items');
-  const [editor, setEditor] = React.useState<BotDefinition | null>(null);
-  const [detail, setDetail] = React.useState<Detail | null>(null);
-  const [creating, setCreating] = React.useState(false);
-  const [configure, setConfigure] = React.useState(false);
+  const [view, setView] = React.useState<View>(HOME);
   const [managingIdentities, setManagingIdentities] = React.useState(false);
   const [identitiesVersion, setIdentitiesVersion] = React.useState(0);
   const [targetUnavailable, setTargetUnavailable] = React.useState(false);
-  React.useLayoutEffect(() => { onViewChange?.(); }, [onViewChange, tab, editor?.id, detail?.item.id, detail?.archived, creating]);
-  const action = useBotAction();
-  useBotsRefresh(project.id, read.refresh, !detail && !editor && !creating);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const identity = `${identityOf(view)}:${tab}`;
+  React.useLayoutEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [identity]);
+  const running = useBotAction();
+  useBotsRefresh(project.id, read.refresh, layout === 'page' || view.kind === 'home' || view.kind === 'bot');
   React.useEffect(() => {
     if ((!initialItemId && !initialBotId) || !snapshot) return;
     const item = snapshot.items.find((entry) => entry.id === initialItemId);
     const bot = snapshot.config.definitions.find((entry) => entry.id === initialBotId);
-    setEditor(null);
-    setDetail(null);
-    setCreating(false);
     setTargetUnavailable(!item && !bot);
-    if (item) setDetail({ item, archived: false });
-    else if (bot) setEditor(bot);
+    if (item) setView({ kind: 'item', item, archived: false, from: HOME });
+    else if (bot) setView({ kind: 'editor', bot, from: HOME });
+    else setView(HOME);
     useUIStore.getState().setBotsPageTarget(null);
   }, [initialItemId, initialBotId, snapshot]);
   const saveBot = async (bot: BotDefinition) => {
@@ -65,71 +69,47 @@ export function BotsProject({ project, onLeave, initialItemId, initialBotId, onV
     const result = await saveBotsConfig(project.id, { ...snapshot.config, definitions });
     if (!runtime.signal.aborted) read.replace({ ...snapshot, config: result.config });
   };
-  if (editor) return <>
-    <BotEditor key={editor.id} projectId={project.id} directory={project.path} initial={editor} onSave={saveBot} onClose={() => setEditor(null)} identitiesVersion={identitiesVersion} onManageIdentities={() => setManagingIdentities(true)} />
-    <Dialog open={managingIdentities} onOpenChange={(open) => { setManagingIdentities(open); if (!open) setIdentitiesVersion((version) => version + 1); }}>
-      <DialogContent className="max-w-3xl max-h-[90dvh] overflow-y-auto"><DialogTitle>{t('bots.identities')}</DialogTitle>{managingIdentities ? <BotIdentities projectId={project.id} /> : null}</DialogContent>
-    </Dialog>
-  </>;
-  if (detail) return <BotItemDetail key={detail.item.id} projectId={project.id} initial={detail.item} archived={detail.archived} onBack={() => { setDetail(null); read.refresh(); }} onLeave={onLeave} />;
-  if (creating && snapshot) return <BotItemCreate projectId={project.id} bots={snapshot.config.definitions} onCreated={(item) => { setCreating(false); setDetail({ item, archived: false }); read.refresh(); }} onClose={() => setCreating(false)} />;
-  const today = new Date().toISOString().slice(0, 10);
-  const attention = snapshot?.items.filter((item) => item.state === 'needs-you' || item.state === 'waiting-answer') ?? [];
-  return <div className="min-w-0 @container space-y-4">
-    <div className="flex min-w-0 items-center gap-2">
-      <Button size="sm" onClick={() => setEditor(newBotDraft())} disabled={!snapshot}>{t('bots.newBot')}</Button>
-      <Button size="sm" variant="outline" disabled={!snapshot?.config.definitions.length} onClick={() => setCreating(true)}>{t('bots.newItem')}</Button>
-      <Button size="sm" variant="ghost" className="ms-auto" aria-pressed={configure} onClick={() => setConfigure((value) => !value)} disabled={!snapshot}><Icon name="settings-3" className="size-4" /><span className="sr-only">{t('bots.configure')}</span></Button>
-      <Button size="sm" variant="ghost" disabled={read.busy} onClick={read.refresh} aria-label={t('bots.refresh')}><Icon name="refresh" className="size-4" /></Button>
-    </div>
-    <div className="min-h-5 typography-meta" role={read.error || action.error ? 'alert' : 'status'}>
-      {read.error || action.error ? <p className="text-[var(--status-error-text)]">{action.error ?? t('bots.error')}</p> : snapshot ? t('bots.tokensToday', { count: snapshot.items.reduce((sum, item) => sum + (item.tokens.byDay[today] ?? 0), 0) }) : t('common.loading')}
-    </div>
-    {targetUnavailable ? <p role="alert" className="typography-meta text-[var(--status-warning-text)]">{t('common.unavailable')}</p> : null}
-    {configure && snapshot ? <BotsProjectConfig projectId={project.id} snapshot={snapshot} onSaved={(config) => read.replace({ ...snapshot, config })} /> : null}
-    <SortableTabsStrip className="h-7" variant="active-pill" activeId={tab} onSelect={setTab} items={[
-      { id: 'items', label: t('bots.items') }, { id: 'audit', label: t('bots.audit') }, { id: 'rules', label: t('bots.rules') },
-      { id: 'identities', label: t('bots.identities') }, { id: 'archive', label: t('bots.archive') },
-    ]} />
-    {tab === 'items' && snapshot ? <>
-      {attention.length ? <SettingsSection title={t('bots.attention')} divider={false}><BotItemList items={attention} onOpen={(item) => setDetail({ item, archived: false })} /></SettingsSection> : null}
-      <SettingsSection title={t('bots.title')} divider={false} contentClassName="space-y-2">
-        {snapshot.config.definitions.map((bot) => <article key={bot.id} className="oc-tile rounded-lg p-3">
-          <div className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate typography-ui-label" dir="auto" title={bot.name}>{bot.name}</span>
-            <Button size="sm" variant="outline" disabled={action.busy || !bot.enabled} onClick={() => void action.run(async () => { await runBot(project.id, bot.id); if (action.isActive()) read.refresh(); })}>{t('bots.run')}</Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditor(bot)}>{t('bots.edit')}</Button>
-          </div>
-          <p className="mt-1 truncate typography-meta text-muted-foreground" dir="auto" title={bot.mission}>{bot.mission}</p>
-        </article>)}
-        {snapshot.config.definitions.length === 0 ? <p className="typography-meta text-muted-foreground">{t('bots.empty')}</p> : null}
-        {snapshot.presets.length ? <div className="flex flex-wrap gap-2 pt-2">{snapshot.presets.map((preset) => {
-          const key = presetLabels.get(preset.id);
-          const name = key ? t(key) : preset.name;
-          return <Button key={preset.id} size="sm" variant="chip" onClick={() => setEditor(botDefinitionSchema.parse({ ...preset, id: crypto.randomUUID(), name }))}>{name}</Button>;
-        })}</div> : null}
-      </SettingsSection>
-      <SettingsSection title={t('bots.items')}><BotItemList items={snapshot.items.filter((item) => !attention.includes(item))} onOpen={(item) => setDetail({ item, archived: false })} /></SettingsSection>
-    </> : null}
-    {tab === 'audit' && snapshot ? <BotItemList items={snapshot.items} onOpen={(item) => setDetail({ item, archived: false })} audit /> : null}
-    {tab === 'rules' ? <BotPolicy projectId={project.id} /> : null}
-    {tab === 'identities' ? <BotIdentities projectId={project.id} /> : null}
-    {tab === 'archive' ? <BotArchive projectId={project.id} onOpen={(item) => setDetail({ item, archived: true })} /> : null}
-  </div>;
-}
+  const run = (botId: string) => void running.run(async () => { await runBot(project.id, botId); if (running.isActive()) read.refresh(); });
+  const bots = snapshot?.config.definitions ?? [];
+  const origin = originOf(view);
+  const back = () => { setView(origin); read.refresh(); };
+  const create = (botId?: string) => setView({ kind: 'create', botId, from: origin });
+  const openItem = (item: BotItem, archived: boolean) => setView({ kind: 'item', item, archived, from: origin });
+  const workspace = view.kind === 'item' && (view.item.conversation !== undefined || (!view.archived && !isTerminalBotItem(view.item)));
+  const place: BotsPlace = view.kind === 'item' ? { kind: 'item', itemId: view.item.id } : origin;
+  const shownBot = view.kind === 'bot' ? bots.find((bot) => bot.id === view.botId) : undefined;
 
-function BotsProjectConfig({ projectId, snapshot, onSaved }: {
-  readonly projectId: string; readonly snapshot: BotsSnapshot; readonly onSaved: (config: BotsSnapshot['config']) => void;
-}) {
-  const { t } = useI18n();
-  const [concurrency, setConcurrency] = React.useState(snapshot.config.concurrency);
-  const [retentionDays, setRetention] = React.useState(snapshot.config.retentionDays);
-  const action = useBotAction();
-  return <SettingsSection title={t('bots.configure')} divider={false} contentClassName="space-y-3">
-    <SettingsTwoColumn>
-      <SettingsStackedField label={t('bots.concurrency')}><NumberInput aria-label={t('bots.concurrency')} value={concurrency} min={1} onValueChange={setConcurrency} /></SettingsStackedField>
-      <SettingsStackedField label={t('bots.retention')}><NumberInput aria-label={t('bots.retention')} value={retentionDays} min={0} onValueChange={setRetention} /></SettingsStackedField>
-    </SettingsTwoColumn>
-    <Button size="sm" disabled={action.busy} onClick={() => void action.run(async () => { const result = await saveBotsConfig(projectId, { ...snapshot.config, concurrency, retentionDays }); if (action.isActive()) onSaved(result.config); })}>{t('settings.common.actions.saveChanges')}</Button>
-    <div className="min-h-5 typography-meta text-[var(--status-error-text)]" role="alert">{action.error}</div>
-  </SettingsSection>;
+  const overview = <BotsOverview projectId={project.id} snapshot={snapshot} tab={tab} onTab={setTab} offersDemand={layout === 'mobile'} running={running}
+    status={{ busy: read.busy, failed: read.error, unavailable: targetUnavailable }} onRefresh={read.refresh}
+    onConfig={(config) => { if (snapshot) read.replace({ ...snapshot, config }); }}
+    onEditBot={(bot) => setView({ kind: 'editor', bot, from: HOME })} onOpenBot={(botId) => setView({ kind: 'bot', botId })}
+    onRunBot={run} onCreate={() => create()} onOpenItem={openItem} />;
+  const content = (() => {
+    switch (view.kind) {
+      case 'home': return overview;
+      case 'bot': return shownBot ? <BotPage bot={shownBot} items={snapshot?.items.filter((item) => item.botId === shownBot.id) ?? []} running={running}
+        onBack={() => setView(HOME)} onCreate={() => create(shownBot.id)} onRun={() => run(shownBot.id)}
+        onEdit={() => setView({ kind: 'editor', bot: shownBot, from: view })} onOpenItem={(item) => openItem(item, false)} /> : overview;
+      case 'editor': return <>
+        <BotEditor key={view.bot.id} projectId={project.id} directory={project.path} initial={view.bot} onSave={saveBot} onClose={() => setView(view.from)} identitiesVersion={identitiesVersion} onManageIdentities={() => setManagingIdentities(true)} />
+        <Dialog open={managingIdentities} onOpenChange={(open) => { setManagingIdentities(open); if (!open) setIdentitiesVersion((version) => version + 1); }}>
+          <DialogContent className="max-w-3xl max-h-[90dvh] overflow-y-auto"><DialogTitle>{t('bots.identities')}</DialogTitle>{managingIdentities ? <BotIdentities projectId={project.id} /> : null}</DialogContent>
+        </Dialog>
+      </>;
+      case 'create': return <BotItemCreate projectId={project.id} bots={bots} botId={view.botId} onClose={() => setView(view.from)}
+        onCreated={(item) => { setView({ kind: 'item', item, archived: false, from: view.from }); read.refresh(); }} />;
+      case 'item': return workspace
+        ? <BotWorkspace key={view.item.id} projectId={project.id} bot={bots.find((bot) => bot.id === view.item.botId)} initial={view.item} archived={view.archived} layout={layout} onBack={back} onLeave={onLeave} />
+        : <BotItemDetail key={view.item.id} projectId={project.id} initial={view.item} archived={view.archived} onBack={back} onLeave={onLeave} />;
+    }
+  })();
+
+  return <BotsShell layout={layout} picker={picker} full={workspace} scrollRef={scrollRef}
+    nav={<BotsNav bots={bots} items={snapshot?.items ?? []} place={place} onNavigate={(next) => {
+      if (next.kind === 'item') setView({ kind: 'item', item: next.item, archived: false, from: origin.kind === 'bot' && origin.botId === next.item.botId ? origin : HOME });
+      else setView(next);
+    }} />}
+    footer={<NewDemandButton disabled={!bots.length} onClick={() => create(origin.kind === 'bot' ? origin.botId : undefined)} />}>
+    {content}
+  </BotsShell>;
 }

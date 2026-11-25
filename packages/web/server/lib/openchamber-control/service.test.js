@@ -1083,7 +1083,7 @@ describe('OpenChamber control service', () => {
       const archive = vi.fn(async () => ({ archived: [], failedIds: [] }));
       const { service, client } = createService();
       const child = (id, parentID) => session(id, { metadata: { openchamber: { kind: 'operator-child', parentID } } });
-      const records = [child('mine', 'ses_lead'), child('theirs', 'ses_other'), session('plain'), session('sub', { parentID: 'ses_lead' })];
+      const records = [child('mine', 'ses_lead'), child('theirs', 'ses_other'), session('plain'), session('sub', { parentID: 'ses_lead' }), session('ses_lead')];
       client.session.active.mockResolvedValue({ mine: { type: 'running' } });
       client.session.list.mockResolvedValue({ data: records });
       client.session.get.mockImplementation(async ({ sessionID }) => records.find((record) => record.id === sessionID));

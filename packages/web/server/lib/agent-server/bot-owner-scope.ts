@@ -1,6 +1,7 @@
 import { botBoundaryError, botScopeSchema } from './bot-service-contract.js';
 import { readTrustedBotMigrationPaths } from '../bots/production-worktrees.js';
 import type { AgentBotServicesOptions, BotServiceOwners, Scope, ScopeLookup, StageSessionEntry, StageRequest, WatchAuthority } from './bot-services.types.js';
+import type { ConversationTarget } from '../bots/conversation-contract.js';
 
 const same = <Left, Right>(left: Left, right: Right) => JSON.stringify(left) === JSON.stringify(right);
 
@@ -105,11 +106,21 @@ export function createBotOwnerScope(options: AgentBotServicesOptions) {
   const bindOwner = (owners: BotServiceOwners) => {
     dataDir = owners.dataDir;
     resolveProject = owners.resolveProject; listProjects = owners.listProjects;
-    readItem = async (projectId, itemId) => (await owners.store.read(projectId)).items.find((item) => item.id === itemId) ?? null;
+    readItem = async (projectId, itemId) => (await owners.store.read(projectId)).items.find((item) => item.id === itemId)
+      ?? (await owners.store.readArchive(projectId)).find((item) => item.id === itemId) ?? null;
     readBot = async (projectId, botId) => (await owners.config.read(projectId)).definitions.find((bot) => bot.id === botId) ?? null;
     listItems = async (projectId) => (await owners.store.read(projectId)).items;
   };
-  return { projectFor, identityProject, scopeFor, entryScope, stageScope, directoryScope, watchMigration, bindOwner,
+  const conversationTarget = async (target: ConversationTarget, creating = false) => {
+    const project = await projectFor(target.project.id);
+    const item = await readItem?.(project.id, target.itemId);
+    if (!item || item.botId !== target.botId || project.path !== target.project.path
+      || target.conversation.directory !== project.path || (!creating || item.conversation) && !same(item.conversation, target.conversation)) {
+      throw botBoundaryError('BOT_CONVERSATION_SCOPE_MISMATCH', 409);
+    }
+    return target;
+  };
+  return { projectFor, identityProject, scopeFor, entryScope, stageScope, directoryScope, watchMigration, bindOwner, conversationTarget,
     projectAt: async (directory: string) => {
       if (!listProjects) throw new TypeError('listProjects is not a function');
       return (await listProjects()).find((project) => project.path === directory);

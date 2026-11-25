@@ -21,6 +21,9 @@ the UI is on a different machine.
 - Authorization recognizes the same common inline and reference-style image
   destinations collected by the UI, including balanced parentheses, while
   excluding fenced and inline code.
+  `discovery.ts` owns this parser. Bot render capture also uses it on literal
+  OpenUI strings, retaining the exact destinations the Markdown renderer reads
+  without rewriting the program.
 - The local images an `openchamber_render` page in the same message names are
   referenced too (`renderPageImageSources` in
   `../openchamber-control/render-page.js`): the page's HTML is the call's

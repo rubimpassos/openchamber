@@ -14,7 +14,8 @@ const project = path.join(root, 'registered-project');
 const children = new Set(); const streams = new Set();
 await fs.mkdir(path.join(project, '.agents/areas'), { recursive: true });
 await fs.writeFile(path.join(project, '.agents/areas/core.md'), '---\nname: Core\npaths: [src/**]\nlevel: human\nowners: []\n---\nReview\n');
-const peer = http.createServer((req, res) => {
+const sessions = new Map(); const active = {}; const prompts = [];
+const peer = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://controlled.invalid');
   if (url.pathname.endsWith('/event')) {
     res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': connected\n\n');
@@ -22,8 +23,28 @@ const peer = http.createServer((req, res) => {
   }
   res.setHeader('content-type', 'application/json');
   if (url.pathname === '/api/info') return res.end(JSON.stringify({ version: '2.2.5' }));
-  if (url.pathname === '/api/session/active') return res.end(JSON.stringify({ data: {} }));
-  if (url.pathname === '/api/session') return res.end(JSON.stringify({ data: [], cursor: {} }));
+  if (url.pathname === '/api/session/active') return res.end(JSON.stringify({ data: active }));
+  if (url.pathname === '/api/model/default') return res.end(JSON.stringify({ data: { providerID: 'fixture', id: 'model' } }));
+  let body;
+  if (req.method === 'POST' || req.method === 'PATCH') {
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    const text = Buffer.concat(chunks).toString('utf8'); body = text ? JSON.parse(text) : {};
+  }
+  if (url.pathname === '/api/session' && req.method === 'POST') {
+    const record = { ...body, id: body.id, time: { created: Date.now(), updated: Date.now() } };
+    sessions.set(record.id, record); return res.end(JSON.stringify({ data: record }));
+  }
+  if (url.pathname === '/api/session') return res.end(JSON.stringify({ data: [...sessions.values()], cursor: {} }));
+  const id = url.pathname.split('/')[3];
+  if (/^\/api\/session\/[^/]+$/.test(url.pathname)) {
+    const record = sessions.get(id);
+    if (body && record) { Object.assign(record, body); res.statusCode = 204; return res.end(); }
+    return res.end(JSON.stringify({ data: record }));
+  }
+  if (url.pathname.endsWith('/prompt')) { prompts.push({ sessionId: id, body }); return res.end(JSON.stringify({ data: { id: body.id } })); }
+  if (url.pathname.endsWith('/interrupt')) { delete active[id]; return res.end(JSON.stringify({ data: { interrupted: true } })); }
+  if (url.pathname.endsWith('/message')) return res.end(JSON.stringify({ data: [], cursor: {} }));
+  if (/\/(?:model|agent)$/.test(url.pathname) || url.pathname.includes('/instructions/entry/')) { res.statusCode = 204; return res.end(); }
   res.end(JSON.stringify({ data: [] }));
 });
 await new Promise((resolve) => peer.listen(0, '127.0.0.1', resolve));
@@ -66,7 +87,7 @@ const launch = async (role, projects, agent = null) => {
       options.body = JSON.stringify(body);
     }
     const response = await fetch(origin + route, options);
-    return { status: response.status, body: await response.json() };
+    return { status: response.status, body: response.status === 204 ? null : await response.json() };
   };
   return { origin, dataDir, request, logs: () => output, async close() {
     const exited = once(child, 'exit'); child.send('stop'); const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
@@ -91,7 +112,7 @@ try {
   } while (Date.now() < deadline);
   assert.equal(saved.status, 200, `${JSON.stringify(saved)}\n${owner.logs()}`);
   assert.equal((await agent.request(base)).status, 403, 'Agent must have no public coordinator');
-  for (const route of ['/api/openchamber/bot-services/identity-list', '/API/OPENCHAMBER/%62ot-services/checkout-create']) {
+  for (const route of ['/api/openchamber/bot-services/identity-list', '/API/OPENCHAMBER/%62ot-services/checkout-create', '/api/openchamber/bot-services/artifacts/pull']) {
     assert.equal((await owner.request(route, 'POST', {})).status, 403, 'Owner clients must not reach private execution');
   }
   const policy = await owner.request(`${base}/policy`);
@@ -103,6 +124,31 @@ try {
   assert.equal(admitted.status, 200, JSON.stringify(admitted));
   assert.equal(admitted.body.item.state, 'needs-you');
   const itemId = admitted.body.item.id;
+  const conversation = admitted.body.item.conversation;
+  assert(conversation?.sessionId, `Missing root conversation: ${JSON.stringify(admitted)}`);
+  assert.equal((await fetch(`${agent.origin}/api/openchamber/bot-services/artifacts/pull`, { method: 'POST' })).status, 401);
+  assert.equal((await agent.request('/api/openchamber/bot-services/artifacts/pull', 'POST', {})).status, 400);
+  const native = { id: 'msg_separatednative1', text: 'Explain the evidence', files: [{ uri: 'file:///proof.txt', name: 'proof.txt' }] };
+  assert.equal((await owner.request(`/api/session/${conversation.sessionId}/prompt`, 'POST', native)).status, 200);
+  assert.deepEqual(prompts, [{ sessionId: conversation.sessionId, body: native }]);
+  assert.equal((await owner.request(`/api/session/${conversation.sessionId}`, 'PATCH', { permissions: [] })).status, 403);
+  assert.equal((await owner.request('/api/openchamber/control', 'POST', {
+    action: 'session.send', input: { sessionId: conversation.sessionId, prompt: 'Bypass' },
+  })).status, 403);
+  active[conversation.sessionId] = { type: 'running' };
+  const queued = await owner.request(`/api/message-queue/sessions/${conversation.sessionId}/items`, 'POST', {
+    directory: conversation.directory, item: { content: 'Queued', text: 'Queued',
+      sendConfig: { providerID: 'fixture', modelID: 'model' }, attachments: [{ dataUrl: 'data:text/plain;base64,YQ==', mimeType: 'text/plain', filename: 'proof.txt' }] },
+  });
+  assert.equal(queued.status, 200, JSON.stringify(queued));
+  assert.equal(queued.body.session.queueOwner, 'bot-conversation');
+  const snapshot = await owner.request('/api/message-queue');
+  assert.equal(snapshot.status, 200, JSON.stringify(snapshot));
+  assert.equal(snapshot.body.revision, 0);
+  assert.equal(snapshot.body.conversation.revision, queued.body.revision);
+  assert.equal(snapshot.body.sessions.some((entry) => entry.sessionId === conversation.sessionId), false);
+  assert.deepEqual(snapshot.body.conversation.sessions[0].items[0].sendConfig, { providerID: 'fixture', modelID: 'model' });
+  assert.equal(snapshot.body.conversation.sessions[0].items[0].attachments[0].filename, 'proof.txt');
   assert.deepEqual(admitted.body.item.sessions, {});
   const pending = (await owner.request('/api/notification-center?version=2')).body.entries.find((entry) => entry.kind === 'bot' && entry.requestId === itemId);
   assert(pending, 'Owner must persist attention before a stage session exists');

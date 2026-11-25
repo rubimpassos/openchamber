@@ -2,7 +2,6 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { useI18n } from '@/lib/i18n';
-import type { ToolPart } from '@/lib/opencode/model';
 import type { RenderedPageAsk } from '@/lib/opencode/tools';
 import { useGuestsStore } from '@/lib/guests/store';
 import { answerRenderedPage } from '@/lib/renderPageAnswer';
@@ -14,13 +13,25 @@ import { usePageDecline } from './usePageDecline';
 import { PageAskStatus } from './PageAskStatus';
 import { pageBlocksTurn } from '@/hooks/usePageAsk';
 
-export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: string; ask: RenderedPageAsk }) {
+export type RenderedPageOrigin = {
+    readonly sessionId: string;
+    readonly callId: string;
+    readonly partId: string;
+    readonly messageId?: string;
+};
+
+export function UiPageFrame({ origin, source, ask, readOnly = false }: {
+    origin: RenderedPageOrigin;
+    source: string;
+    ask: RenderedPageAsk;
+    readOnly?: boolean;
+}) {
     const { t } = useI18n();
     const UiBlock = useUiBlockComponent();
     const [sentSummary, setSentSummary] = React.useState<string | null>(null);
-    const { sessionID, callID } = part;
+    const { sessionId: sessionID, callId: callID } = origin;
     const [decline, sendDecline] = usePageDecline(sessionID, callID);
-    const waiting = ask.kind === 'waiting' && sentSummary === null && decline !== 'declined';
+    const waiting = !readOnly && ask.kind === 'waiting' && sentSummary === null && decline !== 'declined';
     const blocking = waiting && pageBlocksTurn(ask);
     const catalogReady = useGuestsStore((state) => state.status === 'ready');
     const mayReportNotDrawn = waiting && (blocking || catalogReady);
@@ -59,7 +70,7 @@ export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: str
     }, [blocking]);
 
     return (
-        <div ref={blockRef} className="my-2" data-ui-render-part={part.id} data-ui-render-message={part.messageID} data-waiting-page={blocking ? part.id : undefined}>
+        <div ref={blockRef} className="my-2" data-ui-render-part={origin.partId} data-ui-render-message={origin.messageId} data-waiting-page={blocking ? origin.partId : undefined}>
             {UiBlock
                 ? (
                     <UiBlock

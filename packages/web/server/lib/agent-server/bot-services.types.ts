@@ -34,7 +34,7 @@ export type BotServiceOwners = {
   readonly dataDir: string;
   readonly resolveProject: (id: string) => Promise<Project | null>;
   readonly listProjects: () => Promise<readonly Project[]>;
-  readonly store: Pick<ReturnType<typeof createBotStore>, 'read'>;
+  readonly store: Pick<ReturnType<typeof createBotStore>, 'read' | 'readArchive'>;
   readonly config: Pick<ReturnType<typeof createBotsConfig>, 'read'>;
 };
 export type AgentBotServicesOptions = Partial<Pick<BotServiceOwners, 'dataDir' | 'resolveProject' | 'listProjects'>> & {

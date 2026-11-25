@@ -15,6 +15,17 @@ catalog load and DOM subscriptions. Its anchored menu settles on an outside
 press even though the trigger belongs to an opaque iframe. Hiding, replacing
 or navigating the owner releases the same selection.
 
+### Retained bot pages
+
+`useBotArtifactRead` owns one read of a retained page from the Bots owner, for
+the transcript and the work record. A read belongs to the Bots runtime lifetime
+it started in; an answer that arrives after a runtime switch or after the page
+unmounted is dropped. Given the call that drew the page, a snapshot whose
+`source` names another session or call is a failed read, never data. Failure
+and success are distinct states, and `retry` repeats the read. Remembered
+snapshots are bounded by characters and dropped on a runtime switch; a mounted
+page holds its own copy.
+
 ### Session activity and queued sends
 
 - A pending permission or a form that still holds the turn makes a session idle, so the send button stays a send and the user can supersede the prompt. A form whose tool call has ended holds nothing, and the turn keeps Stop and Queue.

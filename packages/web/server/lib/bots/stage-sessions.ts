@@ -85,11 +85,12 @@ type StageSessionsOptions = {
 };
 
 export const botStagePermissions = (stage: Stage, bot: BotDefinition): ReturnType<typeof scanPermissions> => {
-  if (stage !== 'fixing') return scanPermissions(bot.web, bot.mcp);
+  if (stage !== 'fixing') return [...scanPermissions(bot.web, bot.mcp), { action: 'openchamber_render', resource: '*', effect: 'allow' }];
   const rules: ReturnType<typeof scanPermissions> = [
     { action: '*_*', resource: '*', effect: 'deny' },
     { action: 'apply_patch', resource: '*', effect: 'allow' },
     { action: 'openchamber_bot', resource: '*', effect: 'allow' },
+    { action: 'openchamber_render', resource: '*', effect: 'allow' },
   ];
   for (const { server, tools } of bot.correctionMcp) {
     for (const [tool, effect] of Object.entries(tools)) {

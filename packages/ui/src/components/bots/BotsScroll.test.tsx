@@ -66,14 +66,14 @@ async function openList(): Promise<void> {
 }
 
 describe('mobile Bots view scroll ownership', () => {
-  for (const label of ['Edit', 'New bot', 'Add item', 'Repair parser']) {
+  for (const label of ['Edit', 'New bot', 'New demand']) {
     test(`starts ${label} at the mobile page top after a scrolled list`, async () => {
       // Given the real mobile page is scrolled in the list.
       await openList();
       const owner = body();
       owner.scrollTop = 180;
 
-      // When navigation replaces the list with an editor, create form or detail.
+      // When navigation replaces the list with an editor or create form.
       await act(async () => control(label).click());
 
       // Then the same owning page starts at its top, including the project picker.
@@ -82,9 +82,9 @@ describe('mobile Bots view scroll ownership', () => {
     });
   }
 
-  for (const label of ['Edit', 'Add item', 'Repair parser']) {
+  for (const label of ['Edit', 'New demand']) {
     test(`returns from ${label} to the list top`, async () => {
-      // Given the editor, create form or detail has been scrolled.
+      // Given the editor or create form has been scrolled.
       await openList();
       await act(async () => control(label).click());
       const owner = body();
@@ -132,11 +132,44 @@ describe('mobile Bots view scroll ownership', () => {
     expect(owner.scrollTop).toBe(240);
   });
 
-  test('preserves detail scroll while refreshing the same item', async () => {
-    // Given a scrolled detail whose next read has a newer item revision.
+  test('opens an item as one full view with a visible way back to the list top', async () => {
+    // Given a scrolled list.
+    await openList();
+    body().scrollTop = 180;
+
+    // When an item opens.
+    await act(async () => control('Repair parser').click());
+
+    // Then its conversation view replaces the page scroller and offers Back.
+    expect(container.firstElementChild?.classList.contains('overflow-y-auto')).toBe(false);
+    await act(async () => control('Back').click());
+    expect(body().scrollTop).toBe(0);
+    expect(control('Repair parser')).toBeDefined();
+  });
+
+  test('covers the conversation with the work context and returns to it', async () => {
+    // Given an open item on a phone-width view.
     await openList();
     await act(async () => control('Repair parser').click());
-    const owner = body();
+
+    // When the work context opens.
+    await act(async () => control('Work context').click());
+
+    // Then the conversation is inert underneath and one control returns to it.
+    const conversation = container.querySelector('section[aria-label="Repair parser"]');
+    expect(conversation?.hasAttribute('inert')).toBe(true);
+    await act(async () => control('Conversation').click());
+    expect(conversation?.hasAttribute('inert')).toBe(false);
+    expect(container.querySelector('[data-bot-context-body]')).toBeNull();
+  });
+
+  test('preserves work context scroll while refreshing the same item', async () => {
+    // Given a scrolled work context whose next read has a newer item revision.
+    await openList();
+    await act(async () => control('Repair parser').click());
+    await act(async () => control('Work context').click());
+    const owner = container.querySelector('[data-bot-context-body]');
+    if (!(owner instanceof HTMLElement)) throw new Error('Missing work context body');
     owner.scrollTop = 240;
     revision += 1;
 
@@ -145,6 +178,7 @@ describe('mobile Bots view scroll ownership', () => {
     await waitFor(() => !control('Refresh').disabled);
 
     // Then an updated item record does not count as another destination.
+    expect(container.querySelector('[data-bot-context-body]')).toBe(owner);
     expect(owner.scrollTop).toBe(240);
   });
 });

@@ -32,8 +32,12 @@ const discordSchema = z.object({
   channels: z.array(z.object({ guildId: snowflake, channelId: snowflake }).strict()).max(100).default([]),
 }).strict().refine((value) => new Set(value.channels.map((channel) => `${channel.guildId}/${channel.channelId}`)).size === value.channels.length);
 
+export const BOT_AVATAR_MAX_CHARS = 32_768;
+const avatar = z.string().max(BOT_AVATAR_MAX_CHARS).regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/);
+
 export const botDefinitionSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]+$/), name: text, enabled: z.boolean(), mission: text,
+  avatar: avatar.nullable().optional(),
   schedule: z.object({
     kind: z.enum(['manual', 'daily', 'weekly', 'cron']),
     time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),

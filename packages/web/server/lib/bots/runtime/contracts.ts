@@ -18,6 +18,7 @@ import type { BotServices } from '../services.js';
 import type { JsonValue } from '../../shared/json-values.js';
 import type { checkoutRequestSchema, cleanupRequestSchema, dataSchema, runSchema, serviceRequestSchema, cloneRun } from './journal.js';
 import type { RuntimeProject } from './input-contracts.js';
+import type { BotConversationExecution } from '../conversation-contract.js';
 
 export type RuntimeBot = BotDefinition | ({ readonly id: string; readonly enabled: false }
   & { readonly [Field in Exclude<keyof BotDefinition, 'id' | 'enabled'>]?: never });
@@ -41,6 +42,7 @@ export type RuntimeOptions = {
   readonly resolveProject: (projectId: string) => Promise<RuntimeProject>;
   readonly listProjects: () => Promise<readonly RuntimeProject[]>;
   readonly stages: BotStageAdapter;
+  readonly conversations: BotConversationExecution;
   readonly worktrees: Pick<Worktrees, 'inspect' | 'acceptPublished' | 'bindPublication'> & {
     create(request: CheckoutRequest): ReturnType<Worktrees['create']>;
     reconcile(request: CheckoutRequest | (CleanupRequest & { readonly operation: 'remove' })): ReturnType<Worktrees['reconcile']>;

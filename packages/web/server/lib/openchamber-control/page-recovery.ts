@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { isOperatorChildSession } from '../session-lineage.js';
 import { OpenChamberControlError } from './error.js';
 import { isAgentPrompt, renderPageQuestion, renderPageTitleFromHtml, RENDER_PAGE_MAX_HTML_LENGTH, RENDER_PAGE_MAX_TITLE_LENGTH } from './render-page.js';
-import type { createPageAnswers, PageAnswerInput } from './render-page.js';
+import type { createPageAnswers, PageAnswerInput, RenderPageDependencies } from './render-page.js';
 import type { createLaterPages, LaterPageInput } from './later-pages.js';
 import type { ControlClient } from './opencode-client.js';
 import type { SessionInfo, SessionMessageInfo } from '@opencode/client';
@@ -104,18 +104,20 @@ const latestContent = async (client: ControlClient, sessionID: string, signal: A
 };
 
 interface PageRecoveryOptions {
+  readonly artifacts?: RenderPageDependencies['artifacts'];
   readonly getClient: (directory?: string | null) => Promise<ControlClient>;
   readonly pageAnswers: ReturnType<typeof createPageAnswers>;
   readonly laterPages: ReturnType<typeof createLaterPages> | null;
 }
 
-export const createPageRecovery = ({ getClient, pageAnswers, laterPages }: PageRecoveryOptions) => {
+export const createPageRecovery = ({ getClient, pageAnswers, laterPages, artifacts }: PageRecoveryOptions) => {
   const read: ReadRecoveredPage = async (identity) => {
     const { sessionId, messageId, callId } = identity;
     if (pageAnswers.has(sessionId, callId)) return null;
     const options = { signal: AbortSignal.timeout(READ_TIMEOUT_MS) };
     const session = await (await getClient()).session.get({ sessionID: sessionId }, options);
     if (session.id !== sessionId || isOperatorChildSession(session) || session.revert) return null;
+    if (artifacts && !await artifacts.isInteractiveSession(sessionId)) return null;
     const directory = session.location.directory;
     const client = await getClient(directory);
     const [active, forms, inbox, latest] = await Promise.all([

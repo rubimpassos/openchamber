@@ -19,6 +19,7 @@ import { hasMessage, isNonEmptyString, isOpenChamberMetadata, isSessionMetadata,
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 import { LEAD_GUIDANCE, leadBriefEntry } from '../session-lead/guidance.js';
 import { readLead } from '../session-lead/metadata.js';
+import { BOT_LEAD_GUIDANCE, isBotConversationMetadata } from '../session-lead/bot-guidance.js';
 
 const PINS_METADATA_KEY = 'project_context_pins';
 
@@ -436,12 +437,17 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
     try {
       // A failed metadata read cannot authoritatively remove linked stacks or pins.
       const session = await readStoredSession(sessionId);
+      const collected = await collect(directory, readPins(session));
       const entries = buildKnowledgeEntries({
-        ...await collect(directory, readPins(session)),
+        ...collected,
         responseStyleInstruction,
         extensions: await readExtensionInstructions(directory).catch(() => null) ?? undefined,
         lead: await readLeadContext(sessionId, session),
       }, options);
+      if (isBotConversationMetadata(session?.metadata)) {
+        entries[KNOWLEDGE_ENTRY_KEYS.lead] = BOT_LEAD_GUIDANCE;
+        entries[KNOWLEDGE_ENTRY_KEYS.guidance] = buildGuidance({ ...collected, linking: false, naming: false, secrets: false, workflows: false });
+      }
       try {
         entries[KNOWLEDGE_ENTRY_KEYS.pullStacks] = buildPullStackText(await collectFollowedPullStacks(directory, session));
       } catch (error) {

@@ -12,7 +12,9 @@ import { botStagePermissions } from './stage-sessions.js';
 import { BotServiceError } from './services/contracts.js';
 import { readBotSpaceOptions } from './space-options.js';
 import { isolatedBotToolPageSchema, isolatedBotToolReceiptSchema } from './isolated-tools.js';
-import type { InsideResponse } from '../spaces/dispatcher.js';
+import { botSpaceFetch } from './isolated-transport.js';
+import { createBotArtifactTransport } from '../agent-server/bot-artifact-services.js';
+import { BOT_ARTIFACT_SPACE_ROUTE } from '../agent-server/bot-artifact-service-contract.js';
 import type { IsolatedStagesOptions, IsolatedSpacesHost, StageRequest, DispatchRequest, StageModel, RunningRequest, OutcomeRequest, ReconcileRequest, BindingQuery, ItemKey, Project, SpaceOptions, SpaceOptionsRequest, CreationTransfer, OnCreated, Reconciliation, ToolReply, ProofInput, ProofCancellation } from './isolated-stages.types.js';
 import { hasProperties, isRecord } from '../shared/object-guards.js';
 
@@ -28,7 +30,7 @@ const spaceOptionsSchema = z.object({
 const sessionSchema = z.object({ id: text, stage: z.enum(['investigation', 'fixing', 'judge']), directory: text }).strict();
 const bindingSchema = z.object({ version: z.literal(1), projectId: text, itemId: text, botId: text,
   hostDirectory: text, state: z.enum(['creating', 'ready', 'stopping', 'stopped', 'resuming', 'removing', 'remove-failed', 'removed']), spaceId: z.string().regex(/^[a-f0-9]{12}$/).optional(),
-  directory: text.optional(), sessions: z.record(z.string(), sessionSchema),
+  directory: text.optional(), sessions: z.record(z.string(), sessionSchema), artifactsCollected: z.boolean().optional(),
 }).strict();
 type Binding = z.output<typeof bindingSchema>;
 type AllocatedBinding = Binding & { spaceId: string; directory: string };
@@ -94,37 +96,8 @@ finally { for (const dir of checkouts.reverse()) { if (git(['worktree','remove',
 process.stdout.write(JSON.stringify(result));
 `;
 
-const transportFor = (host: IsolatedSpacesHost, spaceId: string) => async (input: string | URL | Request, init?: Omit<RequestInit, 'body'> & { readonly body?: BodyInit | null | undefined }) => {
-  const { body, ...options } = init ?? {};
-  const request = new Request(input, body === undefined ? options : { ...options, body });
-  const url = new URL(request.url);
-  const headers = Object.fromEntries(request.headers);
-  for (const name of ['authorization', 'cookie', 'proxy-authorization', 'host', 'origin', 'referer']) delete headers[name];
-  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]);
-  signal.throwIfAborted();
-  const pending = host.dispatcher.requestInside(spaceId, { method: request.method, path: url.pathname + url.search,
-    headers, body: ['GET', 'HEAD'].includes(request.method) ? null : Buffer.from(await request.arrayBuffer()), timeoutMs: 30_000 });
-  let response: InsideResponse | undefined;
-  const abort = () => response?.destroy();
-  signal.addEventListener('abort', abort, { once: true });
-  try {
-    response = await pending;
-    signal.throwIfAborted();
-    const chunks: Buffer[] = []; let bytes = 0;
-    for await (const chunk of response) {
-      signal.throwIfAborted(); bytes += chunk.length;
-      if (bytes > 8 * 1024 * 1024) throw new Error('Isolated bot response exceeds its byte limit');
-      chunks.push(chunk);
-    }
-    if (!response.complete) throw new Error('Isolated bot response is incomplete');
-    const status = response.statusCode;
-    if (status < 200 || status >= 300) refuse('BOT_ISOLATED_REQUEST_FAILED');
-    return new Response([204, 205].includes(status) ? null : Buffer.concat(chunks), { status, headers: { 'content-type': 'application/json' } });
-  } finally { signal.removeEventListener('abort', abort); response?.destroy(); }
-};
-
 export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject,
-  resolveSpaceOptions = (request: SpaceOptionsRequest) => resolveBotSpaceOptions({ host: getSpacesHost(), ...request }), sessionKnowledgeRuntime, handleTool, readToolOutcome, separated = false }: IsolatedStagesOptions) {
+  resolveSpaceOptions = (request: SpaceOptionsRequest) => resolveBotSpaceOptions({ host: getSpacesHost(), ...request }), sessionKnowledgeRuntime, handleTool, readToolOutcome, collectArtifacts, separated = false }: IsolatedStagesOptions) {
   for (const value of [getSpacesHost, resolveProject, resolveSpaceOptions, sessionKnowledgeRuntime?.collect]) if (!(value instanceof Function)) throw new TypeError('Isolated stages require spaces, project, grants and knowledge owners');
   const records = createBotAdapterState({ dataDir, name: 'isolated-stages', schema: bindingSchema });
   const toolReceipts = createBotAdapterState({ dataDir, name: 'isolated-tool-receipts', schema: isolatedBotToolReceiptSchema });
@@ -148,7 +121,7 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
   };
   const ownerFor = async (binding: Binding) => {
     const host = await requireReady(binding);
-    const fetchImpl = transportFor(host, required(binding.spaceId));
+    const fetchImpl = botSpaceFetch(host, required(binding.spaceId));
     const baseUrl = 'http://space.invalid';
     const client = OpenCode.make({ baseUrl, headers: { 'x-opencode-directory': encodeURIComponent(required(binding.directory)) }, fetch: fetchImpl });
     const probe = createSessionActivityProbe({ buildOpenCodeUrl: (route: string) => baseUrl + route, getOpenCodeAuthHeaders: () => ({}), fetchImpl });
@@ -215,6 +188,7 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
     const sessionId = required(request.sessionId);
     const binding = await find(request); const owner = await ownerFor(binding);
     if (!Object.values(binding.sessions).some((session) => session.id === request.sessionId)) refuse('BOT_ISOLATED_SESSION_MISMATCH');
+    if (binding.artifactsCollected) await records.write(keyFor(binding), { ...binding, artifactsCollected: false });
     await configure({ ...request, sessionId }, binding, owner);
     const { providerID, modelID, agent, variant } = request.selection;
     const model: StageModel = { providerID, id: modelID };
@@ -278,13 +252,29 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
       if (!['ready', 'stopping', 'stopped', 'resuming'].includes(binding.state)) refuse('BOT_ISOLATED_CREATE_UNKNOWN');
       const options = spaceOptionsSchema.parse(readBotSpaceOptions(request.bot.space, request.selection));
       const host = hostFor();
-      binding = await records.write(keyFor(binding), { ...binding, state: 'resuming' });
+      binding = await records.write(keyFor(binding), { ...binding, state: 'resuming', artifactsCollected: false });
       const started = await host.journey.startSpace(required(binding.spaceId));
       if (started.networkRestored !== true) refuse('BOT_ISOLATED_NETWORK_UNCONFIRMED');
       await host.journey.grantAccess(required(binding.spaceId), options.grants[0]);
       await requireReady({ ...binding, state: 'ready' });
       await records.write(keyFor(binding), { ...binding, state: 'ready' });
     });
+  };
+  const finishArtifacts = async (binding: Binding) => {
+    if (!collectArtifacts || binding.artifactsCollected) return binding;
+    const host = hostFor();
+    const fetchImpl = botSpaceFetch(host, required(binding.spaceId));
+    const client = OpenCode.make({ baseUrl: 'http://space.invalid', fetch: fetchImpl,
+      headers: { 'x-opencode-directory': encodeURIComponent(required(binding.directory)) } });
+    const probe = createSessionActivityProbe({ buildOpenCodeUrl: (route) => `http://space.invalid${route}`, getOpenCodeAuthHeaders: () => ({}), fetchImpl });
+    for (const session of Object.values(binding.sessions)) await client.session.interrupt({ sessionID: session.id });
+    const active = await probe.fetchActiveSessionStatuses();
+    if (active === null) refuse('BOT_ISOLATED_ACTIVITY_UNAVAILABLE');
+    for (const session of Object.values(binding.sessions)) {
+      if (active[session.id] || await probe.hasWorkingDescendants(session.id, active) !== false) refuse('BOT_ISOLATED_NOT_STOPPED');
+      await collectArtifacts(session.id);
+    }
+    return records.write(keyFor(binding), { ...binding, artifactsCollected: true });
   };
   const stop = async (request: BindingQuery) => {
     const found = await find(request);
@@ -298,6 +288,7 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
         return;
       }
       if (!(await host.journey.listSpaces()).some((space) => space.id === binding.spaceId)) refuse('BOT_ISOLATED_STOP_UNCONFIRMED');
+      binding = await finishArtifacts(binding);
       if (!removing) binding = await records.write(keyFor(binding), { ...binding, state: 'stopping' });
       await host.journey.stopSpace(required(binding.spaceId));
       const space = (await host.journey.listSpaces()).find((entry) => entry.id === binding.spaceId);
@@ -390,6 +381,7 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
       await records.write(key, { ...binding, state: 'removed' });
       return;
     }
+    binding = await finishArtifacts(binding);
     binding = await records.write(key, { ...binding, state: 'removing' });
     const result = await host.journey.removeSpace(required(binding.spaceId));
     if (!result.removed || result.failures?.length) {
@@ -399,5 +391,13 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
     await records.write(key, { ...binding, state: 'removed' });
   });
   return { create, dispatch, outcome, reconcile, stop, resume, remove, sessionOwner, executeIsolatedProof,
+    artifactTransport: async (sessionId: string) => {
+      const binding = await find({ sessionId });
+      const fetchImpl = botSpaceFetch(hostFor(), binding.spaceId);
+      return createBotArtifactTransport({ request: async (operation, body, signal) =>
+        z.json().parse(await (await fetchImpl(`http://space.invalid${BOT_ARTIFACT_SPACE_ROUTE}/${operation}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body, signal,
+        })).json()) });
+    },
     bindings: records.list, readBinding: (request: ItemKey) => records.read(keyFor(request)), bindingFor: find, exportSnapshot, forwardTools };
 }

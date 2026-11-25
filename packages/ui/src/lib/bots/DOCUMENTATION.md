@@ -8,6 +8,12 @@ and bot-session membership. `../botsApi.ts` parses the server routes and
 the server schemas and routes under `packages/web/server/lib/bots` own writes
 and execution authority.
 
+`artifacts.ts` parses durable evidence/decision metadata and opaque HTML/OpenUI
+snapshots. Its list and payload reads use the same Bot runtime lifetime and
+authentication. A render result's artifact ID identifies the same payload in
+chat and the work record. Artifact interaction intent grants no right to answer;
+the existing page and later-page owners retain that authority.
+
 ## Invariants
 
 - Requests use `runtimeFetch` for the selected server's URL, authentication and
@@ -40,11 +46,25 @@ and execution authority.
 - `item.branch` is the private checkout ref. Optional `publicationBranch` is the
   server's immutable reserved remote ref. Existing items omit it. Both fields are
   read-only client projections; the private server owner grants publication.
+- `item.conversation` is `{ sessionId, directory, createdAt }`, the item's one root
+  conversation, separate from `sessions.investigation|fixing|judge`. Older items
+  omit it. `ensureBotConversation` POSTs `items/:itemId/conversation` and parses
+  `{ conversation }`; the server answers idempotently, and a failure throws. The
+  client never derives a conversation from a stage session or a worktree path.
+- `tokens.conversation` is optional so records written before conversations parse.
+- Item detail may carry `questionKey`, the coordinator question the item waits on.
+  The answer action sends it back only when the detail reported one.
+- `definition.avatar` is an optional, nullable `data:image/(png|jpeg|webp);base64`
+  thumbnail of at most `BOT_AVATAR_MAX_CHARS`. It travels inside the definition
+  with name and mission; `null` records a removal. The server repeats the check
+  and inspects the bytes. No avatar URL is ever fetched.
 - `sessionDirectories` maps session IDs to nonempty server-captured addresses.
   A missing field defaults to an empty map for older servers. Malformed entries
   fail the read; item worktrees never supply missing session addresses.
 - Membership comes from `metadata.openchamber.automation.source === 'bot'` with
-  its project, bot, item and stage, then follows parent links to descendants.
+  its project, bot and item, plus either a `stage` or `role: 'conversation'`, then
+  follows parent links to descendants. The conversation and its subagents stay
+  out of ordinary project lists exactly as stage sessions do.
   Titles, worktree paths and persisted activity are not membership evidence.
   Same-ID metadata replacements are re-evaluated, and malformed parent cycles
   terminate without inventing an owner.

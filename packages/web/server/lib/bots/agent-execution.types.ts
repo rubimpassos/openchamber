@@ -34,7 +34,7 @@ export type ExecutionStageRecord = {
 type StageOptions = Parameters<typeof createBotStageSessions>[0];
 type StageService = StageOptions['sessionService'];
 type ExecutionClient = {
-  readonly session: Pick<SessionClient['session'], 'get' | 'update' | 'interrupt' | 'synthetic'>;
+  readonly session: Pick<SessionClient['session'], 'get' | 'create' | 'update' | 'interrupt' | 'synthetic' | 'prompt' | 'command' | 'switchModel' | 'switchAgent'>;
   readonly message: Pick<SessionClient['message'], 'list'>;
 };
 export type ExecutionDependencies = {
@@ -50,6 +50,7 @@ export type ExecutionDependencies = {
   readonly sessionKnowledgeRuntime: StageOptions['sessionKnowledgeRuntime'] & Pick<ReturnType<typeof createSessionKnowledgeRuntime>, 'collect'>;
   readonly readSessionDefaults: StageOptions['readSessionDefaults'];
   readonly updateMetadata?: Parameters<typeof createBotChildServer>[0]['updateMetadata'];
+  readonly readArtifactPage?: Parameters<typeof createBotChildServer>[0]['readArtifactPage'];
   readonly buildOpenCodeUrl: Parameters<typeof createTokenSnapshotReader>[0]['buildOpenCodeUrl'];
   readonly getOpenCodeAuthHeaders: Parameters<typeof createTokenSnapshotReader>[0]['getOpenCodeAuthHeaders'];
   readonly fetchImpl?: BotServicesOptions['fetchImpl'];

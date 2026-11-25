@@ -8,6 +8,8 @@ import type { LocalImageInspection } from '../markdown-image-grants/inspect-imag
 import type { ControlInput, ActionContext } from './contracts.js';
 import type { createLaterPages } from './later-pages.js';
 import type { createSharePagesRuntime } from '../share-pages/runtime.js';
+import type { createBotArtifactCapture } from '../bots/artifacts-capture.js';
+import type { BotArtifactReference } from '../bots/artifacts-contract.js';
 
 export type PageImageInspection = { source: string } & (LocalImageInspection | { status: 'too-heavy'; size: number });
 export interface PageAnswerInput {
@@ -44,6 +46,8 @@ export interface PageAnswersOptions {
 export interface RenderPageContext extends ActionContext {
   sessionId?: string | null;
   callId?: string | null;
+  readonly messageId?: string | undefined;
+  readonly onArtifactCaptured?: ((artifact: BotArtifactReference) => Promise<void>) | undefined;
 }
 export interface RenderPageDependencies {
   isEnabled: () => Promise<boolean>;
@@ -52,6 +56,7 @@ export interface RenderPageDependencies {
   readSession?: (sessionId: string) => Promise<Parameters<typeof isOperatorChildSession>[0]>;
   laterPages?: ReturnType<typeof createLaterPages> | null;
   sharePages?: ReturnType<typeof createSharePagesRuntime> | null;
+  artifacts?: Pick<ReturnType<typeof createBotArtifactCapture>, 'capture' | 'isInteractiveSession'> | null;
 }
 const isText = (value: unknown): value is string => isString(value);
 
@@ -69,12 +74,12 @@ export const renderPageImageSources = (html: string) => {
   return [...sources];
 };
 
-export const fitRenderPageImages = async (html: string, inspect: (source: string) => Promise<LocalImageInspection>) => {
+export const fitRenderPageImages = async (html: string | readonly string[], inspect: (source: string) => Promise<LocalImageInspection>) => {
   const images: PageImageInspection[] = [];
   let shownBytes = 0;
   let totalBytes = 0;
   let full = false;
-  for (const source of renderPageImageSources(html)) {
+  for (const source of typeof html === 'string' ? renderPageImageSources(html) : html) {
     const inspected = await inspect(source);
     if (inspected.status !== 'ready') {
       images.push({ source, ...inspected });
@@ -269,7 +274,7 @@ const isOperatorChild = async (readSession: NonNullable<RenderPageDependencies['
   }
 };
 
-export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, readSession = async () => null, laterPages = null, sharePages = null }: RenderPageDependencies) => async (input: ControlInput, { sessionId, callId, directory, signal }: RenderPageContext = {}) => {
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, readSession = async () => null, laterPages = null, sharePages = null, artifacts = null }: RenderPageDependencies) => async (input: ControlInput & { readonly artifactKind?: unknown }, { sessionId, callId, messageId, directory, signal, onArtifactCaptured }: RenderPageContext = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
   }
@@ -308,8 +313,20 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
   if (title.length > RENDER_PAGE_MAX_TITLE_LENGTH) {
     throw new OpenChamberControlError(`title is ${title.length} characters; the limit is ${RENDER_PAGE_MAX_TITLE_LENGTH}`, 400);
   }
-  const hidden = html ? await describeHiddenImages(html, directory) : null;
-  const withHidden = <Result>(result: Result, note: string) => (hidden
+  if (input.artifactKind !== undefined && !artifacts) {
+    throw new OpenChamberControlError('Bot artifact capture is unavailable on this server', 503);
+  }
+  if (input.answerLater === true && input.awaitAnswer === true) {
+    throw new OpenChamberControlError('Send awaitAnswer or answerLater, not both: awaitAnswer waits for the answer, answerLater returns at once and the answer comes later as a message', 400);
+  }
+  const artifact = await artifacts?.capture({
+    body: { format: field, content }, title, artifactKind: input.artifactKind,
+    awaitAnswer: input.awaitAnswer, answerLater: input.answerLater, share: input.share,
+  }, { sessionId, callId, messageId, directory, signal });
+  if (artifact) await onArtifactCaptured?.(artifact);
+  const withArtifact = <Result>(result: Result) => artifact ? { ...result, artifact } : result;
+  const hidden = !artifact && html ? await describeHiddenImages(html, directory) : null;
+  const withHidden = <Result>(result: Result, note: string) => withArtifact(hidden
     ? { ...result, note: `${note} ${hidden.note}`, images: hidden.images }
     : { ...result, note });
   if (sharing) {
@@ -319,9 +336,6 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
     return withHidden({ title, shared: { recipients: shared.recipients, expiresAt: new Date(shared.expiresAt).toISOString() } }, note);
   }
   if (input.answerLater === true) {
-    if (input.awaitAnswer === true) {
-      throw new OpenChamberControlError('Send awaitAnswer or answerLater, not both: awaitAnswer waits for the answer, answerLater returns at once and the answer comes later as a message', 400);
-    }
     if (!sessionId || !callId) {
       throw new OpenChamberControlError('This connection cannot keep a page open for a later answer; ask in text', 400);
     }
@@ -342,10 +356,10 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
   }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
   if (answer.reason === 'ui-not-drawn') {
-    return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') };
+    return withArtifact({ title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') });
   }
   if (answer.reason === 'declined') {
-    return { title, answer, note: DECLINED_NOTE };
+    return withArtifact({ title, answer, note: DECLINED_NOTE });
   }
   return withHidden({ title, answer }, ANSWERED_NOTE);
 };

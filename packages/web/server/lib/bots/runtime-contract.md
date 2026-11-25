@@ -4,6 +4,10 @@
 
 `runtime.js` owns item admission and transitions. `effects.ts` owns dispatch safety. `execution-store.ts` persists immutable effect requests and stage reports beside the item snapshot. The item store remains the authority for item state and effect settlement. A descriptor is durable before its item effect exists; an orphan descriptor grants no permission to send.
 
+The required `conversations` execution owner creates and reconciles a separate
+durable lead before worker execution. Its native admission and retained-address
+contract is in [conversation-contract.md](conversation-contract.md).
+
 ## Runtime dependencies
 
 `createBotsRuntime({ config, store, resolveProject, listProjects, stages, worktrees, services, serviceContext, runProof, pullRequests, sources, attention, notices, questions, scheduler, events, now? })` requires every dependency. There are no ambient-account, host-isolation or successful-empty fallbacks.

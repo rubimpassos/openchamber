@@ -31,12 +31,14 @@ const setup = async (options = {}) => {
     return { code: 0, stdout: JSON.stringify({ status: 'passed', testSha: input.testSha, fixSha: input.fixSha, command: input.command, args: input.args, testExitCode: 1, fixExitCode: 0 }) };
   } }, dispatcher: { requestInside: async (_space, value) => {
     calls.push(['request', value]);
-    const body = value.body ? JSON.parse(String(value.body)) : null;
+    const rawBody = value.body ? String(value.body) : '';
+    const body = rawBody ? JSON.parse(rawBody) : null;
     let result = {};
     if (value.path === '/api/session' && value.method === 'POST') {
       const id = body.id; result = { ...body, id }; sessions.set(id, result);
     } else if (/\/api\/session\/ses_[^/]+$/.test(value.path) && value.method === 'GET') result = sessions.get(value.path.split('/').at(-1));
     if (value.path.startsWith('/api/openchamber/bots/isolated-tools?')) result = { requests: toolRequests };
+    if (new URL(value.path, 'http://space.invalid').pathname === '/api/session' && value.method === 'GET') result = [];
     if (value.path.endsWith('/isolated-tools/settle')) { if (!failSettlement) toolRequests = []; result = { settled: !failSettlement }; }
     const wire = value.path.includes('/isolated-tools') ? result : options.nestedRecords ? { data: { data: result } } : { data: result };
     const response = Readable.from([Buffer.from(JSON.stringify(wire))]);
@@ -48,6 +50,7 @@ const setup = async (options = {}) => {
     resolveProject: async () => ({ id: 'p', path: '/host/project' }), resolveSpaceOptions: options.resolveSpaceOptions,
     sessionKnowledgeRuntime: { collect: async () => ({ notes: [], plans: [], memory: { global: [], project: [], enabled: false, complete: true } }) },
     handleTool: async (request) => { calls.push(['host-tool', request]); return { receipt: { id: 'receipt' } }; },
+    collectArtifacts: options.collectArtifacts,
   });
   return { request, dataDir, calls, build, host, disable: () => { available = false; }, tools: (value) => { toolRequests = value; }, failSettlement: (value) => { failSettlement = value; } };
 };
@@ -65,6 +68,25 @@ it('creates one recorded space with code-in and selected grants, then uses its S
   const restarted = fixture.build();
   expect(await restarted.reconcile('session.create', fixture.request, created.sessionId)).toMatchObject({ state: 'succeeded' });
   expect(fixture.calls.filter(([name]) => name === 'space')).toHaveLength(1);
+});
+
+it('keeps the Space and checkout source when final artifact collection fails after producer interruption', async () => {
+  let fail = true;
+  const collected = [];
+  const f = await setup({ collectArtifacts: async (sessionId) => {
+    if (fail) throw new Error('Artifact transfer failed');
+    collected.push(sessionId);
+  } });
+  const adapter = f.build();
+  const created = await adapter.create(f.request, async () => {});
+  const request = { project: { id: 'p' }, bot: f.request.bot, item: { id: 'i', worktree: '/host/worktree' } };
+  await expect(adapter.remove(request)).rejects.toThrow('Artifact transfer failed');
+  expect(f.calls.filter(([name]) => name === 'remove' || name === 'stop')).toEqual([]);
+  expect(f.calls.some(([name, value]) => name === 'request' && value.path.endsWith('/interrupt'))).toBe(true);
+  fail = false;
+  await adapter.remove(request);
+  expect(collected).toEqual([created.sessionId]);
+  expect(f.calls.filter(([name]) => name === 'remove')).toEqual([['remove', 'abcdef123456']]);
 });
 
 it('executes proof snapshots only inside the recorded space and confirms container stop', async () => {

@@ -13,11 +13,14 @@ import { createBotQuestionBlame } from './questions-blame.js';
 import { createBotIsolatedToolInbox } from './isolated-tools.js';
 import { createBotAgentGatewayTransport } from './agent-gateway-transport.js';
 import { createBotAdapterState } from './adapter-state.js';
+import { createBotConversationSessions } from './conversation-sessions.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createTokenSnapshotReader } from '../pr-fix-loop/token-usage.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { registeredTransferDirectory } from '../agent-server/space-transfer-routes.js';
+import { createBotArtifactExecution } from './artifacts-execution.js';
+import { artifactBindingSchema } from './artifacts-contract.js';
 import { botBoundaryError, botPublicIdentitySchema, botStageRequestSchema, botScopeSchema, botSessionIdSchema } from '../agent-server/bot-service-contract.js';
 import type { BotServiceInput } from '../agent-server/bot-service-contract.js';
 import type { BotService } from './services/contracts.js';
@@ -49,6 +52,7 @@ export function createBotExecutionOwner(deps: ExecutionDependencies) {
   const context = deps.context ?? createBotServiceContext({ identities, services: contextServices, fetchImpl, policyOptions });
   const activity = deps.activity ?? createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
   const readTokens = deps.readTokens ?? createTokenSnapshotReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+  const conversations = createBotConversationSessions({ dataDir, clientFor, activity, readTokens, knowledge: sessionKnowledgeRuntime });
   const proof = deps.proof ?? createBotProofRunner({ root: path.join(dataDir, 'bots', 'proof') });
   const gateway = deps.gateway ?? createBotAgentGatewayTransport({ identities, fetchImpl, policyOptions });
   const blame = deps.blame ?? createBotQuestionBlame({ context });
@@ -96,6 +100,33 @@ export function createBotExecutionOwner(deps: ExecutionDependencies) {
     if (matches.length !== 1 || !match || await registeredTransferDirectory(match.path, async () => settings) !== directory) throw botBoundaryError('agent_project_unregistered', 403);
     return project;
   };
+  const resolveArtifactBinding = async (sessionId: string) => {
+    const conversation = await conversations.artifactBinding(sessionId);
+    if (conversation) {
+      await registeredProject({ id: conversation.projectId, path: conversation.directory });
+      return conversation;
+    }
+    const recorded = (await runs.list()).find((record) => record.sessionId === sessionId);
+    if (!recorded) return null;
+    await registeredProject(recorded.scope.project);
+    const { request, scope } = recorded;
+    return artifactBindingSchema.parse({ projectId: scope.project.id, botId: scope.bot.id, itemId: scope.item.id,
+      sessionId, directory: request.directory, producer: { role: 'stage', stage: request.stage } });
+  };
+  let artifactOptions: Parameters<typeof createBotArtifactExecution>[0] = { dataDir, privatePlacement: 'agent', resolveBinding: resolveArtifactBinding,
+    stopProducer: async (binding) => {
+      await clientFor(binding.directory).session.interrupt({ sessionID: binding.sessionId });
+      const active = await activity.fetchActiveSessionStatuses();
+      if (active === null || active[binding.sessionId]
+        || await activity.hasWorkingDescendants(binding.sessionId, active) !== false) fail('BOT_ARTIFACT_PRODUCER_NOT_STOPPED');
+    },
+    readSession: (sessionID) => clientFor('').session.get({ sessionID }),
+    updateMetadata: async (sessionId, patch) => {
+      if (!updateMetadata) fail('BOT_EXECUTION_METADATA_UNAVAILABLE');
+      await updateMetadata(sessionId, patch);
+    } };
+  if (deps.readArtifactPage) artifactOptions = { ...artifactOptions, readPage: deps.readArtifactPage };
+  const artifacts = createBotArtifactExecution(artifactOptions);
   const trustRetainedCheckout = async <Scope extends CheckoutScope>(scope: Scope, allowMissingCheckout = false) => {
     if (scope.trustedMigrationPath && deps.trustMigrationPath) await deps.trustMigrationPath(scope.trustedMigrationPath, { allowMissingCheckout });
     return scope;
@@ -199,7 +230,7 @@ export function createBotExecutionOwner(deps: ExecutionDependencies) {
     if (!tail.success) return null;
     return tail.data.data[0]?.type === 'assistant' && tail.data.data[0].time?.completed == null;
   };
-  return { deps, identities, context, activity, readTokens, proof, gateway, blame, runs, inbox, worktreesFor, resolvePublicationFor,
+  return { deps, identities, context, activity, readTokens, conversations, artifacts, resolveArtifactBinding, proof, gateway, blame, runs, inbox, worktreesFor, resolvePublicationFor,
     servicesFor, prFor, stageOwners, registeredProject, registeredScope, trustRetainedCheckout, requestFor, checkout,
     stageDirectory, verifySession, runIdentity, runDigest, assertRun, verifySelectedService, watchScope, watchReader, expectedIdentity, isWorking, reviewApps };
 }

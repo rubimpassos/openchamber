@@ -1,5 +1,6 @@
 import { settingsDict } from './nl.settings';
 import { botsI18n } from './bots.i18n';
+import { botWorkspaceI18n } from './bot-workspace.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { prFixLoopI18n } from './pr-fix-loop.i18n';
@@ -251,6 +252,7 @@ export const dict = {
   ...settingsDict,
   ...selectionApprovalI18n.nl,
   ...botsI18n.nl,
+  ...botWorkspaceI18n.nl,
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...prStacksI18n.nl,

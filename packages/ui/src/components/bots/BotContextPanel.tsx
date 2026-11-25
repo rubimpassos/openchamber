@@ -1,0 +1,91 @@
+import React from 'react';
+import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+import type { BotItemDetailRead } from '@/lib/botsApi';
+import type { BotArtifact } from '@/lib/bots/artifacts';
+import { isTerminalBotItem, type BotItem } from '@/lib/bots/items';
+import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+import { BotJudgment, BotProof, BotSourceEvidence } from './BotEvidence';
+import { BotItemControls, BotItemRecord, BotItemWait } from './BotItemDetail';
+import { BotStateLabel } from './BotItemList';
+import { useBotArtifacts } from './useBotRequest';
+
+const TABS = ['work', 'evidence', 'decisions'] as const;
+export type BotContextTab = typeof TABS[number];
+const loadArtifactView = () => import('./BotRenderArtifactView').then((module) => module.BotRenderArtifactView);
+
+function BotArtifacts({ projectId, itemId, kind, readOnly, read }: {
+  readonly projectId: string; readonly itemId: string; readonly kind: BotArtifact['kind']; readonly readOnly: boolean;
+  readonly read: ReturnType<typeof useBotArtifacts>;
+}) {
+  const { t, locale } = useI18n();
+  const [viewer, setViewer] = React.useState<{ readonly artifact: BotArtifact; readonly open: boolean } | null>(null);
+  const [viewFailed, setViewFailed] = React.useState(false);
+  const View = useOnDemandComponent(viewer !== null, loadArtifactView, () => { setViewer(null); setViewFailed(true); });
+  const artifacts = read.data?.filter((artifact) => artifact.kind === kind) ?? [];
+  return <SettingsSection title={t('bots.artifacts.title')} contentClassName="space-y-2 typography-meta">
+    {read.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-[var(--status-error-text)]">
+      <span>{t('bots.artifacts.failed')}</span><Button size="xs" variant="outline" onClick={read.refresh}>{t('bots.retry')}</Button>
+    </div> : null}
+    {viewFailed ? <p role="alert" className="text-[var(--status-error-text)]">{t('bots.artifacts.viewFailed')}</p> : null}
+    {!read.data && !read.error ? <p role="status" className="text-muted-foreground">{t('common.loading')}</p> : null}
+    {read.data && artifacts.length === 0 ? <p className="text-muted-foreground">{t(kind === 'evidence' ? 'bots.artifacts.emptyEvidence' : 'bots.artifacts.emptyDecisions')}</p> : null}
+    {artifacts.length ? <ul className="-mx-2 space-y-0.5">{artifacts.map((artifact) => <li key={artifact.id}>
+      <button type="button" onClick={() => { setViewFailed(false); setViewer({ artifact, open: true }); }}
+        className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:bg-interactive-hover/50 focus-visible:outline-none">
+        <span className="min-w-0 flex-1 truncate oc-ui-start-align" dir="auto" title={artifact.title}>{artifact.title}</span>
+        <time className="shrink-0 typography-meta text-muted-foreground" dateTime={new Date(artifact.createdAt).toISOString()}>{new Date(artifact.createdAt).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}</time>
+      </button>
+    </li>)}</ul> : null}
+    <Dialog open={viewer?.open ?? false} onOpenChange={(open) => setViewer((current) => current && { ...current, open })}>
+      <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+        <DialogTitle dir="auto" className="pe-8">{viewer?.artifact.title}</DialogTitle>
+        {viewer && View ? <View key={viewer.artifact.id} projectId={projectId} itemId={itemId} artifactId={viewer.artifact.id} readOnly={readOnly} /> : <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p>}
+      </DialogContent>
+    </Dialog>
+  </SettingsSection>;
+}
+
+export function BotContextPanel({ projectId, item, detail, busy, failed, archived, tab, onTabChange, onRefresh, onLeave, onClose, className }: {
+  readonly projectId: string; readonly item: BotItem; readonly detail: BotItemDetailRead | null;
+  readonly busy: boolean; readonly failed: boolean; readonly archived: boolean;
+  readonly tab: BotContextTab; readonly onTabChange: (tab: BotContextTab) => void;
+  readonly onRefresh: () => void; readonly onLeave: () => void;
+  readonly onClose?: () => void; readonly className?: string;
+}) {
+  const { t } = useI18n();
+  const labels = { work: t('bots.context.work'), evidence: t('bots.evidence'), decisions: t('bots.context.decisions') } satisfies Record<BotContextTab, string>;
+  const readOnly = archived || isTerminalBotItem(item);
+  const pages = useBotArtifacts({ projectId, itemId: item.id }, tab !== 'work', !archived);
+  return <aside aria-label={t('bots.context.label')} className={cn('flex min-h-0 min-w-0 flex-col', className)}>
+    <div className="flex h-10 shrink-0 items-center gap-1 px-2">
+      {onClose ? <Button size="sm" variant="ghost" onClick={onClose}><Icon name="arrow-left" />{t('bots.context.conversation')}</Button> : null}
+      <SortableTabsStrip className="h-7 min-w-0 flex-1" variant="active-pill" activeId={tab} onSelect={(id) => onTabChange(TABS.find((entry) => entry === id) ?? 'work')}
+        items={TABS.map((id) => ({ id, label: labels[id] }))} />
+      {!archived ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => { onRefresh(); pages.refresh(); }} aria-label={t('bots.refresh')}><Icon name="refresh" /></Button> : null}
+    </div>
+    <div data-bot-context-body="" className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-2 @container">
+      {failed ? <p role="alert" className="mb-4 typography-meta text-[var(--status-error-text)]">{t('bots.error')}</p> : null}
+      <div>
+        {tab === 'work' ? <>
+          <SettingsSection contentClassName="space-y-4">
+            {onClose ? <h2 className="break-words typography-ui-header" dir="auto">{item.title}</h2> : null}
+            <p className="typography-meta"><BotStateLabel state={item.state} /> · {t('bots.tokens', { count: item.tokens.total })}</p>
+            {item.description ? <p className="whitespace-pre-wrap break-words typography-ui-label" dir="auto">{item.description}</p> : null}
+            <BotItemWait item={item} />
+            {!archived ? <BotItemControls projectId={projectId} item={item} questionKey={detail?.questionKey} onChanged={onRefresh} /> : null}
+          </SettingsSection>
+          <BotItemRecord item={item} detail={detail} busy={busy} onLeave={onLeave} />
+        </> : null}
+        {tab === 'evidence' ? <><BotSourceEvidence item={item} /><BotProof item={item} /></> : null}
+        {tab === 'decisions' ? <BotJudgment item={item} /> : null}
+        {tab !== 'work' ? <BotArtifacts projectId={projectId} itemId={item.id} kind={tab === 'evidence' ? 'evidence' : 'decision'} readOnly={readOnly} read={pages} /> : null}
+      </div>
+    </div>
+  </aside>;
+}

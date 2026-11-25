@@ -100,4 +100,4 @@ Rounding preserves the advertised duration for a newly created multi-day link; f
 
 ### Why images load during upload and not while the card rests
 
-Local images become data URLs only when a document needs uploading. Keeping image preparation inside that mounted upload path avoids image reads for a card already served by the server's document.
+Local images become data URLs only when a document needs uploading. Keeping image preparation inside that mounted upload path avoids image reads for a card already served by the server's document. A retained bot page passes `retainedHtml`, its source with the captured images already in place, and the upload then reads no image at all.

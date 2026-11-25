@@ -1,6 +1,7 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './uk.settings';
 import { botsI18n } from './bots.i18n';
+import { botWorkspaceI18n } from './bot-workspace.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -191,6 +192,7 @@ export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...selectionApprovalI18n.uk,
   ...botsI18n.uk,
+  ...botWorkspaceI18n.uk,
   'gitView.context.configure': 'Налаштувати репозиторій',
   'gitView.context.description': 'Remote, до яких ідентичність репозиторію не дістає, і доступ для сабмодулів і Git LFS. Ідентичності — в налаштуваннях Git.',
   'gitView.context.needsAttention': 'Потребує уваги',

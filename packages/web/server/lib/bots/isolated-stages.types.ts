@@ -49,6 +49,7 @@ export type IsolatedStagesOptions = {
   readonly handleTool?: (request: Pick<ToolRequest, 'sessionId' | 'action' | 'input'>) => Promise<JsonValue>;
   readonly readToolOutcome?: (request: ToolRequest) => Promise<{ readonly state: string; readonly result?: JsonValue } | null>;
   readonly separated?: boolean;
+  readonly collectArtifacts?: (sessionId: string) => Promise<void>;
 };
 type ResolvedOptions = ReturnType<typeof readBotSpaceOptions>;
 export type SpaceOptions = Pick<ResolvedOptions, 'grants'> & Partial<Omit<ResolvedOptions, 'grants'>>;

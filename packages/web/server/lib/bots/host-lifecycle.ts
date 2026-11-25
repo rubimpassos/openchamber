@@ -5,6 +5,7 @@ import type { createBotsRuntime } from './runtime.js';
 import type { createBotProviderRuntime } from './provider-runtime.js';
 import type { createBotDiscovery } from './discovery.js';
 import type { createBotHostTools } from './host-tools.js';
+import type { createHostArtifacts } from './host-artifacts.js';
 
 type LifecycleOptions = {
   readonly runtime: ReturnType<typeof createBotsRuntime>;
@@ -12,6 +13,7 @@ type LifecycleOptions = {
   readonly providers: ReturnType<typeof createBotProviderRuntime>;
   readonly discovery: ReturnType<typeof createBotDiscovery>;
   readonly hostTools: ReturnType<typeof createBotHostTools> | null;
+  readonly artifacts: ReturnType<typeof createHostArtifacts>;
   readonly listProjects: () => Promise<readonly { readonly id: string }[]>;
   readonly refreshIndex: (projectId: string) => Promise<void>;
   readonly reportAttention: ReportHostAttention;
@@ -20,7 +22,7 @@ type LifecycleOptions = {
 };
 type StartResult = { readonly failures: readonly { readonly projectId: string; readonly code: string }[] };
 
-export function createHostLifecycle({ runtime, isolated, sessions, providers, discovery, hostTools,
+export function createHostLifecycle({ runtime, isolated, sessions, providers, discovery, hostTools, artifacts,
   listProjects, refreshIndex, reportAttention, release, logger }: LifecycleOptions) {
   let started = false;
   let stopping = false;
@@ -56,6 +58,7 @@ export function createHostLifecycle({ runtime, isolated, sessions, providers, di
         const recovered = await runtime.start();
         if (stopping) return { failures: [...failures, ...recovered.failures] };
         await sessions.restore(async (entry, error) => { await reportAttention({ ...entry, reason: failureCode.parse(error) }); });
+        observe(artifacts.recover());
         for (const entry of sessions.entries()) if (entry.isolated && entry.stage === 'fixing') observe((async () => {
           const binding = await isolated.bindingFor({ sessionId: entry.sessionId });
           await isolated.forwardTools({ spaceId: binding.spaceId, sessionId: entry.sessionId })
@@ -77,7 +80,7 @@ export function createHostLifecycle({ runtime, isolated, sessions, providers, di
       try { await startup; } catch (error) { failures.push(error); }
       await cancellation;
       const drain = async () => { while (work.size) await Promise.all([...work]); };
-      for (const stop of [providers.stop, discovery.stop, drain, sessions.stop]) {
+      for (const stop of [providers.stop, discovery.stop, drain, sessions.stop, artifacts.flush]) {
         try { await stop(); } catch (error) { failures.push(error); }
       }
       release(); started = false;

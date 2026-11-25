@@ -1,8 +1,30 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { fixture, identity } from './page-recovery.test-support.js';
+import { createBotArtifactCapture } from '../bots/artifacts-capture.js';
 
 describe('render recovery authority', () => {
+  it('keeps recorded Bot workers read-only when their canonical metadata hint is absent', async () => {
+    const env = await fixture();
+    let producer = { role: 'stage', stage: 'fixing' };
+    const artifacts = createBotArtifactCapture({
+      dataDir: env.dataDir, onCaptured: async () => {},
+      resolveSession: async (sessionId) => ({
+        projectId: 'project', botId: 'bot', itemId: 'item', sessionId,
+        directory: env.state.session.location.directory, producer,
+      }),
+    });
+    const worker = env.make({ artifacts });
+
+    await worker.recover().expect(200, { page: null });
+    await worker.submit().expect(404);
+    expect(worker.laterPages.snapshot().pages).toEqual([]);
+    expect(env.posts).toEqual([]);
+
+    producer = { role: 'conversation' };
+    const conversation = env.make({ artifacts });
+    expect((await conversation.recover().expect(200)).body.page).toMatchObject({ status: 'open', source: 'recovered-await' });
+  });
   it.each([
     ['a running session', (env) => { env.state.active = { [identity.sessionId]: { type: 'running' } }; }],
     ['a canonical form', (env) => { env.state.forms = [{ id: 'form_live' }]; }],

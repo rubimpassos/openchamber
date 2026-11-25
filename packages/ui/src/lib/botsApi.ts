@@ -3,7 +3,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getBotsRuntime } from './botsRuntime';
 import { botDefinitionSchema, botsConfigSchema, type BotsConfig } from './bots/config';
-import { botItemSchema, type BotEvidence, type BotSource } from './bots/items';
+import { botConversationSchema, botItemSchema, type BotEvidence, type BotSource } from './bots/items';
 import { botIdentitySchema, botPolicySchema, type BotIdentityInput } from './bots/management';
 
 const snapshotSchema = z.object({
@@ -13,9 +13,11 @@ const snapshotSchema = z.object({
 const itemDetailSchema = z.object({
   item: botItemSchema, reports: z.record(z.string(), z.json()),
   sessionDirectories: z.record(z.string(), z.string().min(1)).default({}),
+  questionKey: z.string().min(1).optional(),
   snapshot: z.object({ baseSha: z.string(), headSha: z.string(), diff: z.string(), changes: z.array(z.object({ oldPath: z.string().nullable().optional(), newPath: z.string().nullable().optional() })) }).nullable(),
 });
 export type BotsSnapshot = z.infer<typeof snapshotSchema>;
+export type BotItemDetailRead = z.infer<typeof itemDetailSchema>;
 
 export class BotsApiError extends Error {
   readonly name = 'BotsApiError';
@@ -54,9 +56,14 @@ export const runBot = (projectId: string, botId: string) => request(`${root(proj
 export type CreateBotItem = { readonly botId: string; readonly source: BotSource; readonly title: string; readonly description?: string; readonly evidence?: readonly BotEvidence[] };
 export const createBotItem = (projectId: string, input: CreateBotItem) => request(`${root(projectId)}/items`, z.object({ item: botItemSchema }), { method: 'POST', body: JSON.stringify(input) });
 export const fetchBotItem = (projectId: string, itemId: string) => request(`${root(projectId)}/items/${encodeURIComponent(itemId)}`, itemDetailSchema);
-export const actOnBotItem = (projectId: string, itemId: string, action: { readonly kind: 'stop' | 'resume' } | { readonly kind: 'answer'; readonly text: string; readonly eventId: string }) => request(
+export const ensureBotConversation = (projectId: string, itemId: string) => request(
+  `${root(projectId)}/items/${encodeURIComponent(itemId)}/conversation`, z.object({ conversation: botConversationSchema }), { method: 'POST' },
+);
+type BotItemAction = { readonly kind: 'stop' | 'resume' }
+  | { readonly kind: 'answer'; readonly text: string; readonly eventId: string; readonly questionKey?: string };
+export const actOnBotItem = (projectId: string, itemId: string, action: BotItemAction) => request(
   `${root(projectId)}/items/${encodeURIComponent(itemId)}/${action.kind}`, z.json(),
-  { method: 'POST', body: JSON.stringify(action.kind === 'answer' ? { text: action.text, eventId: action.eventId } : {}) },
+  { method: 'POST', body: JSON.stringify(action.kind === 'answer' ? { text: action.text, eventId: action.eventId, questionKey: action.questionKey } : {}) },
 );
 export const fetchBotArchive = (projectId: string, month: string) => request(`${root(projectId)}/archive?month=${encodeURIComponent(month)}`, z.object({ items: z.array(botItemSchema) }));
 export const fetchBotPolicy = (projectId: string) => request(`${root(projectId)}/policy`, botPolicySchema);

@@ -22,6 +22,12 @@ import type { BotServiceReply } from '../agent-server/bot-service-contract.js';
 import type { SessionActivityOptions } from '../opencode/session-activity.js';
 import type { createTokenSnapshotReader } from '../pr-fix-loop/token-usage.js';
 import type { KnowledgeCollector } from '../session-knowledge/contracts.js';
+import type { BotConversationExecution } from './conversation-contract.js';
+import type { SessionClient } from '../openchamber-sessions/opencode-client-contract.js';
+import type { SessionDispatchAdmission } from '../openchamber-sessions/dispatch-admission.js';
+import type { BotArtifactTransport } from '../agent-server/bot-artifact-service-contract.js';
+import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
+import type { RenderedPageOrigin, RenderedPageProjection } from '../openchamber-control/page-projection.js';
 
 export type HostSessions = ReturnType<typeof createBotHostSessions>;
 export type HostEntry = NonNullable<ReturnType<HostSessions['get']>>;
@@ -41,6 +47,7 @@ export type HostAttention = {
 };
 export type ReportHostAttention = (request: HostAttention) => Promise<BotItem | void>;
 export type HostExecution = {
+  readonly artifacts: BotArtifactTransport;
   readonly bindOwner: (owners: {
     readonly dataDir: string; readonly resolveProject: RuntimeOptions['resolveProject']; readonly listProjects: RuntimeOptions['listProjects'];
     readonly store: ReturnType<typeof createBotStore>; readonly config: ReturnType<typeof createBotsConfig>;
@@ -52,6 +59,7 @@ export type HostExecution = {
   };
   readonly worktrees: HostWorktrees & { readonly sameTree: (request: TreeRequest & { readonly left: string; readonly right: string }) => Promise<boolean> };
   readonly stages: HostStages;
+  readonly conversations: BotConversationExecution;
   readonly hostSessions: NonNullable<Parameters<typeof createBotHostSessions>[0]['hostExecution']> & Parameters<typeof createBotHostTools>[0]['execution'];
   readonly sessionKnowledgeRuntime: KnowledgeCollector;
   readonly readSessionDefaults: StageOptions['readSessionDefaults'];
@@ -64,13 +72,18 @@ export type HostExecution = {
   readonly createGateway: NonNullable<Parameters<typeof createBotProviderRuntime>[0]['createGateway']>;
 };
 export type HostOptions<NotifyResult = void> = {
+  readonly updateMetadata?: ((sessionId: string, patch: SessionMetadata) => Promise<void>) | undefined;
+  readonly readArtifactPage?: ((origin: RenderedPageOrigin) => Promise<RenderedPageProjection | null>) | undefined;
   readonly dataDir: string; readonly projectsDir: string;
   readonly projectConfigRuntime: Parameters<typeof createBotsConfig>[0]['projectConfigRuntime'] & Parameters<typeof createBotScheduler>[0]['projectConfigRuntime'];
   readonly scheduledTasksRuntime: Parameters<typeof createBotScheduler>[0]['scheduledTasksRuntime'];
   readonly listProjects: RuntimeOptions['listProjects']; readonly resolveProject: RuntimeOptions['resolveProject'];
-  readonly sessionService: (StageOptions['sessionService'] & { readonly sessionArchive: { isArchived(sessionId: string): Promise<boolean> } }) | null;
+  readonly sessionService: (StageOptions['sessionService'] & { readonly sessionArchive: { isArchived(sessionId: string): Promise<boolean> };
+    readonly setDispatchAdmission?: (admission: SessionDispatchAdmission) => void }) | null;
   readonly readOnlySessionService: StageOptions['sessionService'] | null;
-  readonly clientFor: StageOptions['clientFor'] & Parameters<typeof createBotHostSessions>[0]['clientFor'];
+  readonly clientFor: (directory: string) => ReturnType<StageOptions['clientFor']>
+    & ReturnType<Parameters<typeof createBotHostSessions>[0]['clientFor']>
+    & { readonly session: Pick<SessionClient['session'], 'create' | 'synthetic' | 'prompt' | 'command' | 'switchModel' | 'switchAgent'> };
   readonly permissionAutoAcceptRuntime: StageOptions['permissionAutoAcceptRuntime'] | null;
   readonly sessionKnowledgeRuntime: (StageOptions['sessionKnowledgeRuntime'] & KnowledgeCollector) | null;
   readonly readSessionDefaults: StageOptions['readSessionDefaults'];

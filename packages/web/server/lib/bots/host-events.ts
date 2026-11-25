@@ -8,6 +8,7 @@ import type { createBotHostTools } from './host-tools.js';
 import type { createHostLifecycle } from './host-lifecycle.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 import type { JsonObject } from '../event-stream/contracts.js';
+import type { createHostArtifacts } from './host-artifacts.js';
 
 type EventOptions = {
   readonly lifecycle: ReturnType<typeof createHostLifecycle>;
@@ -16,8 +17,10 @@ type EventOptions = {
   readonly discovery: ReturnType<typeof createBotDiscovery>;
   readonly hostTools: ReturnType<typeof createBotHostTools> | null;
   readonly reportAttention: ReportHostAttention;
+  readonly artifacts: ReturnType<typeof createHostArtifacts>;
 };
-export function createHostPayloadProcessor({ lifecycle, runtime, sessions, isolated, discovery, hostTools, reportAttention }: EventOptions) {
+export function createHostPayloadProcessor({ lifecycle, runtime, sessions, isolated, discovery, hostTools, artifacts, reportAttention }: EventOptions) {
+  const captured = new Map<string, string>();
   const usageReads = new Map<string, { readonly state: { again: boolean }; readonly promise: Promise<void> }>();
   const accountUsage = (entry: HostEntry) => {
     const previous = usageReads.get(entry.sessionId);
@@ -44,9 +47,11 @@ export function createHostPayloadProcessor({ lifecycle, runtime, sessions, isola
     const status = isJsonObject(properties.status) ? properties.status : undefined;
     const completed = payload.type === 'message.updated' && info?.role === 'assistant' && time?.completed !== undefined;
     const wake = payload.type === 'session.updated' && openchamber?.botToolPending;
+    const artifactWake = payload.type === 'session.updated' && isString(openchamber?.botArtifactCaptured) ? openchamber.botArtifactCaptured : null;
+    const deliveryWake = payload.type === 'session.updated' && isString(openchamber?.botConversationDeliveryPending) ? openchamber.botConversationDeliveryPending : null;
     const reason = payload.type === 'session.idle' || payload.type === 'session.status' && status?.type === 'idle' ? 'idle'
       : payload.type === 'session.error' ? 'BOT_SESSION_ERROR' : null;
-    if (!completed && !wake && !reason) return;
+    if (!completed && !wake && !artifactWake && !deliveryWake && !reason) return;
     const sessionId = properties.sessionID ?? info?.sessionID ?? info?.id;
     if (!isString(sessionId)) return;
     const entry = sessions.get(sessionId);
@@ -55,6 +60,11 @@ export function createHostPayloadProcessor({ lifecycle, runtime, sessions, isola
       const binding = await isolated.bindingFor({ sessionId });
       if (binding.spaceId !== spaceId) return;
     } else if (spaceId) return;
+    const captureWake = JSON.stringify([artifactWake, deliveryWake]);
+    if ((artifactWake || deliveryWake) && captured.get(sessionId) !== captureWake) {
+      captured.set(sessionId, captureWake);
+      lifecycle.observe(artifacts.collect(sessionId).catch((error) => { captured.delete(sessionId); throw error; }));
+    }
     sessions.processPayload(payload, { spaceId });
     if (entry.isolated && entry.stage === 'fixing' && wake && spaceId) {
       lifecycle.observe(isolated.forwardTools({ spaceId, sessionId }).catch((error) => reportAttention({ ...entry, reason: failureCode.parse(error) })));
@@ -63,6 +73,7 @@ export function createHostPayloadProcessor({ lifecycle, runtime, sessions, isola
       lifecycle.observe(hostTools.forward(entry).catch((error) => reportAttention({ ...entry, reason: failureCode.parse(error) })));
     }
     if (completed || reason === 'idle') {
+      if (reason === 'idle') await artifacts.collect(sessionId);
       try { await accountUsage(entry); }
       catch (error) {
         if (!entry.itemId.startsWith('discovery_') && (await runtime.detail(entry.projectId, entry.itemId)).item.state === 'needs-you') return;
