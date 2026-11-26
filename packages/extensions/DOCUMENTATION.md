@@ -55,6 +55,13 @@ A timed-out operation in that queue closes the connection: Chrome may still
 complete it, so subsequent metrics cannot safely use that runtime. A definite
 protocol rejection releases the queue and preserves the connection.
 
+Chrome answers a command addressed to an unknown CDP session with an error on
+the root channel, retaining the owned request ID but omitting `sessionId`.
+The client rejects that command as a protocol error immediately. Successful
+replies and replies naming an explicit session still require matching session
+identity; an error must not masquerade as an unanswered command and tear down
+the connection on timeout.
+
 ## Adding a package
 
 1. Add its SDK manifest and source under this directory.
