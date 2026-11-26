@@ -82,4 +82,23 @@ export const BOT_PAGE_TURNS = [
     }],
     answer: "The OpenUI choice is recorded. Coordinator approval remains separate.\n",
   },
+  {
+    id: "verify_bot_fixed_page",
+    prompt: "Show the fixed-only bot page.",
+    steps: [{
+      text: "Showing the fixed viewport.",
+      calls: [{
+        name: "openchamber_render",
+        arguments: {
+          action: "render.page",
+          parameters: {
+            title: "Fixed viewport proof",
+            artifactKind: "evidence",
+            html: '<div style="position:fixed;inset:0">Fixed viewport content</div>',
+          },
+        },
+      }],
+    }],
+    answer: "The fixed viewport page is recorded.\n",
+  },
 ];
