@@ -29,6 +29,7 @@ function BotArtifacts({ projectId, itemId, kind, readOnly, read }: {
 }) {
   const { t, locale } = useI18n();
   const [viewer, setViewer] = React.useState<{ readonly artifact: BotArtifact; readonly open: boolean } | null>(null);
+  const opener = React.useRef<HTMLButtonElement | null>(null);
   const [viewFailed, setViewFailed] = React.useState(false);
   const View = useOnDemandComponent(viewer !== null, loadArtifactView, () => { setViewer(null); setViewFailed(true); });
   const artifacts = read.data?.filter((artifact) => artifact.kind === kind) ?? [];
@@ -40,14 +41,14 @@ function BotArtifacts({ projectId, itemId, kind, readOnly, read }: {
     {!read.data && !read.failure ? <p role="status" className="text-muted-foreground">{t('common.loading')}</p> : null}
     {read.data && artifacts.length === 0 ? <p className="text-muted-foreground">{t(kind === 'evidence' ? 'bots.artifacts.emptyEvidence' : 'bots.artifacts.emptyDecisions')}</p> : null}
     {artifacts.length ? <ul className="-mx-2 space-y-0.5">{artifacts.map((artifact) => <li key={artifact.id}>
-      <button type="button" onClick={() => { setViewFailed(false); setViewer({ artifact, open: true }); }}
+      <button type="button" onClick={(event) => { opener.current = event.currentTarget; setViewFailed(false); setViewer({ artifact, open: true }); }}
         className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label text-foreground hover:bg-interactive-hover/50 pointer-coarse:!min-h-11 focus-visible:bg-interactive-hover/50 focus-visible:outline-none">
         <span className="min-w-0 flex-1 truncate oc-ui-start-align" dir="auto" title={artifact.title}>{artifact.title}</span>
         <time className="shrink-0 typography-meta text-muted-foreground" dateTime={new Date(artifact.createdAt).toISOString()}>{new Date(artifact.createdAt).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}</time>
       </button>
     </li>)}</ul> : null}
     <Dialog open={viewer?.open ?? false} onOpenChange={(open) => setViewer((current) => current && { ...current, open })}>
-      <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+      <DialogContent finalFocus={() => (opener.current?.isConnected ? opener.current : true)} className="max-h-[90dvh] max-w-3xl overflow-y-auto">
         <DialogTitle dir="auto" className="pe-8">{viewer?.artifact.title}</DialogTitle>
         {viewer && View ? <View key={viewer.artifact.id} projectId={projectId} itemId={itemId} artifactId={viewer.artifact.id} readOnly={readOnly} /> : <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p>}
       </DialogContent>

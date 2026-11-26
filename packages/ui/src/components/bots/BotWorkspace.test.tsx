@@ -34,12 +34,13 @@ const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { BotWorkspace } = await import('./BotWorkspace');
 let root: Root;
+let renderObserver: MutationObserver | null = null;
 
 beforeEach(() => {
   item = botItem(); conversationAsks = 0; artifactReads = 0; artifactsFail = null;
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
-afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); });
+afterEach(async () => { renderObserver?.disconnect(); renderObserver = null; await act(async () => root.unmount()); document.body.replaceChildren(); });
 afterAll(async () => { globalThis.fetch = originalFetch; await dom.restore(); });
 
 const button = (label: string) => {
@@ -51,6 +52,18 @@ const open = async () => {
   await act(async () => root.render(<I18nProvider><BotWorkspace projectId="project-1" bot={configuredBot()} initial={item} archived={false} layout="mobile" onBack={() => {}} onLeave={() => {}} /></I18nProvider>));
 };
 const text = () => document.body.textContent ?? '';
+const pageRow = (title: string) => {
+  const element = [...document.querySelectorAll('[data-bot-context-body] li button')].find((entry) => entry.textContent?.startsWith(title));
+  if (!(element instanceof HTMLButtonElement)) throw new Error(`Missing page row: ${title}`);
+  return element;
+};
+const waitFor = (ready: () => boolean) => new Promise<void>((resolve) => {
+  const observer = new MutationObserver(check);
+  renderObserver = observer;
+  function check() { if (ready()) { observer.disconnect(); renderObserver = null; resolve(); } }
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  check();
+});
 
 describe('Bot item conversation', () => {
   test('reports a conversation the server cannot open and asks again only on retry', async () => {
@@ -95,6 +108,28 @@ describe('Bot work context', () => {
     expect(text()).toContain('No judge verdict recorded.');
     expect(text()).not.toContain('Latency before and after');
     expect(artifactReads).toBe(1);
+  });
+
+  test('returns focus to the page row when its dialog closes', async () => {
+    // Given a reader in Decisions whose focus rests on another control, as it stays on the composer after a press that moves no focus.
+    await open();
+    await act(async () => button('Work context').click());
+    await act(async () => button('Decisions').click());
+    button('Decisions').focus();
+    const row = pageRow('Why the cache was rejected');
+
+    // When the page opens from its row and Escape closes it.
+    const appeared = waitFor(() => document.querySelector('[role="dialog"]') !== null);
+    await act(async () => row.click());
+    await appeared;
+    const dialog = document.querySelector('[role="dialog"]');
+    const closed = waitFor(() => document.querySelector('[role="dialog"]') === null);
+    await act(async () => dialog?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    await closed;
+    await act(async () => {});
+
+    // Then focus is on the row that opened the page.
+    expect(document.activeElement === row).toBe(true);
   });
 
   for (const { cause, says, refuse } of [
