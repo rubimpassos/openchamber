@@ -302,7 +302,7 @@ const failureOf = <Cause>(error: Cause): JourneyFailure => ({
  * each resolving `{ ok: true }` or `{ ok: false, code }`; without the service both answer
  * `protected_mcp_unavailable`.
  */
-interface SpaceRemoval {
+export interface SpaceRemoval {
   removed: boolean;
   refsRemoved: boolean | null;
   failures: JourneyFailure[];
