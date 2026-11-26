@@ -15,16 +15,20 @@ const fixture = async (t, { loading = false, devtools = false, scale = 2 } = {})
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const listeners = new Set();
   const captures = [];
+  const queued = [];
   const motion = Buffer.from('motion frame');
   const sharp = Buffer.from('high density frame');
   let resolveCapture = null;
+  let queueCaptures = false;
   const page = {
     targetId: 'shown', sessionId: 'shown-session', devtools,
     cdp: {
       isOpen: true,
       onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-      async sendSession(sessionId, method, params) {
+      async sendSession(sessionId, method, params, signal) {
         if (method !== 'Page.captureScreenshot') return {};
+        if (queueCaptures) await new Promise((resolve) => { queued.push({ signal, resolve }); });
+        signal?.throwIfAborted();
         captures.push({ sessionId, ...params });
         if (resolveCapture) return new Promise((resolve) => { resolveCapture = resolve; });
         return { data: sharp.toString('base64') };
@@ -54,7 +58,9 @@ const fixture = async (t, { loading = false, devtools = false, scale = 2 } = {})
   const tick = async () => { t.mock.timers.tick(180); return read(); };
   await read();
   return {
-    surface, runtime, emit, frame, read, tick, captures, motion, sharp,
+    surface, runtime, emit, frame, read, tick, captures, motion, sharp, queued,
+    queueCaptures() { queueCaptures = true; },
+    releaseCaptures() { queueCaptures = false; for (const entry of queued) entry.resolve(); },
     holdCapture() { resolveCapture = () => {}; },
     finishCapture() { resolveCapture({ data: sharp.toString('base64') }); resolveCapture = null; },
   };
@@ -157,3 +163,32 @@ test('retarget and close cancel navigation-resumed refinement', async (t) => {
     });
   }
 });
+
+for (const action of ['loading', 'retarget', 'close']) {
+  test(`${action} aborts every queued refinement of the document before dispatch`, async (t) => {
+    const f = await fixture(t);
+    f.queueCaptures();
+    f.frame();
+    await f.tick();
+    f.frame();
+    await f.tick();
+    assert.equal(f.queued.length, 2);
+    if (action === 'loading') {
+      f.emit('Page.frameStartedLoading', { frameId: 'shown' });
+    } else {
+      await f.surface[action]();
+    }
+    f.releaseCaptures();
+    await f.read();
+    assert.equal(f.captures.length, 0, 'stale captures never reach Chrome');
+    const [first, second] = f.queued;
+    assert.ok(first.signal instanceof AbortSignal);
+    assert.equal(first.signal, second.signal, 'captures share the document lifetime');
+    assert.equal(first.signal.aborted, true);
+    if (action === 'loading') {
+      f.emit('Page.frameStoppedLoading', { frameId: 'shown' });
+      assert.deepEqual((await f.tick()).bytes, f.sharp, 'the next document can refine');
+      assert.equal(f.captures.length, 1);
+    }
+  });
+}

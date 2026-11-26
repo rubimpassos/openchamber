@@ -12,6 +12,7 @@ export const createSurfaceRefinement = (runtime, page, publish) => {
   let changes = 0;
   let refinedAt = 0;
   let disposed = false;
+  let documentCaptures = new AbortController();
   let mainFrameId = page.targetId;
   // runtime.isLoading describes the inspected tab, never the DevTools frontend.
   let loading = !page.devtools && runtime.isLoading;
@@ -31,7 +32,7 @@ export const createSurfaceRefinement = (runtime, page, publish) => {
         format: 'jpeg',
         quality: REFINE_QUALITY,
         optimizeForSpeed: true,
-      });
+      }, documentCaptures.signal);
     } catch {
       return;
     }
@@ -70,6 +71,8 @@ export const createSurfaceRefinement = (runtime, page, publish) => {
       case 'Page.frameStartedLoading':
         if (event.params.frameId !== mainFrameId) return;
         loading = true;
+        documentCaptures.abort();
+        documentCaptures = new AbortController();
         changes += 1;
         refinedAt = 0;
         cancel();
@@ -95,6 +98,7 @@ export const createSurfaceRefinement = (runtime, page, publish) => {
     },
     dispose() {
       disposed = true;
+      documentCaptures.abort();
       cancel();
       unsubscribe();
     },
