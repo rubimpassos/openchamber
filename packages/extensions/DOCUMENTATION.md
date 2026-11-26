@@ -62,6 +62,16 @@ replies and replies naming an explicit session still require matching session
 identity; an error must not masquerade as an unanswered command and tear down
 the connection on timeout.
 
+### Why refinement waits for navigation
+
+The surface refinement owner pauses high-density screenshots while its main
+frame loads and resumes on that frame's load completion event. Chrome can lose
+a screenshot response when navigation replaces the rendering widget during
+capture. A queued viewport would then wait behind that capture until the host
+request expires. Motion frames remain available during loading. Navigation
+invalidates captured pixels, and DevTools follows its own page's loading events
+instead of the inspected tab's state.
+
 ## Adding a package
 
 1. Add its SDK manifest and source under this directory.
