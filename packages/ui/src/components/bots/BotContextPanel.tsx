@@ -3,12 +3,13 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import type { BotItemDetailRead } from '@/lib/botsApi';
-import type { BotArtifact } from '@/lib/bots/artifacts';
+import type { BotArtifact, BotArtifactFailure } from '@/lib/bots/artifacts';
 import { isTerminalBotItem, type BotItem } from '@/lib/bots/items';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { BotJudgment, BotProof, BotSourceEvidence } from './BotEvidence';
 import { BotItemControls, BotItemRecord, BotItemWait } from './BotItemDetail';
@@ -17,6 +18,9 @@ import { useBotArtifacts } from './useBotRequest';
 
 const TABS = ['work', 'evidence', 'decisions'] as const;
 export type BotContextTab = typeof TABS[number];
+const listFailureKeys = {
+  failed: 'bots.artifacts.failed', unavailable: 'bots.artifacts.unavailable', network: 'bots.artifacts.network',
+} satisfies Record<BotArtifactFailure, I18nKey>;
 const loadArtifactView = () => import('./BotRenderArtifactView').then((module) => module.BotRenderArtifactView);
 
 function BotArtifacts({ projectId, itemId, kind, readOnly, read }: {
@@ -29,15 +33,15 @@ function BotArtifacts({ projectId, itemId, kind, readOnly, read }: {
   const View = useOnDemandComponent(viewer !== null, loadArtifactView, () => { setViewer(null); setViewFailed(true); });
   const artifacts = read.data?.filter((artifact) => artifact.kind === kind) ?? [];
   return <SettingsSection title={t('bots.artifacts.title')} contentClassName="space-y-2 typography-meta">
-    {read.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-[var(--status-error-text)]">
-      <span>{t('bots.artifacts.failed')}</span><Button size="xs" variant="outline" onClick={read.refresh}>{t('bots.retry')}</Button>
+    {read.failure ? <div role="alert" className="flex flex-wrap items-center gap-2 text-[var(--status-error-text)]">
+      <span>{t(listFailureKeys[read.failure])}</span><Button size="xs" variant="outline" onClick={read.refresh}>{t('bots.retry')}</Button>
     </div> : null}
     {viewFailed ? <p role="alert" className="text-[var(--status-error-text)]">{t('bots.artifacts.viewFailed')}</p> : null}
-    {!read.data && !read.error ? <p role="status" className="text-muted-foreground">{t('common.loading')}</p> : null}
+    {!read.data && !read.failure ? <p role="status" className="text-muted-foreground">{t('common.loading')}</p> : null}
     {read.data && artifacts.length === 0 ? <p className="text-muted-foreground">{t(kind === 'evidence' ? 'bots.artifacts.emptyEvidence' : 'bots.artifacts.emptyDecisions')}</p> : null}
     {artifacts.length ? <ul className="-mx-2 space-y-0.5">{artifacts.map((artifact) => <li key={artifact.id}>
       <button type="button" onClick={() => { setViewFailed(false); setViewer({ artifact, open: true }); }}
-        className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:bg-interactive-hover/50 focus-visible:outline-none">
+        className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label text-foreground hover:bg-interactive-hover/50 pointer-coarse:!min-h-11 focus-visible:bg-interactive-hover/50 focus-visible:outline-none">
         <span className="min-w-0 flex-1 truncate oc-ui-start-align" dir="auto" title={artifact.title}>{artifact.title}</span>
         <time className="shrink-0 typography-meta text-muted-foreground" dateTime={new Date(artifact.createdAt).toISOString()}>{new Date(artifact.createdAt).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}</time>
       </button>
@@ -67,7 +71,10 @@ export function BotContextPanel({ projectId, item, detail, busy, failed, archive
       {onClose ? <Button size="sm" variant="ghost" onClick={onClose}><Icon name="arrow-left" />{t('bots.context.conversation')}</Button> : null}
       <SortableTabsStrip className="h-7 min-w-0 flex-1" variant="active-pill" activeId={tab} onSelect={(id) => onTabChange(TABS.find((entry) => entry === id) ?? 'work')}
         items={TABS.map((id) => ({ id, label: labels[id] }))} />
-      {!archived ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => { onRefresh(); pages.refresh(); }} aria-label={t('bots.refresh')}><Icon name="refresh" /></Button> : null}
+      {!archived ? <Tooltip>
+        <TooltipTrigger asChild><Button size="sm" variant="ghost" disabled={busy} onClick={() => { onRefresh(); pages.refresh(); }} aria-label={t('bots.refresh')}><Icon name="refresh" /></Button></TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('bots.refresh')}</TooltipContent>
+      </Tooltip> : null}
     </div>
     <div data-bot-context-body="" className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-2 @container">
       {failed ? <p role="alert" className="mb-4 typography-meta text-[var(--status-error-text)]">{t('bots.error')}</p> : null}

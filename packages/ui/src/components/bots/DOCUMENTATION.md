@@ -47,7 +47,10 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
 - Evidence and Decisions show recorded proof and verdict above the bot's pages of
   that kind. The page list depends on `id`, `kind`, `title` and `createdAt` only.
   It is read while one of those tabs is open, and a failed read never reads as
-  an empty list.
+  an empty list. The failed list and a failed page say which of three causes it
+  was (the server could not be reached, the server is not ready, anything else)
+  in translated text; a status code, an error code or a message from the
+  response or the transport is never shown.
 - A retained page remains readable when its canonical answer projection fails.
   `pageError` disables its answer controls, including while the live index still
   reports a waiting call.

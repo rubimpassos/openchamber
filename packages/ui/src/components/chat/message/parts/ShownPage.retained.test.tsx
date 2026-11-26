@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { useLayoutEffect, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { z } from 'zod';
 import type { Metadata, Session, ToolPart } from '@/lib/opencode/model';
 import { useSyncRuntime } from '@/sync/sync-runtime-context';
@@ -15,6 +16,7 @@ const HTML = '<!doctype html><html><head><title>Latency</title></head><body>'
   + '<img id="plot" src="/repo/plot.png"><img id="gone" src="/repo/gone.png"><img id="remote" src="https://cdn.example/x.png">'
   + '<script>fetch("https://cdn.example/beacon")</script></body></html>';
 const UI = 'root = Stack([plot])\nplot = Text("![plot](/repo/plot.png)")';
+const UNOPENED = 'Could not open this page. Try again.';
 const MISSING = [{ source: '/repo/gone.png', status: 'missing' }, { source: 'https://cdn.example/x.png', status: 'external' }] as const;
 
 const stand = installRetainedPageStand();
@@ -65,6 +67,24 @@ afterEach(() => { for (const view of mounted) view.unmount(); mounted = []; repo
 afterAll(async () => { await stand.restore(); });
 
 describe('a page the bot drew, in its conversation', () => {
+  for (const modal of [true, false]) test(`relays Escape from a retained frame only inside a dialog: ${modal}`, async () => {
+    const page = retainedCase(modal ? 'e1' : 'e2');
+    const keys: string[] = [];
+    stand.serve((url) => url.pathname === page.path
+      ? Response.json(page.read({ body: { format: 'html', content: '<p>Retained document</p>' } }))
+      : undefined);
+    const view = mount(<div role={modal ? 'dialog' : undefined} onKeyDown={(event) => keys.push(event.key)}>
+      <BotRenderArtifactView {...SCOPE} artifactId={page.artifactId} />
+    </div>);
+    const documentFrame = await frame(view.host);
+    flushSync(() => { documentFrame.dispatchEvent(new Event('load')); });
+    window.dispatchEvent(new MessageEvent('message', { source: documentFrame.contentWindow, data: {
+      type: 'openchamber:html-render:key', key: 'Escape', code: 'Escape',
+      metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, repeat: false,
+    } }));
+    expect(keys).toEqual(modal ? ['Escape'] : []);
+  });
+
   for (const { status, digit } of [
     { status: 'running', digit: 'f' },
     { status: 'error', digit: '0' },
@@ -250,11 +270,18 @@ describe('a page the bot drew, in its conversation', () => {
     expect(reads(page.path)).toEqual([page.path]);
   });
 
-  for (const { cause, digit, refuse } of [
-    { cause: 'fails', digit: 'c', refuse: () => Response.json({}, { status: 500 }) },
-    { cause: 'answers with another call\'s page', digit: '5', refuse: (read: ReturnType<ReturnType<typeof retainedCase>['read']>) => Response.json(
+  const signIn = { headers: { 'content-type': 'text/html' } };
+  for (const { cause, digit, says, refuse } of [
+    { cause: 'fails', digit: 'c', says: UNOPENED, refuse: () => Response.json({}, { status: 500 }) },
+    { cause: 'answers with another call\'s page', digit: '5', says: UNOPENED, refuse: (read: ReturnType<ReturnType<typeof retainedCase>['read']>) => Response.json(
       { ...read, artifact: { ...read.artifact, source: { ...read.artifact.source, callId: 'call-other' } } },
     ) },
+    { cause: 'is redirected to a sign-in page', digit: 'c2', says: UNOPENED, refuse: () => new Response('<html>Sign in</html>', { ...signIn, status: 302 }) },
+    { cause: 'answers with a web page', digit: 'c3', says: UNOPENED, refuse: () => new Response('<html>Sign in</html>', signIn) },
+    { cause: 'is refused by a server that is not ready', digit: 'c0', says: 'The server cannot show the bot\'s pages right now. Try again in a moment.',
+      refuse: () => Response.json({ code: 'BOT_EXECUTION_NOT_READY', error: 'at read (/srv/bots/artifacts-owner.js:41)' }, { status: 503 }) },
+    { cause: 'never reaches the server', digit: 'c1', says: 'Could not reach the server. Check the connection and try again.',
+      refuse: () => Promise.reject<Response>(new TypeError('fetch failed: https://internal.example/artifacts?token=secret')) },
   ]) test(`shows a failure and reads nothing live when the owner's read ${cause}`, async () => {
     // Given a bot conversation whose owner cannot give this call's snapshot.
     const page = retainedCase(digit);
@@ -269,8 +296,9 @@ describe('a page the bot drew, in its conversation', () => {
     // When the transcript draws the call.
     const view = mount(<ShownPage part={page.call({ html: HTML })} />);
 
-    // Then it says so and mounts no part of the page the call wrote.
+    // Then it names the cause in the app's own words and mounts no part of the page the call wrote.
     const failure = await failureNotice(view.host);
+    expect(failure.querySelector('p')?.textContent).toBe(says);
     expect(drawn(view.host)).toEqual([]);
 
     // When the owner recovers and the reader tries again.

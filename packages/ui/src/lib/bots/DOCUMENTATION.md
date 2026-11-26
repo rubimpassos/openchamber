@@ -24,6 +24,14 @@ the existing page and later-page owners retain that authority.
 - API failure throws; it never becomes successful empty config or items.
   Responses are parsed at the boundary. Identity schemas discard secret-bearing
   fields, and request errors expose a code rather than an upstream error body.
+- A failed artifact read shows one of three causes, picked by `botArtifactFailure`
+  from where the request failed and from nothing the response or the transport
+  said: `network` when the request never got an answer, `unavailable` for a 503,
+  `failed` for every other status, a body that does not parse, a snapshot of
+  another call and any error the boundary did not raise. An aborted request
+  keeps its abort and is never reported as a network failure.
+  Mounted resource state retains only that closed cause, never the rejected
+  object or its transport details.
 - Config writes contain editable fields only. Identity POST sends the raw
   definition; PUT sends `{ definition, expectedRevision }`; DELETE sends
   `{ expectedRevision }`. Secret-bearing resolution is server-only.

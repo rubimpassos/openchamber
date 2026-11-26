@@ -1,7 +1,7 @@
 import React from 'react';
 import { z } from 'zod';
 import { BotsApiError, ensureBotConversation, fetchBotItem } from '@/lib/botsApi';
-import { fetchBotArtifacts, type BotArtifact } from '@/lib/bots/artifacts';
+import { botArtifactFailure, fetchBotArtifacts, type BotArtifact, type BotArtifactFailure } from '@/lib/bots/artifacts';
 import type { BotConversation, BotItem } from '@/lib/bots/items';
 import { getBotsRuntime } from '@/lib/botsRuntime';
 import { useI18n } from '@/lib/i18n';
@@ -23,26 +23,30 @@ export function useBotsRefresh(projectId: string, refresh: () => void, enabled =
 
 /** Every mounted read belongs to this visit. Failure retains only this visit's prior result. */
 export function useBotResource<T>(load: () => Promise<T>) {
-  const [read, setRead] = React.useState<{ readonly owner: typeof load; readonly data: T | null; readonly busy: boolean; readonly error: boolean }>({ owner: load, data: null, busy: true, error: false });
+  const [read, setRead] = React.useState<{ readonly owner: typeof load; readonly data: T | null; readonly busy: boolean; readonly error: boolean; readonly reason: BotArtifactFailure | null }>({ owner: load, data: null, busy: true, error: false, reason: null });
   const [attempt, setAttempt] = React.useState(0);
   const revision = React.useRef(0);
   React.useEffect(() => {
     let active = true;
     const runtime = getBotsRuntime();
     const request = ++revision.current;
-    setRead((current) => ({ owner: load, data: current.owner === load ? current.data : null, busy: true, error: false }));
-    void load().then(
-      (data) => { if (active && !runtime.signal.aborted && request === revision.current) setRead({ owner: load, data, busy: false, error: false }); },
-      () => { if (active && !runtime.signal.aborted && request === revision.current) setRead((current) => ({ ...current, busy: false, error: true })); },
-    );
+    setRead((current) => ({ owner: load, data: current.owner === load ? current.data : null, busy: true, error: false, reason: null }));
+    void (async () => {
+      try {
+        const data = await load();
+        if (active && !runtime.signal.aborted && request === revision.current) setRead({ owner: load, data, busy: false, error: false, reason: null });
+      } catch (failure) {
+        if (active && !runtime.signal.aborted && request === revision.current) setRead((current) => ({ ...current, busy: false, error: true, reason: failure instanceof BotsApiError ? botArtifactFailure(failure) : 'failed' }));
+      }
+    })();
     return () => { active = false; };
   }, [load, attempt]);
   const refresh = React.useCallback(() => setAttempt((current) => current + 1), []);
   const replace = (data: T) => {
     revision.current += 1;
-    setRead({ owner: load, data, busy: false, error: false });
+    setRead({ owner: load, data, busy: false, error: false, reason: null });
   };
-  return { data: read.owner === load ? read.data : null, busy: read.owner !== load || read.busy, error: read.owner === load && read.error, refresh, replace };
+  return { data: read.owner === load ? read.data : null, busy: read.owner !== load || read.busy, error: read.owner === load && read.error, reason: read.owner === load ? read.reason : null, refresh, replace };
 }
 
 export function useBotItemRead(projectId: string, initial: BotItem, archived: boolean) {
@@ -80,7 +84,7 @@ export function useBotArtifacts(scope: { readonly projectId: string; readonly it
   }, [projectId, itemId, wanted]);
   const read = useBotResource(load);
   useBotsRefresh(projectId, read.refresh, wanted && live);
-  return read;
+  return { ...read, failure: read.reason };
 }
 
 /** Serializes explicit user actions and rejects navigation from a retired runtime or visit. */

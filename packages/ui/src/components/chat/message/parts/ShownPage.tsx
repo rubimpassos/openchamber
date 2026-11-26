@@ -90,7 +90,7 @@ export function ShownPage({ part }: { part: ToolPart }) {
         case 'pending':
             return <RetainedPagePending className="my-2" />;
         case 'failed':
-            return <RetainedPageFailure retry={retained.retry} className="my-2" />;
+            return <RetainedPageFailure cause={retained.cause} retry={retained.retry} className="my-2" />;
         case 'ready':
             return <RetainedPage {...host} data={retained.data} sharing={share ? { title: page.title, share } : null} />;
         default:

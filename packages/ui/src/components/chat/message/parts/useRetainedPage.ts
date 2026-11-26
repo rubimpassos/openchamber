@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { useChatTranscriptDirectory } from '@/components/chat/chatColumnSession';
 import { useBotArtifactRead } from '@/hooks/useBotArtifactRead';
-import type { BotArtifactRead } from '@/lib/bots/artifacts';
+import type { BotArtifactFailure, BotArtifactRead } from '@/lib/bots/artifacts';
 import { botAutomation } from '@/lib/bots/sessionMetadata';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import type { Session, ToolPart } from '@/lib/opencode/model';
@@ -15,7 +15,7 @@ import { useToolContentCompletion } from './useToolContentCompletion';
 type RetainedPage =
     | { readonly kind: 'live' }
     | { readonly kind: 'pending' }
-    | { readonly kind: 'failed'; readonly retry: (() => void) | null }
+    | { readonly kind: 'failed'; readonly cause: BotArtifactFailure; readonly retry: (() => void) | null }
     | { readonly kind: 'ready'; readonly data: BotArtifactRead };
 
 type SessionOwner =
@@ -25,7 +25,7 @@ type SessionOwner =
 
 const LIVE: RetainedPage = { kind: 'live' };
 const PENDING: RetainedPage = { kind: 'pending' };
-const NOT_RETAINED: RetainedPage = { kind: 'failed', retry: null };
+const NOT_RETAINED: RetainedPage = { kind: 'failed', cause: 'failed', retry: null };
 const UNKNOWN: SessionOwner = { kind: 'unknown' };
 const ORDINARY: SessionOwner = { kind: 'ordinary' };
 
@@ -78,7 +78,7 @@ export function useRetainedPage(part: ToolPart, drawn: boolean): RetainedPage {
     if (read) {
         switch (read.kind) {
             case 'loading': return PENDING;
-            case 'failed': return { kind: 'failed', retry: read.retry };
+            case 'failed': return { kind: 'failed', cause: read.cause, retry: read.retry };
             case 'ready': return { kind: 'ready', data: read.data };
             default: return unreachable(read);
         }
@@ -92,7 +92,7 @@ export function useRetainedPage(part: ToolPart, drawn: boolean): RetainedPage {
         case 'completed':
             switch (completion.status) {
                 case 'loading': return PENDING;
-                case 'failed': return { kind: 'failed', retry: completion.retry };
+                case 'failed': return { kind: 'failed', cause: 'failed', retry: completion.retry };
                 case 'whole': return NOT_RETAINED;
                 default: return unreachable(completion);
             }

@@ -118,7 +118,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - `useRetainedPage` answers one of four states, and `ShownPage` mounts the page's renderers in two of them only:
     - `live`: the session carries no bot marker, or the runtime is VS Code. The page draws from the call's input and reads its images as any chat does. A session the session list has not delivered yet is drawn this way too unless its call names a capture, because an ordinary session's page must not wait on that list.
     - `pending`: nothing of the page is mounted. This covers a bot's call that still runs or waits and names no capture yet, a completed call whose result is being completed from history, an owner read in flight, and a call that names a capture while the session list has not delivered its session.
-    - `failed`: nothing of the page is mounted and the row says so. A failed or refused owner read, a snapshot that names another session or call, and a failed history completion offer a retry that repeats that read. A bot's call that ended with no reference anywhere has no read to repeat, so it says the page was not retained and offers nothing.
+    - `failed`: nothing of the page is mounted and the row says so. A failed or refused owner read, a snapshot that names another session or call, and a failed history completion offer a retry that repeats that read. A bot's call that ended with no reference anywhere has no read to repeat, so it says the page was not retained and offers nothing. A retry row names one of three causes (`BotArtifactFailure`, `lib/bots/DOCUMENTATION.md`): the server could not be reached, the server answered that it is not ready, or anything else. The cause changes the sentence only; the retry, the remembered snapshot and the refusal of another call's page are the same for all three.
     - `ready`: the owner's snapshot for this exact session and call.
   - The project and item come from the session's own bot marker in the global sessions store (`botAutomation`); a child session's inherited membership names no owner, because capture binds a snapshot to the session that carries the marker. The artifact comes from `state.metadata.openchamber.artifact`, recorded at capture before the call waits; old calls can still name it in their result envelope (`retainedPageReference`, `botArtifactReferenceSchema`). History pages leave results out, so an old completed call without the metadata reference completes its content first, as an opened tool row does; a call with the metadata reference never loads its message.
   - `useBotArtifactRead` (`hooks/useBotArtifactRead.ts`) is the one read both views use, in the Bots runtime lifetime it started in. A runtime switch drops what an earlier runtime answered. Given the call, it accepts a snapshot only when its `source` names that session and call, and reports any other answer as a failed read. The transcript remembers snapshots (64 MB of characters, oldest first) because the timeline mounts a page again on every scroll past it; a mounted page holds its own copy, so trimming never unloads a page on screen, and a remembered snapshot is checked against the call again before it draws. The work record always reads fresh, because the same read carries where the page's question stands.
@@ -754,6 +754,14 @@ The host reads in a passive effect, which runs after every layout effect of the
 same commit; `useAppFontEffects` is a layout effect for that reason. A read one
 frame later was the alternative: it works too, but leaves a frame at the old
 size and depends on frame timing.
+
+### Why Escape forwarding follows the containing dialog
+
+A rendered HTML page forwards an unhandled plain Escape separately from its
+selection dismissal. The host replays it only when the frame belongs to a
+dialog, so the dialog can close and restore focus. A selection consumes its
+first Escape, page handlers can prevent forwarding, and inline pages keep their
+own unmodified Escape behavior.
 
 ### Why a stored running call is not enough for a page to wait
 

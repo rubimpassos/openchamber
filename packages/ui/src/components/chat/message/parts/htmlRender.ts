@@ -210,7 +210,7 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `i=Y();v=Math.abs(v-window.innerHeight)<1?window.innerHeight:Math.ceil(v);if(i&&!(i===G&&v===window.innerHeight))v+=i;G=i;r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;HN++;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
     + `if(window.ResizeObserver){var o=new ResizeObserver(z);o.observe(document.documentElement);document.addEventListener("DOMContentLoaded",function(){if(document.body)o.observe(document.body);});}`
     + `document.addEventListener("DOMContentLoaded",z);window.addEventListener("load",z);`
-    + `window.addEventListener("keydown",function(e){var t=e.composedPath()[0],f;if(!e.isTrusted||e.isComposing||!(e.metaKey||e.ctrlKey)||/^[acvxyz]$/i.test(e.key)&&!e.altKey||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;`
+    + `window.addEventListener("keydown",function(e){var t=e.composedPath()[0],f,E=e.key==="Escape"&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!e.shiftKey;if(!e.isTrusted||e.isComposing||!(e.metaKey||e.ctrlKey||E&&!SL)||/^[acvxyz]$/i.test(e.key)&&!e.altKey||!E&&t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;`
     + `f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;window.parent.postMessage({type:${JSON.stringify(KEY_MESSAGE)},key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat},"*");};`
     + `window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);`
     + `var SE=function(n){var e=n&&(n.nodeType===1?n:n.parentElement);if(!e)return false;if(e.tagName==="INPUT")return /^(?:text|search|url|tel|email|password|number)$/.test(e.type);if(e.tagName==="TEXTAREA")return true;return !/^(?:SELECT|BUTTON)$/.test(e.tagName)&&!!e.isContentEditable;},`
@@ -466,7 +466,7 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     if (message.type === SCROLL_MESSAGE) return { kind: 'scroll', direction: message.direction };
     if (message.type === DECLINE_MESSAGE) return { kind: 'decline' };
     if (message.type === DECLINE_PLACED_MESSAGE) return { kind: 'decline-placed', placed: message.placed };
-    if (!message.metaKey && !message.ctrlKey) return null;
+    if (!message.metaKey && !message.ctrlKey && (message.key !== 'Escape' || message.altKey || message.shiftKey)) return null;
     return { kind: 'key', chord: keyChordSchema.parse(message) };
 }
 

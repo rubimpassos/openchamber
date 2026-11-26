@@ -48,7 +48,10 @@ export function BotWorkspace({ projectId, bot, initial, archived, layout, onBack
   return <div ref={bodyRef} className="relative flex min-h-0 min-w-0 flex-1">
     <section aria-label={item.title} inert={covering} className={cn('flex min-h-0 min-w-0 flex-1 flex-col', covering && 'invisible')}>
       <header className="flex h-10 shrink-0 items-center gap-2 px-2">
-        <Button size="sm" variant="ghost" className="shrink-0" onClick={onBack} aria-label={t('bots.back')}><Icon name="arrow-left" /></Button>
+        <Tooltip>
+          <TooltipTrigger asChild><Button size="sm" variant="ghost" className="shrink-0" onClick={onBack} aria-label={t('bots.back')}><Icon name="arrow-left" /></Button></TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('bots.back')}</TooltipContent>
+        </Tooltip>
         {bot ? <BotAvatar name={bot.name} avatar={bot.avatar} described={!wide} /> : null}
         {bot && wide ? <><span className="max-w-1/3 shrink-0 truncate typography-ui-label text-muted-foreground" dir="auto">{bot.name}</span><span aria-hidden="true" className="text-muted-foreground/50">/</span></> : null}
         <h2 className="min-w-0 truncate typography-ui-label oc-ui-start-align" dir="auto" title={item.title}>{item.title}</h2>

@@ -329,35 +329,47 @@ describe('the page bootstrap', () => {
         expect(selection.toString()).toBe('editable text');
     });
 
-    test('passes Escape on only while a reported selection stands and the page left the key alone', async () => {
-        const press = () => {
+    test('reports unhandled Escape separately from selection dismissal and leaves consumed keys alone', async () => {
+        const press = (target: HappyNode = page.win.document.body) => {
             const event = new page.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
             // A key the user pressed; the bootstrap ignores synthetic ones.
             Object.defineProperty(event, 'isTrusted', { value: true });
-            page.win.document.body.dispatchEvent(event);
+            target.dispatchEvent(event);
         };
         const escapes = () => page.reports.filter((message) => message?.kind === 'selection-escape').length;
+        const keys = () => page.reports.filter((message) => message?.kind === 'key' && message.chord.key === 'Escape').length;
 
-        // No selection: Escape is the page's own.
         press();
         expect(escapes()).toBe(0);
+        expect(keys()).toBe(1);
 
         page.select('fix it now');
         await settle();
         press();
         expect(escapes()).toBe(1);
+        expect(keys()).toBe(1);
 
         // The page's own script took the key.
         const takeIt = (event: HappyEvent) => event.preventDefault();
         page.win.document.addEventListener('keydown', takeIt);
         press();
         expect(escapes()).toBe(1);
+        expect(keys()).toBe(1);
         page.win.document.removeEventListener('keydown', takeIt);
 
-        // Once the host clears the selection, Escape is the page's own again.
         page.send(htmlRenderClearSelectionMessage());
+        page.win.document.addEventListener('keydown', takeIt);
+        press();
+        expect(keys()).toBe(1);
+        page.win.document.removeEventListener('keydown', takeIt);
         press();
         expect(escapes()).toBe(1);
+        expect(keys()).toBe(2);
+        const field = page.win.document.createElement('input');
+        page.win.document.body.appendChild(field);
+        field.focus();
+        press(field);
+        expect(keys()).toBe(3);
     });
 
     test('reports a wheel up and a vertical swipe the page left alone, for the chat around it', () => {

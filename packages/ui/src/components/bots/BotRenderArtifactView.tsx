@@ -88,7 +88,7 @@ export function BotRenderArtifactView({ projectId, itemId, artifactId, readOnly 
   const read = useBotArtifactRead({ projectId, itemId, artifactId }, true);
   switch (read.kind) {
     case 'loading': return <RetainedPagePending />;
-    case 'failed': return <RetainedPageFailure retry={read.retry} />;
+    case 'failed': return <RetainedPageFailure cause={read.cause} retry={read.retry} />;
     case 'ready': return <ArtifactDocument key={read.data.artifact.id} data={read.data} readOnly={readOnly || Boolean(read.data.pageError)} />;
     default: return unreachable(read);
   }

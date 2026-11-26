@@ -23,8 +23,8 @@ export function BotAvatar({ name, avatar, size = 'sm', described = false, classN
   const image = useAvatarImage(avatar);
   const { box, letters } = sizes[size];
   return <span role={described ? 'img' : undefined} aria-label={described ? name : undefined} aria-hidden={described ? undefined : true}
-    className={cn('oc-tile-inset relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full font-medium text-muted-foreground', box, className)}>
-    <span aria-hidden="true">{botInitials(name, letters)}</span>
+    className={cn('oc-tile-inset oc-row-clip relative inline-flex shrink-0 select-none items-center justify-center rounded-full font-medium text-muted-foreground', box, className)}>
+    <span aria-hidden="true" className="leading-none">{botInitials(name, letters)}</span>
     {avatar && !image.broken ? <img src={avatar} alt="" draggable={false} onError={image.onError} className="absolute inset-0 size-full object-cover" /> : null}
   </span>;
 }

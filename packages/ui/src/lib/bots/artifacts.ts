@@ -54,6 +54,12 @@ export type BotArtifact = z.output<typeof botArtifactSchema>;
 export type BotArtifactRead = z.output<typeof botArtifactReadSchema>;
 export type BotArtifactReference = z.output<typeof botArtifactReferenceSchema>;
 type BotArtifactScope = { readonly projectId: string; readonly itemId: string };
+export type BotArtifactFailure = 'network' | 'unavailable' | 'failed';
+const UNREACHABLE = 'BOT_ARTIFACT_UNREACHABLE';
+export function botArtifactFailure(error: BotsApiError): BotArtifactFailure {
+  if (error.code === UNREACHABLE) return 'network';
+  return error.status === 503 ? 'unavailable' : 'failed';
+}
 const root = ({ projectId, itemId }: BotArtifactScope) =>
   `/api/projects/${encodeURIComponent(projectId)}/bots/items/${encodeURIComponent(itemId)}/artifacts`;
 
@@ -61,7 +67,13 @@ async function request<Value>(url: string, schema: z.ZodType<Value>, signal?: Ab
   if (isVSCodeRuntime()) throw new BotsApiError(501, 'bots_unsupported');
   const runtime = getBotsRuntime();
   const activeSignal = signal ? AbortSignal.any([runtime.signal, signal]) : runtime.signal;
-  const response = await runtimeFetch(url, { signal: activeSignal });
+  let response: Response;
+  try {
+    response = await runtimeFetch(url, { signal: activeSignal });
+  } catch (cause) {
+    if (activeSignal.aborted) throw cause;
+    throw new BotsApiError(0, UNREACHABLE);
+  }
   if (!response.ok) throw new BotsApiError(response.status, 'BOT_ARTIFACT_READ_FAILED');
   const parsed = schema.parse(await response.json());
   activeSignal.throwIfAborted();

@@ -14,7 +14,7 @@ const artifact = (index: number, kind: 'evidence' | 'decision', title: string) =
 let item = botItem();
 let conversationAsks = 0;
 let artifactReads = 0;
-let artifactsFail = false;
+let artifactsFail: (() => Response | Promise<Response>) | null = null;
 // Only the HTTP boundary is replaced; the workspace, parsers and request owners are real.
 // Install before module imports so their startup reads use the same test transport.
 globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
@@ -22,7 +22,7 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
   if (path.endsWith('/conversation')) { conversationAsks += 1; return Response.json({ code: 'BOT_CONVERSATION_UNAVAILABLE' }, { status: 503 }); }
   if (path.endsWith('/artifacts')) {
     artifactReads += 1;
-    return artifactsFail ? Response.json({}, { status: 500 }) : Response.json({ nextOffset: null, artifacts: [
+    return artifactsFail ? artifactsFail() : Response.json({ nextOffset: null, artifacts: [
       artifact(1, 'evidence', 'Latency before and after'), artifact(2, 'decision', 'Why the cache was rejected'),
     ] });
   }
@@ -36,7 +36,7 @@ const { BotWorkspace } = await import('./BotWorkspace');
 let root: Root;
 
 beforeEach(() => {
-  item = botItem(); conversationAsks = 0; artifactReads = 0; artifactsFail = false;
+  item = botItem(); conversationAsks = 0; artifactReads = 0; artifactsFail = null;
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); });
@@ -97,17 +97,34 @@ describe('Bot work context', () => {
     expect(artifactReads).toBe(1);
   });
 
-  test('keeps a failed page list apart from an empty one', async () => {
+  for (const { cause, says, refuse } of [
+    { cause: 'the server fails', says: 'Could not load the pages.', refuse: () => Response.json({}, { status: 500 }) },
+    { cause: 'the server is not ready', says: 'The server cannot show the bot\'s pages right now. Try again in a moment.',
+      refuse: () => Response.json({ code: 'BOT_EXECUTION_NOT_READY', error: 'at list (/srv/bots/artifacts-owner.js:12)' }, { status: 503 }) },
+    { cause: 'the server cannot be reached', says: 'Could not reach the server. Check the connection and try again.',
+      refuse: () => Promise.reject<Response>(new TypeError('fetch failed: https://internal.example/artifacts?token=secret')) },
+  ]) test(`keeps a page list apart from an empty one and names the cause when ${cause}`, async () => {
     // Given the page list cannot be read.
-    artifactsFail = true;
+    artifactsFail = refuse;
     await open();
     await act(async () => button('Work context').click());
 
     // When Evidence opens.
     await act(async () => button('Evidence').click());
 
-    // Then the failure is stated, with no claim that the bot drew nothing.
+    // Then the cause is stated in the app's own words, with no claim that the bot drew nothing.
+    const alert = document.querySelector('[data-bot-context-body] [role="alert"]');
+    expect(alert?.querySelector('span')?.textContent).toBe(says);
     expect(text()).not.toContain('The bot has not drawn any evidence yet.');
     expect(text()).toContain(item.proof.reason);
+
+    // When the server recovers and the reader tries again.
+    const reads = artifactReads;
+    artifactsFail = null;
+    await act(async () => alert?.querySelector('button')?.click());
+
+    // Then one more read lists the pages.
+    expect(artifactReads).toBe(reads + 1);
+    expect(text()).toContain('Latency before and after');
   });
 });

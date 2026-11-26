@@ -20,6 +20,7 @@ const NO_ANSWER: HtmlRenderAnswerState = { waiting: false, answer: null };
 const NO_RECT = { top: 0, left: 0, width: 0, height: 0 };
 
 function replayKeyChord(frame: HTMLIFrameElement, chord: HtmlRenderKeyChord) {
+  if (chord.key === 'Escape' && !chord.metaKey && !chord.ctrlKey && !frame.closest('[role="dialog"]')) return;
   for (const type of ['keydown', 'keyup'] as const) {
     frame.dispatchEvent(new KeyboardEvent(type, { ...chord, bubbles: true, cancelable: true, composed: true }));
   }

@@ -18,10 +18,10 @@ type Asset = { readonly source: string; readonly status: 'missing' | 'rejected' 
 
 /**
  * One render call and the page the owner retained for it. Each test takes its
- * own hex digit, so a snapshot one test read is never another test's page.
+ * own hex digits, so a snapshot one test read is never another test's page.
  */
 export function retainedCase(digit: string) {
-  const artifactId = `artifact_${digit.repeat(64)}`;
+  const artifactId = `artifact_${digit.repeat(64).slice(0, 64)}`;
   const callId = `call-${digit}`;
   const metadata = (incompleteAssets: readonly Asset[], interaction: string) => ({
     id: artifactId, title: 'Latency', kind: 'evidence', createdAt: 1,

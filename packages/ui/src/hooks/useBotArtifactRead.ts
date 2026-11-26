@@ -1,6 +1,7 @@
 import React from 'react';
 
-import { fetchBotArtifact, type BotArtifactRead } from '@/lib/bots/artifacts';
+import { botArtifactFailure, fetchBotArtifact, type BotArtifactFailure, type BotArtifactRead } from '@/lib/bots/artifacts';
+import { BotsApiError } from '@/lib/botsApi';
 import { useBotsRuntime } from '@/lib/botsRuntime';
 
 type BotArtifactCall = { readonly sessionId: string; readonly callId: string };
@@ -12,11 +13,14 @@ type BotArtifactTarget = {
 };
 type BotArtifactReadState =
     | { readonly kind: 'loading' }
-    | { readonly kind: 'failed'; readonly retry: () => void }
+    | { readonly kind: 'failed'; readonly cause: BotArtifactFailure; readonly retry: () => void }
     | { readonly kind: 'ready'; readonly data: BotArtifactRead };
 
 type Snapshot = Pick<BotArtifactRead, 'artifact' | 'payload'>;
-type Held = { readonly request: string; readonly data: BotArtifactRead | null };
+type Held = { readonly request: string } & (
+    | { readonly data: BotArtifactRead }
+    | { readonly data: null; readonly cause: BotArtifactFailure }
+);
 
 const MAX_REMEMBERED_CHARACTERS = 64 * 1024 * 1024;
 const remembered = new Map<string, { readonly snapshot: Snapshot; readonly characters: number }>();
@@ -65,7 +69,7 @@ export function useBotArtifactRead(target: BotArtifactTarget | null, fresh = fal
     );
     const key = target ? JSON.stringify([runtime.generation, projectId, itemId, artifactId]) : null;
     const request = key === null ? null : JSON.stringify([key, sessionId, callId, attempt]);
-    let current = held !== null && held.request === request ? held : null;
+    let current: Held | null = held !== null && held.request === request ? held : null;
     if (request !== null && key !== null && artifactId && current === null && !fresh) {
         const snapshot = remembered.get(key)?.snapshot;
         if (snapshot && isSnapshotOf(snapshot, artifactId, call)) {
@@ -77,16 +81,22 @@ export function useBotArtifactRead(target: BotArtifactTarget | null, fresh = fal
     React.useEffect(() => {
         if (!pending || request === null || key === null || !projectId || !itemId || !artifactId) return;
         const controller = new AbortController();
-        const settle = (read: BotArtifactRead | null) => {
+        const settle = (next: Held) => {
             if (controller.signal.aborted || runtime.signal.aborted) return;
-            const data = read && isSnapshotOf(read, artifactId, call) ? read : null;
-            if (data) remember(runtime.generation, key, data);
-            setHeld({ request, data });
+            if (next.data) remember(runtime.generation, key, next.data);
+            setHeld(next);
         };
-        void fetchBotArtifact({ projectId, itemId }, artifactId, controller.signal).then(settle, () => settle(null));
+        void (async () => {
+            try {
+                const data = await fetchBotArtifact({ projectId, itemId }, artifactId, controller.signal);
+                settle(isSnapshotOf(data, artifactId, call) ? { request, data } : { request, data: null, cause: 'failed' });
+            } catch (error) {
+                settle({ request, data: null, cause: error instanceof BotsApiError ? botArtifactFailure(error) : 'failed' });
+            }
+        })();
         return () => controller.abort();
     }, [pending, request, key, projectId, itemId, artifactId, call, runtime]);
     if (request === null) return null;
     if (current === null) return { kind: 'loading' };
-    return current.data ? { kind: 'ready', data: current.data } : { kind: 'failed', retry };
+    return current.data ? { kind: 'ready', data: current.data } : { kind: 'failed', cause: current.cause, retry };
 }
