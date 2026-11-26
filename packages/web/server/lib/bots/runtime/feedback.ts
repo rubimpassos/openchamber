@@ -70,9 +70,15 @@ export const createRuntimeFeedback = (
       const feedback = z.object({ eventId: text, text }).strict().parse(input);
       const previous = await journal.read(projectId, itemId);
       if (explicit && previous.data.pendingQuestion && questionKey === undefined) throw error('BOT_QUESTION_KEY_REQUIRED');
-      if (questionKey !== undefined && questionKey !== (previous.data.pendingQuestion ?? previous.data.questionAnswer?.key)) return;
+      if (questionKey !== undefined && questionKey !== (previous.data.pendingQuestion ?? previous.data.questionAnswer?.key)) {
+        if (explicit) throw error('BOT_QUESTION_CHANGED');
+        return;
+      }
       if (Object.hasOwn(previous.data.feedbackQuestions ?? {}, feedback.eventId)
-        && previous.data.feedbackQuestions?.[feedback.eventId] !== (previous.data.pendingQuestion ?? previous.data.questionAnswer?.key ?? null)) return;
+        && previous.data.feedbackQuestions?.[feedback.eventId] !== (previous.data.pendingQuestion ?? previous.data.questionAnswer?.key ?? null)) {
+        if (explicit) throw error('BOT_QUESTION_CHANGED');
+        return;
+      }
       if (previous.data.questionAnswer && !previous.data.pendingQuestion) {
         const bot = (await config.read(projectId)).definitions.find((entry) => entry.id === item.botId);
         if (!bot) throw error('BOT_DEFINITION_REQUIRED');

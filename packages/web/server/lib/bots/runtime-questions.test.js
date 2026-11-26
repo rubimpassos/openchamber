@@ -86,6 +86,10 @@ it('requires item.ask operation IDs, replays the same event while waiting and re
   expect((await driver.current()).state).toBe('fixing');
   await driver.ask('next-question');
   const pending = (await driver.execution()).data.pendingQuestion;
+  await expect(driver.runtime.answer('project', driver.item.id, { eventId: 'stale-explicit', text: 'Answer to the first question' },
+    { explicit: true, questionKey: first.question.key })).rejects.toMatchObject({ code: 'BOT_QUESTION_CHANGED', status: 409 });
+  await expect(driver.runtime.answer('project', driver.item.id, { eventId: 'tool-reply', text: 'Keep the API' },
+    { explicit: true, questionKey: pending })).rejects.toMatchObject({ code: 'BOT_QUESTION_CHANGED', status: 409 });
   await driver.runtime.answer('project', driver.item.id, { eventId: 'tool-reply', text: 'Keep the API' });
   expect((await driver.execution()).data.pendingQuestion).toBe(pending);
   expect((await driver.current()).state).toBe('waiting-answer');

@@ -12,7 +12,7 @@ import type { createTokenSnapshotReader } from '../pr-fix-loop/token-usage.js';
 import type { createSessionKnowledgeRuntime } from '../session-knowledge/runtime.js';
 import { createBotConversationDispatch } from './conversation-dispatch.js';
 import type { BotArtifactBinding } from './artifacts-contract.js';
-import type { SessionSwitchModelInput } from '@opencode/client';
+import { isSessionNotFoundError, type SessionSwitchModelInput } from '@opencode/client';
 
 const recordSchema = z.object({ capture: conversationCaptureSchema, state: z.enum(['allocating', 'ready']) }).strict();
 const infoSchema = z.object({
@@ -67,8 +67,18 @@ export function createBotConversationSessions({ dataDir, clientFor, activity, re
   const ensure = (input: ConversationCapture) => records.own(keyFor(input), async () => {
     const previous = await records.read(keyFor(input));
     if (previous && JSON.stringify(previous.capture) !== JSON.stringify(input)) refuse('BOT_CONVERSATION_CAPTURE_CHANGED');
-    if (!previous) {
-      await records.write(keyFor(input), { capture: input, state: 'allocating' });
+    if (!previous) await records.write(keyFor(input), { capture: input, state: 'allocating' });
+    let shouldCreate = !previous;
+    if (previous?.state === 'allocating') {
+      try {
+        await verify(input);
+      } catch (error) {
+        if (!isSessionNotFoundError(error) || error.sessionID !== input.conversation.sessionId
+          || !Object.hasOwn(error, 'message') || typeof error.message !== 'string') throw error;
+        shouldCreate = true;
+      }
+    }
+    if (shouldCreate) {
       const { selection, conversation } = input;
       let model: SessionSwitchModelInput['model'] = { providerID: selection.providerID, id: selection.modelID };
       if (selection.variant) model = { ...model, variant: selection.variant };

@@ -7,6 +7,7 @@ import { createBotExecutionStore } from './execution-store.js';
 import { createBotConversationSessions } from './conversation-sessions.js';
 import { conversationCaptureSchema } from './conversation-contract.js';
 import { assertBotLeadControl } from '../session-lead/bot-guidance.js';
+import { OpenCode } from '@opencode/client';
 
 const roots = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -61,24 +62,83 @@ it('keeps one root lead through concurrent opens, coordinator restart, Stop and 
   await restarted.stop();
 });
 
-it('reconciles an uncertain creation from its recorded session without creating a second lead', async () => {
+it.each([false, true])('recovers interrupted allocation with its persisted ID when creation reached OpenCode: %s', async (created) => {
   const f = await fixture();
   const admitted = await f.admit();
   const journal = createBotExecutionStore({ store: f.store });
   const saved = await journal.read('project', admitted.id);
   const capture = conversationCaptureSchema.parse(saved.data.conversationCapture);
   const original = f.client.session.create;
-  f.client.session.create = async (input) => { await original(input); throw new Error('Lost response'); };
+  f.client.session.create = async (input) => { if (created) await original(input); throw new Error('Lost response'); };
+  f.client.session.get = OpenCode.make({ baseUrl: 'http://opencode.invalid', fetch: async (url) => {
+    const sessionID = new URL(url).pathname.split('/').pop();
+    const info = f.sessions.get(sessionID);
+    return info ? Response.json({ data: info })
+      : Response.json({ _tag: 'SessionNotFoundError', sessionID, message: 'Session not found' }, { status: 404 });
+  } }).session.get;
   const target = { ...capture, itemId: 'second', conversation: { ...capture.conversation, sessionId: 'ses_uncertain' } };
-  const execution = createBotConversationSessions({ dataDir: path.join(f.project.path, 'other-owner'), clientFor: () => f.client,
+  const options = { dataDir: path.join(f.project.path, 'other-owner'), clientFor: () => f.client,
     readTokens: async () => 0, knowledge: { sync: async () => true },
-    activity: { fetchActiveSessionStatuses: async () => ({}), hasWorkingDescendants: async () => false } });
-  await expect(execution.ensure(target)).rejects.toThrow('Lost response');
+    activity: { fetchActiveSessionStatuses: async () => ({}), hasWorkingDescendants: async () => false } };
+  await expect(createBotConversationSessions(options).ensure(target)).rejects.toThrow('Lost response');
   f.client.session.create = original;
-  expect(await execution.ensure(target)).toEqual(target.conversation);
+  const restarted = createBotConversationSessions(options);
+  await expect(restarted.ensure({ ...target, title: 'Changed capture' })).rejects.toMatchObject({ code: 'BOT_CONVERSATION_CAPTURE_CHANGED' });
+  expect(await restarted.ensure(target)).toEqual(target.conversation);
+  expect(f.calls.sessions.filter((session) => session.id === 'ses_uncertain')).toHaveLength(1);
+  expect(f.sessions.get('ses_uncertain')).toMatchObject({ location: { directory: target.conversation.directory },
+    model: { providerID: target.selection.providerID, id: target.selection.modelID },
+    metadata: { openchamber: { lead: { at: target.conversation.createdAt }, automation: { itemId: target.itemId } } } });
+  expect(await createBotConversationSessions(options).ensure(target)).toEqual(target.conversation);
   expect(f.calls.sessions.filter((session) => session.id === 'ses_uncertain')).toHaveLength(1);
   f.sessions.get('ses_uncertain').metadata.openchamber.automation.itemId = 'other';
-  await expect(execution.read(target)).rejects.toMatchObject({ code: 'BOT_CONVERSATION_SESSION_MISMATCH' });
+  await expect(restarted.ensure(target)).rejects.toMatchObject({ code: 'BOT_CONVERSATION_SESSION_MISMATCH' });
+  f.sessions.delete('ses_uncertain');
+  await expect(restarted.ensure(target)).rejects.toMatchObject({ _tag: 'SessionNotFoundError' });
+  expect(f.calls.sessions.filter((session) => session.id === 'ses_uncertain')).toHaveLength(1);
+});
+
+it.each([
+  ['unavailable', () => Response.json({}, { status: 503 })],
+  ['transport', () => { throw new TypeError('Connection closed'); }],
+  ['unauthorized', () => Response.json({ _tag: 'UnauthorizedError', message: 'Unauthorized' }, { status: 401 })],
+  ['generic 404', () => Response.json({ message: 'Not found' }, { status: 404 })],
+  ['missing location', () => Response.json({ _tag: 'LocationNotFoundError', message: 'Location missing' }, { status: 404 })],
+  ['wrong missing identity', () => Response.json({ _tag: 'SessionNotFoundError', sessionID: 'ses_other', message: 'Missing' }, { status: 404 })],
+  ['malformed missing', () => Response.json({ _tag: 'SessionNotFoundError' }, { status: 404 })],
+  ['missing error message', () => Response.json({ _tag: 'SessionNotFoundError', sessionID: 'ses_uncertain' }, { status: 404 })],
+  ['invalid JSON', () => new Response('{', { headers: { 'content-type': 'application/json' } })],
+  ['empty success', () => Response.json({ data: null })],
+  ['malformed success', () => Response.json({ data: { id: 'ses_uncertain' } })],
+  ['wrong scope', (_url, input) => Response.json({ data: { ...input, parentID: 'ses_parent',
+    metadata: { openchamber: { lead: { at: input.conversation.createdAt }, automation: {
+      source: 'bot', role: 'conversation', projectId: input.project.id, botId: input.botId, itemId: input.itemId,
+    } } }, id: input.conversation.sessionId, location: { directory: input.conversation.directory } } })],
+])('preserves interrupted allocation without another create after %s lookup', async (_name, response) => {
+  const f = await fixture();
+  const admitted = await f.admit();
+  const saved = await createBotExecutionStore({ store: f.store }).read('project', admitted.id);
+  const capture = conversationCaptureSchema.parse(saved.data.conversationCapture);
+  const target = { ...capture, itemId: 'second', conversation: { ...capture.conversation, sessionId: 'ses_uncertain' } };
+  const original = f.client.session.create;
+  f.client.session.create = async () => { throw new Error('Before creation'); };
+  const options = { dataDir: path.join(f.project.path, 'other-owner'), clientFor: () => f.client,
+    readTokens: async () => 0, knowledge: { sync: async () => true },
+    activity: { fetchActiveSessionStatuses: async () => ({}), hasWorkingDescendants: async () => false } };
+  await expect(createBotConversationSessions(options).ensure(target)).rejects.toThrow('Before creation');
+  f.client.session.create = original;
+  f.client.session.get = OpenCode.make({ baseUrl: 'http://opencode.invalid',
+    fetch: async (url) => response(url, target) }).session.get;
+  await expect(createBotConversationSessions(options).ensure(target)).rejects.toBeDefined();
+  expect(f.calls.sessions.filter((session) => session.id === target.conversation.sessionId)).toEqual([]);
+  f.client.session.get = OpenCode.make({ baseUrl: 'http://opencode.invalid', fetch: async () => {
+    const info = f.sessions.get(target.conversation.sessionId);
+    return info ? Response.json({ data: info }) : Response.json({ _tag: 'SessionNotFoundError',
+      sessionID: target.conversation.sessionId, message: 'Session not found' }, { status: 404 });
+  } }).session.get;
+  const restarted = createBotConversationSessions(options);
+  expect(await Promise.all([restarted.ensure(target), restarted.ensure(target)])).toEqual([target.conversation, target.conversation]);
+  expect(f.calls.sessions.filter((session) => session.id === target.conversation.sessionId)).toHaveLength(1);
 });
 
 it('charges lead usage separately once and refuses normal chat after the shared daily budget is exhausted', async () => {
@@ -112,7 +172,8 @@ it('leaves the coordinator question pending on ordinary chat and accepts only it
   expect((await f.runtime.detail('project', item.id)).questionKey).toBe(waiting.questionKey);
   await expect(f.runtime.answer('project', item.id, { eventId: 'missing-key', text: 'Do it' }, { explicit: true }))
     .rejects.toMatchObject({ code: 'BOT_QUESTION_KEY_REQUIRED' });
-  await f.runtime.answer('project', item.id, { eventId: 'wrong-answer', text: 'Do it' }, { explicit: true, questionKey: 'stale-key' });
+  await expect(f.runtime.answer('project', item.id, { eventId: 'wrong-answer', text: 'Do it' },
+    { explicit: true, questionKey: 'stale-key' })).rejects.toMatchObject({ code: 'BOT_QUESTION_CHANGED', status: 409 });
   expect((await f.runtime.detail('project', item.id)).item.state).toBe('waiting-answer');
   await f.runtime.answer('project', item.id, { eventId: 'exact-answer', text: 'Do it' }, { explicit: true, questionKey: waiting.questionKey });
   expect((await f.runtime.detail('project', item.id)).questionKey).toBeUndefined();

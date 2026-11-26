@@ -36,7 +36,14 @@ owners deferred until the request is handled.
 - A conversation has no parent and has the server-owned automation marker with
   `source: bot`, project, bot, item and `role: conversation`, plus `lead.at`.
 - Session allocation uses a persisted identity before the SDK create. Uncertain
-  allocation reconciles that identity; it never creates a replacement.
+  allocation reconciles that identity; it never creates a replacement. Under the
+  execution journal's owner lock, an `allocating` record first verifies the SDK
+  session. Only a thrown `SessionNotFoundError` carrying that exact `sessionID`
+  and a string message permits creation with the saved capture and ID. Existing
+  sessions must pass the root, directory, automation scope and lead-time checks.
+  Transport failures, other errors and malformed responses preserve the
+  allocation for a later attempt without issuing create. A `ready` record whose
+  session is missing fails; it does not recreate a previously established lead.
 - Opening retained conversation information requires neither the bot definition
   nor its checkout. Sending still requires an active item and enabled bot.
 - User chat does not answer a coordinator question or Resume an interrupted item.
@@ -113,6 +120,15 @@ admission. Ordinary leads and overflow compaction inside an admitted turn retain
 their existing behavior.
 
 ## Decisions
+
+### Why interrupted allocation reads before creating again
+
+The process can stop after saving `allocating` but before OpenCode stores the
+session. Creation can also succeed while its response is lost. The SDK's
+session-specific missing error distinguishes these outcomes; a generic 404,
+missing location or failed read cannot authorize creation. Preparation and the
+`ready` write follow verification, so a failed create or preparation retains the
+same capture for recovery without allocating a new identity.
 
 ### Why the conversation queue has its own revision
 

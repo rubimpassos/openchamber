@@ -42,7 +42,10 @@ contract is in [conversation-contract.md](conversation-contract.md).
 - `POST .../:botId/run`, body `{ occurrence? }`.
 - `GET|POST .../items`, POST body `{ botId, source, title, description?, evidence? }`.
 - `GET .../items/:itemId` includes the complete proof, absence reason, judgment, evidence and retained stage reports/diff for active or archived items. Archived inspection never starts a stage or reads a provider; mutations remain restricted to active items.
-- `POST .../items/:itemId/answer`, body `{ text, eventId }`.
+- `POST .../items/:itemId/answer`, body `{ text, eventId, questionKey? }`.
+  Explicit answers require the current question key when one is pending.
+  A stale key or an event already attributed to another question returns
+  `BOT_QUESTION_CHANGED` with HTTP 409, preserving the caller's unsent draft.
 - `POST .../items/:itemId/resume`, body `{}`. Repairs a pending tool request under the original logical key after proven pre-dispatch failure, or reconciles its original uncertain effect by reads. It cannot re-send ambiguous writes.
 - `POST .../items/:itemId/stop`, body `{}`.
 - `GET .../archive?month=YYYY-MM`.
