@@ -11,7 +11,7 @@
  */
 import React from 'react';
 
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 import {
@@ -39,47 +39,16 @@ import {
   setServerBrowserColorScheme,
   setServerBrowserDevTools,
   stopServerBrowser,
-  type ServerBrowserCapture,
   type ServerBrowserResult,
 } from './client';
+import type { ServerBrowserConnection } from './connectionTypes';
 import { emptiedChatPanelTabs } from './panelTabs';
 import { useServerBrowserSharedState } from './sharedState';
-import { findSelectedScope, type ServerBrowserScope, type ServerBrowserState } from './types';
+import { findSelectedScope, type ServerBrowserState } from './types';
 
 const POLL_MS = 2_000;
 const STATE_WAIT_MS = 15_000;
 const POLL_MS_HIDDEN = 10_000;
-
-type ServerBrowserConnection = {
-  readonly state: ServerBrowserState | null;
-  readonly scope: ServerBrowserScope | null;
-  readonly sessionId: string | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-  readonly refresh: () => Promise<void>;
-  readonly navigate: (url: string) => Promise<ServerBrowserState | null>;
-  readonly back: () => Promise<ServerBrowserState | null>;
-  readonly forward: () => Promise<ServerBrowserState | null>;
-  readonly reload: () => Promise<ServerBrowserState | null>;
-  readonly stop: () => Promise<ServerBrowserState | null>;
-  /** Resolves to the state after the tab opened (its active tab is the new one), or null on failure. */
-  readonly newTab: () => Promise<ServerBrowserState | null>;
-  readonly selectTab: (tabId: string) => Promise<ServerBrowserState | null>;
-  readonly closeTab: (tabId: string) => Promise<ServerBrowserState | null>;
-  readonly setViewport: (viewport: { mode: 'auto' | 'fixed'; mobile: boolean; width?: number; height?: number }) => Promise<ServerBrowserState | null>;
-  readonly setZoom: (level: number) => Promise<ServerBrowserState | null>;
-  readonly setColorScheme: (scheme: 'system' | 'light' | 'dark') => Promise<ServerBrowserState | null>;
-  readonly setDevTools: (open: boolean) => Promise<ServerBrowserState | null>;
-  readonly clearData: (what: 'cookies' | 'cache') => Promise<ServerBrowserState | null>;
-  readonly selectScope: (scopeId: string) => Promise<ServerBrowserState | null>;
-  readonly closeScope: (scopeId: string) => Promise<ServerBrowserState | null>;
-  readonly evaluate: (expression: string, userGesture?: boolean) => Promise<unknown>;
-  readonly capture: () => Promise<ServerBrowserCapture | null>;
-  /** Resolve to null when the answer was refused (the dialog or request is gone, someone else is in control). */
-  readonly answerDialog: (answer: { tabId: string; dialogId: number; accept: boolean; promptText?: string }) => Promise<ServerBrowserState | null>;
-  readonly answerFileChooser: (answer: { tabId: string; chooserId: number; files: readonly string[] | null }) => Promise<ServerBrowserState | null>;
-  readonly answerProfileRequest: (approve: boolean) => Promise<ServerBrowserState | null>;
-};
 
 export const useServerBrowserConnection = (
   guestId: string,
@@ -90,6 +59,16 @@ export const useServerBrowserConnection = (
   /** A profile being signed into from Settings: show its sign-in browser instead of the chat's. */
   signInProfileId: string | null = null,
 ): ServerBrowserConnection => {
+  const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
+  const owner = React.useMemo(
+    () => ({ guestId, viewerId, runtimeKey, isRuntimeCurrent: captureRuntimeInstance(), mounted: false }),
+    [guestId, runtimeKey, viewerId],
+  );
+  React.useEffect(() => {
+    owner.mounted = true;
+    return () => { owner.mounted = false; };
+  }, [owner]);
+  const isCurrent = React.useCallback(() => owner.mounted && owner.isRuntimeCurrent(), [owner]);
   const sessionId = useSessionUIStore((storeState) => storeState.currentSessionId);
   const [state, setState] = React.useState<ServerBrowserState | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -118,29 +97,34 @@ export const useServerBrowserConnection = (
   }, [showsOtherChat]);
 
   const applyState = React.useCallback((next: ServerBrowserState) => {
-    useServerBrowserSharedState.getState().publish(guestId, getRuntimeKey(), next);
+    if (!isCurrent()) return;
+    useServerBrowserSharedState.getState().publish(owner.guestId, owner.runtimeKey, next);
     // A held request that timed out returns the same state; nothing to render.
     if (next.version && next.version === stateRef.current?.version) return;
     stateRef.current = next;
     generationRef.current = next.generation;
     setState(next);
     setError(null);
-  }, [guestId]);
+  }, [isCurrent, owner]);
 
   const act = React.useCallback(async (
     fn: (generation: number) => Promise<ServerBrowserResult<ServerBrowserState>>,
     targetsSelectedView = true,
   ): Promise<ServerBrowserState | null> => {
+    if (!isCurrent()) return null;
     const originalViewId = stateRef.current?.viewId;
     let result = await fn(generationRef.current);
+    if (!isCurrent()) return null;
     // A fresh generation may belong to another chat or Chrome tab. Only a
     // command naming its own target may follow that change on retry.
     if (!result.ok && isServerBrowserViewChanged(result.error)) {
-      const current = await getServerBrowserState(guestId, viewerId);
+      const current = await getServerBrowserState(owner.guestId, owner.viewerId);
+      if (!isCurrent()) return null;
       if (current.ok) {
         applyState(current.data);
         if (!targetsSelectedView || (originalViewId != null && current.data.viewId === originalViewId)) {
           result = await fn(current.data.generation);
+          if (!isCurrent()) return null;
         }
       }
     }
@@ -150,17 +134,19 @@ export const useServerBrowserConnection = (
     }
     setError(result.error);
     return null;
-  }, [applyState, guestId, viewerId]);
+  }, [applyState, isCurrent, owner]);
 
   const refresh = React.useCallback(async (): Promise<void> => {
-    const result = await getServerBrowserState(guestId, viewerId);
+    if (!isCurrent()) return;
+    const result = await getServerBrowserState(owner.guestId, owner.viewerId);
+    if (!isCurrent()) return;
     if (result.ok) {
       applyState(result.data);
     } else {
       setError(result.error);
     }
     setLoading(false);
-  }, [applyState, guestId, viewerId]);
+  }, [applyState, isCurrent, owner]);
 
   // Attaches this chat's scope (creating it if needed) and brings it to the
   // front of the shared surface. Re-runs when the current chat changes, so
@@ -171,14 +157,15 @@ export const useServerBrowserConnection = (
       let cancelled = false;
       void (async () => {
         const current = await getServerBrowserState(guestId, viewerId);
-        if (cancelled || !current.ok) { setLoading(false); return; }
+        if (cancelled || !isCurrent()) return;
+        if (!current.ok) { setLoading(false); return; }
         applyState(current.data);
         const signInScope = current.data.scopes.find((entry) => entry.directory === `profile:${signInProfileId}`);
         if (signInScope && current.data.selectedScopeId !== signInScope.id) {
           const selected = await selectServerBrowserScope(guestId, viewerId, { scopeId: signInScope.id, generation: current.data.generation });
-          if (!cancelled && selected.ok) applyState(selected.data);
+          if (!cancelled && isCurrent() && selected.ok) applyState(selected.data);
         }
-        if (!cancelled) setLoading(false);
+        if (!cancelled && isCurrent()) setLoading(false);
       })();
       return () => { cancelled = true; };
     }
@@ -191,7 +178,7 @@ export const useServerBrowserConnection = (
       // One retry covers a change that lands between the read and the open.
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const current = await getServerBrowserState(guestId, viewerId);
-        if (cancelled) return;
+        if (cancelled || !isCurrent()) return;
         if (current.ok) applyState(current.data);
         // Its browser closed with its last tab: the view closes the panel
         // tabs that showed it instead of opening a new, empty browser.
@@ -201,7 +188,7 @@ export const useServerBrowserConnection = (
           sessionId,
           generation: generationRef.current,
         });
-        if (cancelled) return;
+        if (cancelled || !isCurrent()) return;
         if (result.ok) {
           applyState(result.data);
           break;
@@ -211,7 +198,7 @@ export const useServerBrowserConnection = (
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [applyState, directory, enabled, guestId, reopenRequest, sessionId, signInProfileId, viewerId]);
+  }, [applyState, directory, enabled, guestId, isCurrent, reopenRequest, sessionId, signInProfileId, viewerId]);
 
   // Tells the service our pixel ratio once a viewer is attached, so a
   // high-DPI client gets crisp frames from the start.
@@ -228,19 +215,19 @@ export const useServerBrowserConnection = (
     // the address bar, tabs, and loading state follow the page at once. A
     // hidden window or a failed request falls back to a slow poll.
     const tick = async () => {
-      if (disposed) return;
+      if (disposed || !isCurrent()) return;
       const since = stateRef.current?.version;
       const visible = document.visibilityState !== 'hidden';
       const result = await getServerBrowserState(guestId, viewerId, since && visible ? { since, waitMs: STATE_WAIT_MS } : undefined);
-      if (!disposed && result.ok) applyState(result.data);
-      if (disposed) return;
+      if (disposed || !isCurrent()) return;
+      if (result.ok) applyState(result.data);
       const delay = !visible ? POLL_MS_HIDDEN : result.ok && result.data.version ? 0 : POLL_MS;
       timer = setTimeout(tick, delay);
     };
     let timer = setTimeout(tick, 0);
     const stopFollowing = useServerBrowserSharedState.getState().follow(guestId);
     return () => { disposed = true; clearTimeout(timer); stopFollowing(); };
-  }, [applyState, enabled, guestId, viewerId]);
+  }, [applyState, enabled, guestId, isCurrent, viewerId]);
 
   const scope = React.useMemo(() => findSelectedScope(state), [state]);
 
@@ -267,17 +254,20 @@ export const useServerBrowserConnection = (
     selectScope: (scopeId) => act((generation) => selectServerBrowserScope(guestId, viewerId, { scopeId, generation }), false),
     closeScope: (scopeId) => act((generation) => closeServerBrowserScope(guestId, viewerId, { scopeId, generation }), false),
     evaluate: async (expression, userGesture) => {
+      if (!isCurrent()) return null;
       const result = await evaluateServerBrowserPage(guestId, viewerId, {
         generation: generationRef.current,
         expression,
         userGesture,
       });
+      if (!isCurrent()) return null;
       if (!result.ok) throw new Error(result.error);
       return result.data.value;
     },
     capture: async () => {
+      if (!isCurrent()) return null;
       const result = await captureServerBrowserPage(guestId, viewerId, { generation: generationRef.current });
-      return result.ok ? result.data : null;
+      return isCurrent() && result.ok ? result.data : null;
     },
     // A dialog or file request is named by its own ids, so these need no generation.
     answerDialog: (answer) => act(() => answerServerBrowserDialog(guestId, viewerId, answer), false),

@@ -1,3 +1,4 @@
+// allow: SIZE_OK: One HTTP connection ownership suite shares runtime, DOM and held-response fixtures.
 import { act } from 'react';
 import { expect, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
@@ -5,7 +6,7 @@ import type { ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@/lib/runtime-url';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { serveTestHttp } from '@/lib/test-http-server';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { monitoredBrowsers } from './monitoredBrowsers';
@@ -31,6 +32,122 @@ const snapshot = (lastActivityAt: number): ServerBrowserState => ({
     viewport: null, problems: { errors: 0, warnings: 0 }, zoomLevel: 0, lastActivityAt,
   }],
 });
+
+for (const retirement of ['runtime switch', 'unmount'] as const) {
+  for (const operation of ['navigate', 'refresh', 'viewer', 'retry'] as const) {
+    test(`a held ${operation} cannot publish or retry after ${retirement}`, async () => {
+      const previousRuntime = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+      const previousResolver = getRuntimeUrlResolver();
+      const previousSession = useSessionUIStore.getState().currentSessionId;
+      const dom = installHookTestDom();
+      const root = createRoot(dom.container);
+      let receiveHeld: (response: ServerResponse) => void = () => { throw new Error('Held response barrier is not initialized'); };
+      const held = new Promise<ServerResponse>((resolve) => { receiveHeld = resolve; });
+      let receiveConsumed: () => void = () => { throw new Error('Body consumption barrier is not initialized'); };
+      const consumed = new Promise<void>((resolve) => { receiveConsumed = resolve; });
+      const originalFetch = globalThis.fetch;
+      // Observe consumption of the real HTTP body. The viewer effect has no public promise.
+      globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+        const response = await originalFetch(...args);
+        if (response.headers.has('x-held-response')) {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            try { return await json(); }
+            finally { setImmediate(receiveConsumed); }
+          };
+        }
+        return response;
+      }, originalFetch);
+      let holdNext = false;
+      const requests: string[] = [];
+      const requestSchema = z.object({ path: z.string() });
+      const serverA = await serveTestHttp(async (request, response) => {
+        if (!request.url?.endsWith('/service/request')) { response.writeHead(404).end(); return; }
+        let body = '';
+        for await (const chunk of request) body += String(chunk);
+        const { path } = requestSchema.parse(JSON.parse(body));
+        requests.push(path);
+        response.setHeader('Content-Type', 'application/json');
+        if (holdNext && path === (operation === 'viewer' ? '/browser/viewer' : operation === 'refresh' ? '/browser/state' : '/browser/navigate')) {
+          holdNext = false;
+          response.setHeader('x-held-response', 'true');
+          receiveHeld(response);
+          return;
+        }
+        response.end(JSON.stringify({ status: 200, body: JSON.stringify(snapshot(60_000)) }));
+      });
+      const requestsB: string[] = [];
+      const serverB = await serveTestHttp(async (request, response) => {
+        if (!request.url?.endsWith('/service/request')) { response.writeHead(404).end(); return; }
+        let body = '';
+        for await (const chunk of request) body += String(chunk);
+        requestsB.push(requestSchema.parse(JSON.parse(body)).path);
+        response.end(JSON.stringify({ status: 200, body: JSON.stringify({ ...snapshot(240_000), generation: 2 }) }));
+      });
+      let shown: ReturnType<typeof useServerBrowserConnection> | null = null;
+      const Probe = ({ viewer = false, enabled = viewer }: { viewer?: boolean; enabled?: boolean }) => {
+        shown = useServerBrowserConnection(GUEST, DIRECTORY, viewer ? 'held-viewer' : undefined, enabled);
+        return null;
+      };
+      const connection = () => {
+        if (!shown) throw new Error('The Browser connection did not mount');
+        return shown;
+      };
+      let pending: Promise<ServerBrowserState | null | void> = Promise.resolve();
+      try {
+        switchRuntimeEndpoint({ apiBaseUrl: serverA.url.toString(), runtimeKey: 'connection-a' });
+        await act(async () => root.render(<Probe />));
+        await act(async () => connection().refresh());
+        const original = connection();
+        holdNext = true;
+        await act(async () => {
+          if (operation === 'viewer') root.render(<Probe viewer />);
+          else pending = operation === 'refresh' ? original.refresh() : original.navigate('https://example.com/held');
+        });
+        const response = await held;
+        await act(async () => {
+          if (retirement === 'runtime switch') {
+            switchRuntimeEndpoint({ apiBaseUrl: serverB.url.toString(), runtimeKey: 'connection-b' });
+            // Keep the viewer identity but stop live polling, so only the held callback can reach B.
+            if (operation === 'viewer') root.render(<Probe viewer enabled={false} />);
+          }
+          else root.render(null);
+        });
+        const current = snapshot(180_000);
+        useServerBrowserSharedState.getState().publish(GUEST, getRuntimeKey(), current);
+        const requestCount = requests.length;
+        let result: ServerBrowserState | null | void = undefined;
+        await act(async () => {
+          response.end(JSON.stringify(operation === 'retry'
+            ? { status: 409, body: JSON.stringify({ error: 'The browser view changed before the dock command ran' }) }
+            : { status: 200, body: JSON.stringify(snapshot(300_000)) }));
+          result = await pending;
+          await consumed;
+        });
+        expect(monitoredBrowsers(publishedServerBrowserState(useServerBrowserSharedState.getState(), GUEST, getRuntimeKey()), DIRECTORY)[0]?.lastActiveMinute).toBe(180_000);
+        await act(async () => {
+          await original.refresh();
+          expect(await original.navigate('https://example.com/retired')).toBeNull();
+        });
+        expect(requestsB).toEqual([]);
+        expect(requests.slice(requestCount)).toEqual([]);
+        if (operation === 'navigate' || operation === 'retry') expect(result).toBeNull();
+      } finally {
+        holdNext = false;
+        serverA.close();
+        serverB.close();
+        await pending;
+        await act(async () => root.unmount());
+        useServerBrowserSharedState.getState().clear(GUEST);
+        useSessionUIStore.setState({ currentSessionId: previousSession });
+        switchRuntimeEndpoint(previousRuntime);
+        setRuntimeUrlResolver(previousResolver);
+        globalThis.fetch = originalFetch;
+        dom.restore();
+      }
+    });
+  }
+}
 
 for (const { name, viewId, sessionId, operation, retries } of [
   { name: 'another chat', viewId: 'other-chat-view', sessionId: 'other-session', operation: 'navigate', retries: false },
