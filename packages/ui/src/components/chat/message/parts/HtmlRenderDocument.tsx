@@ -123,7 +123,7 @@ export function HtmlRenderDocument({
       const message = readHtmlRenderFrameMessage(event);
       if (message?.kind === 'size') {
         setShown(true);
-        onContentHeight?.(message.height);
+        onContentHeight?.(message.height === 0 ? frame.clientHeight : message.height);
       }
       if (message?.kind === 'open-link') void openExternalUrl(message.url);
       if (message?.kind === 'key') replayKeyChord(frame, message.chord);

@@ -23,15 +23,35 @@ const listFailureKeys = {
 } satisfies Record<BotArtifactFailure, I18nKey>;
 const loadArtifactView = () => import('./BotRenderArtifactView').then((module) => module.BotRenderArtifactView);
 
+type ArtifactViewer = { readonly artifact: BotArtifact } & (
+  | { readonly phase: 'preparing' | 'presented' }
+  | { readonly phase: 'closing'; readonly retry: (() => void) | null }
+);
+
 function BotArtifacts({ projectId, itemId, kind, readOnly, read }: {
   readonly projectId: string; readonly itemId: string; readonly kind: BotArtifact['kind']; readonly readOnly: boolean;
   readonly read: ReturnType<typeof useBotArtifacts>;
 }) {
   const { t, locale } = useI18n();
-  const [viewer, setViewer] = React.useState<{ readonly artifact: BotArtifact; readonly open: boolean } | null>(null);
+  const [viewer, setViewer] = React.useState<ArtifactViewer | null>(null);
   const opener = React.useRef<HTMLButtonElement | null>(null);
   const [viewFailed, setViewFailed] = React.useState(false);
-  const View = useOnDemandComponent(viewer !== null, loadArtifactView, () => { setViewer(null); setViewFailed(true); });
+  const failView = () => { setViewer(null); setViewFailed(true); };
+  const View = useOnDemandComponent(viewer !== null, loadArtifactView, failView);
+  const preparingId = viewer?.phase === 'preparing' ? viewer.artifact.id : null;
+  const ready = React.useCallback(() => setViewer((current) => (
+    current === viewer && current?.phase === 'preparing' ? { artifact: current.artifact, phase: 'presented' } : current
+  )), [viewer]);
+  const close = (retry: (() => void) | null) => setViewer((current) => (
+    current?.phase === 'presented' ? { artifact: current.artifact, phase: 'closing', retry } : current
+  ));
+  const closed = () => {
+    if (viewer?.phase !== 'closing') return;
+    if (!viewer.retry) { setViewer(null); return; }
+    setViewer({ artifact: viewer.artifact, phase: 'preparing' });
+    viewer.retry();
+  };
+  const cancel = () => { setViewer(null); opener.current?.focus(); };
   const artifacts = read.data?.filter((artifact) => artifact.kind === kind) ?? [];
   return <SettingsSection title={t('bots.artifacts.title')} contentClassName="space-y-2 typography-meta">
     {read.failure ? <div role="alert" className="flex flex-wrap items-center gap-2 text-[var(--status-error-text)]">
@@ -40,17 +60,22 @@ function BotArtifacts({ projectId, itemId, kind, readOnly, read }: {
     {viewFailed ? <p role="alert" className="text-[var(--status-error-text)]">{t('bots.artifacts.viewFailed')}</p> : null}
     {!read.data && !read.failure ? <p role="status" className="text-muted-foreground">{t('common.loading')}</p> : null}
     {read.data && artifacts.length === 0 ? <p className="text-muted-foreground">{t(kind === 'evidence' ? 'bots.artifacts.emptyEvidence' : 'bots.artifacts.emptyDecisions')}</p> : null}
-    {artifacts.length ? <ul className="-mx-2 space-y-0.5">{artifacts.map((artifact) => <li key={artifact.id}>
-      <button type="button" onClick={(event) => { opener.current = event.currentTarget; setViewFailed(false); setViewer({ artifact, open: true }); }}
-        className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label text-foreground hover:bg-interactive-hover/50 pointer-coarse:!min-h-11 focus-visible:bg-interactive-hover/50 focus-visible:outline-none">
+    {artifacts.length ? <ul className="-mx-2 space-y-0.5">{artifacts.map((artifact) => <li key={artifact.id} className="flex min-w-0 items-center gap-1">
+      <button type="button" onClick={(event) => { opener.current = event.currentTarget; setViewFailed(false); setViewer({ artifact, phase: 'preparing' }); }}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label text-foreground hover:bg-interactive-hover/50 pointer-coarse:!min-h-11 focus-visible:bg-interactive-hover/50 focus-visible:outline-none">
         <span className="min-w-0 flex-1 truncate oc-ui-start-align" dir="auto" title={artifact.title}>{artifact.title}</span>
         <time className="shrink-0 typography-meta text-muted-foreground" dateTime={new Date(artifact.createdAt).toISOString()}>{new Date(artifact.createdAt).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}</time>
       </button>
+      {artifact.id === preparingId ? <>
+        <span role="status" className="shrink-0 typography-meta text-muted-foreground">{t('common.loading')}</span>
+        <Button size="xs" variant="ghost" onClick={cancel}>{t('settings.common.actions.cancel')}</Button>
+      </> : null}
     </li>)}</ul> : null}
-    <Dialog open={viewer?.open ?? false} onOpenChange={(open) => setViewer((current) => current && { ...current, open })}>
-      <DialogContent finalFocus={() => (opener.current?.isConnected ? opener.current : true)} className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+    <Dialog open={viewer?.phase === 'presented'} onOpenChange={(open) => { if (!open) close(null); }} onOpenChangeComplete={(open) => { if (!open) closed(); }}>
+      <DialogContent staged={viewer ? viewer.phase === 'preparing' : undefined} finalFocus={() => (opener.current?.isConnected ? opener.current : true)} className="max-h-[90dvh] max-w-3xl overflow-y-auto">
         <DialogTitle dir="auto" className="pe-8">{viewer?.artifact.title}</DialogTitle>
-        {viewer && View ? <View key={viewer.artifact.id} projectId={projectId} itemId={itemId} artifactId={viewer.artifact.id} readOnly={readOnly} /> : <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p>}
+        {viewer && View ? <View key={viewer.artifact.id} projectId={projectId} itemId={itemId} artifactId={viewer.artifact.id} readOnly={readOnly}
+          preparing={viewer.phase === 'preparing'} onReady={ready} onLoadFailed={failView} onRetry={close} /> : null}
       </DialogContent>
     </Dialog>
   </SettingsSection>;

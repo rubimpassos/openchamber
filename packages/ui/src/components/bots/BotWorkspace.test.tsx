@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { botItem, configuredBot } from '@/lib/bots/bots.fixture';
@@ -15,10 +15,17 @@ let item = botItem();
 let conversationAsks = 0;
 let artifactReads = 0;
 let artifactsFail: (() => Response | Promise<Response>) | null = null;
+/** One read of a page: whether a dialog stood open when it was asked for, and the signal that retires it. */
+let pageReads: { readonly dialogOpen: boolean; readonly signal: AbortSignal | null | undefined }[] = [];
+let pageAnswer: (() => Response | Promise<Response>) | null = null;
 // Only the HTTP boundary is replaced; the workspace, parsers and request owners are real.
 // Install before module imports so their startup reads use the same test transport.
-globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+  if (path.includes('/artifacts/')) {
+    pageReads.push({ dialogOpen: document.querySelector('[role="dialog"]') !== null, signal: init?.signal });
+    return pageAnswer ? pageAnswer() : Response.json({});
+  }
   if (path.endsWith('/conversation')) { conversationAsks += 1; return Response.json({ code: 'BOT_CONVERSATION_UNAVAILABLE' }, { status: 503 }); }
   if (path.endsWith('/artifacts')) {
     artifactReads += 1;
@@ -33,14 +40,19 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { BotWorkspace } = await import('./BotWorkspace');
+const { useUiBlockComponent } = await import('@/components/chat/uiBlocks/useUiBlockComponent');
 let root: Root;
 let renderObserver: MutationObserver | null = null;
+let rendererLoad: { mockRestore: () => void } | null = null;
 
 beforeEach(() => {
-  item = botItem(); conversationAsks = 0; artifactReads = 0; artifactsFail = null;
+  item = botItem(); conversationAsks = 0; artifactReads = 0; artifactsFail = null; pageReads = []; pageAnswer = null;
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
-afterEach(async () => { renderObserver?.disconnect(); renderObserver = null; await act(async () => root.unmount()); document.body.replaceChildren(); });
+afterEach(async () => {
+  renderObserver?.disconnect(); renderObserver = null; rendererLoad?.mockRestore(); rendererLoad = null;
+  await act(async () => root.unmount()); document.body.replaceChildren();
+});
 afterAll(async () => { globalThis.fetch = originalFetch; await dom.restore(); });
 
 const button = (label: string) => {
@@ -130,6 +142,117 @@ describe('Bot work context', () => {
 
     // Then focus is on the row that opened the page.
     expect(document.activeElement === row).toBe(true);
+  });
+
+  const openDecisions = async () => {
+    await open();
+    await act(async () => button('Work context').click());
+    await act(async () => button('Decisions').click());
+    return pageRow('Why the cache was rejected');
+  };
+  const openDialog = () => document.querySelector('[role="dialog"]');
+  const stagedPopup = () => document.querySelector('[data-slot="dialog-content"]');
+  const refused = () => Response.json({}, { status: 500 });
+  const heldAnswer = () => {
+    let answer: (response: Response) => void = () => {};
+    pageAnswer = () => new Promise<Response>((resolve) => { answer = resolve; });
+    return (response: Response) => act(async () => answer(response));
+  };
+
+  test('prepares a page out of sight beside its row and opens the dialog on what it prepared', async () => {
+    // Given a page whose read is still in flight after its row was pressed.
+    const answer = heldAnswer();
+    const row = await openDecisions();
+    const staging = waitFor(() => stagedPopup()?.querySelector('[data-retained-page="pending"]') != null);
+    await act(async () => row.click());
+    await staging;
+    const staged = stagedPopup();
+
+    // Then the row says it is loading and offers Cancel, and no dialog is open over the page.
+    expect(row.closest('li')?.querySelector('[role="status"]')?.textContent).toBe('Loading...');
+    expect(row.closest('li')?.textContent).toContain('Cancel');
+    expect(openDialog()).toBeNull();
+    expect(staged?.hasAttribute('inert')).toBe(true);
+    expect(document.documentElement.classList.contains('oc-dialog-open')).toBe(false);
+
+    // When the read settles and its content is laid out.
+    const opened = waitFor(() => openDialog() !== null);
+    await answer(refused());
+    await opened;
+
+    // Then the dialog is the popup that was prepared, showing what the read gave, and the row is back to rest.
+    expect(openDialog() === staged).toBe(true);
+    expect(openDialog()?.querySelector('[data-retained-page="failed"]')).not.toBeNull();
+    expect(row.closest('li')?.textContent).not.toContain('Cancel');
+  });
+
+  test('drops a page cancelled while it was being prepared', async () => {
+    // Given a page being prepared from its row.
+    const answer = heldAnswer();
+    const row = await openDecisions();
+    const staging = waitFor(() => stagedPopup()?.querySelector('[data-retained-page="pending"]') != null);
+    await act(async () => row.click());
+    await staging;
+    await act(async () => {});
+
+    // When the reader cancels and the read answers late.
+    await act(async () => button('Cancel').click());
+    await answer(refused());
+
+    // Then the read is retired, nothing prepared remains, no dialog opens and focus is back on the row.
+    expect(pageReads[0]?.signal?.aborted).toBe(true);
+    expect(stagedPopup()).toBeNull();
+    expect(openDialog()).toBeNull();
+    expect(row.closest('li')?.textContent).not.toContain('Cancel');
+    expect(document.activeElement === row).toBe(true);
+  });
+
+  test('asks again for a failed page only after its dialog has closed, and opens it once prepared', async () => {
+    // Given a page whose read failed, shown in its dialog.
+    pageAnswer = refused;
+    const row = await openDecisions();
+    const shown = waitFor(() => openDialog() !== null);
+    await act(async () => row.click());
+    await shown;
+
+    // When the reader tries again from the dialog.
+    const reopened = waitFor(() => pageReads.length === 2 && openDialog() !== null);
+    await act(async () => [...(openDialog()?.querySelectorAll('button') ?? [])].find((entry) => entry.textContent === 'Try again')?.click());
+    await reopened;
+
+    // Then neither read was asked for under an open dialog, whose size the answer would change.
+    expect(pageReads.map((read) => read.dialogOpen)).toEqual([false, false]);
+  });
+
+  test('ends the preparation of a page whose renderer cannot load, says so by the list, and tries again from its row', async () => {
+    // Given a UI page whose renderer chunk does not load.
+    const load = spyOn(useUiBlockComponent, 'load').mockImplementation(async () => { throw new Error('The renderer chunk did not load'); });
+    rendererLoad = load;
+    pageAnswer = () => Response.json({
+      artifact: artifact(2, 'decision', 'Why the cache was rejected'),
+      payload: { version: 1, body: { format: 'ui', content: 'root = Stack([go])\ngo = Button("Ship it")' }, assets: [] },
+    });
+    const row = await openDecisions();
+    const saysViewFailed = () => [...document.querySelectorAll('[data-bot-context-body] [role="alert"]')]
+      .some((entry) => entry.textContent === 'Could not open this page. Try again.');
+
+    // When its row is pressed.
+    const failed = waitFor(saysViewFailed);
+    await act(async () => row.click());
+    await failed;
+
+    // Then nothing is left being prepared and no dialog opened on the page's source.
+    expect(stagedPopup()).toBeNull();
+    expect(openDialog()).toBeNull();
+    expect(row.closest('li')?.textContent).not.toContain('Cancel');
+
+    // When the reader presses the row again.
+    const again = waitFor(() => load.mock.calls.length === 2 && saysViewFailed());
+    await act(async () => row.click());
+    await again;
+
+    // Then the page was read and its renderer asked for once more.
+    expect(pageReads).toHaveLength(2);
   });
 
   for (const { cause, says, refuse } of [

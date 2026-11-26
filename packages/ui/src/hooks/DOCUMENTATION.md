@@ -26,6 +26,11 @@ and success are distinct states, and `retry` repeats the read. Remembered
 snapshots are bounded by characters and dropped on a runtime switch; a mounted
 page holds its own copy.
 
+`useCommittedLayoutReady` notifies an owner after ready content has committed its
+DOM geometry. A staged dialog uses that boundary for measured HTML, a loaded UI
+renderer and a failed read. Render-time notification could expose provisional
+geometry; readiness never follows the loading row or iframe load alone.
+
 ### Session activity and queued sends
 
 - A pending permission or a form that still holds the turn makes a session idle, so the send button stays a send and the user can supersede the prompt. A form whose tool call has ended holds nothing, and the turn keeps Stop and Queue.

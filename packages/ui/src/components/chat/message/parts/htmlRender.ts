@@ -408,7 +408,7 @@ export interface HtmlRenderMark {
 }
 
 const frameMessageSchema = z.discriminatedUnion('type', [
-    z.object({ type: z.literal(SIZE_MESSAGE), height: z.number().positive() }),
+    z.object({ type: z.literal(SIZE_MESSAGE), height: z.number().nonnegative() }),
     z.object({ type: z.literal(OPEN_LINK_MESSAGE), url: z.string().regex(/^https?:\/\//i) }),
     keyChordSchema.extend({ type: z.literal(KEY_MESSAGE) }),
     z.object({

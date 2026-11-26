@@ -38,12 +38,32 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
   transcript, composer, model, attachment, permission or render code of its own.
 - A retained page in the record is the document the conversation draws for the
   same call: one owner read, the captured images and no live file or network
-  read. While that read is in flight the record shows a loading row, and when it
-  fails an error row with a retry (`RetainedPagePending`, `RetainedPageFailure`),
-  the same rows the conversation shows. Its question opens only while the server lists the call as waiting or
+  read. While that read is in flight the page's row in the list says it is
+  loading, and when it fails the dialog shows an error row with a retry
+  (`RetainedPageFailure`), the same row the conversation shows. Its question opens only while the server lists the call as waiting or
   keeps an open later page; otherwise the record shows how the owner read it
   settled. A read-only record (an archived or ended item) never answers,
   declines or reports a page, and says the answer belongs in the conversation.
+- A page's dialog first appears at the size of what it shows. A pressed row
+  prepares its page out of sight (`ArtifactViewer` in `BotContextPanel`): the
+  dialog root stays closed, the popup is staged (`DialogContent staged`), and
+  the row shows Loading with Cancel. The root opens only when the view reports
+  its content laid out (`onReady`): an HTML page after the first content
+  height its frame reports is applied, a UI page and a failed read after they
+  mount, a loading row never. The frame that was measured is the frame that
+  shows. A report opens the dialog only for the selection that is current;
+  Cancel and a replaced selection unmount the view and abort its read.
+- A UI page mounts in the native frame only after the UI renderer's chunk has
+  loaded (`UiArtifact`), so the page that is measured is the drawn page and never
+  its source. A chunk that does not load ends the preparation the way a view
+  that does not load does (`onLoadFailed`): the row returns to rest, the list
+  says the page could not be opened, and pressing the row tries again.
+- A page being prepared takes no answer or decline (`preparing`), and is laid
+  out with the item's real `readOnly`, so the size measured is the size shown.
+- Retry of a failed page closes the dialog first. The failure stays drawn while
+  the dialog closes, and the read is asked again only after the close has
+  completed, back in preparation, so neither the loading row nor the new answer
+  resizes a dialog on screen.
 - Evidence and Decisions show recorded proof and verdict above the bot's pages of
   that kind. The page list depends on `id`, `kind`, `title` and `createdAt` only.
   It is read while one of those tabs is open, and a failed read never reads as
@@ -133,6 +153,34 @@ A page is authored for the width of a chat reply. The panel is narrower than
 that on a desktop, so the dialog gives the page its intended width while the
 list stays where the user left it.
 
+### Why a page is prepared in a staged popup and not opened on a loading row
+
+Opening at once showed three heights in a row: the loading row, the frame's
+provisional 240px, then the page's own height, each on an opaque sheet. A fixed
+height or a remembered size cannot fix a first opening, and a second frame for
+measuring would load the page twice and split who answers it. The page is
+instead drawn once in the dialog's own popup while the root is closed, and the
+root opens on that same node. Readiness comes from the frame's first reported
+height because a frame's `load` fires before the page has measured itself.
+
+### Why the UI renderer is loaded before the native frame mounts and not inside it
+
+`UiPageFrame` draws a page's source in a `<pre>` until the renderer's chunk
+arrives, then swaps in the drawn page at another height. Its hook does not say
+whether the chunk is still loading or has failed, so readiness reported from
+the frame would either measure the source or wait forever. `UiArtifact` asks
+for the chunk through the renderer's own `load()`, which fills the cache the
+native hook reads, and mounts the unchanged native frame once it is there.
+
+### Why a prepared page is refused answers at the frame and not through `readOnly`
+
+`readOnly` changes what a waiting page draws: the read-only note, the decline
+button, and what the page is told about its question. Turning it off at the
+moment the dialog opens would resize the dialog on screen. Preparation instead
+hands the frame no submit or decline handler, which `HtmlRenderDocument`
+already refuses; a UI page needs nothing more, because the staged popup is
+inert and only a frame runs script of its own.
+
 ### Why the page list reads every page of results
 
 The server returns at most 100 entries per read and both tabs filter one list by
@@ -195,8 +243,8 @@ action instead of editing the server-managed scheduled definition.
 Focused tests cover the HTTP boundary, membership, read authority, evidence,
 atomic page transitions, managed targets, archive waits, real form-to-HTTP
 bot creation/editing, the photo round-trip and removal, bot-page navigation,
-conversation failure and retry, the page lists by kind, and the phone's
-conversation and work-context views. No unit test mounts the chat column inside
+conversation failure and retry, the page lists by kind, a page's preparation,
+cancel and retry, and the phone's conversation and work-context views. No unit test mounts the chat column inside
 the workspace: a ready conversation with its digest, sending, and an opened page
 need the running app. Combined runtime QA still needs the coordinator's server:
 create/edit a bot and source item, review and approve policy content, create and

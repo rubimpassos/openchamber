@@ -4,6 +4,12 @@ This folder contains renderers for chat message parts (text, tools, reasoning, p
 
 Use this doc when you ask an agent to change tool/header/description behavior.
 
+An HTML size report of zero is valid for content outside document flow, such as
+a fixed-position page. `HtmlRenderDocument` reports its current iframe viewport
+height to the host in that case. The document remains usable and a staged viewer
+can become ready without collapsing the page or waiting for a positive report
+that its layout cannot produce. Negative and nonfinite reports remain invalid.
+
 ## High-level flow
 
 - Message parts are rendered from `MessageBody.tsx`, which composes `body/` (`useAssistantRenderedParts.tsx` draws the assistant rows).
