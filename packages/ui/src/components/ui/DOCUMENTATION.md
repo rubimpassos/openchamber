@@ -48,6 +48,7 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 - `Textarea` offers emoji on `:` in both modes (`components/emoji/`, placed by `components/inline-picker/`); its forwarded ref is the textarea element itself.
 - A bottom sheet's list is built from `MobileSheetList`: `MobileSheetRow` for every option and action, `MobileSheetSection` for its captions, and `MobileSheetSearch` in `MobileOverlayPanel`'s `subheader`, so the field stays put while the list scrolls. The chosen row takes the selection fill and a check. The model sheet draws its own rows to the same measures, because its list is virtual.
 - On a phone `DialogContent` is a bottom sheet: `mobile.css` shapes every dialog through `data-slot`, so callers keep one markup for desktop and phone, and the layer's keyboard rider follows the whole keyboard. Tablet layouts and a dialog with `items-start` on its layer keep their centred window.
+- `DialogContent staged` is for an owner that lays its content out before the dialog shows. While `staged` is true the root is closed: the portal stays mounted and the popup is in the layout at its real width (the phone sheet's included), transparent, `inert` and `aria-hidden`, without `role="dialog"`, a backdrop, a scrollbar or the `oc-dialog-open` mark, so focus and Escape handling never see an open dialog. The owner then opens the root with `staged={false}` and the same popup node becomes the dialog, so a frame inside is not reloaded. Dialogs that leave `staged` undefined are unchanged.
 - A dialog that covers the whole window passes `fullWindow`, which leaves out `pwa-dialog-content` and `oc-window-corners` (an unlayered radius that beats a caller's `rounded-none`). In an installed app window 768 px wide or narrower, `mobile.css` gives that class a max height and padding outside any cascade layer, so it beats the caller's Tailwind classes and would shrink the dialog off the window's edges.
 - Every scroller a user sees draws the app's overlay scrollbar, never the native one: `ScrollableOverlay` for a scroller the caller renders, `AttachedOverlayScrollbar` for one a library creates (CodeMirror's `.cm-scroller`), `PopupOverlayScrollbar` for a popup that scrolls itself (`DialogContent`, `DropdownMenuContent`, `ContextMenuContent`, the framed `Textarea`). A new `overflow-auto` element goes through one of them. Only fallback screens after a crash keep the native bar, so they depend on nothing that may have failed.
 - A scroller whose content is replaced in place passes `memoryKey` (the list's identity) and `memoryReady` (false while what it shows is not yet that key's content) to `ScrollableOverlay`, and the offset comes back before paint. Omit both and the scroller keeps no memory.
@@ -123,6 +124,18 @@ ignores the lifecycle parameter. The palette asks for everything, so nothing
 has to be hidden: the session caches mark the hits they know, and the rest
 are listed without the tag. Hiding them, as an active-only request once
 required, would drop every hit from a session the caches have not loaded.
+
+### Why a staged popup overrides `hidden` and its opening transition
+
+Base UI keeps a closed, kept-mounted popup `hidden`, and a hidden frame has no
+size to measure. A staged popup therefore sets `hidden={false}` and is kept out
+of sight by opacity, also in the commit where the owner has opened the root and
+Base UI's store still says closed (`data-closed`). Base UI's opening motion
+relies on the popup coming out of `display: none`, where the starting style
+applies without a transition; a popup that was already laid out would animate
+from its resting place to the starting style and back. `transition: none` on
+`data-starting-style` restores the jump, and the phone sheet still slides up
+from below.
 
 ### Why a scrolling popup gets a sibling frame and not a wrapper
 

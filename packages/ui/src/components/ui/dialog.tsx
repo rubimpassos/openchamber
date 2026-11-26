@@ -80,8 +80,11 @@ type DialogContentProps = Omit<React.ComponentProps<typeof BaseDialog.Popup>, "c
   backdropProps?: React.ComponentProps<typeof DialogOverlay>
   layerClassName?: string
   fullWindow?: boolean
+  staged?: boolean
   children?: React.ReactNode
 }
+
+const STAGED_POPUP_PROPS = { inert: true, 'aria-hidden': true, role: 'none' } as const
 
 const TEXT_ENTRY_SELECTOR = [
   'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]):not([disabled])',
@@ -96,6 +99,7 @@ function DialogContent({
   backdropProps,
   layerClassName,
   fullWindow = false,
+  staged,
   ref,
   initialFocus,
   ...props
@@ -120,8 +124,8 @@ function DialogContent({
   }, [])
 
   return (
-    <DialogPortal>
-      <DialogOverlay className="rounded-none" {...backdropProps} />
+    <DialogPortal keepMounted={staged !== undefined}>
+      {staged ? null : <DialogOverlay className="rounded-none" {...backdropProps} />}
       <div data-slot="dialog-layer" data-sheet={bottomSheet ? '' : undefined} data-keyboard-rider={heldToTop ? undefined : bottomSheet ? '1' : '0.5'} className={cn("oc-keyboard-inset-surface fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
         <BaseDialog.Popup
           ref={setPopupRef}
@@ -136,9 +140,13 @@ function DialogContent({
             "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
             "motion-reduce:data-[starting-style]:scale-none motion-reduce:data-[ending-style]:scale-none",
             "data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]",
+            staged !== undefined && "data-[closed]:opacity-0 data-[closed]:pointer-events-none data-[starting-style]:!transition-none",
+            staged && "!opacity-0 !pointer-events-none",
             className
           )}
           {...props}
+          {...(staged === undefined ? undefined : { hidden: false })}
+          {...(staged ? STAGED_POPUP_PROPS : undefined)}
         >
         <DockedPanelSurfaceContext.Provider value={false}>{children}</DockedPanelSurfaceContext.Provider>
         {showCloseButton && (
@@ -151,7 +159,7 @@ function DialogContent({
           </BaseDialog.Close>
         )}
         </BaseDialog.Popup>
-        <PopupOverlayScrollbar scroller={popup} />
+        {staged ? null : <PopupOverlayScrollbar scroller={popup} />}
       </div>
     </DialogPortal>
   )
