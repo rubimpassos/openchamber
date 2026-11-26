@@ -1,5 +1,6 @@
 import { SURFACE_FRAME_MAX_BYTES, SURFACE_TEXT_MAX } from '@openchamber/sdk';
 import { deviceScale } from './viewports.js';
+import { createSurfaceRefinement } from './surface-refinement.js';
 
 const BUTTON_NAMES = ['left', 'middle', 'right'];
 const KEY_CODES = Object.freeze({
@@ -129,9 +130,6 @@ const clipboardExpression = `(() => {
 })()`;
 
 const MOTION_QUALITY = 75;
-const REFINE_QUALITY = 88;
-const REFINE_AFTER_MS = 180;
-const REFINE_ECHO_MS = 120;
 // While any tab is captured for its sound (tab-audio.js), Chrome shows a
 // sharing bar in every tab, and takes it away after; each time the real view
 // changes size under the emulated one, and the screencast goes on at the real
@@ -207,13 +205,7 @@ export const createSurface = (runtime, { now = Date.now } = {}) => {
   };
   // The viewport the running screencast was sized for.
   let streamedFor = null;
-  // Motion streams at CSS size, which Chrome encodes fast; once the page
-  // holds still, one screenshot at the viewer's density replaces the last
-  // frame so text is sharp at rest. Anything that happens while that
-  // screenshot is taken (a frame, input) makes it stale, and it is dropped.
-  let refineTimer = null;
-  let changes = 0;
-  let refinedAt = 0;
+  let refinement = null;
   let repairingSize = false;
   let sizeRepairedAt = 0;
   // When frames started coming at another size; 0 while they fit.
@@ -233,57 +225,9 @@ export const createSurface = (runtime, { now = Date.now } = {}) => {
     }
   };
 
-  const cancelRefine = () => {
-    clearTimeout(refineTimer);
-    refineTimer = null;
-  };
-
-  const refine = async (current, mark) => {
-    const viewport = runtime.surfaceViewport;
-    if (!viewport || deviceScale(viewport, viewport.scale) <= 1) return;
-    // A page paused on a dialog takes no screenshot until it is answered.
-    if (runtime.dialogOpen(current.targetId)) return;
-    let capture;
-    try {
-      capture = await current.cdp.sendSession(current.sessionId, 'Page.captureScreenshot', {
-        format: 'jpeg',
-        quality: REFINE_QUALITY,
-        optimizeForSpeed: true,
-      });
-    } catch {
-      return;
-    }
-    if (closed || page !== current) return;
-    if (changes !== mark) {
-      scheduleRefine(current);
-      return;
-    }
-    const bytes = Buffer.from(String(capture.data ?? ''), 'base64');
-    if (bytes.length === 0 || bytes.length > SURFACE_FRAME_MAX_BYTES) return;
-    refinedAt = Date.now();
-    sequence += 1;
-    publish({
-      sequence,
-      bytes,
-      mime: 'image/jpeg',
-      width: viewport.width,
-      height: viewport.height,
-      title: runtime.title,
-    });
-  };
-
-  const scheduleRefine = (current) => {
-    cancelRefine();
-    const mark = changes;
-    refineTimer = setTimeout(() => {
-      refineTimer = null;
-      void refine(current, mark);
-    }, REFINE_AFTER_MS);
-    refineTimer.unref?.();
-  };
-
   const detach = () => {
-    cancelRefine();
+    refinement?.dispose();
+    refinement = null;
     unsubscribe?.();
     unsubscribe = null;
     stopScreencast(page);
@@ -337,6 +281,10 @@ export const createSurface = (runtime, { now = Date.now } = {}) => {
       if (page?.sessionId === current.sessionId && unsubscribe) return current;
       detach();
       page = current;
+      refinement = createSurfaceRefinement(runtime, current, (frame) => {
+        sequence += 1;
+        publish({ ...frame, sequence });
+      });
       unsubscribe = current.cdp.onEvent((event) => {
         if (event.sessionId !== current.sessionId || event.method !== 'Page.screencastFrame') return;
         void current.cdp.sendSession(current.sessionId, 'Page.screencastFrameAck', {
@@ -344,14 +292,13 @@ export const createSurface = (runtime, { now = Date.now } = {}) => {
         }).catch(() => {});
         // Chrome repaints after taking the screenshot; that frame shows the
         // same page, blurrier, so it does not replace the sharp one.
-        if (Date.now() - refinedAt < REFINE_ECHO_MS) return;
+        if (refinement.echo) return;
         const width = Math.round(event.params.metadata?.deviceWidth ?? runtime.surfaceViewport?.width ?? 0);
         const height = Math.round(event.params.metadata?.deviceHeight ?? runtime.surfaceViewport?.height ?? 0);
         const bytes = Buffer.from(String(event.params.data ?? ''), 'base64');
         if (bytes.length === 0 || bytes.length > SURFACE_FRAME_MAX_BYTES) return;
         if (offSize(current, width, height, bytes)) return;
-        changes += 1;
-        scheduleRefine(current);
+        refinement.motion();
         sequence += 1;
         publish({
           sequence,
@@ -424,8 +371,7 @@ export const createSurface = (runtime, { now = Date.now } = {}) => {
     async input(events, theme = null) {
       const current = await start();
       // Input usually changes the page: a screenshot in flight is stale.
-      changes += 1;
-      if (refineTimer) scheduleRefine(current);
+      refinement.input();
       const menu = runtime.contextMenu;
       for (const event of events) {
         if (event.type === 'key' && event.key === 'Escape' && event.action === 'up' && swallowEscapeUp) {
