@@ -1,4 +1,4 @@
-import { shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder } from '@/lib/mobileWorkspaceTabs';
+import { offeredMobileWorkspaceTabs, shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder } from '@/lib/mobileWorkspaceTabs';
 import { carrySurfaceToZone, getZoneView, withZoneView, zoneOfMode, CONTEXT_ZONES } from '@/lib/workspace/zones';
 import type { ContextZonePlacement } from '@/lib/workspace/zones';
 import { sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
@@ -340,7 +340,8 @@ export const createWorkspaceActions: UIStoreSlice<
         return hidden.includes(tab) ? { mobileWorkspaceHiddenTabs: hidden.filter((entry) => entry !== tab) } : state;
       }
       if (hidden.includes(tab)) return state;
-      const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden, extensions);
+      const offered = offeredMobileWorkspaceTabs(extensions ?? [], state.browserProvider);
+      const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden, offered);
       if (shown.length <= 1) return state;
       return { mobileWorkspaceHiddenTabs: [...hidden, tab] };
     });

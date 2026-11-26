@@ -17,7 +17,7 @@ export interface SurfaceViewer {
   sentSeq: number;
   shownServiceSeq: number;
   framesInFlight: number;
-  inFlight: Array<{ seq: number; serviceSeq: number }>;
+  inFlight: Array<{ readonly seq: number; readonly serviceSeq: number; readonly viewId: string | undefined }>;
   audio: boolean;
   gone: boolean;
 }

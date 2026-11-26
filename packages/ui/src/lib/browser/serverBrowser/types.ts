@@ -102,6 +102,9 @@ export type ServerBrowserScope = {
   readonly agentTabId?: string | null;
   /** An agent action runs in this browser now. */
   readonly agentActive?: boolean;
+  readonly lastActivityAt?: number;
+  readonly lastError?: string | null;
+  readonly devtools?: boolean;
   readonly viewport: ServerBrowserViewportState | null;
   readonly problems: { readonly errors: number; readonly warnings: number };
   /** Chrome zoom level, -5..+5 in the service's steps (factor 1.2^level). */
@@ -115,7 +118,7 @@ export type ServerBrowserScope = {
 };
 
 export type ServerBrowserState = {
-  /** Changes whenever anything else in the state does; used to wait for the next change. */
+  /** Cursor for material dock state; activity timestamps alone do not advance it. */
   readonly version?: string;
   readonly controller: ServerBrowserController;
   readonly viewerInControl: boolean;
@@ -123,11 +126,18 @@ export type ServerBrowserState = {
   /** The chat the agent holds the picture for; older services do not report it. */
   readonly agentScopeId?: string | null;
   readonly generation: number;
+  /** Fresh identity for the selected scope, active tab, and capture surface. Null with no selection. */
+  readonly viewId: string | null;
   readonly help: ServerBrowserHelp | null;
   /** Chats whose browser closed with its last tab, until that chat opens a browser again. */
   readonly emptiedSessions?: readonly string[];
   readonly chrome: ServerBrowserChromeStatus;
   readonly scopes: readonly ServerBrowserScope[];
+};
+
+export type ServerBrowserMemory = {
+  readonly sampledAt: number;
+  readonly bytesByScope: ReadonlyMap<string, number>;
 };
 
 export type ServerBrowserConsoleRow = {

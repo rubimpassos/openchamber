@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 
-import { SurfaceClient, type SurfaceConnectionState, type SurfaceControlState, type SurfaceFrame } from './surface-client';
+import { SurfaceClient, type SurfaceConnectionState, type SurfaceControlState, type SurfaceFrame, type SurfacePresentation } from './surface-client';
 
 class FakeSocket implements RelayTunnelWebSocket {
   readyState = 0;
@@ -28,12 +28,14 @@ const createClient = () => {
   const controls: SurfaceControlState[] = [];
   const connections: SurfaceConnectionState[] = [];
   const clipboard: Array<{ id: string; text: string }> = [];
+  const presented: SurfacePresentation[] = [];
   let cleared = 0;
   const client = new SurfaceClient('sim', {
     onFrame: (frame) => frames.push(frame),
     onControl: (state) => controls.push(state),
     onConnection: (state) => connections.push(state),
     onClipboard: (id, text) => clipboard.push({ id, text }),
+    onPresented: (frame) => presented.push(frame),
   }, {
     refreshAuth: async () => 'token',
     clearUrlAuthToken: () => { cleared += 1; },
@@ -45,7 +47,7 @@ const createClient = () => {
     isPaused: () => false,
     onWake: () => () => undefined,
   });
-  return { client, sockets, frames, controls, connections, clipboard, clearedCount: () => cleared };
+  return { client, sockets, frames, controls, connections, clipboard, presented, clearedCount: () => cleared };
 };
 
 describe('surface client', () => {
@@ -69,7 +71,7 @@ describe('surface client', () => {
     socket.binary(new Uint8Array([9]));
     expect(frames).toHaveLength(1);
 
-    client.ack(3);
+    client.ack(frames[0]);
     expect(socket.sent).toEqual([JSON.stringify({ type: 'ack', seq: 3 })]);
     client.dispose();
   });
@@ -90,12 +92,12 @@ describe('surface client', () => {
     frame(3);
     expect(frames.map((f) => f.seq)).toEqual([1]);
     // An ack for a frame the pane is not drawing changes nothing.
-    client.ack(2);
+    client.ack({ ...frames[0], seq: 2 });
     expect(socket.sent).toEqual([]);
 
-    client.ack(1);
+    client.ack(frames[0]);
     expect(frames.map((f) => f.seq)).toEqual([1, 3]);
-    client.ack(3);
+    client.ack(frames[1]);
     expect(socket.sent.map((raw) => JSON.parse(raw))).toEqual([{ type: 'ack', seq: 1 }, { type: 'ack', seq: 3 }]);
 
     // A new connection forgets the frame being drawn: its first frame is drawn at once.
@@ -109,6 +111,51 @@ describe('surface client', () => {
     sockets[1].binary(new Uint8Array([1]));
     expect(frames.map((f) => f.seq)).toEqual([1, 3, 4, 1]);
     client.dispose();
+  });
+
+  test('passes frame identity and host confirmation separately from sending a presentation ACK', async () => {
+    const { client, sockets, frames, presented } = createClient();
+    client.start();
+    await tick();
+    const socket = sockets[0];
+    socket.open();
+    socket.text({ type: 'frame', seq: 1, viewId: 'view-B', width: 320, height: 200, mime: 'image/png', bytes: 1, agentActive: false });
+    socket.binary(new Uint8Array([1]));
+    expect(frames[0]?.viewId).toBe('view-B');
+    client.ack(frames[0], true);
+    expect(socket.sent.map((raw) => JSON.parse(raw))).toEqual([{ type: 'ack', seq: 1, presented: true }]);
+    expect(presented).toEqual([]);
+    socket.text({ type: 'presented', seq: 1, viewId: 'view-B' });
+    expect(presented).toEqual([{ seq: 1, viewId: 'view-B' }]);
+    client.dispose();
+  });
+
+  test('a late draw cannot acknowledge a reused sequence from a new connection', async () => {
+    const { client, sockets, frames } = createClient();
+    client.start();
+    await tick();
+    const sendFrame = (socket: FakeSocket) => {
+      socket.text({ type: 'frame', seq: 1, width: 320, height: 200, mime: 'image/png', bytes: 1, agentActive: false });
+      socket.binary(new Uint8Array([1]));
+    };
+    sockets[0].open();
+    sendFrame(sockets[0]);
+    const old = frames[0];
+    sockets[0].text({ type: 'ended', reason: 'service-stopped' });
+    sockets[0].close();
+    client.retry();
+    await tick();
+    sockets[1].open();
+    sendFrame(sockets[1]);
+
+    expect(client.isCurrentFrame(old)).toBe(false);
+    client.ack(old, true);
+    expect(sockets[1].sent).toEqual([]);
+    expect(client.isCurrentFrame(frames[1])).toBe(true);
+    client.ack(frames[1], false);
+    expect(sockets[1].sent.map((raw) => JSON.parse(raw))).toEqual([{ type: 'ack', seq: 1, presented: false }]);
+    client.dispose();
+    expect(client.isCurrentFrame(frames[1])).toBe(false);
   });
 
   test('asks for sound again after a reconnect and pairs each audio header with its packets', async () => {

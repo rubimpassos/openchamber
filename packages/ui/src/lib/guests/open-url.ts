@@ -1,4 +1,4 @@
-import { isDesktopShell } from '@/lib/desktop';
+import { browserPanelAvailable, openBrowserPanel } from '@/lib/browser/openPanel';
 import { isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -15,15 +15,14 @@ export const guestUrlTarget = (url: string, { panelAvailable, directory, linksIn
 );
 
 export const openGuestUrl = async (url: string, directory: string | null, supported: boolean): Promise<boolean> => {
-  const { openLinksInBrowserPanel, openContextPreview } = useUIStore.getState();
+  const { openLinksInBrowserPanel } = useUIStore.getState();
   const target = guestUrlTarget(url, {
-    panelAvailable: supported && isDesktopShell(),
+    panelAvailable: supported && browserPanelAvailable(),
     directory,
     linksInPanel: openLinksInBrowserPanel,
   });
   if (target === 'browser-panel' && directory) {
-    openContextPreview(directory, url);
-    return true;
+    if (openBrowserPanel(directory, url)) return true;
   }
   return openExternalUrl(url);
 };

@@ -12,6 +12,7 @@ import { createModelActions } from './ui/modelActions';
 import { createNotificationActions } from './ui/notificationActions';
 import { createAgentActions } from './ui/agentActions';
 import { createSessionBrowserActions } from './ui/sessionBrowserActions';
+import { createBrowserTabActions } from './ui/browserTabActions';
 
 export type { PendingDiffScope } from './ui/types';
 export { clampContextEditorTreeWidth } from './ui/preferences';
@@ -40,6 +41,7 @@ export const useUIStore = create<UIStore>()(
         ...createWorkspaceActions(set, get, store),
         ...createContextTabActions(set, get, store),
         ...createSessionBrowserActions(set, get, store),
+        ...createBrowserTabActions(set, get, store),
         ...createNavigationActions(set, get, store),
         ...createPreferenceActions(set, get, store),
         ...createModelActions(set, get, store),

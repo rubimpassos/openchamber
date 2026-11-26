@@ -6,6 +6,7 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
 import type { ServerBrowserChromeStatus, ServerBrowserHelp } from '@/lib/browser/serverBrowser/types';
 
@@ -23,6 +24,7 @@ const ControlBar: React.FC<{
   onHandBack: () => void;
 }> = ({ control, connection, focused, onHandBack }) => {
   const { t } = useI18n();
+  const { hasTouchInput } = useDeviceInfo();
 
   if (control.controller === 'user' && control.mine) {
     return (
@@ -57,7 +59,7 @@ const ControlBar: React.FC<{
   return (
     <div className="flex items-center gap-2 border-b border-border bg-[var(--surface-elevated)] px-3 py-1.5">
       <span className="typography-meta text-muted-foreground" aria-live="polite">
-        {focused ? t('contextPanel.surface.status.readyFocused') : t('contextPanel.browser.server.control.hint')}
+        {hasTouchInput ? t('contextPanel.browser.keyboard.tapFirst') : focused ? t('contextPanel.surface.status.readyFocused') : t('contextPanel.browser.server.control.hint')}
       </span>
     </div>
   );

@@ -28,10 +28,19 @@ The simulator build uses `cap copy ios` to update bundled web assets without reg
 
 ## Dev-server preview
 
-The workspace drawer's Browser tab (id `preview`) shows a dev server running on
-the OpenChamber host. It exists only in the native app: hosted mobile cannot
-reach the host's `localhost`, so there the tab is not offered, not in the strip
-and not in Settings (`lib/mobileWorkspaceTabs.ts`).
+The workspace drawer's Browser tab (id `preview`) supports the selected server
+browser provider in the native app and on hosted mobile. Chrome runs on the
+OpenChamber host, so its loopback addresses refer to that host. The shared
+authenticated canvas carries page input, sound and the bundled DevTools
+frontend. The keyboard control opens a local editable field and forwards its
+text through the existing surface; a canvas alone cannot summon a phone keyboard.
+Each chat owns its tabs. Hidden panes and a chat without a browser start no
+browser connection. Android and mobile-web Back use remote page history before
+closing the drawer, and close open DevTools before navigating.
+
+With the in-app browser provider, preview remains native-only because hosted
+mobile cannot reach the host's `localhost`. The following tunnel and frame rules
+apply to that iframe fallback, not to the server browser.
 
 - A loopback URL resolves to an app-owned TCP listener on `127.0.0.1`, one per
   remote port. Each accepted connection is carried by the renderer over the
@@ -60,7 +69,8 @@ and not in Settings (`lib/mobileWorkspaceTabs.ts`).
   WebView to go back: inside the page while it has history, and off the guard
   once it has none, which takes the preview's own step to the previous address
   or the server list. At the server list Android Back closes the drawer.
-- The page is for viewing: annotation and agent page control stay on desktop.
+- The iframe fallback is for viewing. Server Browser retains shared annotation
+  and agent control.
 - Only the app's own document reaches native plugins. WebKit exposes
   Capacitor's `bridge` message handler to every frame, so the iOS shell
   replaces it with one that drops messages from other frames

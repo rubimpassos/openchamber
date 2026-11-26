@@ -41,7 +41,7 @@ import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSy
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
-import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useMobileBrowserNavigation } from '@/hooks/useMobileBrowserNavigation';
 import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
 import { useGuestMarksSync } from '@/hooks/useGuestMarksSync';
 import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
@@ -92,12 +92,11 @@ import { BotsView } from '@/components/bots/BotsPage';
 import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
 import type { MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
-import { connectMobileWorkspaceOpener, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { connectMobileWorkspaceOpener, orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { GuestHosts } from '@/components/layout/GuestHosts';
-import { useGuestPages, usePhoneGuestPanelModes } from '@/hooks/useGuestSurfaces';
-import { phoneGuestPanelModes } from '@/lib/guests/phone';
-import { useGuestsStore } from '@/lib/guests/store';
-import { isPluginContextPanelMode, pluginModeFromId } from '@/lib/surfaces/modes';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { readOfferedMobileWorkspaceTabs, useOfferedMobileWorkspaceTabs } from '@/hooks/useOfferedMobileWorkspaceTabs';
+import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, switchToSavedInstance, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useAndroidParentSessionBack, useMobileBackHandlers, useMobileWebBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
@@ -177,12 +176,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>(() => {
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
-    return shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs)[0];
+    return shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, readOfferedMobileWorkspaceTabs())[0];
   });
   const openWorkspace = React.useCallback(() => {
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
-    const extensions = phoneGuestPanelModes(useGuestsStore.getState().guests);
-    const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, extensions);
+    const offered = readOfferedMobileWorkspaceTabs();
+    const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, offered);
     const pagesShown = hasReceivedPages(useReceivedPagesStore.getState());
     setWorkspaceTab((current) => (shown.some((id) => id === current) || (current === 'pages' && pagesShown) ? current : shown[0]));
     setWorkspaceOpen(true);
@@ -194,12 +193,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [changesRequest, setChangesRequest] = React.useState<{ diff: MobileChangesInitialDiff } | { commit: MobileChangesCommitRequest } | null>(null);
   const pendingChangesDiff = changesRequest && 'diff' in changesRequest ? changesRequest.diff : null;
   const pendingChangesCommit = changesRequest && 'commit' in changesRequest ? changesRequest.commit : null;
-  const extensionTabs = usePhoneGuestPanelModes();
+  const offeredTabs = useOfferedMobileWorkspaceTabs();
   React.useEffect(() => {
-    if (!isPluginContextPanelMode(workspaceTab) || extensionTabs.includes(workspaceTab)) return;
+    if (workspaceTab === 'pages' || orderMobileWorkspaceTabs([], offeredTabs).some((id) => id === workspaceTab)) return;
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
-    setWorkspaceTab(shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, extensionTabs)[0]);
-  }, [extensionTabs, workspaceTab]);
+    setWorkspaceTab(shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, offeredTabs)[0]);
+  }, [offeredTabs, workspaceTab]);
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
   const guestPages = useGuestPages();
   const guestPage = guestPages.find((guest) => guest.id === openGuestPageId) ?? null;
@@ -326,6 +325,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setWorkspaceTab(request.tab);
     setWorkspaceOpen(true);
   }), []);
+  useMobileBrowserNavigation({ showing: workspaceOpen && workspaceTab === 'preview', close: closeWorkspace });
 
   const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
   const rightResize = useIpadSidebarResize(
@@ -1222,7 +1222,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useQuotaProviderSync();
   useGuestCatalogSync();
   useGuestMarksSync();
-  useBrowserProviderSync();
   useAgentMemorySync(currentDirectory || null);
   useNativePushRegistration({ enabled: isNativeMobileApp && isConnected });
   useKeepScreenAwake(isConnected);

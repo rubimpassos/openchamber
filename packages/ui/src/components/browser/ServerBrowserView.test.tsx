@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { create } from 'zustand';
@@ -22,23 +22,23 @@ const blankScope: ServerBrowserScope = {
 const connection = create<{ scope: ServerBrowserScope; error: string | null }>(() => ({ scope: blankScope, error: null }));
 const navigations: string[] = [];
 let failNavigation = false;
+const stateOf = (scope: ServerBrowserScope): ServerBrowserState => ({
+  controller: 'none', viewerInControl: false, selectedScopeId: scopeId, generation: 1, viewId: 'view-chat',
+  help: null, chrome: { status: 'ready', message: '' }, scopes: [scope],
+});
 const navigate = async (url: string) => {
   navigations.push(url);
   const scope = connection.getState().scope;
   const next = { ...scope, url, tabs: scope.tabs.map((tab) => tab.active ? { ...tab, url } : tab) };
   connection.setState({ scope: next, error: failNavigation ? 'Navigation failed' : null });
   if (failNavigation) return null;
-  const state: ServerBrowserState = {
-    controller: 'none', viewerInControl: false, selectedScopeId: scopeId, generation: 1,
-    help: null, chrome: { status: 'ready', message: '' }, scopes: [next],
-  };
-  return state;
+  return stateOf(next);
 };
 mock.module('@/lib/browser/serverBrowser/useServerBrowserConnection', () => ({
   useServerBrowserConnection: () => {
     const { scope, error } = connection();
     return {
-      scope, error, state: null, sessionId: 'chat', loading: false, navigate,
+      scope, error, state: stateOf(scope), sessionId: 'chat', loading: false, navigate,
       reload: () => navigate(connection.getState().scope.url),
       selectTab: async (id: string) => {
         const current = connection.getState().scope;
@@ -48,8 +48,13 @@ mock.module('@/lib/browser/serverBrowser/useServerBrowserConnection', () => ({
     };
   },
 }));
-mock.module('./ServerBrowserCanvas', () => ({ ServerBrowserCanvas: () => null }));
-mock.module('./BrowserEmptyState', () => ({ BrowserEmptyState: () => null }));
+mock.module('./ServerBrowserCanvas', () => ({
+  ServerBrowserCanvas: ({ onPresented }: { onPresented: (viewId: string | null) => void }) => {
+    useEffect(() => onPresented('view-chat'), [onPresented]);
+    return null;
+  },
+}));
+mock.module('./BrowserEmptyState', () => ({ BrowserEmptyState: () => <div data-discovery-list="" /> }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ files: { downloadFile: async () => undefined } }) }));
 
 const { ServerBrowserView } = await import('./ServerBrowserView');
@@ -119,8 +124,16 @@ test('opens a chat link through the server browser and receives another click on
     await act(async () => useUIStore.getState().openContextPreview(directory, url));
     expect(navigations).toHaveLength(5);
 
-    // Mirroring an agent-opened Chrome page must not reload that page.
+    // Given a blank tab, which offers the discovery list.
     const current = connection.getState().scope;
+    await act(async () => connection.setState({ scope: blankScope }));
+    expect(host.querySelector('[data-discovery-list]') !== null).toBe(true);
+    // When Chrome DevTools opens on it, the list leaves the canvas DevTools is drawn on.
+    await act(async () => connection.setState({ scope: { ...blankScope, devtools: true } }));
+    expect(host.querySelector('[data-discovery-list]') !== null).toBe(false);
+    await act(async () => connection.setState({ scope: current }));
+
+    // Mirroring an agent-opened Chrome page must not reload that page.
     await act(async () => connection.setState({ scope: { ...current, tabs: [...current.tabs, {
       id: 'agent-tab', url: 'https://example.com/agent', title: 'Agent page', isLoading: false, active: false,
     }] } }));

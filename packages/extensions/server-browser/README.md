@@ -157,6 +157,39 @@ back, and the panel then opened an empty browser in its place. An open Chrome
 with a few tabs costs a few hundred MB, so the bound on how many are open
 (`maxBrowsers`) limits memory, and time alone does not.
 
+## Embedded DevTools
+
+`POST /browser/devtools` takes `{ open: boolean, generation: number }` through
+the ordinary authenticated service request. `scopes[].devtools` reports whether
+Chrome's bundled frontend is displayed in the existing shared surface.
+Input and copy use that frontend; agent actions still use the inspected page.
+The frontend fills the panel while the inspected page keeps its viewport.
+
+Each opening owns an ephemeral Chrome context and a loopback WebSocket relay
+with a fresh local capability. Neither its address nor its capability enters
+public state, client URLs, profiles or persistent settings. Closing DevTools,
+changing its tab or scope, closing the inspected target, and stopping the
+runtime dispose that context and revoke its relay.
+
+### Why DevTools uses a page policy
+
+A Chrome page socket still accepts commands with browser-wide effects.
+The relay admits explicit methods and parameter names, tracks handles per
+session, and admits only related frame and dedicated-worker attachments.
+The frontend sees default page worlds; service-owned isolated worlds retain
+native capture APIs and stay private. A debugger pause in a private world
+resumes without exposing its frames or objects to the frontend.
+Browser administration, other tabs, server files, origin-wide storage and
+raw Performance tracing remain unavailable. Elements, Console, Network and
+the JavaScript debugger use Chrome's real frontend. Frontend network traffic
+keeps the scope's egress proxy, protected-origin refusal and capture guard;
+only the exact private relay address bypasses the proxy.
+
+Wire readers parse frontend commands and backend replies into recursive JSON
+records before the authority walker sees them. Protocol identifiers are parsed
+separately with their bounds. Page-controlled return-by-value data cannot grant
+object, script, frame or execution-context authority.
+
 ## Configuration
 
 There is no user-editable package directory for a built-in, so configuration

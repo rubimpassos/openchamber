@@ -1,57 +1,26 @@
 import crypto from 'node:crypto';
 import { GUEST_CLIPBOARD_TEXT_MAX } from '@openchamber/sdk';
 import { createBrowserActions } from './browser-actions.js';
+import { createTab, isScopePage, requireNoDialog, requireTab, untilDialog } from './browser-tab.js';
 import { installCaptureGuard } from './capture-guard.js';
 import { connectCdp } from './cdp-client.js';
 import fs from 'node:fs';
 import { createChromeProcess, visibleUserAgent } from './chrome-process.js';
 import { MENU_BINDING, MENU_WORLD, createContextMenu } from './context-menu.js';
 import { createDownloads } from './downloads.js';
+import { createDevTools } from './devtools.js';
 import { createFavicons } from './favicons.js';
 import { InspectorError, createInspector } from './inspector.js';
 import { networkGrants, originGrants } from './config.js';
 import { createNativeSelectCompatibility } from './native-select-compatibility.js';
 import { createPageRequests, dialogBlockedMessage, publicDialog } from './page-requests.js';
 import { createPolicyProxy } from './policy-proxy.js';
+import { createOriginRefusal } from './origin-refusal.js';
 import { createSurface } from './surface.js';
 import { AUDIO_BINDING, AUDIO_WORLD, createTabAudio } from './tab-audio.js';
 import { applyViewport, cssScreenshotParams, presetViewport } from './viewports.js';
 
 const boundedText = (value, maximum = 1_000) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maximum);
-
-const createTab = (targetId, sessionId, openerId) => ({
-  targetId,
-  sessionId,
-  openerId,
-  // A page target's main frame shares the target's id.
-  mainFrameId: targetId,
-  url: 'about:blank',
-  title: '',
-  isLoading: false,
-  canGoBack: false,
-  canGoForward: false,
-  navigationRefresh: null,
-  navigationStale: false,
-  navigationTimer: null,
-  problems: [],
-  compatibility: null,
-  lastActive: 0,
-  // Opened by the agent (browser.open, or a page an agent tab opened):
-  // only such a tab may be closed by browser.close; the person's stay.
-  openedByAgent: false,
-  // What the page asks of the person; see page-requests.js.
-  dialog: null,
-  fileChooser: null,
-  dialogListeners: new Set(),
-  // Settings the tab could not take while paused on a dialog ('viewport',
-  // 'zoom', 'colorScheme', 'nativeSelect'); they land once it is answered.
-  staleSettings: new Set(),
-});
-
-const isScopePage = (info, contextId, ignoredTargetId = null) => info?.type === 'page'
-  && info.browserContextId === contextId
-  && info.targetId !== ignoredTargetId
-  && info.subtype !== 'prerender';
 
 // `profile` ({ id, name, checkout, checkin }) runs this browser on a copy of
 // a saved profile: Chrome's own default context on a checked-out
@@ -107,6 +76,8 @@ export const createBrowserRuntime = ({
   let activations = 0;
   let nativeSelectEnabled = false;
   let cdp = null;
+  let devtools = null;
+  let devtoolsIntent = 0;
   let contextId = null;
   let eventCleanup = null;
   let guardCleanup = null;
@@ -124,6 +95,7 @@ export const createBrowserRuntime = ({
   // desktop size, so opening the panel does not lay it out again at the
   // panel's size. The source says who chose the size.
   const DEFAULT_VIEWPORT = presetViewport('desktop');
+  let panelSize = { ...DEFAULT_VIEWPORT, scale: 1 };
   let viewportConfig = {
     mode: 'fixed',
     source: 'default',
@@ -160,8 +132,20 @@ export const createBrowserRuntime = ({
   let agentAction = null;
 
   const runtime = {
+    get browserProcess() {
+      return closed || dead ? null : chrome?.process ?? null;
+    },
     get viewport() {
       return effectiveViewport();
+    },
+    get surfaceViewport() {
+      return devtools?.page ? { ...panelSize, mobile: false } : effectiveViewport();
+    },
+    get surfaceIdentity() {
+      return [devtools?.page?.targetId ?? activeTargetId, devtools?.epoch ?? 0];
+    },
+    get devtools() {
+      return Boolean(devtools?.page);
     },
     get viewportState() {
       const { width, height, mobile } = effectiveViewport();
@@ -292,6 +276,7 @@ export const createBrowserRuntime = ({
 
   const activate = async (current) => {
     if (activeTargetId === current.targetId || tabs.get(current.targetId) !== current) return;
+    if (activeTargetId !== null) await runtime.closeDevTools();
     const previous = activeTab();
     if (previous) inspector.endTab(previous.sessionId);
     activeTargetId = current.targetId;
@@ -311,6 +296,7 @@ export const createBrowserRuntime = ({
     tabs.delete(targetId);
     if (agentTargetId === targetId) agentTargetId = null;
     sessions.delete(current.sessionId);
+    if (devtools?.targetId === targetId) void runtime.closeDevTools().catch(markDead);
     clearTimeout(current.navigationTimer);
     contextMenu.forget(current.sessionId);
     inspector.endTab(current.sessionId);
@@ -528,6 +514,19 @@ export const createBrowserRuntime = ({
       contextId = nextContextId;
       cdp.onClose(markDead);
       eventCleanup = cdp.onEvent(handleEvent);
+      devtools = createDevTools({
+        cdp, endpoint: processInfo.endpoint, proxyAddress, version: processInfo.version,
+        refuses: createOriginRefusal(openchamberOrigins),
+        onError: markDead,
+        onCopy: (text) => {
+          copyRequest = { id: crypto.randomUUID(), text: text.length > GUEST_CLIPBOARD_TEXT_MAX ? null : text, at: Date.now() };
+        },
+        onChange: () => {
+          surface.retarget();
+          notifyTabs();
+          return !devtools.page && !closed ? runtime.setPanelSize(panelSize) : undefined;
+        },
+      });
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       // Browsing works without downloads: a folder that cannot be made only
       // means files are dropped, as headless Chrome does by default.
@@ -586,6 +585,11 @@ export const createBrowserRuntime = ({
     if (current) return pageOf(current);
     if (!pagePromise) pagePromise = openTab().finally(() => { pagePromise = null; });
     return pageOf(await pagePromise);
+  };
+  runtime.surfacePage = async () => devtools?.page ?? runtime.ensurePage();
+  runtime.closeDevTools = () => {
+    devtoolsIntent += 1;
+    return devtools?.close() ?? Promise.resolve();
   };
 
   // Agent actions name a tab from browser.snapshot's tabs or act on the one
@@ -665,43 +669,13 @@ export const createBrowserRuntime = ({
   };
 
   // The dock's answers name the tab and the request it showed.
-  const dockTab = (tabId) => {
-    const current = tabs.get(tabId);
-    if (!current) throw new Error('That tab is no longer open');
-    return current;
-  };
   runtime.answerDialog = ({ tabId, dialogId, accept, promptText }) => {
-    const current = dockTab(tabId);
+    const current = requireTab(tabs, tabId);
     return pageRequests.answerDialog(current, (method, params) => cdp.sendSession(current.sessionId, method, params), { dialogId, accept, promptText });
   };
   runtime.answerFileChooser = ({ tabId, chooserId, files }) => {
-    const current = dockTab(tabId);
+    const current = requireTab(tabs, tabId);
     return pageRequests.answerFileChooser(current, (method, params) => cdp.sendSession(current.sessionId, method, params), { chooserId, files });
-  };
-
-  // Resolves with the command's result, or with null as soon as the page
-  // opens a dialog meanwhile ("leave this page?" on a navigation): the
-  // command then waits on the dialog, which the dock shows.
-  const untilDialog = (current, promise) => new Promise((resolve, reject) => {
-    const onChange = () => {
-      if (!current.dialog) return;
-      current.dialogListeners.delete(onChange);
-      promise.catch(() => {});
-      resolve(null);
-    };
-    current.dialogListeners.add(onChange);
-    onChange();
-    promise.then((value) => {
-      current.dialogListeners.delete(onChange);
-      resolve(value);
-    }, (error) => {
-      current.dialogListeners.delete(onChange);
-      reject(error);
-    });
-  });
-
-  const requireNoDialog = (current) => {
-    if (current?.dialog) throw new Error('Answer the dialog on this page first');
   };
 
   // The person's input reaches a paused page only once its dialog is
@@ -738,15 +712,16 @@ export const createBrowserRuntime = ({
 
   // Sets the tab's emulated size again, unchanged; see surface.js for why.
   runtime.reapplyViewport = (targetId) => {
+    if (devtools?.page?.targetId === targetId) return devtools.resize(panelSize);
     const current = tabs.get(targetId);
     return current ? applyViewportToTab(current, effectiveViewport()) : Promise.resolve();
   };
 
   const applyViewportToTabs = async () => {
     const viewport = effectiveViewport();
-    await runtime.ensurePage();
+    if (tabs.size === 0) await runtime.ensurePage();
     const active = activeTab();
-    await applyViewportToTab(active, viewport);
+    if (active) await applyViewportToTab(active, viewport);
     await Promise.allSettled([...tabs.values()]
       .filter((current) => current !== active)
       .map((current) => applyViewportToTab(current, viewport)));
@@ -774,6 +749,11 @@ export const createBrowserRuntime = ({
   // The CSS size the viewer's panel can show. A fixed viewport keeps its own
   // size and the host letterboxes it.
   runtime.setPanelSize = async ({ width, height, scale }) => {
+    panelSize = { width, height, scale: typeof scale === 'number' ? scale : panelSize.scale, mobile: false };
+    if (devtools?.page) {
+      await devtools.resize(panelSize);
+      return { width, height };
+    }
     const scaleChanged = typeof scale === 'number' && scale !== viewportConfig.scale;
     viewportConfig = {
       ...viewportConfig,
@@ -781,7 +761,7 @@ export const createBrowserRuntime = ({
       scale: typeof scale === 'number' ? scale : viewportConfig.scale,
     };
     // A fixed viewport keeps its size but still follows the viewer's density.
-    if (viewportConfig.mode === 'auto' || scaleChanged) await applyViewportToTabs();
+    if (tabs.size > 0 && (viewportConfig.mode === 'auto' || scaleChanged)) await applyViewportToTabs();
     const shown = effectiveViewport();
     return { width: shown.width, height: shown.height };
   };
@@ -790,7 +770,21 @@ export const createBrowserRuntime = ({
   // follow page events, so a slow page can still be stopped.
   runtime.command = async (name, parameters = {}) => {
     if (closed) throw new Error('Browser runtime is closed');
+    const intent = name === 'devtools' ? ++devtoolsIntent : null;
     await contextMenu.close();
+    if (name === 'devtools') {
+      if (intent !== devtoolsIntent) throw new Error('The browser view changed before DevTools opened');
+      if (!parameters.open) {
+        await runtime.closeDevTools();
+        await runtime.setPanelSize(panelSize);
+        return;
+      }
+      const page = await runtime.ensurePage();
+      if (intent !== devtoolsIntent) throw new Error('The browser view changed before DevTools opened');
+      requireNoDialog(activeTab());
+      if (devtools.targetId !== page.targetId) await devtools.open(page.targetId, { size: panelSize, colorScheme });
+      return;
+    }
     if (name === 'tab-new') {
       await openTab();
       return;
@@ -921,6 +915,9 @@ export const createBrowserRuntime = ({
     requireNoDialog(activeTab());
     colorScheme = scheme;
     await Promise.all([...tabs.values()].map((current) => applySetting(current, 'colorScheme')));
+    if (devtools?.page) await cdp.sendSession(devtools.page.sessionId, 'Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: scheme === 'system' ? '' : scheme }],
+    });
   };
   Object.defineProperty(runtime, 'colorScheme', { get: () => colorScheme, enumerable: true });
 
@@ -993,6 +990,7 @@ export const createBrowserRuntime = ({
   // would become readable by every site.
   runtime.exportCookies = async () => {
     if (!cdp) return [];
+    await runtime.closeDevTools();
     const request = {};
     if (!profile) request.browserContextId = contextId;
     const { cookies = [] } = await cdp.send('Storage.getCookies', request);
@@ -1107,6 +1105,7 @@ export const createBrowserRuntime = ({
     // kill, and fails the CDP calls that the work below may still wait on. A
     // profile's Chrome is asked to exit first so its cookie jar is written.
     await chrome?.close();
+    await devtools?.dispose();
     let saved = null;
     let saveError = null;
     if (profileDirectory && save) {

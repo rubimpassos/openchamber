@@ -108,6 +108,12 @@ geometry; readiness never follows the loading row or iframe load alone.
 
 ### Routing
 
+- `useMobileBrowserNavigation` owns mobile Browser session transitions and
+  automatic reveals. It shares the desktop session-match rule, ignores other
+  chats and projects, and never starts a stopped service to restore a pane.
+  Browser Back registration follows the current live view and releases on hide;
+  a stale page cannot consume Back after the view changes.
+
 - A route write is suppressed while a route is being applied, and only the latest applied request may normalize the current history entry.
 - The session named in the URL is retained until directory and message bootstrap catch up. A route that startup would drop is not acknowledged.
 - An empty route supersedes pending startup and closes Settings.
@@ -129,6 +135,11 @@ geometry; readiness never follows the loading row or iframe load alone.
 - A worktree whose creation has not finished looks dirty: its setup commands and initial git reset are still running. Surfaces that report uncommitted changes consult the pending state and show nothing instead of reporting bootstrap noise.
 
 ### Keyboard, focus and window behavior
+
+- `useBrowserAddressSelection` keeps an unedited focused browser address fully
+  selected after page updates. An edit preserves its caret; changing panel
+  ownership resets that editing state. Draft ownership is documented in
+  `components/browser/DOCUMENTATION.md`.
 
 - Shortcut handling is scoped by surface: VS Code, the phone shell and the desktop app each receive only the chords their UI can act on.
 - A completion key typed into an editable target is a deliberate sequence only when the prefix was armed from that same target. Otherwise it is typing and must not be swallowed.

@@ -6,6 +6,10 @@
 // when it gave no answer in time (it may still carry the command out), and
 // 'closed' when the connection is gone.
 const commandError = (method, reason, code) => Object.assign(new Error(`CDP command ${method} failed: ${reason}`), { code });
+const viewportMethods = new Set([
+  'Page.captureScreenshot', 'Emulation.setDeviceMetricsOverride',
+  'Page.navigate', 'Page.reload', 'Page.navigateToHistoryEntry',
+]);
 
 export const connectCdp = async (webSocketDebuggerUrl, {
   commandTimeoutMs = 30_000,
@@ -15,6 +19,7 @@ export const connectCdp = async (webSocketDebuggerUrl, {
   const pending = new Map();
   const listeners = new Set();
   const closeListeners = new Set();
+  const viewportOperations = new Map();
   let nextId = 1;
   let open = false;
 
@@ -46,6 +51,11 @@ export const connectCdp = async (webSocketDebuggerUrl, {
       const timeout = setTimeout(() => {
         pending.delete(id);
         reject(commandError(method, `timed out after ${commandTimeoutMs}ms`, 'timeout'));
+        if (method === 'Page.captureScreenshot' || method === 'Emulation.setDeviceMetricsOverride') {
+          // A late capture can still restore old metrics after this timeout.
+          disconnect('viewport operation timed out');
+          socket.close();
+        }
       }, commandTimeoutMs);
       timeout.unref?.();
       pending.set(id, { method, sessionId, resolve, reject, timeout });
@@ -59,6 +69,27 @@ export const connectCdp = async (webSocketDebuggerUrl, {
     });
   };
 
+  // Chrome restores the capture-start metrics when a screenshot completes.
+  // Navigation can replace its renderer, so it shares the same session queue.
+  // Wait only for command settlement; input and loading/dialog recovery bypass it.
+  const sendSession = (sessionId, method, params = {}, signal) => {
+    if (!viewportMethods.has(method)) {
+      return sendCommand(method, params, sessionId);
+    }
+    const previous = viewportOperations.get(sessionId) ?? Promise.resolve();
+    const operation = previous.then(() => {
+      // Cancellation applies only before dispatch, never to a command in Chrome.
+      signal?.throwIfAborted();
+      return sendCommand(method, params, sessionId);
+    });
+    const release = () => {
+      if (viewportOperations.get(sessionId) === settled) viewportOperations.delete(sessionId);
+    };
+    const settled = operation.then(release, release);
+    viewportOperations.set(sessionId, settled);
+    return operation;
+  };
+
   socket.addEventListener('message', (event) => {
     let message;
     try {
@@ -69,7 +100,10 @@ export const connectCdp = async (webSocketDebuggerUrl, {
     if (!message || typeof message !== 'object') return;
     if (Number.isInteger(message.id)) {
       const entry = pending.get(message.id);
-      if (!entry || entry.sessionId !== message.sessionId) return;
+      if (!entry) return;
+      // Chrome reports an unknown session on the root channel. Its request ID
+      // still identifies our command; successful replies retain the session guard.
+      if (entry.sessionId !== message.sessionId && !(message.error && message.sessionId === undefined)) return;
       pending.delete(message.id);
       clearTimeout(entry.timeout);
       if (message.error) entry.reject(commandError(entry.method, message.error.message || 'protocol error', 'protocol'));
@@ -119,7 +153,7 @@ export const connectCdp = async (webSocketDebuggerUrl, {
 
   return {
     send: (method, params = {}) => sendCommand(method, params),
-    sendSession: (sessionId, method, params = {}) => sendCommand(method, params, sessionId),
+    sendSession,
     async attach(targetId) {
       const result = await sendCommand('Target.attachToTarget', { targetId, flatten: true });
       if (typeof result.sessionId !== 'string') throw new Error('Chrome returned no target session id');

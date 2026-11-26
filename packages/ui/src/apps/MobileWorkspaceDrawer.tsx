@@ -3,7 +3,6 @@ import { ReceivedPagesList } from '@/components/chat/sharePages/received/Receive
 import { hasReceivedPages, useReceivedPages } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { createPortal } from 'react-dom';
 import { arrayMove } from '@dnd-kit/sortable';
-import { isIMECompositionEvent } from '@/lib/ime';
 
 import { Icon } from '@/components/icon/Icon';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
@@ -14,6 +13,9 @@ import { useI18n } from '@/lib/i18n';
 import { orderMobileWorkspaceTabs, stripMobileWorkspaceTabs, withReceivedPagesTab, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { usePhoneGuestPanelModes } from '@/hooks/useGuestSurfaces';
+import { useOfferedMobileWorkspaceTabs } from '@/hooks/useOfferedMobileWorkspaceTabs';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { openBrowserOfChatOnScreen } from '@/hooks/useMobileServerBrowserTabs';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -30,7 +32,7 @@ import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigatio
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileStatusPane } from './MobileStatusPane';
 import { useEdgeSwipe } from './useEdgeSwipe';
-import { isVimEditorEventTarget } from '@/lib/editorFocus';
+import { handleMobileWorkspaceEscape } from './mobileWorkspaceEscape';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 const MobileBrowserSurface = React.lazy(() => import('./MobileBrowserSurface').then((module) => ({ default: module.MobileBrowserSurface })));
@@ -66,6 +68,8 @@ export const MobileWorkspaceDrawer: React.FC<{
   const hiddenTabs = useUIStore((state) => state.mobileWorkspaceHiddenTabs);
   const setTabOrder = useUIStore((state) => state.setMobileWorkspaceTabOrder);
   const extensionTabs = usePhoneGuestPanelModes();
+  const offeredTabs = useOfferedMobileWorkspaceTabs();
+  const browserDirectory = useEffectiveDirectory();
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
   const guests = useGuestsStore((state) => state.guests);
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
@@ -129,10 +133,7 @@ export const MobileWorkspaceDrawer: React.FC<{
     const previousOverflow = document.body.style.overflow;
     if (variant === 'drawer') document.body.style.overflow = 'hidden';
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || tabRef.current === 'terminal') return;
-      if (isVimEditorEventTarget(event.target)) return;
-      if (isIMECompositionEvent(event)) return;
-      onCloseRef.current();
+      handleMobileWorkspaceEscape(event, tabRef.current, onCloseRef.current);
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -182,12 +183,12 @@ export const MobileWorkspaceDrawer: React.FC<{
       ),
     };
   };
-  const orderedTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab, extensionTabs);
+  const orderedTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab, offeredTabs);
   const stripTabs = receivedPagesShown || tab === 'pages' ? withReceivedPagesTab(orderedTabs) : orderedTabs;
   const tabItems = stripTabs.map((id) => (isPluginContextPanelMode(id) ? extensionTabItem(id) : tabDefinitions[id]));
   const soleTab = tabItems.length === 1 ? tabItems[0] : null;
   const reorderTabs = (activeId: string, overId: string) => {
-    const all = orderMobileWorkspaceTabs(tabOrder, extensionTabs);
+    const all = orderMobileWorkspaceTabs(tabOrder, offeredTabs);
     const from = all.findIndex((id) => id === activeId);
     const to = all.findIndex((id) => id === overId);
     if (from < 0 || to < 0) return;
@@ -209,6 +210,7 @@ export const MobileWorkspaceDrawer: React.FC<{
               activeId={tab}
               onSelect={(id) => {
                 const next = stripTabs.find((entry) => entry === id);
+                if (next === 'preview') openBrowserOfChatOnScreen(browserDirectory);
                 if (next) onTabChange(next);
               }}
               onReorder={reorderTabs}

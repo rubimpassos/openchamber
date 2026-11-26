@@ -304,6 +304,7 @@ export interface UIStore {
   messageSearchEnabled: boolean;
   messageSearchReasoningEnabled: boolean;
   browserProvider: string;
+  browserSessionContext: { readonly directory: string; readonly sessionId: string | null } | null;
   agentMemoryToolEnabled: boolean;
   agentKnowledgeToolEnabled: boolean;
   agentNotifyToolEnabled: boolean;

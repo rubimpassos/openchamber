@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder, stripMobileWorkspaceTabs, withReceivedPagesTab } from './mobileWorkspaceTabs';
+import { offeredMobileWorkspaceTabs, orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder, stripMobileWorkspaceTabs, withReceivedPagesTab } from './mobileWorkspaceTabs';
 
 describe('mobile workspace tabs', () => {
   test('the native app adds the browser before Project knowledge, also to an order saved without it', () => {
@@ -20,6 +20,30 @@ describe('mobile workspace tabs', () => {
 
   test('hosted mobile never offers the browser and drops it from a saved order', () => {
     expect(orderMobileWorkspaceTabs(['preview', 'files'])).toEqual(['status', 'changes', 'files', 'terminal', 'notes']);
+  });
+
+  test('hosted mobile offers the browser while Chrome on the server draws it, in its saved place', () => {
+    expect(orderMobileWorkspaceTabs([], ['preview'])).toEqual(['status', 'changes', 'files', 'terminal', 'preview', 'notes']);
+    expect(orderMobileWorkspaceTabs(['preview', 'files'], ['plugin:tasks', 'preview'])).toEqual(['status', 'changes', 'terminal', 'preview', 'files', 'notes', 'plugin:tasks']);
+    expect(shownMobileWorkspaceTabs([], ['preview'], ['preview'])).toEqual(['status', 'changes', 'files', 'terminal', 'notes']);
+    expect(stripMobileWorkspaceTabs([], ['preview'], 'preview', ['preview'])).toEqual(['status', 'changes', 'files', 'terminal', 'preview', 'notes']);
+    expect(storedMobileWorkspaceTabOrder(['preview', 'status', 'changes', 'files', 'terminal', 'notes'], [])).toEqual(['preview', 'status', 'changes', 'files', 'terminal', 'notes']);
+  });
+
+  test('the browser is offered on the phone surface only, and only while Chrome on the server is the browser', () => {
+    expect(offeredMobileWorkspaceTabs(['plugin:tasks'], 'openchamber-builtin-server-browser')).toEqual(['plugin:tasks']);
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __OPENCHAMBER_SURFACE__: 'mobile', location: { protocol: 'https:', search: '' } },
+    });
+    try {
+      expect(offeredMobileWorkspaceTabs(['plugin:tasks'], 'openchamber-builtin-server-browser')).toEqual(['plugin:tasks', 'preview']);
+      expect(offeredMobileWorkspaceTabs(['plugin:tasks'], 'builtin')).toEqual(['plugin:tasks']);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'window', descriptor);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
   });
 
   test('a saved order keeps its tabs and places tabs it does not name where they go by default', () => {

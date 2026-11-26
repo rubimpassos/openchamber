@@ -59,6 +59,9 @@ export const SURFACE_AGENT_ACTIVE_HEADER = 'x-surface-agent-active';
 export const SURFACE_VIEWER_HEADER = 'x-surface-viewer';
 export const SURFACE_FRAME_SEQ_HEADER = 'x-surface-frame-seq';
 export const SURFACE_VIEWER_CONTROLS_HEADER = 'x-surface-viewer-controls';
+/** Opaque identity of the view captured in this frame, independent of frame sequence. */
+export const SURFACE_VIEW_ID_HEADER = 'x-surface-view-id';
+export const SURFACE_VIEW_ID_MAX = 128;
 export const SURFACE_AUDIO_CODEC_HEADER = 'x-surface-audio-codec';
 export const SURFACE_AUDIO_SAMPLE_RATE_HEADER = 'x-surface-audio-sample-rate';
 export const SURFACE_AUDIO_CHANNELS_HEADER = 'x-surface-audio-channels';

@@ -131,7 +131,10 @@ export const closeContextPanelTabs = (
   const closed = new Set(tabIds);
   const closedTabs = current.tabs.filter((tab) => closed.has(tab.id));
   let nextTabs = current.tabs.filter((tab) => !closed.has(tab.id));
-  if (nextTabs.length === current.tabs.length) {
+  const visibleChanged = nextTabs.length !== current.tabs.length;
+  const parked = current.parkedBrowserTabs ?? [];
+  const nextParked = parked.filter((tab) => !closed.has(tab.id));
+  if (!visibleChanged && nextParked.length === parked.length) {
     return current;
   }
 
@@ -159,7 +162,8 @@ export const closeContextPanelTabs = (
       : { activeTabId: null, isOpen: false, expanded: false };
   }
 
-  let next: ContextPanelDirectoryState = { ...current, tabs: nextTabs, touchedAt: Date.now() };
+  let next: ContextPanelDirectoryState = { ...current, tabs: visibleChanged ? nextTabs : current.tabs, touchedAt: Date.now() };
+  if (nextParked.length !== parked.length) next = withParkedBrowserTabs(next, nextParked);
   for (const zone of CONTEXT_ZONES) {
     const patch = views[zone];
     if (patch) next = withZoneView(next, zone, patch);

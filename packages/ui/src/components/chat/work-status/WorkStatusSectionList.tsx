@@ -8,6 +8,7 @@ import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
 import { WorkStatusWorkflowsSection } from './WorkStatusWorkflowsSection';
 import { WorkStatusTasksSection } from './WorkStatusTasksSection';
 import { useLoadSessionTodos } from './useLoadSessionTodos';
+import { ServerBrowsersSection } from './ServerBrowsersSection';
 import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
@@ -32,6 +33,7 @@ export const WorkStatusSectionList: React.FC<{
     subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
     tasks: <WorkStatusTasksSection sessionId={sessionId} />,
     workflows: <WorkStatusWorkflowsSection sessionId={sessionId} directory={directory} />,
+    browsers: <ServerBrowsersSection visible={visible} sessionId={sessionId} directory={directory} />,
     mcp: <WorkStatusMcpSection sessionId={sessionId} directory={directory} />,
     pinned: <WorkStatusPinnedSection sessionId={sessionId} directory={directory} />,
     contextSources: <WorkStatusContextSection sessionId={sessionId} directory={directory} />,

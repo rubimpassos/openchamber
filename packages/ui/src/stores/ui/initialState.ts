@@ -190,6 +190,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'messageSearchEnabled'
   | 'messageSearchReasoningEnabled'
   | 'browserProvider'
+  | 'browserSessionContext'
   | 'agentMemoryToolEnabled'
   | 'agentKnowledgeToolEnabled'
   | 'agentNotifyToolEnabled'
@@ -431,6 +432,7 @@ export const createInitialUIState = (): Pick<UIStore,
   messageSearchEnabled: false,
   messageSearchReasoningEnabled: false,
   browserProvider: 'openchamber-builtin-server-browser',
+  browserSessionContext: null,
   agentMemoryToolEnabled: false,
   agentKnowledgeToolEnabled: true,
   agentNotifyToolEnabled: false,

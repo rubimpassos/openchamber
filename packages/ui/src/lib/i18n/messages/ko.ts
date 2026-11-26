@@ -14,6 +14,8 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { browserMobileInputI18n } from './browser-mobile-input.i18n';
+import { browserStatusI18n } from './browser-status.i18n';
 import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
@@ -266,6 +268,8 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.ko,
   ...surfacePanelI18n.ko,
   ...browserServerPanelI18n.ko,
+  ...browserMobileInputI18n.ko,
+  ...browserStatusI18n.ko,
   ...prFixLoopI18n.ko,
   ...fileArtifactsI18n.ko,
   ...fileContentSearchI18n.ko,

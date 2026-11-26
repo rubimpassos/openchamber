@@ -6,16 +6,24 @@ This module owns the rendered browser panel, its navigation lifecycle, agent-act
 
 `ServerBrowserView` pairs context-panel tabs with the selected chat's Chrome
 tabs when a Server Browser provider is selected. `usePanelNavigation` delivers
-requested addresses after pairing selects the corresponding Chrome tab. The
+requested addresses after pairing selects the corresponding Chrome tab and the
+host confirms presentation of its current view identity: the
+address a tab opened with, a link to an existing tab, and an address the person
+enters in the address field or picks from the server list. The
 service owns observed page URLs, loading and errors. The built-in provider keeps
 the native webview and iframe navigation lifecycles in `BrowserPane`.
 
 ## Invariants
 
 - `directory` identifies the panel and composer destination; `siteDirectory` identifies the browsed folder, history and servers. They can differ while a draft shows an isolated space.
-- A newly requested Server Browser address survives blank service snapshots until its navigation finishes. Page-URL synchronization cannot erase pending intent.
+- A newly requested Server Browser address survives blank service snapshots until its navigation finishes. Page-URL synchronization cannot erase pending intent, in the panel tab or in the address field.
+- What the person types in the Server Browser address field stays there while the field has focus: a page address that arrives meanwhile, the blank page of a browser that just opened included, cannot replace it. The draft belongs to its panel tab (directory and tab id), so another panel tab starts from its own address even when the same field keeps focus. A field nobody is typing in follows the tab's address (`useBrowserAddress`).
+- An address the person enters or picks is sent once, after the chat's browser has opened and this panel tab's Chrome tab is selected, and replaces a working page. It belongs to the chat it was asked in: a chat switch, a sign-in browser, another panel tab or hiding the view drops it.
+- Queued navigation requires a confirmed presented identity equal to HTTP `state.viewId`, with the claimed tab active in the requesting session's selected scope. Canvas readiness requires a successful current-connection draw and a matching host confirmation. Failed decoding, a local ACK send, or a confirmation for another view grants no readiness. Hiding the browser zone retires its socket and pending draw; a blank discovery overlay keeps the canvas mounted.
+- Chrome DevTools is drawn on the canvas of the tab it inspects, a blank tab included. While it is open the discovery list stays off the canvas, and the phone's typing field is available under the same control and connection checks as on a page. Annotation and opening in the external browser still require a page address.
+- Rotating the viewport consumes a focused numeric draft before sending a viewport change, so an asynchronous parent cannot rotate stale dimensions. Focus may pass from a size field to Rotate without committing an intermediate size; leaving Rotate without activating it still commits. Escape consumes the key when cancelling a size draft so the workspace stays open.
 - Existing-tab requests reach the mounted view, or the latest request is delivered when that view subscribes. Reopening a working page only focuses it.
-- A sign-in browser does not receive chat-link navigation.
+- A sign-in browser does not receive chat-link navigation. It has no panel tab, so an address entered there is sent at once.
 - A panel tab mirroring a page already opened by Chrome or the agent consumes its first-open marker without navigating that page again.
 - Failed requested navigations remain associated with their scope and Chrome tab until a successful navigation, reload, history action or claim release. Selecting another tab cannot clear a failed navigation.
 - A space's view attaches only after the shell configures its in-memory session proxy, including for saved public addresses. Its partition name matches the shell's contract, and external-browser opening stays unavailable because that browser lacks the space's proxy restrictions.
@@ -28,6 +36,7 @@ the native webview and iframe navigation lifecycles in `BrowserPane`.
 - Only the current annotation run changes panel state or attaches its result. Cancellation also reaches an overlay still starting, and leaving the tab clears overlays and live style overrides.
 - Annotation dictation ends with its annotation. Transcript delivery precedes the idle-state message; a failed recording preserves partial text and leaves a waiting submit unsent for review. Model-download status appears in the overlay while recording continues.
 - A frame annotation captures only the visible area clipped by the window and scrolling ancestors, after overlay teardown and repaint. Hosts without desktop capture attach the annotation without an image.
+- A Server Browser view that is not on screen holds no picture socket, no state polling and no typing field: its host passes no tab (`tabID` null), as the desktop zone does for a tab of another kind and the phone's workspace drawer does for a hidden Browser tab.
 - Iframe tunnel resolutions are generation-scoped. A later navigation, return to discovery or teardown invalidates an older resolution so it cannot replace the selected page.
 
 ## Decisions
@@ -38,6 +47,37 @@ The service also writes page URLs into panel tabs after navigation and redirects
 Replaying every target-path update would navigate on service synchronization.
 Explicit first-open markers and existing-tab load requests distinguish user
 intent from observed page state.
+
+### Why an entered address waits for host-confirmed presentation
+
+A dock command carries the generation of the view it was built from, and the
+service refuses it once the view has moved on. A panel that just opened has no
+generation, then no browser of its own, then a Chrome tab that is not selected
+yet, and each of those steps moves the view. HTTP can report that selection
+before the host has processed the picture's ACK, so selecting the tab alone
+still sends a command stamped with the previous picture. `usePanelNavigation`
+holds the address until Canvas has drawn that view and the host confirms its
+retained identity after advancing the shown service sequence. Retrying the
+refused command can instead land after another chat is selected.
+
+### Why a typed address is a draft kept apart from the page address
+
+The view used to copy every new page address into the field. A browser that
+opens while the person types reports `about:blank` between the last key and
+Enter, so the typed address was replaced and Enter loaded nothing.
+`useBrowserAddress` keeps the typed text as a draft owned by its panel tab and
+shows the tab's address only when there is no draft. A new address drops the
+draft unless the field has focus, which the toolbar reports from the field's
+own focus and blur events before it does anything else with them. Focus sits in
+a ref: as state, a blur would run the synchronization again and wipe a draft
+the person only stepped away from. Holding back every address while the field
+has focus was rejected too, since a field that was focused and left unedited
+would keep an address the page has moved on from. A draft left behind without
+focus stays until the tab's next address, as it did before.
+
+An unedited focused address stays fully selected when its live value changes,
+so the next keystroke replaces the new value. A panel owner change resets that
+editing state even if the same input keeps focus.
 
 ### Why the iframe exposes fewer controls than the webview
 
@@ -121,9 +161,36 @@ An announcement represents a server the user just started and makes that port re
 
 A centered column that overflows can clip its own top beyond scroll reach. Keeping the surrounding panel fixed and letting only the shrinking server list scroll preserves access to every row; unavailable rows use `aria-disabled` so their explanatory marks retain pointer tooltips.
 
-### Why address suggestions select on pointer down
+### Why address suggestions select on click with mouse-down cancelled
 
-Address-field blur closes the list before a click can select a row. Pointer-down selection preserves the choice; the toolbar owns keyboard selection, resets it when the address or focus changes, and cycles through an unselected state so the typed address stays reachable.
+Address-field blur closes the list before a click can select a row, so a suggestion cancels mouse-down and the field keeps its focus. Selecting on pointer-down, the earlier approach, opened a row the moment a finger landed on it, which made the list impossible to scroll on a phone. The toolbar owns keyboard selection, resets it when the address or focus changes, and cycles through an unselected state so the typed address stays reachable.
+
+Arrow keys and Ctrl+N/P share that selection. Composition events belong to the
+input method; accepting an IME candidate cannot navigate a history suggestion.
+
+### Why the toolbar counts the actions that fit and not `ActionToolbar`'s fold
+
+The address is the only part of the row that can shrink, so the action group never overflows its own box and its fold never ran: on a phone the address collapsed to 28 px under the buttons. The toolbar measures its row and its navigation buttons, keeps 144 px for the address, and moves the actions that do not fit into More (`browserToolbarRoom.ts`). The count changes state only when it changes, so a panel resize does not re-render the row per frame.
+
+### Why a phone types through a hidden field and not the picture
+
+A canvas cannot open a touch keyboard. A field inside the picture's container takes the keyboard and its changes go out through the picture's own input queue, in order with taps, under the same control and frame checks. It mounts only while this viewer holds control, so handing control back closes the keyboard, and a key pressed in it never also reaches the container's key handler.
+
+### Why typed changes are compared by grapheme
+
+Autocorrect and input methods replace text the page already has. The field's previous value is compared with the new one by grapheme (`remoteTyping.ts`). Removed graphemes become Backspace presses where Chrome's Backspace removes exactly one of them (single code points, emoji sequences); a letter with combining marks would lose only its last mark, so those are selected with Shift+ArrowLeft and replaced. The remembered text starts over on a tap in the page, Enter, a paste, an editing key, a refused input, another tab or chat, and a page load, so a correction cannot delete in a field it was not typed into.
+
+### Why a finger drag scrolls and does not drag the mouse
+
+Sent as mouse events, a finger drag selects text in desktop Chrome. A touch that moves past 8 px sends wheel deltas anchored where it began; one that stays put is a click on release (`touchGesture.ts`). A fast release adds one more wheel step in the same direction, capped at the page height: a frame loop for momentum would be a timer in UI code, and Chrome animates a wheel step itself.
+
+### Why a custom viewport size commits on blur and not per digit
+
+Each digit used to be applied at once and clamped to the minimum, so typing "1" became 240 before the second digit. The boxes hold a draft; Enter in the width moves to the height, Enter in the height leaves the field, and leaving a field applies it.
+
+### Why a phone picks the device preset from a sheet and not the dropdown
+
+The preset list has 9 values, and on a phone the app picks a value from a sheet; an anchored dropdown there is kept for 2 to 5 actions. `BrowserDeviceBar` shows `MobileOverlayPanel` with one `MobileSheetRow` per preset when `useDeviceInfo().isMobile` is true, and the shared `Select` otherwise. That flag describes the device the app runs on. The viewport of the page in the panel is a different thing: a desktop window that emulates an iPhone keeps the `Select`. Both pickers apply a choice through the same `onViewportChange` transition, and the phone trigger keeps the `Select` trigger's chrome and 12rem cap, so the bar's row has the same width in both.
 
 ### Why annotation images attach before prompt text
 
@@ -144,3 +211,7 @@ The overlay matches physical letter and digit keys in a single chord, so other s
 ### Why mobile Back uses a frame-history guard
 
 The opaque iframe's internal history belongs to the WebView and takes priority over leaving the preview. Walking off the guard triggers the preview's own history step; the handler avoids reading the reported state because WebKit can report the departed guard's state after crossing a full load. Reload resolves a phone-local tunnel listener again because background suspension can reclaim the previous listener.
+
+Server Browser has authoritative history on the server. Its registered Back
+handler closes DevTools, then navigates that history, and yields to the shell
+only when the page has none. Hiding the view releases the handler.

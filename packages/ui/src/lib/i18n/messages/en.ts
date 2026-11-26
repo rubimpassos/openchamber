@@ -13,6 +13,8 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { browserMobileInputI18n } from './browser-mobile-input.i18n';
+import { browserStatusI18n } from './browser-status.i18n';
 import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
@@ -265,6 +267,8 @@ export const dict = {
   ...pluginPanelI18n.en,
   ...surfacePanelI18n.en,
   ...browserServerPanelI18n.en,
+  ...browserMobileInputI18n.en,
+  ...browserStatusI18n.en,
   ...prFixLoopI18n.en,
   ...fileArtifactsI18n.en,
   ...fileContentSearchI18n.en,

@@ -10,6 +10,34 @@ This folder is the UI half of the in-app browser and of agent browser control. T
 - `annotationOverlay.ts`, `annotationSession.ts`, `annotationPrompt.ts`, `annotationScreenshot.ts`, `overlayTheme.ts` and `previewFrameHost.ts` own annotation: the overlay injected into a page, one session from overlay to screenshot, the prompt the agent reads, the image drawn on the capture, theme resolution for the overlay, and the parent half of the preview-frame bridge.
 - `devServers.ts`, `announcedServers.ts`, `hiddenDevServers.ts`, `devServerWait.ts`, `devTunnel.ts` and `mobileDevTunnel.ts` own dev-server discovery, the wait for a server that is starting, and tunnelling a remote loopback server into a local origin.
 - `crashRecovery.ts`, `liveTabs.ts`, `history.ts`, `url.ts`, `viewport.ts`, `uploads.ts` and `hostCapability.ts` own one policy each.
+- `openPanel.ts` routes chat and extension links to an available Browser panel.
+  A server provider supports web and mobile; the local webview remains desktop.
+  The phone opens its workspace tab and captures the selected chat before
+  creating a panel tab. An unavailable phone shell leaves no hidden browser tab.
+- `serverBrowser` requires a bounded presentation identity in HTTP state. A
+  missing or malformed identity uses the existing invalid-state result.
+  Optional monitoring fields remain compatible; arbitrary frame arrival never
+  makes queued navigation ready. The Canvas confirmation contract is documented
+  in `packages/ui/src/components/browser/DOCUMENTATION.md`.
+- Commands acting on the selected view retain its original service `viewId`
+  across a stale-generation refresh. They retry only in that same view; a chat
+  or Chrome tab switch refuses the original command. Commands naming their own
+  scope, tab, dialog or file-chooser target keep that target when retrying.
+- `serverBrowser/sharedState.ts` publishes the pane's authoritative service
+  snapshots to visible Work Status consumers. The monitor samples memory on
+  demand and reuses a pane's live state instead of starting another state loop.
+  Material-state versions omit input activity, so equal versions still publish
+  fresh timestamps. Rows compare their derived minute to avoid input-frequency
+  rendering. Failed memory reads clear the measurement.
+  Close confirmations keep their originating monitor. A provider, project or
+  runtime change retires it, and a runtime change also cancels stale-generation
+  retries before another close request can use the new transport.
+  The pane's connection separately captures its runtime instance and key.
+  Unmounting or replacing its provider, viewer or runtime retires pending
+  completions: they cannot publish snapshots, update local state, return page
+  results or retry through the replacement transport. `connectionTypes.ts`
+  owns the hook's returned command contract; service wire shapes remain in
+  `serverBrowser/types.ts`.
 
 ## Invariants
 
@@ -39,6 +67,15 @@ This folder is the UI half of the in-app browser and of agent browser control. T
 - Agent tabs sit outside the user's live-tab count and sleep after their idle period. The user's tabs keep their page while among the most recently used up to the configured limit.
 
 ## Decisions
+
+### Why selected-view retries retain the original view
+
+A refreshed generation can belong to a different chat or Chrome tab that the
+viewer has already presented. Retrying navigation, history or a DevTools toggle
+there would pass the host's presentation gate while changing the wrong page.
+The invocation's `viewId` keeps the command tied to its original target and
+still permits a retry when only the generation changed within that view.
+Explicit-target commands retain their named target independently of selection.
 
 ### Why a navigation status carries its URL
 

@@ -5,6 +5,10 @@
   "type": "module",
   "license": "MIT",
   "description": "Built-in Chrome browser provider and shared surface for OpenChamber, running on the OpenChamber server.",
+  "dependencies": {
+    "ws": "^8.18.3",
+    "zod": "^4.6.7"
+  },
   "openchamber": {
     "apiVersion": 1,
     "contributes": {

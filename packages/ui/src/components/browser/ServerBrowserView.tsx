@@ -7,6 +7,8 @@ import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useServerBrowserBackHandler, type RegisterBrowserBackHandler } from '@/hooks/useServerBrowserBackHandler';
+import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { BLANK_URL, normalizeBrowserUrl } from '@/lib/browser/url';
@@ -51,10 +53,12 @@ import { usePanelNavigation } from '@/lib/browser/serverBrowser/usePanelNavigati
 import { forgetBrowserTabOpenedWithAddress, wasBrowserTabOpenedWithAddress } from '@/lib/browser/devServerWait';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
 
-import { BrowserToolbar } from './BrowserToolbar';
+import { BrowserToolbar, type BrowserToolbarMenuItem } from './BrowserToolbar';
+import { evaluateHeld } from './evaluateHeld';
 import { BrowserDeviceBar } from './BrowserDeviceBar';
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
+import { useBrowserAddress } from './useBrowserAddress';
 import { ServerBrowserCanvas, type ServerBrowserCanvasHandle } from './ServerBrowserCanvas';
 import { ServerBrowserBanners } from './ServerBrowserBanners';
 import { ServerBrowserInspector } from './ServerBrowserInspector';
@@ -65,9 +69,11 @@ type ServerBrowserViewProps = {
   directory: string;
   /** The Browser panel tab in front, which shows one Chrome tab of the chat; null when no Browser tab is. */
   tabID: string | null;
+  menuItems?: readonly BrowserToolbarMenuItem[];
+  registerBackHandler?: RegisterBrowserBackHandler;
 };
 
-type LiveViewProps = { guestId: string; directory: string; tabID: string };
+type LiveViewProps = Omit<ServerBrowserViewProps, 'tabID'> & { tabID: string };
 
 const ZOOM_MIN = -5;
 const ZOOM_MAX = 5;
@@ -154,52 +160,10 @@ const useCloseChromeTabsOfClosedPanelTabs = (guestId: string): void => {
   }, [guestId]);
 };
 
-export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, directory, tabID }) => {
+export const ServerBrowserView: React.FC<ServerBrowserViewProps> = ({ guestId, directory, tabID, menuItems, registerBackHandler }) => {
   useCloseChromeTabsOfClosedPanelTabs(guestId);
   if (!tabID) return null;
-  return <ServerBrowserLiveView guestId={guestId} directory={directory} tabID={tabID} />;
-};
-
-// Each dock request must answer within the host proxy's 20 s, but the
-// annotation script resolves only when the person finishes. So the promise is
-// started in the page and its result fetched by short requests that each wait
-// up to HELD_POLL_MS inside the page. `code` must be an expression.
-const HELD_POLL_MS = 8_000;
-let heldSequence = 0;
-
-const evaluateHeld = async (
-  evaluate: (expression: string, userGesture?: boolean) => Promise<unknown>,
-  code: string,
-  userGesture?: boolean,
-): Promise<unknown> => {
-  heldSequence += 1;
-  const key = JSON.stringify(`${Date.now()}-${heldSequence}`);
-  // Callers pass a statement-like expression, possibly ending in `;`.
-  const expression = code.trim().replace(/;+\s*$/, '');
-  await evaluate(`(() => {
-    const store = (window.__openchamberHeld ||= {});
-    const slot = store[${key}] = { done: false, value: null, error: null, wake: [] };
-    const finish = () => { slot.done = true; for (const wake of slot.wake.splice(0)) wake(); };
-    Promise.resolve((
-${expression}
-)).then((value) => { slot.value = value ?? null; finish(); }, (error) => { slot.error = String(error && error.message || error); finish(); });
-    return true;
-  })()`, userGesture);
-  for (;;) {
-    const result = await evaluate(`(async () => {
-      const slot = window.__openchamberHeld && window.__openchamberHeld[${key}];
-      if (!slot) return { gone: true };
-      if (!slot.done) await new Promise((resolve) => { slot.wake.push(resolve); setTimeout(resolve, ${HELD_POLL_MS}); });
-      if (!slot.done) return { pending: true };
-      delete window.__openchamberHeld[${key}];
-      return { done: true, value: slot.value, error: slot.error };
-    })()`) as { gone?: boolean; pending?: boolean; value?: unknown; error?: string | null } | null;
-    // The page navigated away: whatever the script was doing went with it.
-    if (!result || result.gone) return null;
-    if (result.pending) continue;
-    if (result.error) throw new Error(result.error);
-    return result.value ?? null;
-  }
+  return <ServerBrowserLiveView guestId={guestId} directory={directory} tabID={tabID} menuItems={menuItems} registerBackHandler={registerBackHandler} />;
 };
 
 const activeChromeTabOf = (state: ServerBrowserState | null): string | null => (
@@ -278,8 +242,9 @@ const useServerBrowserDownloads = (scope: ServerBrowserScope | null) => {
     }), [downloads, files.downloadFile, save, t]);
 };
 
-const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, tabID }) => {
+const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, tabID, menuItems: leadingMenuItems = [], registerBackHandler }) => {
   const { t } = useI18n();
+  const { hasTouchInput } = useDeviceInfo();
   const visible = useZoneInteractive();
   const { currentTheme } = useThemeSystem();
   const canvasHandleRef = React.useRef<ServerBrowserCanvasHandle | null>(null);
@@ -287,11 +252,12 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const [viewerId, setViewerId] = React.useState<string | undefined>(undefined);
   const [control, setControl] = React.useState<SurfaceControlState>({ controller: 'none', mine: false });
   const [connection, setConnection] = React.useState<SurfaceConnectionState>({ status: 'connecting' });
+  const [presentedViewId, setPresentedViewId] = React.useState<string | null>(null);
   const [canvasFocused, setCanvasFocused] = React.useState(false);
 
   const signIn = useServerBrowserSignIn((store) => store.signIn);
   const setSignIn = useServerBrowserSignIn((store) => store.setSignIn);
-  const serverBrowser = useServerBrowserConnection(guestId, directory, viewerId, true, signIn?.profileId ?? null);
+  const serverBrowser = useServerBrowserConnection(guestId, directory, viewerId, visible, signIn?.profileId ?? null);
   const { state } = serverBrowser;
   // Right after a chat switch the service still shows the previous chat's
   // browser until this chat's opens. Nothing of it is paired, shown as this
@@ -299,6 +265,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const scope = serverBrowser.scope && (serverBrowser.scope.signIn || serverBrowser.scope.sessionId === serverBrowser.sessionId)
     ? serverBrowser.scope
     : null;
+  useServerBrowserBackHandler(registerBackHandler, scope?.devtools
+    ? () => serverBrowser.setDevTools(false)
+    : scope?.canGoBack ? serverBrowser.back : null);
 
   // ---- this panel tab <-> one Chrome tab of the chat ----------------------
   const claims = useServerBrowserPanelTabs((store) => store.claims);
@@ -319,10 +288,12 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     return next;
   };
 
-  const navigationPending = usePanelNavigation({
-    directory, tabID, scope, chromeTabId: myChromeTab,
-    navigate: (url) => runNavigation(() => serverBrowser.navigate(url)), error: serverBrowser.error, disabled: Boolean(signIn),
+  const navigation = usePanelNavigation({
+    directory, tabID, sessionId: serverBrowser.sessionId, scope, chromeTabId: myChromeTab,
+    viewId: state?.viewId ?? null, presentedViewId,
+    navigate: (url) => runNavigation(() => serverBrowser.navigate(url)), error: serverBrowser.error, disabled: Boolean(signIn) || !visible,
   });
+  const navigationPending = navigation.pending;
 
   React.useEffect(() => {
     if (signIn || !scope || pairingRef.current) return;
@@ -476,13 +447,13 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     });
   }, [claims, closeContextPanelTabs, directory, release, scope, serverBrowser]);
 
-  const [address, setAddress] = React.useState('');
-  React.useEffect(() => {
-    setAddress(scope ? toDisplayUrl(scope.url) : '');
-    // Only the url, not the whole (identity-changing-every-poll) scope object:
-    // resyncing on every poll tick would fight whatever the user is typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope?.url]);
+  const addressField = useBrowserAddress({ directory, tabID, requestedUrl: navigation.requestedUrl, pageUrl: scope?.url });
+  const address = addressField.value;
+
+  const openAddress = (url: string) => {
+    if (signIn || isSignInScope) void runNavigation(() => serverBrowser.navigate(normalizeBrowserUrl(url)));
+    else navigation.load(url);
+  };
 
   const [showDeviceBar, setShowDeviceBar] = React.useState(false);
   const viewport = fromServiceViewport(scope?.viewport);
@@ -592,6 +563,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const zoomPercent = Math.round(1.2 ** zoomLevel * 100);
 
   const loaded = Boolean(showingMine && scope && scope.url && scope.url !== BLANK_URL);
+  // Chrome DevTools is drawn on the canvas of a blank tab too.
+  const showingDevTools = showingMine && scope?.devtools === true;
 
   // ---- what the page in front asks of the person ---------------------------
   const { files } = useRuntimeAPIs();
@@ -644,6 +617,15 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
 
   const downloadMenuItems = useServerBrowserDownloads(scope);
 
+  const [typingOpenFor, setTypingOpenFor] = React.useState<string | null>(null);
+  const typingTarget = `${tabID}\u0000${scope?.id ?? ''}\u0000${shownTab?.id ?? ''}`;
+  const canType = control.controller === 'user' && control.mine && connection.status === 'open' && (loaded || showingDevTools);
+  if (!canType && typingOpenFor !== null) setTypingOpenFor(null);
+  const toggleKeyboard = () => {
+    if (canType) canvasHandleRef.current?.toggleKeyboard();
+    else toast.info(t('contextPanel.browser.keyboard.tapFirst'));
+  };
+
   // ---- sound: off until the person turns it on ----------------------------
   const [soundSupported, setSoundSupported] = React.useState(false);
   const [soundOn, setSoundOn] = React.useState(false);
@@ -682,11 +664,12 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
       ) : null}
       <BrowserToolbar
         address={address}
-        onAddressChange={setAddress}
+        addressOwner={addressField.owner}
+        onAddressChange={addressField.edit}
+        onAddressFocusChange={addressField.setFocused}
         onSubmit={(value) => {
-          const next = normalizeBrowserUrl(value);
-          if (next === BLANK_URL) return;
-          void runNavigation(() => serverBrowser.navigate(next));
+          if (normalizeBrowserUrl(value) === BLANK_URL) return;
+          openAddress(value);
         }}
         suggestions={suggestions}
         onForgetSuggestion={(url) => forgetHistoryVisit(directory, url)}
@@ -701,11 +684,16 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         isAnnotating={isAnnotating}
         onToggleInspector={() => setInspectorOpen((current) => !current)}
         isInspectorOpen={inspectorOpen}
+        onToggleDevTools={scope && !isSignInScope ? () => void serverBrowser.setDevTools(scope.devtools !== true) : undefined}
+        isDevToolsOpen={scope?.devtools === true}
+        onToggleKeyboard={hasTouchInput ? toggleKeyboard : undefined}
+        isKeyboardOpen={canType && typingOpenFor === typingTarget}
         onZoomIn={() => void serverBrowser.setZoom(Math.min(ZOOM_MAX, zoomLevel + 1))}
         onZoomOut={() => void serverBrowser.setZoom(Math.max(ZOOM_MIN, zoomLevel - 1))}
         onZoomReset={() => void serverBrowser.setZoom(0)}
         zoomPercent={zoomPercent}
         menuItems={[
+          ...leadingMenuItems,
           ...downloadMenuItems,
           ...(downloadMenuItems.length > 0 ? [{ kind: 'separator' as const, id: 'sep-downloads' }] : []),
           { kind: 'item', id: 'cookies', icon: 'delete-bin', label: t('contextPanel.browser.clearCookies'), onSelect: () => setClearConfirm('cookies') },
@@ -752,8 +740,14 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
           onViewer={setViewerId}
           onControl={setControl}
           onConnection={setConnection}
+          onPresented={setPresentedViewId}
           onFocusChange={setCanvasFocused}
           onAudioState={(available) => setSoundMissing(!available)}
+          typing={hasTouchInput && canType ? {
+            targetKey: typingTarget,
+            pageEpoch: `${scope?.url ?? ''}:${scope?.isLoading ? 'loading' : 'loaded'}:${scope?.devtools ? 'devtools' : 'page'}`,
+            onOpenChange: (open) => setTypingOpenFor(open ? typingTarget : null),
+          } : undefined}
         />
         {shownTab?.dialog ? (
           <ServerBrowserDialogCard key={shownTab.dialog.id} dialog={shownTab.dialog} url={shownTab.url} disabled={answerLocked} onAnswer={answerDialog} />
@@ -767,9 +761,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
             onCancel={cancelFiles}
           />
         ) : null}
-        {!loaded && showingMine ? (
+        {!loaded && !showingDevTools && showingMine ? (
           <div className="absolute inset-0">
-            <BrowserEmptyState onOpen={(url) => void runNavigation(() => serverBrowser.navigate(normalizeBrowserUrl(url)))} directory={directory} visible={visible} />
+            <BrowserEmptyState onOpen={openAddress} directory={directory} visible={visible} />
           </div>
         ) : null}
       </div>

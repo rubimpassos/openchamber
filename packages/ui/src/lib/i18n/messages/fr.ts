@@ -13,6 +13,8 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
+import { browserMobileInputI18n } from './browser-mobile-input.i18n';
+import { browserStatusI18n } from './browser-status.i18n';
 import { prFixLoopI18n } from './pr-fix-loop.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
@@ -265,6 +267,8 @@ export const dict: Readonly<Record<string, string>> = {
   ...pluginPanelI18n.fr,
   ...surfacePanelI18n.fr,
   ...browserServerPanelI18n.fr,
+  ...browserMobileInputI18n.fr,
+  ...browserStatusI18n.fr,
   ...prFixLoopI18n.fr,
   ...fileArtifactsI18n.fr,
   ...fileContentSearchI18n.fr,

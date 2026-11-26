@@ -16,9 +16,11 @@ export type SurfaceFrame = {
   mime: 'image/jpeg' | 'image/png';
   bytes: ArrayBuffer;
   title?: string;
+  readonly viewId?: string;
   agentActive: boolean;
 };
 
+export type SurfacePresentation = Readonly<Pick<Extract<SurfaceHostMessage, { type: 'presented' }>, 'seq' | 'viewId'>>;
 export type SurfaceControlState = { controller: SurfaceController; mine: boolean };
 
 
@@ -36,6 +38,7 @@ export type SurfaceClientHandlers = {
   onClipboard?: (id: string, text: string) => void;
   onError?: (code: string, message: string) => void;
   onViewer?: (viewerId: string) => void;
+  onPresented?: (presentation: SurfacePresentation) => void;
   /** Sound while it is on; see `setAudio`. */
   onAudio?: (audio: SurfaceAudioBatch) => void;
   /** `false` when the extension has no sound to send, `true` when it sends again. */
@@ -78,7 +81,7 @@ export class SurfaceClient {
   /** Kept so a reconnect asks for sound again. */
   private audio = false;
   /** The frame the pane is drawing, until it acknowledges it. */
-  private drawingSeq: number | null = null;
+  private drawingFrame: SurfaceFrame | null = null;
   /** The newest frame that arrived while the pane was drawing. */
   private nextFrame: SurfaceFrame | null = null;
   private lastSize: { width: number; height: number } | null = null;
@@ -115,29 +118,35 @@ export class SurfaceClient {
     }
   }
 
-  ack(seq: number): void {
-    // A frame of an earlier connection: its ack means nothing to this one.
-    if (seq !== this.drawingSeq) return;
-    this.send({ type: 'ack', seq });
-    this.drawingSeq = null;
+  /** Object identity binds an asynchronous draw to its connection, even if sequences recur. */
+  isCurrentFrame(frame: SurfaceFrame): boolean {
+    return !this.disposed && !this.ended && this.socket?.readyState === SOCKET_OPEN && frame === this.drawingFrame;
+  }
+
+  ack(frame: SurfaceFrame, presented?: boolean): void {
+    if (!this.isCurrentFrame(frame)) return;
+    const message: Extract<SurfaceViewerMessage, { type: 'ack' }> = { type: 'ack', seq: frame.seq };
+    if (presented !== undefined) message.presented = presented;
+    this.send(message);
+    this.drawingFrame = null;
     const next = this.nextFrame;
     this.nextFrame = null;
     if (next) this.draw(next);
   }
 
   private draw(frame: SurfaceFrame): void {
-    if (this.drawingSeq !== null) {
+    if (this.drawingFrame !== null) {
       this.nextFrame = frame;
       return;
     }
-    this.drawingSeq = frame.seq;
+    this.drawingFrame = frame;
     this.handlers.onFrame(frame);
   }
 
   private resetFrames(): void {
     this.pendingFrame = null;
     this.pendingAudio = null;
-    this.drawingSeq = null;
+    this.drawingFrame = null;
     this.nextFrame = null;
   }
 
@@ -267,6 +276,10 @@ export class SurfaceClient {
           agentActive: message.agentActive,
         };
         if (message.title) this.pendingFrame.title = message.title;
+        if (message.viewId !== undefined) this.pendingFrame = { ...this.pendingFrame, viewId: message.viewId };
+        return;
+      case 'presented':
+        this.handlers.onPresented?.({ seq: message.seq, viewId: message.viewId });
         return;
       case 'control':
         this.handlers.onControl({ controller: message.controller, mine: message.mine });
@@ -282,6 +295,7 @@ export class SurfaceClient {
         return;
       case 'ended':
         this.ended = true;
+        this.resetFrames();
         this.cancelReconnect();
         this.handlers.onConnection({ status: 'ended', reason: message.reason });
         return;

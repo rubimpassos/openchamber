@@ -103,8 +103,57 @@ own data fetching and reconciliation; the layout's right slot owns column width.
   scrollbar, which would consume trailing-value space. Horizontal margins leave
   room for its shadow, and the overlay stays outside flex flow so it cannot push
   the transcript.
+- Browser rows are the Server Browser's chats in the panel's own directory, read
+  from the service of the connected instance. Sign-in browsers, other projects
+  and other worktrees of the same project are left out, and a published state
+  from another instance is never shown.
+- A browser row shows one state: the agent asking for the person, then an agent
+  action running, then the last failed action, then who holds control, then
+  loading. `agentActive`, `isLoading` and `problems` from the service decide it;
+  the section infers none of them.
+- The section sends nothing while no browser of the project changes. It reads
+  once when it shows, on `browser-agent-activity`, on a refresh press and after
+  its own close. A stopped service is not started for a read, and a provider
+  without `/browser/state` or `/browser/memory` is asked once.
+- A row shows memory only for a browser the service measured. A missing or
+  failed reading shows no number, never zero, and the heading sums measured
+  browsers only.
+- A failed read keeps the rows of the last reading and says so under them. A
+  refused close keeps the row and names the cause in a toast.
+- Closing a browser asks first, sends the generation of the last reading, and
+  retries once when the view moved. Closing the browser of the chat on screen
+  also closes that chat's Browser panel tabs, as the panel's own close does.
+- A row re-renders when what it shows changes. `lastActivityAt` is kept to the
+  minute, because the service moves it on every input and frame request.
 
 ## Decisions
+
+### Why the Browsers section follows the service only while an agent acts and not on a timer
+
+A browser changes when an agent acts in it or a person uses the panel. The
+server announces the first (`browser-agent-activity`), and the open panel
+already holds a request on `/browser/state` for the second. So the section holds
+a request of its own only from an agent's announcement until no browser of the
+project has `agentActive`, and gives up a page that only keeps loading after
+one hold that ran out. A timer would send requests through the relay for every
+idle minute the card is on screen; no follow at all left a row reading "Agent
+is working" after the agent had stopped.
+
+### Why the panel and the section share one published state and not two reads
+
+`useServerBrowserConnection` publishes every state it applies
+(`lib/browser/serverBrowser/sharedState.ts`) and counts itself as a follower.
+While a panel follows the service the section reads that state and sends
+nothing; when no panel does, the section's own reads publish to the same place.
+Two independent reads doubled the traffic exactly while the browser was busiest.
+
+### Why memory is a separate, spaced reading and not part of the state
+
+A memory reading runs `ps` over every process on the server, so it cannot ride
+on a state the service recomputes for every held request. The section asks when
+a browser of the project opens, closes, navigates, or starts or ends loading or
+an agent action, at most once per 5 seconds, with changes inside that window
+sharing one later reading. A refresh press reads at once.
 
 ### Why the monthly total is found by its window key and not by row order
 
@@ -327,6 +376,8 @@ replaced the drawer's MCP tab: the MCP section carries the same switches.
   this tab is open, rather than over the first heading as on the card.
 - Sections mount only while the tab is on screen, so a closed drawer holds no
   subscriptions.
+- A browser row keeps its close button on screen at the 36px touch floor; the
+  desktop card shows it on hover or keyboard focus, in space the row reserves.
 
 ### Why a separate hidden list and not the shared one
 
@@ -350,6 +401,9 @@ Rows that would open the context panel are readouts there, because VS Code
 mounts no `ContextPanel`. A pull request row opens its URL in the browser, the
 only surface VS Code has for one; a summary without a URL leaves the row a
 readout (`prRowTarget.ts`).
+
+The Browsers section is not listed there: VS Code has no OpenChamber event
+stream to announce agent activity, and no Browser panel to follow.
 
 ## Data sources
 
@@ -376,6 +430,7 @@ which requests only providers enabled for this panel.
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | the switch reuses `useMcpStore.setEnabled`; a failed toggle shows its error in a toast and leaves the switch usable |
+| Browsers | `useServerBrowserMonitor` (`lib/browser/serverBrowser`): the Server Browser's `/browser/state` scopes of this directory, shared with the open Browser panel, and `/browser/memory` for Chrome's resident memory per chat; chat names from `useGlobalSessionsStore.entityById` | listed only while a Server Browser provider is selected and outside VS Code; see the invariants and decisions above |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
 | Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in the section list, then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown. VS Code has no such route, so the loader never reads there and Tasks stays unlisted |
 
@@ -731,14 +786,14 @@ The default order is by durability:
    long as the session is open. Usage sits here rather than lower down because a
    spent quota stops the work outright, and Context sources because it holds the
    linked issue and PR, which tell what the session is about;
-2. **Subagents**, **Tasks** and **Workflows** — what is happening right now;
+2. **Subagents**, **Tasks**, **Workflows** and **Browsers** — what is happening right now;
 3. **MCP** and **Pinned messages** — supporting material.
 
 The sections dialog has drag handles for changing this order, including hidden
 sections. A drop updates the panel immediately. `workStatusSectionOrder` is a
 profile preference persisted through the settings registry and the local UI
 store. Missing or empty order uses the default; duplicate and obsolete ids are
-discarded, and newly introduced sections append in default order, except those listed in `PLACED_AFTER` (`sections.ts`), which go right after their default neighbour: Tasks lands after Subagents in every saved list, where the default puts it. Visibility
+discarded, and newly introduced sections append in default order, except those listed in `PLACED_AFTER` (`sections.ts`), which go right after their default neighbour: Tasks lands after Subagents in every saved list, and Browsers after Workflows, where the default puts them. Visibility
 changes never alter positions.
 
 Clients saved the default as their order without the user choosing it, so a
@@ -964,6 +1019,8 @@ Rows that name something the app can already show are buttons:
 | Subagents heading button | the Subagents panel (`openSubagentsPanel`) |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
+| Browser (close) | asks, then closes that chat's Chrome on the server without saving (`POST /browser/close-scope`) |
+| Browsers heading button | reads the browsers and their memory again |
 | MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`); switching on a `needs_auth` server signs in instead |
 | MCP status | the state doubles as the button: "Sign in" starts the server's OAuth sign-in under the row, "Failed" reconnects |
 | Pinned (pin icon) | unpins the message |

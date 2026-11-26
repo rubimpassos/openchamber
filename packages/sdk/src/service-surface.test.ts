@@ -1,6 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readSurfaceControlNotice, readSurfaceInputBatch } from './service-surface.ts';
+import { surfaceHostMessageSchema, surfaceViewerMessageSchema } from './service-surface-schemas.ts';
+
+describe('surface presentation wire', () => {
+  const frame = { type: 'frame', seq: 7, width: 320, height: 200, mime: 'image/png', bytes: 3, agentActive: false };
+
+  test('preserves optional view identity, explicit presentation, and the host confirmation', () => {
+    expect(surfaceHostMessageSchema.parse({ ...frame, viewId: 'view-B' })).toEqual({ ...frame, viewId: 'view-B' });
+    expect(surfaceHostMessageSchema.parse(frame)).toEqual(frame);
+    for (const presented of [true, false]) {
+      expect(surfaceViewerMessageSchema.parse({ type: 'ack', seq: 7, presented })).toEqual({ type: 'ack', seq: 7, presented });
+    }
+    expect(surfaceViewerMessageSchema.parse({ type: 'ack', seq: 7 })).toEqual({ type: 'ack', seq: 7 });
+    const confirmed = { type: 'presented', seq: 7, viewId: 'view-B' };
+    expect(surfaceHostMessageSchema.parse(confirmed)).toEqual(confirmed);
+  });
+
+  test.each(['', 'x'.repeat(129), 'view\nB', 'view\u00e9'])('refuses an invalid frame or confirmation identity %j', (viewId) => {
+    expect(surfaceHostMessageSchema.safeParse({ ...frame, viewId }).success).toBe(false);
+    expect(surfaceHostMessageSchema.safeParse({ type: 'presented', seq: 7, viewId }).success).toBe(false);
+  });
+});
 
 describe('readSurfaceInputBatch', () => {
   const modifiers = { alt: false, ctrl: false, meta: false, shift: false };

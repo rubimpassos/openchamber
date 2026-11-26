@@ -4,6 +4,7 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { useShowTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { openBrowserPanel } from '@/lib/browser/openPanel';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
@@ -19,14 +20,11 @@ export function useOpenChatLink(directory: string) {
   const inWorkspace = useChatSurfaceMode() !== 'mini-chat';
 
   const openElsewhere = React.useCallback((url: string) => {
-    const { openTrackerLinksOnBoard, openLinksInBrowserPanel, openContextPreview } = useUIStore.getState();
+    const { openTrackerLinksOnBoard, openLinksInBrowserPanel } = useUIStore.getState();
     if (inWorkspace && openTrackerLinksOnBoard && showTrackerItem(url, directory)) return;
-    if (inWorkspace && openLinksInBrowserPanel && !mobile && isDesktopShell() && directory) {
-      openContextPreview(directory, url);
-      return;
-    }
+    if (inWorkspace && openLinksInBrowserPanel && openBrowserPanel(directory, url)) return;
     void openExternalUrl(url);
-  }, [directory, inWorkspace, mobile, showTrackerItem]);
+  }, [directory, inWorkspace, showTrackerItem]);
 
   return React.useCallback((url: string) => {
     const git = getRegisteredRuntimeAPIs()?.git ?? null;

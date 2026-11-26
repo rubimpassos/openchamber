@@ -19,7 +19,7 @@ export const BrowserAddressSuggestions: React.FC<{
 
   return (
     <div
-      className="oc-glass-popover oc-glass-floating absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-xl p-1"
+      className="oc-glass-popover oc-glass-floating absolute inset-x-0 top-full z-50 mt-1 max-h-[min(20rem,45dvh)] overflow-y-auto rounded-xl p-1"
       role="listbox"
       aria-label={t('contextPanel.browser.history.label')}
     >
@@ -29,13 +29,11 @@ export const BrowserAddressSuggestions: React.FC<{
           role="option"
           aria-selected={index === activeIndex}
           className={cn(
-            'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1',
+            'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 pointer-coarse:min-h-11',
             index === activeIndex ? 'bg-interactive-hover' : 'hover:bg-interactive-hover',
           )}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            onSelect(entry.url);
-          }}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onSelect(entry.url)}
           onPointerEnter={() => onHighlight(index)}
         >
           <Icon name="global" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -50,12 +48,12 @@ export const BrowserAddressSuggestions: React.FC<{
               <button
                 type="button"
                 className={cn(
-                  'shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity',
-                  'hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100',
+                  'flex shrink-0 items-center justify-center rounded-md p-1 text-muted-foreground opacity-0 transition-opacity',
+                  'hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100',
                 )}
                 aria-label={t('contextPanel.browser.history.forget')}
-                onPointerDown={(event) => {
-                  event.preventDefault();
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => {
                   event.stopPropagation();
                   onForget(entry.url);
                 }}

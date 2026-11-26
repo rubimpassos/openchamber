@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { z } from 'zod';
 
 if (!process.versions.bun) await import('../packages/web/scripts/register-server-sources.mjs');
@@ -9,6 +10,7 @@ const { builtInExtensionSchema, builtInRegistrySchema, DEFAULT_BUILTIN_ROOT } = 
 const { inspectGuestPackage } = await import('../packages/web/server/lib/guests/catalog.js');
 
 const repoRoot = fileURLToPath(new URL('../', import.meta.url));
+const webRequire = createRequire(new URL('../packages/web/package.json', import.meta.url));
 const relativeFile = z.string().min(1).refine((value) => !value.includes('\\') && !value.includes('\0')
   && !path.isAbsolute(value) && value.split('/').every((part) => part && part !== '.' && part !== '..'));
 const sourceSchema = z.object({
@@ -48,7 +50,11 @@ export const buildBuiltInExtensions = async ({ sourceRoot = path.join(repoRoot, 
       const root = await inside(sourceRoot, entry.directory);
       const destination = path.join(staging, entry.directory);
       await fs.mkdir(destination, { recursive: true });
-      const manifest = z.object({ name: z.string(), openchamber: z.object({}).passthrough() }).passthrough()
+      const manifest = z.object({
+        name: z.string(),
+        openchamber: z.object({}).passthrough(),
+        dependencies: z.record(z.string(), z.string()).optional(),
+      }).passthrough()
         .parse(JSON.parse(await fs.readFile(await inside(root, 'package.json'), 'utf8')));
       await fs.writeFile(path.join(destination, 'package.json'), `${JSON.stringify({ ...manifest, version: app.version }, null, 2)}\n`);
       for (const file of entry.files) {
@@ -71,6 +77,10 @@ export const buildBuiltInExtensions = async ({ sourceRoot = path.join(repoRoot, 
               build.onResolve({ filter: /^@openchamber\/sdk(?:\/ui|\/schemas)?$/ }, ({ path: specifier }) => ({
                 path: path.join(repoRoot, 'packages/sdk/src', specifier.endsWith('/ui') ? 'ui/index.ts' : specifier.endsWith('/schemas') ? 'schemas.ts' : 'index.ts'),
               }));
+              // Built-ins are not Bun workspaces. Bundle the host's existing
+              // Node socket implementation; Bun resolves "ws" to its own shim.
+              build.onResolve({ filter: /^ws$/ }, () => manifest.dependencies?.ws
+                ? { path: path.join(path.dirname(webRequire.resolve('ws/package.json')), 'index.js') } : undefined);
             },
           }],
           loader: { '.svg': 'dataurl', '.png': 'dataurl' },

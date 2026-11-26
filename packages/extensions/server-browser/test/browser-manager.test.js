@@ -132,6 +132,36 @@ test('rebases frame sequences when the user selects another scope', async () => 
   assert.ok(second.sequence > first.sequence);
 });
 
+test('gives each selected view a fresh identity across returns and manager restarts', async () => {
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  assert.equal(manager.state().viewId, null);
+  await manager.openScope(context('/repo', 'ses_one'), manager.state().generation);
+  const first = manager.state().viewId;
+  assert.match(first, /^[\x21-\x7e]{1,128}$/);
+  const frame = await manager.surfaceFrame({ after: 0, wait: 0 });
+  assert.equal(frame.viewId, first);
+  assert.equal((await manager.surfaceFrame({ after: 0, wait: 0 })).viewId, first);
+
+  await manager.openScope(context('/repo', 'ses_two'), manager.state().generation);
+  const second = manager.state().viewId;
+  await manager.openScope(context('/repo', 'ses_one'), manager.state().generation);
+  const returned = manager.state().viewId;
+  const runtime = runtimes.get('ses_one');
+  runtime.tabs = [{ id: 'another-tab', active: true }];
+  runtime.changeTabs();
+  const tab = manager.state().viewId;
+  runtime.surfaceIdentity = ['devtools', 1];
+  const tools = manager.state().viewId;
+  assert.equal((await manager.surfaceFrame({ after: 0, wait: 0 })).viewId, tools);
+
+  const restarted = createBrowserManager({ createRuntime: factory });
+  await restarted.openScope(context('/repo', 'ses_one'), restarted.state().generation);
+  assert.equal(new Set([first, second, returned, tab, tools, restarted.state().viewId]).size, 6);
+  await manager.close();
+  await restarted.close();
+});
+
 test('serializes dock navigation and rejects it while any viewer owns control', async () => {
   // Given a selected scope and user control held through the host surface lease.
   const { factory, runtimes } = createRuntimeFactory();
@@ -324,6 +354,27 @@ test('discards a frame that resolves after the selected view changes twice', asy
   await manager.selectScope(scopes[0].id, manager.state().generation);
   pendingFrame.resolve({ sequence: 1, bytes: Buffer.from('stale'), mime: 'image/jpeg', width: 800, height: 600, title: '' });
   assert.equal(await waiting, null);
+});
+
+test('discards a capture when the surface changes during its read without a tab notification', async () => {
+  const pending = Promise.withResolvers();
+  const { factory, runtimes } = createRuntimeFactory();
+  const manager = createBrowserManager({ createRuntime: factory });
+  await manager.openScope(context('/repo', 'ses_one'), manager.state().generation);
+  const runtime = runtimes.get('ses_one');
+  const capture = runtime.surfaceFrame;
+  runtime.surfaceFrame = () => pending.promise;
+  const oldView = manager.state().viewId;
+  const waiting = manager.surfaceFrame({ after: 0, wait: 0 });
+
+  runtime.surfaceIdentity = ['devtools', 1];
+  pending.resolve(await capture({ after: 0 }));
+  assert.equal(await waiting, null);
+  runtime.surfaceFrame = capture;
+  const current = await manager.surfaceFrame({ after: 0, wait: 0 });
+  assert.notEqual(current.viewId, oldView);
+  assert.equal(current.viewId, manager.state().viewId);
+  await manager.close();
 });
 
 test('routes queued surface input to the view that remains selected', async () => {

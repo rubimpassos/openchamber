@@ -66,7 +66,13 @@ export const createSessionBrowserActions: UIStoreSlice<
         byDirectory ??= { ...state.contextPanelByDirectory };
         byDirectory[directory] = next;
       }
-      return byDirectory ? { contextPanelByDirectory: byDirectory } : state;
+      const previous = state.browserSessionContext;
+      const selection = current === null ? null
+        : previous?.directory === current && previous.sessionId === sessionId
+          ? previous : { directory: current, sessionId };
+      return byDirectory || selection !== previous
+        ? { contextPanelByDirectory: byDirectory ?? state.contextPanelByDirectory, browserSessionContext: selection }
+        : state;
     });
   },
 
