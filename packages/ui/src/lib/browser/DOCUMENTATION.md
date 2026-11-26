@@ -32,6 +32,12 @@ This folder is the UI half of the in-app browser and of agent browser control. T
   Close confirmations keep their originating monitor. A provider, project or
   runtime change retires it, and a runtime change also cancels stale-generation
   retries before another close request can use the new transport.
+  The pane's connection separately captures its runtime instance and key.
+  Unmounting or replacing its provider, viewer or runtime retires pending
+  completions: they cannot publish snapshots, update local state, return page
+  results or retry through the replacement transport. `connectionTypes.ts`
+  owns the hook's returned command contract; service wire shapes remain in
+  `serverBrowser/types.ts`.
 
 ## Invariants
 
