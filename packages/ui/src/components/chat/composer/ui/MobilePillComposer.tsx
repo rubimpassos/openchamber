@@ -116,7 +116,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     <span
                         className={cn(
                             'truncate typography-ui-label',
-                            message.trim() ? 'text-foreground' : 'text-muted-foreground/40',
+                            message.trim() ? 'text-foreground' : 'text-muted-foreground',
                         )}
                     >
                         {message.trim()
