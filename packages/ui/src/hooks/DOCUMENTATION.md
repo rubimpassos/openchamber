@@ -128,6 +128,7 @@ page holds its own copy.
 - Shortcut handling is scoped by surface: VS Code, the phone shell and the desktop app each receive only the chords their UI can act on.
 - A completion key typed into an editable target is a deliberate sequence only when the prefix was armed from that same target. Otherwise it is typing and must not be swallowed.
 - Double Escape from a chat's composer stops that chat's run; the first press arms the prompt and the second within three seconds stops it. An Escape already prevented was spent by the composer itself.
+- Coming back to the window puts the caret in the composer two frames later, and only while focus is still on the element that held it at the window's `focus` event. Focus that moved during those frames stays where it was put. `inputRedirect` then applies its own checks: an editable target, a floating layer or a text selection keeps focus as well.
 - The Shift flag follows `shiftKey` on every keyboard and pointer event rather than pairing Shift keydown with keyup, because a keyup can be swallowed. Window blur resets it.
 - The document root never scrolls. Chromium still scrolls hidden-overflow ancestors programmatically, most visibly to reveal a textarea caret, so root scroll is snapped back to zero.
 
@@ -200,6 +201,10 @@ A worktree session directory is not where memories are stored. The sync resolves
 ### Why a failed model-list request keeps the previous answer
 
 An empty list reads as "nothing available" and leaves a restored walkthrough picker broken. A transport failure is not an answer, so the known list stands until a read succeeds.
+
+### Why the window-focus refocus remembers what held focus on return
+
+The refocus runs two frames after the window's `focus` event, and other code places focus in that gap. Closing a dialog that held an iframe page left `body` focused at the event; Base UI then returned focus to the control that opened the dialog, and the delayed refocus moved it on to the composer. That control is an ordinary button, which `inputRedirect` rightly treats as free to take when the user returns with it focused, so its checks cannot tell the two cases apart. Comparing `document.activeElement` at the event with the one in the final frame can, without knowing who moved focus. A list of protected openers or iframes in `inputRedirect` would need an entry for every surface that restores focus.
 
 ### Why one clock drives every live readout
 

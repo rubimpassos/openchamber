@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { EditorView } from '@codemirror/view';
 import { OpenCode } from '@opencode/client';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
@@ -116,18 +117,14 @@ async function withShortcutsMounted(
       : path.endsWith('/config') || path.endsWith('/project') ? [] : { data: [] };
     return Response.json(data);
   };
-  const originals = new Map<string, PropertyDescriptor | undefined>();
-  for (const [name, value] of Object.entries({
+  const restoreGlobals = installGlobals({
     window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
     Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement,
     HTMLTextAreaElement: dom.HTMLTextAreaElement, Node: dom.Node, Event: dom.Event,
     KeyboardEvent: dom.KeyboardEvent, CustomEvent: dom.CustomEvent,
     IS_REACT_ACT_ENVIRONMENT: true,
     fetch: fetchResponse,
-  })) {
-    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  }
+  });
 
   opencodeClient.reconnectToRuntimeBaseUrl();
   const sdk = OpenCode.make({
@@ -160,13 +157,23 @@ async function withShortcutsMounted(
   } finally {
     await act(async () => root.unmount());
     document.body.replaceChildren();
+    restoreGlobals();
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    await dom.happyDOM.close();
+  }
+}
+
+function installGlobals(values: Record<string, unknown>): () => void {
+  const originals = Object.keys(values).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+  for (const [name, value] of Object.entries(values)) {
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  return () => {
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
     }
-    opencodeClient.reconnectToRuntimeBaseUrl();
-    await dom.happyDOM.close();
-  }
+  };
 }
 
 test('Settings shortcuts work without a chat sync owner or session requests', async () => {
@@ -285,6 +292,72 @@ test('Ctrl+L adds a selection outside chat and yields to a sequence without one'
     } finally {
       useUIStore.setState({ shortcutOverrides: previousOverrides });
       useInputStore.getState().setPendingInputText(null);
+    }
+  });
+});
+
+test('coming back to the window focuses the composer only while focus stayed where it was', async () => {
+  await withShortcutsMounted(async () => {
+    // The hook waits two animation frames before it refocuses. The queue
+    // stands in for the browser's frames, so each one runs when the test says.
+    const queued = new Map<number, FrameRequestCallback>();
+    let nextHandle = 1;
+    const runFrame = () => {
+      const callbacks = [...queued.values()];
+      queued.clear();
+      for (const callback of callbacks) callback(0);
+    };
+    const restoreGlobals = installGlobals({
+      MutationObserver: window.MutationObserver, ResizeObserver: window.ResizeObserver,
+      getComputedStyle: window.getComputedStyle.bind(window),
+      requestAnimationFrame: (callback: FrameRequestCallback) => {
+        queued.set(nextHandle, callback);
+        return nextHandle++;
+      },
+      cancelAnimationFrame: (handle: number) => { queued.delete(handle); },
+    });
+    const chatInput = document.createElement('div');
+    chatInput.dataset.chatInput = 'true';
+    const button = document.createElement('button');
+    // The control a closing dialog hands focus back to.
+    const opener = document.createElement('button');
+    const frame = document.createElement('iframe');
+    document.body.append(chatInput, button, opener, frame);
+    const view = new EditorView({ parent: chatInput });
+    const composer = view.contentDOM;
+    const names = new Map<Element | null, string>([
+      [composer, 'composer'], [button, 'button'], [opener, 'opener'], [frame, 'frame'],
+    ]);
+    const focused = () => names.get(document.activeElement) ?? 'nothing';
+    const returnToWindow = (start: HTMLElement | null, moves: { beforeFirstFrame?: HTMLElement; beforeSecondFrame?: HTMLElement } = {}) => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      start?.focus();
+      window.dispatchEvent(new Event('focus'));
+      moves.beforeFirstFrame?.focus();
+      runFrame();
+      const afterFirstFrame = focused();
+      moves.beforeSecondFrame?.focus();
+      runFrame();
+      return [afterFirstFrame, focused()];
+    };
+
+    try {
+      expect({
+        buttonKeptFocus: returnToWindow(button),
+        nothingFocused: returnToWindow(null),
+        frameKeptFocus: returnToWindow(frame),
+        focusMovedBeforeFirstFrame: returnToWindow(null, { beforeFirstFrame: opener }),
+        focusMovedBeforeSecondFrame: returnToWindow(button, { beforeSecondFrame: opener }),
+      }).toEqual({
+        buttonKeptFocus: ['button', 'composer'],
+        nothingFocused: ['nothing', 'composer'],
+        frameKeptFocus: ['frame', 'frame'],
+        focusMovedBeforeFirstFrame: ['opener', 'opener'],
+        focusMovedBeforeSecondFrame: ['button', 'opener'],
+      });
+    } finally {
+      view.destroy();
+      restoreGlobals();
     }
   });
 });

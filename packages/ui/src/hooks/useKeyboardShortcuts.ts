@@ -553,10 +553,12 @@ export const useKeyboardShortcuts = () => {
     const handleWindowFocus = () => {
       if (useUIStore.getState().isMobile) return;
       if (windowFocusFrame !== null) cancelAnimationFrame(windowFocusFrame);
+      const focusedOnReturn = document.activeElement;
       windowFocusFrame = requestAnimationFrame(() => {
         windowFocusFrame = requestAnimationFrame(() => {
           windowFocusFrame = null;
-          if (!hasOverlayOpen()) inputRedirect.refocusAfterWindowFocus();
+          if (document.activeElement !== focusedOnReturn || hasOverlayOpen()) return;
+          inputRedirect.refocusAfterWindowFocus();
         });
       });
     };
