@@ -59,6 +59,7 @@ import { activationSpecOf } from './manager.js';
 import { LOGIN_PROVIDERS, buildStartConfig, loginEndOf, loginEnded, loginGrantOf } from './space-opencode.js';
 import { domainSchema, grantSchema, mcpConnectionSchema, mcpNameSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
 import { createSpaceToken } from './space-server.js';
+import { createSpaceCleanup } from './space-cleanup.js';
 import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
 import { botMigrationPathSchema, transferSourceSchema } from './transfer-bundle.js';
 import type { StoredLogin } from '../opencode/auth.js';
@@ -901,7 +902,7 @@ export function createSpaceJourney<HostSecret, ArchivedChats>({
 
   const sayLogin = async (spaceId: string, grant: LoginGrant, login: StoredLogin) => {
     if (busy.has(spaceId)) return null;
-    return deliverGrant(spaceId, grant, login);
+    return exclusive(spaceId, () => deliverGrant(spaceId, grant, login));
   };
 
   const restoreLostGrants = async () => {
@@ -1283,34 +1284,7 @@ export function createSpaceJourney<HostSecret, ArchivedChats>({
     return requireListed(spaceId);
   });
 
-  const saveChatsOf = async (space: Awaited<ReturnType<typeof requireListed>>, allowUnsaved: boolean) => {
-    if (!archiveChats) return null;
-    let running = space.state === 'running';
-    let started = false;
-    // A root space starts only with a passkey confirmation, which a delete does not ask for: its
-    // chats count as not saved, and the user can delete anyway or start it and delete again.
-    if (!running && space.state === 'exited' && placeKindOf(space.placeId) !== ROOT_PLACE_KIND) {
-      try {
-        await manager.startSpace({ spaceId: space.id });
-        running = true;
-        started = true;
-      } catch (error) {
-        logger.warn?.(`[spaces] space ${space.id} did not start to give its chats: ${errorSummary(error)}`);
-      }
-    }
-    try {
-      return await archiveChats({ spaceId: space.id, name: space.name, projectDirectory: space.projectDirectory ?? null, running, allowUnsaved });
-    } catch (error) {
-      if (started) {
-        await manager.stopSpace({ spaceId: space.id }).catch((stopError) => {
-          logger.warn?.(`[spaces] space ${space.id} started for its chats is still running: ${stopError?.code ?? stopError?.message ?? stopError}`);
-        });
-      }
-      throw error;
-    }
-  };
-
-  const removeAndForget = async (spaceId: string, { allowUnsaved = false } = {}) => {
+  const removeAndForget = async (spaceId: string, { allowUnsaved = false, collect }: { allowUnsaved?: boolean; collect?: () => Promise<void> } = {}): Promise<SpaceRemoval & { id: string; chats: ArchivedChats | null }> => {
     const waiting = pending.get(spaceId);
     if (waiting) {
       if (waiting.state !== 'failed') throw new SpaceError('space_preparing', 'This space is still being made. Wait for it, then remove it.');
@@ -1330,14 +1304,33 @@ export function createSpaceJourney<HostSecret, ArchivedChats>({
     }
     // A creation that a previous host did not live to finish is a failed creation too: no chat
     // could have run in it, so nothing is saved and the archive is not asked.
-    const chats = space.state === 'failed' ? null : await saveChatsOf(space, allowUnsaved);
+    const chats = space.state === 'failed' ? null : await saveChatsOf(space, allowUnsaved, !collect);
+    if (collect) await collect();
     const { record, status } = records.read(spaceId);
     const outcome = await removeEverything(spaceId, status === 'unreadable' ? null : record?.repository ?? space.projectDirectory);
     onSpacesChanged();
     return { id: spaceId, ...outcome, chats };
   };
-  const removeUnlocked = (spaceId: string, options?: { allowUnsaved?: boolean }) => removeAndForget(spaceId, options).then((outcome) => { if (outcome.removed) announce(spaceId, { type: 'openchamber:space-progress', properties: { spaceId, step: 'removed', failure: null, timestamp: now().getTime() } }); return outcome; });
+  const removeUnlocked = (spaceId: string, options?: { allowUnsaved?: boolean; collect?: () => Promise<void> }) => removeAndForget(spaceId, options).then((outcome) => { if (outcome.removed) announce(spaceId, { type: 'openchamber:space-progress', properties: { spaceId, step: 'removed', failure: null, timestamp: now().getTime() } }); return outcome; });
   const removeSpace = (spaceId: string, options?: { allowUnsaved?: boolean }) => exclusive(spaceId, () => removeUnlocked(spaceId, options));
+
+  const { saveChatsOf, cleanupBotSpace } = createSpaceCleanup({
+    manager,
+    records,
+    gatekeeper,
+    archiveChats,
+    placeKindOf,
+    logger,
+    exclusive,
+    requireNotPending,
+    requireListed,
+    requireStartActivation,
+    strayStops,
+    isClosing: () => closing,
+    removeUnlocked,
+    syncMcpSubject,
+    onSpacesChanged,
+  });
 
   const stopAllSpaces = async () => {
     const preparing = Array.from(pending.values()).filter((entry) => entry.state === 'preparing');
@@ -1486,5 +1479,5 @@ export function createSpaceJourney<HostSecret, ArchivedChats>({
 
   // Server-only. The caller owns and verifies sourceDirectory as its item worktree.
   const createBotSpace = <Request>(request: Request, { sourceDirectory, source, onAllocated }: InternalCreation) => createSpace(request, { sourceDirectory, source, onAllocated, waitUntilReady: true });
-  return { createSpace, createBotSpace, rootActivationOptions, readRootPasskeys, rootApprovalChallenge, completeRootApproval, listSpaces, setTaskTitle, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, readHostCatalogProviders: modelGrants.listCatalogProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
+  return { createSpace, createBotSpace, cleanupBotSpace, rootActivationOptions, readRootPasskeys, rootApprovalChallenge, completeRootApproval, listSpaces, setTaskTitle, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, readHostCatalogProviders: modelGrants.listCatalogProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }

@@ -115,6 +115,21 @@ Separated config fields such as `useDefaults` remain part of captured requests.
 
 Removal records `removing` before the archival journey. A successful receipt records `removed`; repeated Stop of that binding needs no Spaces host. If the journey acknowledgement or binding receipt is lost, Stop and removal reconcile the intent against `manager.listAllSpaces`. Only authoritative absence with every place available confirms removal. Failed reads and unavailable places preserve the intent. A missing space without removal intent cannot confirm Stop. A returned partial-removal failure records `remove-failed`; absence then cannot erase that known failure, which still requires inspection. A remaining space can retry the archival journey. Lifecycle mutations use the same item owner lock so Stop cannot overwrite a concurrent removal receipt.
 
+Stop and removal persist their non-ready binding state before entering the
+server-only `journey.cleanupBotSpace`. Session owners and tool forwarding
+therefore refuse a producer started temporarily for retention. Spaces holds
+its own lifecycle lock across that run and resets an exited producer's entire
+topology before startup, without ordinary Resume or grant restoration. The
+existing live collector still interrupts recorded sessions, confirms inactivity
+and descendants, and invokes canonical artifact drain and collection.
+
+Only a durable collection receipt on an authoritatively exited producer permits
+Stop without another collection. An omitted field never does. A running producer
+is collected again. Removal collects before archival and again immediately
+before removal in the same runtime, invalidating the receipt before each pull.
+Failure preserves source; temporary execution ends stopped. The owning Spaces
+contract defines cold policy, protected MCP suspension and root restrictions.
+
 `executeIsolatedProof(input, { signal })` looks up exactly one binding by the proof runner's recorded host checkout. It sends a fixed Node program and JSON input through `manager.exec` to that space. Git creates separate detached snapshots for the test and fix SHAs. The command runs as an argv, without a shell, with `{files}` expanded from the test commit. Missing commands, signals, output limits and snapshot cleanup failures are inconclusive. The proof never checks out or resets the agent's checkout. The outer container command has a 300-second limit and the host call a 330-second limit. A caller's abort is checked before and after execution; Docker exec currently does not forward that signal to its runner, so it cannot promise immediate cancellation inside the container.
 
 `isolated.exportSnapshot({ projectId, itemId })` delegates to the existing code-out quarantine and returns `{ spaceId, directory, repository, resultSha }`. The production worktree owner's `adoptIsolated({ project, bot, item, resultSha })` adopts that verified result before host-side inspection/publication. Reading the unchanged host worktree as the isolated fix would be incorrect. `bindingFor(request)` resolves a recorded binding by item, session or unique host checkout. It exposes no secret. SDK create/get record answers pass through `unwrapOpenCodeResponse` before their identity or metadata is trusted.
@@ -214,6 +229,11 @@ consume them. Required record and array entries preserve nullish failures instea
 of claiming that every disk read or indexed access succeeds. Transport keeps the
 authenticated dispatcher, credential stripping, deadline, byte cap and complete
 response check. The fixed proof program stays byte-for-byte unchanged.
+
+The bounded artifact JSON adapter lives beside that transport in
+`isolated-transport.ts`; the binding owner resolves its recorded Space before
+constructing it. Retention startup and shutdown live in Spaces' `space-cleanup.ts`
+under the journey's existing lifecycle lock.
 
 The existing adapter closure is retained for this scoped port (`SIZE_OK`). Its
 operations share the item-owner lock, binding journal and current Spaces host;

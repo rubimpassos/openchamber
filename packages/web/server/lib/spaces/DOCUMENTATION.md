@@ -1071,6 +1071,41 @@ Decision 9 and journey step 7; built in 5e-2, `space-archive.js`, the export in 
 - **A new chat after an archived one.** Opening an archived chat makes the archive's directory the current one in the window. A draft opened then, from the button, the shortcut or the desktop menu, treats that directory as a chat's scratch folder would be treated (`openNewSessionDraft` in `packages/ui/src/sync/session-ui-store.ts`): it opens as a Chat, or on the project the user last chose, never rooted in the archive, where a sent message would have made a live session beside the archived ones. The read-only rule of the chat view applies to a selected chat only, so that draft has its composer.
 - **Not a boundary against the agent.** By the time a chat is archived the space is gone. What a space wrote into its chats is shown as any chat of the space was shown while it lived.
 
+### Why Bot cleanup uses one cold runtime
+
+The server-only `cleanupBotSpace` holds the existing exclusive lifecycle lock
+through collection, chat archival, final collection and removal or stop. The Bot
+owner holds its item binding lock outside it and persists non-ready state before
+entry. Public removal keeps its existing archive flow.
+
+`space-cleanup.ts` owns retention startup, archive startup and teardown. Its typed
+dependencies take the journey's existing lock, root check, pending-state check
+and removal operation. It owns no second lifecycle state or grant store.
+
+For an exited producer, cleanup stops the complete producer and gatekeeper
+topology before calling the manager's start directly. Docker start alone keeps
+an already-running gatekeeper and its old grants. Cleanup never calls the
+journey's ordinary start or restores network, model or login grants. It checks
+the fresh gatekeeper's empty allowlist and verifies isolation before collection.
+Remembered grants and network choices stay unchanged. Startup executes
+producer-controlled code inside the existing isolation; it is not an offline
+read or an execution-free operation.
+
+Retained protected MCP grants require an acknowledged empty subject before
+startup. Connections return only after successful shutdown of a retained Space.
+Login refresh delivery takes the same lifecycle lock and skips a busy Space.
+A stopped root Space still needs its ordinary passkey confirmation to start;
+Bot cleanup supplies none and refuses.
+
+Removal archives while the same producer run remains up and collects again
+immediately before destructive removal. It cannot restart for archival after a
+collection receipt. A temporary runtime is stopped in `finally` on failure;
+source and records remain available for retry. Stop also stops in `finally`
+when collection fails. Failed MCP restoration propagates after shutdown.
+The first removal collection is provisional and leaves its receipt invalid
+through archival. Only confirmed final collection writes a valid receipt, so
+a capture followed by archive failure remains discoverable after shutdown.
+
 ### Spaces page
 
 Journey step 9 and decision 12; built in 5e-3, UI only on top of `GET /`. The maintainer's calls of 2026-09-30:

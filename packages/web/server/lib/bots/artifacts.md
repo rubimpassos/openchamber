@@ -146,6 +146,15 @@ a final-collection receipt before stopping the container. Dispatch and Resume
 invalidate that receipt. Transfer failure blocks destructive cleanup. Shutdown
 drains collections before the root closes either transport.
 
+An already exited Space uses the journey's lifecycle-owned cold cleanup run.
+The Bot binding is non-ready before startup, and Spaces resets the full
+topology and verifies empty external access without restoring grants. Removal
+archives chats and then repeats final collection in that same run; a receipt
+cannot survive another startup or suppress a capture during archival. Failure
+retains the source and stops temporary execution.
+The initial removal collection leaves the receipt invalid until final
+collection succeeds, including when archival admits a capture and then fails.
+
 The execution service's authenticated `drain` waits for capture writes of the
 named producer, including its metadata wake and local publication. `quiesce`
 interrupts and verifies a host producer before that drain. Final collection

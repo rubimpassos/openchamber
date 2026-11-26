@@ -12,9 +12,7 @@ import { botStagePermissions } from './stage-sessions.js';
 import { BotServiceError } from './services/contracts.js';
 import { readBotSpaceOptions } from './space-options.js';
 import { isolatedBotToolPageSchema, isolatedBotToolReceiptSchema } from './isolated-tools.js';
-import { botSpaceFetch } from './isolated-transport.js';
-import { createBotArtifactTransport } from '../agent-server/bot-artifact-services.js';
-import { BOT_ARTIFACT_SPACE_ROUTE } from '../agent-server/bot-artifact-service-contract.js';
+import { botSpaceFetch, botSpaceArtifactTransport } from './isolated-transport.js';
 import type { IsolatedStagesOptions, IsolatedSpacesHost, StageRequest, DispatchRequest, StageModel, RunningRequest, OutcomeRequest, ReconcileRequest, BindingQuery, ItemKey, Project, SpaceOptions, SpaceOptionsRequest, CreationTransfer, OnCreated, Reconciliation, ToolReply, ProofInput, ProofCancellation } from './isolated-stages.types.js';
 import { hasProperties, isRecord } from '../shared/object-guards.js';
 
@@ -260,8 +258,9 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
       await records.write(keyFor(binding), { ...binding, state: 'ready' });
     });
   };
-  const finishArtifacts = async (binding: Binding) => {
-    if (!collectArtifacts || binding.artifactsCollected) return binding;
+  const finishArtifacts = async (binding: Binding, final: boolean) => {
+    if (!collectArtifacts) return binding;
+    const collecting = await records.write(keyFor(binding), { ...binding, artifactsCollected: false });
     const host = hostFor();
     const fetchImpl = botSpaceFetch(host, required(binding.spaceId));
     const client = OpenCode.make({ baseUrl: 'http://space.invalid', fetch: fetchImpl,
@@ -274,7 +273,7 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
       if (active[session.id] || await probe.hasWorkingDescendants(session.id, active) !== false) refuse('BOT_ISOLATED_NOT_STOPPED');
       await collectArtifacts(session.id);
     }
-    return records.write(keyFor(binding), { ...binding, artifactsCollected: true });
+    return final ? records.write(keyFor(binding), { ...collecting, artifactsCollected: true }) : collecting;
   };
   const stop = async (request: BindingQuery) => {
     const found = await find(request);
@@ -287,10 +286,11 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
         if (binding.state === 'removing') await records.write(keyFor(binding), { ...binding, state: 'removed' });
         return;
       }
-      if (!(await host.journey.listSpaces()).some((space) => space.id === binding.spaceId)) refuse('BOT_ISOLATED_STOP_UNCONFIRMED');
-      binding = await finishArtifacts(binding);
+      const producer = (await host.manager.listAllSpaces()).spaces.find((space) => space.id === binding.spaceId);
+      if (!producer) refuse('BOT_ISOLATED_STOP_UNCONFIRMED');
       if (!removing) binding = await records.write(keyFor(binding), { ...binding, state: 'stopping' });
-      await host.journey.stopSpace(required(binding.spaceId));
+      if (!collectArtifacts || (binding.artifactsCollected && producer.state === 'exited')) await host.journey.stopSpace(required(binding.spaceId));
+      else await host.journey.cleanupBotSpace(required(binding.spaceId), { remove: false, collect: async (final) => { binding = await finishArtifacts(binding, final); } });
       const space = (await host.journey.listSpaces()).find((entry) => entry.id === binding.spaceId);
       if (!space || space.state !== 'exited') refuse('BOT_ISOLATED_STOP_UNCONFIRMED');
       if (!removing) await records.write(keyFor(binding), { ...binding, state: 'stopped' });
@@ -371,8 +371,9 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
   };
   const remove = async ({ project, bot, item }: { readonly project: Pick<Project, 'id'>; readonly bot: Pick<StageRequest['bot'], 'id'>; readonly item: { readonly id: string; readonly worktree?: string | undefined } }) => records.own({ projectId: project.id, itemId: item.id }, async () => {
     const key = { projectId: project.id, itemId: item.id };
-    let binding = await records.read(key);
-    if (!binding) return;
+    const recorded = await records.read(key);
+    if (!recorded) return;
+    let binding = recorded;
     if (binding.botId !== bot.id || binding.hostDirectory !== item.worktree || !binding.spaceId) refuse('BOT_ISOLATED_BINDING_REQUIRED');
     if (binding.state === 'removed') return;
     const host = hostFor();
@@ -381,9 +382,8 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
       await records.write(key, { ...binding, state: 'removed' });
       return;
     }
-    binding = await finishArtifacts(binding);
     binding = await records.write(key, { ...binding, state: 'removing' });
-    const result = await host.journey.removeSpace(required(binding.spaceId));
+    const result = required(await host.journey.cleanupBotSpace(required(binding.spaceId), { remove: true, collect: async (final) => { binding = await finishArtifacts(binding, final); } }));
     if (!result.removed || result.failures?.length) {
       await records.write(key, { ...binding, state: 'remove-failed' });
       refuse('BOT_ISOLATED_REMOVE_UNCONFIRMED');
@@ -393,11 +393,7 @@ export function createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject
   return { create, dispatch, outcome, reconcile, stop, resume, remove, sessionOwner, executeIsolatedProof,
     artifactTransport: async (sessionId: string) => {
       const binding = await find({ sessionId });
-      const fetchImpl = botSpaceFetch(hostFor(), binding.spaceId);
-      return createBotArtifactTransport({ request: async (operation, body, signal) =>
-        z.json().parse(await (await fetchImpl(`http://space.invalid${BOT_ARTIFACT_SPACE_ROUTE}/${operation}`, {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body, signal,
-        })).json()) });
+      return botSpaceArtifactTransport(hostFor(), binding.spaceId);
     },
     bindings: records.list, readBinding: (request: ItemKey) => records.read(keyFor(request)), bindingFor: find, exportSnapshot, forwardTools };
 }

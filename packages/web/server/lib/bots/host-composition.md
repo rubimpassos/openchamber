@@ -37,6 +37,9 @@ contract. Single-account installations retain local execution adapters.
 
 - Construction performs no provider reads or execution. The local bootstrap continuation starts workers after OpenCode readiness; the front door starts owner recovery through typed agent services. Neither delays the HTTP listener or initial shell. Mutation requests received earlier return `BOT_HOST_NOT_READY`.
 - One watcher callback feeds host and space events. Item mutations, stage allocation and startup records populate the session index. Ordinary sessions and token deltas perform no Bot SDK or disk reads. Completed steps use the existing complete, cache-inclusive cumulative token reader. Discovery usage stays in its own ledger and contributes once to daily admission.
+- An idle worker's usage is recorded before artifact collection. Failed collection
+  becomes item attention through the session-event owner, retaining its checkout
+  and producer for recovery rather than consuming the only completion event.
 - Permission and form waits remain active stages. Their existing live attention entries resolve through ordinary replies. Authorization, budget and execution failures require explicit item attention.
 - Isolated sessions resolve their recorded binding and current spaces host at each operation. Notices have separate host-owned persistence and a dispatcher-backed queue per session. Host session reads, queue transport and token readers are never substitutes for an isolated target.
 - The child persists a tool call before merging `openchamber.botToolPending` into session metadata. Translation preserves the resulting metadata event. The host checks the recorded space/session before pulling the inbox. Recovery also pulls pending calls for recorded active fixing sessions. No host tool credential enters a space.

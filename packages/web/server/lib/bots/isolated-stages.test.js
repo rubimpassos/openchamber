@@ -23,6 +23,16 @@ const setup = async (options = {}) => {
     startSpace: async (id) => { calls.push(['start', id]); if (removed) throw new Error('Removed'); stopped = false; return { networkRestored: true }; },
     grantAccess: async (id, grant) => { calls.push(['grant', id, grant]); granted = true; },
     removeSpace: async (id) => { calls.push(['remove', id]); removed = true; return { removed: true, failures: [] }; },
+    cleanupBotSpace: async (id, { remove, collect }) => {
+      try {
+        await collect(!remove);
+        if (!remove) return null;
+        await collect(true);
+        return await host.journey.removeSpace(id);
+      } finally {
+        if (!remove) await host.journey.stopSpace(id);
+      }
+    },
     readHostLogins: async () => ({ logins: [{ provider: 'chosen', state: 'usable' }] }),
     readHostCustomProviders: async () => ({ providers: [] }),
   }, manager: { listAllSpaces: async () => ({ spaces: await host.journey.listSpaces(), unavailable: [] }), verify: async () => [], exec: async (id, argv, options) => {
@@ -85,7 +95,7 @@ it('keeps the Space and checkout source when final artifact collection fails aft
   expect(f.calls.some(([name, value]) => name === 'request' && value.path.endsWith('/interrupt'))).toBe(true);
   fail = false;
   await adapter.remove(request);
-  expect(collected).toEqual([created.sessionId]);
+  expect(collected).toEqual([created.sessionId, created.sessionId]);
   expect(f.calls.filter(([name]) => name === 'remove')).toEqual([['remove', 'abcdef123456']]);
 });
 

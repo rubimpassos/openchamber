@@ -34,6 +34,7 @@ const withConversations = (f, directories) => ({ ...directories,
 // binding ownership and checkout removal use their production implementations.
 const isolatedLifecycle = async () => {
   let removed = false; let stopped = false; let granted = true;
+  const producer = { tokens: 0, artifactFailure: false };
   const calls = []; const sessions = new Map();
   const spaces = { journey: {
     createBotSpace: async (_request, options) => { calls.push('create'); await options.onAllocated({ id: 'abcdef123456', directory: '/spaces/abcdef123456/worktree' }); },
@@ -42,18 +43,31 @@ const isolatedLifecycle = async () => {
     startSpace: async (id) => { calls.push(['start', id]); stopped = false; return { networkRestored: true }; },
     grantAccess: async (id, grant) => { calls.push(['grant', id, grant]); granted = true; },
     removeSpace: async () => { calls.push('remove'); removed = true; return { removed: true, failures: [] }; },
+    cleanupBotSpace: async (id, { remove, collect }) => {
+      await collect(!remove);
+      if (remove) { await collect(true); return spaces.journey.removeSpace(id); }
+      await spaces.journey.stopSpace(id);
+      return null;
+    },
   }, manager: { verify: async () => [], listAllSpaces: async () => ({ spaces: await spaces.journey.listSpaces(), unavailable: [] }) },
   dispatcher: { requestInside: async (_id, input) => {
     calls.push(input.path);
     let result = {};
+    if (producer.artifactFailure && input.path === '/api/openchamber/bots/artifacts/drain') {
+      throw Object.assign(new Error('The producer artifact store is unavailable'), { code: 'BOT_ARTIFACT_READ_FAILED' });
+    }
     if (input.path === '/api/session' && input.method === 'POST') { result = JSON.parse(String(input.body)); sessions.set(result.id, result); }
     else if (input.path === '/api/session/active') result = {};
+    else if (new URL(input.path, 'http://space.invalid').pathname.endsWith('/message')) result = producer.tokens ? [{ id: 'usage', type: 'assistant', content: [],
+      tokens: { input: producer.tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: Date.now(), completed: Date.now() } }] : [];
     else if (input.path.startsWith('/api/session/') && input.method === 'GET') result = sessions.get(input.path.split('/').at(-1)) ?? [];
     else if (input.path.includes('/isolated-tools?')) result = { requests: [] };
     else if (input.path === '/api/openchamber/bots/artifacts/pull') result = { entries: [], nextOffset: null };
     else if (input.path === '/api/openchamber/bots/artifacts/drain') result = { drained: true };
     else if (new URL(input.path, 'http://space.invalid').pathname === '/api/session' && input.method === 'GET') result = [];
-    const response = Readable.from([Buffer.from(JSON.stringify(input.path.includes('/isolated-tools') || input.path.includes('/bots/artifacts/') ? result : { data: result }))]); response.complete = true;
+    const body = input.path.includes('/isolated-tools') || input.path.includes('/bots/artifacts/') ? result
+      : new URL(input.path, 'http://space.invalid').pathname.endsWith('/message') ? { data: result, cursor: {} } : { data: result };
+    const response = Readable.from([Buffer.from(JSON.stringify(body))]); response.complete = true;
     response.statusCode = input.method === 'PATCH' || /\/(?:model|agent)$/.test(input.path) || input.path.includes('/instructions/entry/') ? 204 : 200;
     return response;
   } } };
@@ -80,10 +94,27 @@ const isolatedLifecycle = async () => {
   await store.update('project', (snapshot) => ({ snapshot: { ...snapshot, items: [{ ...snapshot.items[0], worktree: checkout.directory, branch: checkout.branch,
     sessions: { fixing: sessionId }, state: 'needs-you', wait: { reason: 'BOT_DAILY_TOKEN_BUDGET', since: Date.now(), channel: 'ui', people: [] } }] } }));
   await createBotExecutionStore({ store }).update('project', item.id, (entry) => ({ ...entry, data: { ...entry.data, checkout, resumeState: 'fixing', runs: { 'fixing:0': run } } }));
-  return { ...f, isolated, buildIsolated, spaces, spaceCalls: calls, store, checkout, run, itemId: item.id, sessionId };
+  return { ...f, isolated, buildIsolated, spaces, spaceCalls: calls, producer, store, checkout, run, itemId: item.id, sessionId };
 };
 
 describe('production bot host composition', () => {
+  it('retains idle worker usage and raises attention when artifact collection fails', async () => {
+    const f = await isolatedLifecycle(); await f.host.start();
+    await f.store.update('project', (snapshot) => ({ snapshot: { ...snapshot, items: snapshot.items.map((item) => ({ ...item, state: 'fixing', wait: undefined })) } }));
+    f.producer.tokens = 2;
+    f.producer.artifactFailure = true;
+
+    await f.host.processPayload({ type: 'session.idle', properties: { sessionID: f.sessionId } }, { spaceId: 'abcdef123456' });
+
+    const { item } = await f.host.runtime.detail('project', f.itemId);
+    expect(item.tokens.total, JSON.stringify({ wait: item.wait, calls: f.spaceCalls })).toBe(2);
+    expect(item.state).toBe('needs-you');
+    expect(item.wait.reason).toBe('BOT_ARTIFACT_READ_FAILED');
+    expect((await f.isolated.readBinding(f.run)).state).toBe('ready');
+    expect(f.spaceCalls.filter((call) => call === 'remove')).toEqual([]);
+    expect((await fs.stat(f.checkout.directory)).isDirectory()).toBe(true);
+  });
+
   it('rejects malformed tool input without pausing the item, then accepts a corrected report', async () => {
     const f = await isolatedLifecycle(); await f.host.start();
     await f.store.update('project', (snapshot) => ({ snapshot: { ...snapshot, items: snapshot.items.map((item) => ({ ...item, state: 'fixing', wait: undefined })) } }));

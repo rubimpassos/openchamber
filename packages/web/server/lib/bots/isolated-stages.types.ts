@@ -12,7 +12,7 @@ import type { readBotSpaceOptions } from './space-options.js';
 type Journey = ReturnType<typeof createSpaceJourney>;
 type Manager = ReturnType<typeof createSpaceManager>;
 export type IsolatedSpacesHost = {
-  readonly journey: Pick<Journey, 'readHostCustomProviders' | 'readHostLogins' | 'listSpaces' | 'createBotSpace' | 'grantAccess' | 'startSpace' | 'stopSpace' | 'previewApply' | 'removeSpace'>;
+  readonly journey: Pick<Journey, 'readHostCustomProviders' | 'readHostLogins' | 'listSpaces' | 'createBotSpace' | 'cleanupBotSpace' | 'grantAccess' | 'startSpace' | 'stopSpace' | 'previewApply' | 'removeSpace'>;
   readonly manager: Pick<Manager, 'verify' | 'listAllSpaces' | 'exec'>;
   readonly dispatcher: { requestInside(spaceId: string, request: InsideRequest): Promise<InsideResponse> };
 };

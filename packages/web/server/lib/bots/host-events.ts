@@ -73,8 +73,10 @@ export function createHostPayloadProcessor({ lifecycle, runtime, sessions, isola
       lifecycle.observe(hostTools.forward(entry).catch((error) => reportAttention({ ...entry, reason: failureCode.parse(error) })));
     }
     if (completed || reason === 'idle') {
-      if (reason === 'idle') await artifacts.collect(sessionId);
-      try { await accountUsage(entry); }
+      try {
+        await accountUsage(entry);
+        if (reason === 'idle') await artifacts.collect(sessionId);
+      }
       catch (error) {
         if (!entry.itemId.startsWith('discovery_') && (await runtime.detail(entry.projectId, entry.itemId)).item.state === 'needs-you') return;
         const failure = { sessionId, reason: failureCode.parse(error) };

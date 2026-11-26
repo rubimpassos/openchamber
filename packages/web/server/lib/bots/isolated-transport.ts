@@ -1,4 +1,7 @@
 import { BotServiceError } from './services/contracts.js';
+import { z } from 'zod';
+import { createBotArtifactTransport } from '../agent-server/bot-artifact-services.js';
+import { BOT_ARTIFACT_SPACE_ROUTE } from '../agent-server/bot-artifact-service-contract.js';
 import type { IsolatedSpacesHost } from './isolated-stages.types.js';
 import type { InsideResponse } from '../spaces/dispatcher.js';
 
@@ -32,3 +35,11 @@ export const botSpaceFetch = (host: IsolatedSpacesHost, spaceId: string) => asyn
     return new Response([204, 205].includes(status) ? null : Buffer.concat(chunks), { status, headers: { 'content-type': 'application/json' } });
   } finally { signal.removeEventListener('abort', abort); response?.destroy(); }
 };
+
+export function botSpaceArtifactTransport(host: IsolatedSpacesHost, spaceId: string) {
+  const fetchImpl = botSpaceFetch(host, spaceId);
+  return createBotArtifactTransport({ request: async (operation, body, signal) =>
+    z.json().parse(await (await fetchImpl(`http://space.invalid${BOT_ARTIFACT_SPACE_ROUTE}/${operation}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body, signal,
+    })).json()) });
+}
