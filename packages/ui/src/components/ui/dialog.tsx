@@ -134,6 +134,7 @@ function DialogContent({
             "transition-all duration-150 ease-out",
             "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
             "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
+            "motion-reduce:data-[starting-style]:scale-none motion-reduce:data-[ending-style]:scale-none",
             "data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]",
             className
           )}

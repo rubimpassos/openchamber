@@ -996,6 +996,18 @@
   transform: translateY(100%);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"] {
+    transition: opacity 150ms ease-out;
+  }
+
+  [data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"][data-starting-style],
+  [data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"][data-ending-style] {
+    opacity: 0;
+    transform: none;
+  }
+}
+
 [data-slot="dialog-layer"][data-sheet] [data-slot="dialog-header"] {
   text-align: start;
   padding-inline-end: 2rem;
