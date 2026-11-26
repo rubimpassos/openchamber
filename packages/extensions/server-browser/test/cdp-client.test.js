@@ -30,9 +30,20 @@ test('bounds a WebSocket peer that accepts TCP without completing the handshake'
   );
 });
 
-for (const firstMethod of ['Page.captureScreenshot', 'Emulation.setDeviceMetricsOverride']) {
+const captureMethod = 'Page.captureScreenshot';
+const metricsMethod = 'Emulation.setDeviceMetricsOverride';
+const navigationMethods = ['Page.navigate', 'Page.reload', 'Page.navigateToHistoryEntry'];
+const independentMethods = [
+  'Runtime.evaluate', 'Input.dispatchMouseEvent', 'Input.dispatchKeyEvent',
+  'Page.screencastFrameAck', 'Page.stopLoading', 'Page.handleJavaScriptDialog',
+];
+const exclusivePairs = [
+  [captureMethod, metricsMethod], [metricsMethod, captureMethod],
+  ...navigationMethods.flatMap((method) => [[captureMethod, method], [method, captureMethod]]),
+];
+for (const [firstMethod, secondMethod] of exclusivePairs) {
   for (const rejected of [false, true]) {
-    test(`serializes viewport changes and captures in one session after ${firstMethod} ${rejected ? 'fails' : 'succeeds'}`, async (context) => {
+    test(`${secondMethod} waits for ${firstMethod} to ${rejected ? 'reject' : 'succeed'} in one session`, async (context) => {
       const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
       context.after(() => server.close());
       await new Promise((resolve) => server.once('listening', resolve));
@@ -52,16 +63,17 @@ for (const firstMethod of ['Page.captureScreenshot', 'Emulation.setDeviceMetrics
       const first = cdp.sendSession('page', firstMethod, { hold: true });
       const firstOutcome = rejected ? assert.rejects(first, /fixture refusal/) : first;
       const held = await receivedFirst.promise;
-      const secondMethod = firstMethod === 'Page.captureScreenshot' ? 'Emulation.setDeviceMetricsOverride' : 'Page.captureScreenshot';
       const second = cdp.sendSession('page', secondMethod);
+      const third = cdp.sendSession('page', metricsMethod);
       context.after(async () => {
         cdp.close();
-        await Promise.allSettled([firstOutcome, second]);
+        await Promise.allSettled([firstOutcome, second, third]);
       });
       await cdp.sendSession('other-page', secondMethod);
-      await cdp.sendSession('page', 'Runtime.evaluate');
+      for (const method of independentMethods) await cdp.sendSession('page', method);
       assert.deepEqual(messages.map(({ sessionId, method }) => [sessionId, method]), [
-        ['page', firstMethod], ['other-page', secondMethod], ['page', 'Runtime.evaluate'],
+        ['page', firstMethod], ['other-page', secondMethod],
+        ...independentMethods.map((method) => ['page', method]),
       ]);
       peer.send(JSON.stringify({
         id: held.id, sessionId: held.sessionId,
@@ -69,11 +81,57 @@ for (const firstMethod of ['Page.captureScreenshot', 'Emulation.setDeviceMetrics
       }));
       await firstOutcome;
       await second;
-      assert.equal(messages.at(-1).sessionId, 'page');
-      assert.equal(messages.at(-1).method, secondMethod);
+      await third;
+      assert.deepEqual(messages.slice(-2).map(({ sessionId, method }) => [sessionId, method]), [
+        ['page', secondMethod], ['page', metricsMethod],
+      ], 'queued commands are released in FIFO order on command settlement without waiting for page loading');
     });
   }
 }
+
+test('loading cancels queued captures before dispatch but leaves a sent capture unresolved until Chrome replies', async (context) => {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  context.after(() => server.close());
+  await new Promise((resolve) => server.once('listening', resolve));
+  const received = Promise.withResolvers();
+  const messages = [];
+  let peer;
+  server.on('connection', (socket) => {
+    peer = socket;
+    socket.on('message', (data) => {
+      const message = JSON.parse(String(data));
+      messages.push(message);
+      if (message.params.hold) received.resolve(message);
+      else socket.send(JSON.stringify({ id: message.id, sessionId: message.sessionId, result: {} }));
+    });
+  });
+  const cdp = await connectCdp(`ws://127.0.0.1:${server.address().port}`);
+  const document = new AbortController();
+  cdp.onEvent(({ method }) => {
+    if (method === 'Page.frameStartedLoading') document.abort();
+  });
+  let settled = false;
+  const capture = cdp.sendSession('page', captureMethod, { hold: true }, document.signal)
+    .then(() => { settled = true; });
+  const held = await received.promise;
+  const cancelled = [0, 1].map(() => assert.rejects(
+    cdp.sendSession('page', captureMethod, {}, document.signal), { name: 'AbortError' },
+  ));
+  const metrics = cdp.sendSession('page', metricsMethod);
+  context.after(async () => {
+    cdp.close();
+    await Promise.allSettled([capture, ...cancelled, metrics]);
+  });
+  peer.send(JSON.stringify({ sessionId: 'page', method: 'Page.frameStartedLoading', params: { frameId: 'main' } }));
+  await cdp.sendSession('page', 'Runtime.evaluate');
+  assert.equal(document.signal.aborted, true);
+  assert.equal(settled, false, 'abort cannot settle a capture already sent to Chrome');
+  assert.deepEqual(messages.map(({ method }) => method), [captureMethod, 'Runtime.evaluate']);
+  peer.send(JSON.stringify({ id: held.id, sessionId: held.sessionId, result: {} }));
+  await Promise.all([capture, ...cancelled, metrics]);
+  assert.deepEqual(messages.map(({ method }) => method), [captureMethod, 'Runtime.evaluate', metricsMethod]);
+  assert.equal(cdp.isOpen, true);
+});
 
 test('closes an uncertain viewport operation on timeout before queued metrics can reach Chrome', async (context) => {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });

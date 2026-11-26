@@ -6,6 +6,10 @@
 // when it gave no answer in time (it may still carry the command out), and
 // 'closed' when the connection is gone.
 const commandError = (method, reason, code) => Object.assign(new Error(`CDP command ${method} failed: ${reason}`), { code });
+const viewportMethods = new Set([
+  'Page.captureScreenshot', 'Emulation.setDeviceMetricsOverride',
+  'Page.navigate', 'Page.reload', 'Page.navigateToHistoryEntry',
+]);
 
 export const connectCdp = async (webSocketDebuggerUrl, {
   commandTimeoutMs = 30_000,
@@ -66,13 +70,18 @@ export const connectCdp = async (webSocketDebuggerUrl, {
   };
 
   // Chrome restores the capture-start metrics when a screenshot completes.
-  // Keep captures and metrics changes exclusive without blocking page input.
-  const sendSession = (sessionId, method, params = {}) => {
-    if (method !== 'Page.captureScreenshot' && method !== 'Emulation.setDeviceMetricsOverride') {
+  // Navigation can replace its renderer, so it shares the same session queue.
+  // Wait only for command settlement; input and loading/dialog recovery bypass it.
+  const sendSession = (sessionId, method, params = {}, signal) => {
+    if (!viewportMethods.has(method)) {
       return sendCommand(method, params, sessionId);
     }
     const previous = viewportOperations.get(sessionId) ?? Promise.resolve();
-    const operation = previous.then(() => sendCommand(method, params, sessionId));
+    const operation = previous.then(() => {
+      // Cancellation applies only before dispatch, never to a command in Chrome.
+      signal?.throwIfAborted();
+      return sendCommand(method, params, sessionId);
+    });
     const release = () => {
       if (viewportOperations.get(sessionId) === settled) viewportOperations.delete(sessionId);
     };
