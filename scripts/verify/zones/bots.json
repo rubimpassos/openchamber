@@ -13,12 +13,12 @@
     ],
     "what": "A bot can explain an item and maintain its native lead brief and digest while the coordinator waits.",
     "reach": "Bots, create a bot and a manual demand, then write in the item's conversation.",
-    "proof": "The model calls the actual lead controls and the pinned conversation shows the digest they stored.",
+     "proof": "The model calls the actual lead controls, and a retained OpenUI form answers its canonical call without releasing coordinator attention.",
     "scenarios": [{
       "id": "lead",
       "kind": "path",
       "isolation": "stand",
-      "title": "The item's lead updates its brief and digest through its available tools",
+       "title": "The item's lead updates its digest and answers a retained OpenUI form",
       "steps": [
         {"do": "open"},
         {"do": "click", "on": "bots.open"},
@@ -39,7 +39,16 @@
         {"do": "click", "on": "bots.editor"},
         {"do": "type", "text": "Show the retained bot proof."},
         {"do": "press", "key": "Enter"},
-        {"do": "see", "on": "bots.digest", "text": "The catalog investigation is waiting for its configured identity.", "timeout": 60}
+         {"do": "see", "on": "bots.digest", "text": "The catalog investigation is waiting for its configured identity.", "timeout": 60},
+         {"do": "see", "on": "bots.assistantText", "text": "The proof is recorded.", "timeout": 60},
+         {"do": "click", "on": "bots.editor"},
+         {"do": "type", "text": "Show the retained bot OpenUI decision."},
+         {"do": "press", "key": "Enter"},
+         {"do": "see", "on": "bots.cacheEnabled", "timeout": 60},
+         {"do": "click", "on": "bots.cacheEnabled"},
+         {"do": "click", "on": "bots.keepCache"},
+         {"do": "see", "on": "bots.assistantText", "text": "The OpenUI choice is recorded. Coordinator approval remains separate.", "timeout": 60},
+         {"do": "see", "on": "bots.workContext", "text": "BOT_IDENTITY_REQUIRED"}
       ]
     }]
   }]

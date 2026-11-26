@@ -62,4 +62,24 @@ export const BOT_PAGE_TURNS = [
     }],
     answer: "The visual decision is recorded. Coordinator approval remains separate.\n",
   },
+  {
+    id: "verify_bot_openui_decision",
+    prompt: "Show the retained bot OpenUI decision.",
+    steps: [{
+      text: "Showing the cache choice.",
+      calls: [{
+        name: "openchamber_render",
+        arguments: {
+          action: "render.page",
+          parameters: {
+            title: "Catalog cache decision",
+            artifactKind: "decision",
+            awaitAnswer: true,
+            ui: 'root = Stack([choice, submit])\nchoice = Choice("cache", ["Enabled", "Disabled"], "Cache")\nsubmit = Button("Keep cache", "primary", "keep-cache")',
+          },
+        },
+      }],
+    }],
+    answer: "The OpenUI choice is recorded. Coordinator approval remains separate.\n",
+  },
 ];
