@@ -3,7 +3,7 @@
 The chat composer: the prompt language, the editor that renders it, and
 everything between typing and sending.
 
-The collapsed mobile placeholder uses the full muted foreground token. Applying
+Collapsed and expanded mobile and desktop placeholders use the full muted foreground token. Applying
 opacity to that already-muted text drops its contrast below the theme's
 readability floor, including when the composer is pinned inside a Bot workspace.
 
@@ -842,8 +842,8 @@ the row's head states the file and line it anchors to.
   editor's IME context and caret geometry remain empty. Its quoted CSS string
   travels through a custom property because `attr()` reads the pseudo-element's
   own element. CSS custom property names retain kebab case.
-- Placeholder opacity keeps a repeated hint quieter than draft text. Placeholder
-  fit uses the editor's actual font and width, including completed web-font loads;
+- The muted foreground keeps the placeholder quieter than draft text without
+  reducing contrast through opacity. Placeholder fit uses the editor's actual font and width, including completed web-font loads;
   a hidden editor has no usable width and retains the full hint.
 - Shared-page draft storage keeps page identity without its key or content.
   Resolved reference content otherwise stays in memory because it is a potentially
