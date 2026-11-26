@@ -91,7 +91,10 @@ export const connectCdp = async (webSocketDebuggerUrl, {
     if (!message || typeof message !== 'object') return;
     if (Number.isInteger(message.id)) {
       const entry = pending.get(message.id);
-      if (!entry || entry.sessionId !== message.sessionId) return;
+      if (!entry) return;
+      // Chrome reports an unknown session on the root channel. Its request ID
+      // still identifies our command; successful replies retain the session guard.
+      if (entry.sessionId !== message.sessionId && !(message.error && message.sessionId === undefined)) return;
       pending.delete(message.id);
       clearTimeout(entry.timeout);
       if (message.error) entry.reject(commandError(entry.method, message.error.message || 'protocol error', 'protocol'));

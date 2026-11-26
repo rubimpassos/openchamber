@@ -98,3 +98,26 @@ test('closes an uncertain viewport operation on timeout before queued metrics ca
   assert.equal(cdp.isOpen, false);
   assert.deepEqual(messages.map(({ method }) => method), ['Page.captureScreenshot']);
 });
+
+test('rejects an unscoped CDP session error without closing the connection', { timeout: 2000 }, async (context) => {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  context.after(() => server.close());
+  await new Promise((resolve) => server.once('listening', resolve));
+  server.on('connection', (socket) => {
+    socket.on('message', (data) => {
+      const message = JSON.parse(String(data));
+      socket.send(JSON.stringify(message.method === 'Page.captureScreenshot'
+        ? { id: message.id, error: { code: -32001, message: 'Session with given id not found.' } }
+        : { id: message.id, result: {} }));
+    });
+  });
+  const cdp = await connectCdp(`ws://127.0.0.1:${server.address().port}`);
+  const rejected = assert.rejects(cdp.sendSession('missing-session', 'Page.captureScreenshot'), { code: 'protocol' });
+  context.after(async () => {
+    cdp.close();
+    await Promise.allSettled([rejected]);
+  });
+  await rejected;
+  assert.equal(cdp.isOpen, true);
+  await cdp.send('Browser.getVersion');
+});
