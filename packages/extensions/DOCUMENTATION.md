@@ -48,9 +48,12 @@ or a frame captured before a switch cannot authorize the returned view.
 
 Chrome's surface screenshot temporarily changes device emulation and restores
 the metrics saved at capture start when it finishes. A concurrent viewport
-change would therefore be undone. The CDP client serializes screenshots and
-metrics overrides within each session while other sessions and page commands
-remain independent. Captures retain their device density and CSS clip behavior.
+change would therefore be undone. The CDP client serializes screenshots,
+metrics overrides and explicit navigation commands within each session.
+Navigation can replace the rendering widget before a pending screenshot
+responds. Other sessions, input, screencast acknowledgements, Stop and dialog
+answers remain independent. The queue waits for command settlement, never page
+loading. Captures retain their device density and CSS clip behavior.
 A timed-out operation in that queue closes the connection: Chrome may still
 complete it, so subsequent metrics cannot safely use that runtime. A definite
 protocol rejection releases the queue and preserves the connection.
@@ -71,6 +74,12 @@ capture. A queued viewport would then wait behind that capture until the host
 request expires. Motion frames remain available during loading. Navigation
 invalidates captured pixels, and DevTools follows its own page's loading events
 instead of the inspected tab's state.
+
+Each document's queued refinements share an abort signal. Navigation and
+disposal cancel those still waiting before dispatch; a screenshot already sent
+to Chrome keeps its ordinary settlement and timeout behavior. Explicit command
+ordering does not control navigation triggered by page scripts, input or another
+CDP connection.
 
 ## Adding a package
 
