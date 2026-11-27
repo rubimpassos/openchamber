@@ -1,6 +1,7 @@
 import { offeredMobileWorkspaceTabs, shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder } from '@/lib/mobileWorkspaceTabs';
 import { carrySurfaceToZone, getZoneView, withZoneView, zoneOfMode, CONTEXT_ZONES } from '@/lib/workspace/zones';
 import type { ContextZonePlacement } from '@/lib/workspace/zones';
+import { clampSurfaceWidth, declaredSurfaceWidth } from '@/lib/surfaces/registry';
 import { sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
 import { clampContextEditorTreeWidth } from './preferences';
 import type { ContextPanelDirectoryState, UIStoreSlice } from './types';
@@ -27,6 +28,7 @@ export const createWorkspaceActions: UIStoreSlice<
   | 'closeContextZone'
   | 'toggleContextPanelExpanded'
   | 'setContextZoneSize'
+  | 'setContextPanelWidth'
   | 'setContextZoneExpandedChatSize'
   | 'moveContextSurfaceToZone'
   | 'setWorkStatusSectionExpanded'
@@ -183,6 +185,12 @@ export const createWorkspaceActions: UIStoreSlice<
 
   setContextZoneSize: (zone, size) => {
     set((state) => ({ contextZoneSizes: { ...state.contextZoneSizes, [zone]: clampContextZoneSize(zone, size) } }));
+  },
+
+  setContextPanelWidth: (mode, width) => {
+    const declared = declaredSurfaceWidth(mode);
+    if (!declared || !Number.isFinite(width)) return;
+    set((state) => ({ contextPanelWidths: { ...state.contextPanelWidths, [mode]: clampSurfaceWidth(declared, width) } }));
   },
 
   setContextZoneExpandedChatSize: (zone, size) => {

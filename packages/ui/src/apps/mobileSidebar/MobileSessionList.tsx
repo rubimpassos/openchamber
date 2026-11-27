@@ -1,5 +1,4 @@
 import React from 'react';
-import { BotsSidebarZone } from '@/components/bots/BotsSidebarZone';
 import type { SessionProjectListProps } from '@/components/session/sidebar/projects/SessionProjectScroller';
 import {
   applyShowControl,
@@ -7,6 +6,7 @@ import {
   grantGroupAccess,
   retryGroupStatus,
   toggleActivityZone,
+  toggleBotsZone,
   toggleProjectsCaption,
 } from '@/components/session/sidebar/projects/sessionProjectListActions';
 import { SessionSidebarRows } from '@/components/session/sidebar/SessionSidebarRows';
@@ -17,6 +17,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChildStoreManager } from '@/sync/sync-context';
+import { MobileBotsSection } from './MobileBotsSection';
 import { MobileSessionRow } from './MobileSessionRow';
 import { MobileFolderRow, MobileGroupHeader, MobileProjectHeader, MobileProjectsCaption, MobileStatusRow, MobileZoneHeader } from './MobileSectionRows';
 import { MobileDraftRow, MobileRunRow, MobileWorktreeRow } from './MobileWorkRows';
@@ -88,7 +89,15 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
     switch (row.kind) {
       case 'bots-zone':
-        return <BotsSidebarZone query={model.search?.query} onLeave={phone.close} />;
+        return <MobileBotsSection
+          model={model.bots}
+          collapsed={row.collapsed}
+          onToggle={() => toggleBotsZone({ model })}
+          expandedKeys={model.groupProps.expandedParents}
+          onToggleExpanded={model.groupProps.toggleParent}
+          geometry={geometry}
+          onNavigate={phone.close}
+        />;
       case 'activity-header':
         return <MobileZoneHeader row={row} onToggle={() => toggleActivityZone(row, { model, actions })} />;
       case 'caption':

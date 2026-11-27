@@ -7,15 +7,17 @@ import { resolveRepositoryIdentity } from '../source-control/repository-identity
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { botMigrationPathSchema, sameBotMigrationPath } from '../spaces/transfer-bundle.js';
 import { requiredFailureProperty } from '../spaces/failure.js';
-import { botGit, createBotCheckoutGit } from './production-git.js';
+import { botGit, createBotCheckoutGit, isLocalBotCheckout, localRepositoryId } from './production-git.js';
 import { adoptionOf, fail, ownerFields, ownerSchema, reservationsSchema } from './production-worktree-contracts.js';
 import type { CheckoutLocation, CheckoutOwner, CheckoutIdentityRequest, MigrationRequest, Reservation, Reservations } from './production-worktree-contracts.js';
 
 export const statId = (stat: Stats) => `${stat.dev}:${stat.ino}`;
-const repositoryId = async (directory: string) => {
+export const repositoryIdOf = async (directory: string) => {
   const identity = await resolveRepositoryIdentity(directory);
   return identity.supported ? identity.repositoryId : undefined;
 };
+const repositoryId = async (directory: string, record: CheckoutOwner) => await repositoryIdOf(directory)
+  ?? (isLocalBotCheckout(record) ? localRepositoryId(record.projectId) : undefined);
 export const publicationOwner = (record: CheckoutOwner) => Object.fromEntries(Object.entries(record)
   .filter(([key, value]) => Object.hasOwn(ownerFields, key) && value !== undefined));
 export const reservedFor = (registry: Reservations, { botId, itemId }: Pick<CheckoutOwner, 'botId' | 'itemId'>) => registry.reservations.find((entry) => entry.owner.botId === botId && entry.owner.itemId === itemId);
@@ -90,7 +92,7 @@ export function createCheckoutOwner(dataDir: string) {
       || request.item.botId && request.item.botId !== request.bot.id
       || record.branch !== `bot/${request.item.id}`
       || record.projectPath !== await fs.realpath(request.project.path)
-      || await repositoryId(request.project.path) !== record.repositoryId
+      || await repositoryId(request.project.path, record) !== record.repositoryId
       || request.item.worktree && request.item.worktree !== record.directory
       || request.item.branch && request.item.branch !== record.branch
       || request.item.publicationBranch !== undefined && request.item.publicationBranch !== record.publicationBranch
@@ -107,7 +109,7 @@ export function createCheckoutOwner(dataDir: string) {
     const detachedAdoption = record.state === 'adopting' && head === 'HEAD'
       && (await botGit(record.directory, ['rev-parse', 'HEAD'])).trim() === adoptionOf(record).resultSha;
     if (gitDirectory !== record.gitDirectory || statId(await fs.stat(gitDirectory)) !== record.gitIdentity
-      || await repositoryId(record.directory) !== record.repositoryId
+      || await repositoryId(record.directory, record) !== record.repositoryId
       || head !== `refs/heads/${record.branch}` && !detachedAdoption) fail('BOT_WORKTREE_OWNERSHIP');
     const topology = await getWorktrees(request.project.path);
     if (!topology.some((entry) => path.resolve(entry.path) === record.directory && (entry.branch === record.branch || detachedAdoption && !entry.branch))

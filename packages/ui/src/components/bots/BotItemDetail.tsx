@@ -1,7 +1,5 @@
-import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { SettingsSection, SettingsStackedField } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { actOnBotItem, type BotItemDetailRead } from '@/lib/botsApi';
 import type { BotItem } from '@/lib/bots/items';
 import { isTerminalBotItem } from '@/lib/bots/items';
@@ -21,20 +19,13 @@ export function BotItemWait({ item }: { readonly item: BotItem }) {
   </section>;
 }
 
-export function BotItemControls({ projectId, item, questionKey, onChanged }: {
-  readonly projectId: string; readonly item: BotItem; readonly questionKey: string | undefined; readonly onChanged: () => void;
+export function BotItemControls({ projectId, item, onChanged }: {
+  readonly projectId: string; readonly item: BotItem; readonly onChanged: () => void;
 }) {
   const { t } = useI18n();
   const action = useBotAction();
-  const [answer, setAnswer] = React.useState('');
-  const delivery = React.useRef<{ readonly text: string; readonly eventId: string } | null>(null);
-  const operate = (kind: 'resume' | 'stop' | 'answer') => action.run(async () => {
-    if (kind === 'answer') {
-      if (!answer.trim()) return;
-      if (delivery.current?.text !== answer) delivery.current = { text: answer, eventId: crypto.randomUUID() };
-      await actOnBotItem(projectId, item.id, { kind, ...delivery.current, questionKey });
-      if (action.isActive()) { setAnswer(''); delivery.current = null; }
-    } else await actOnBotItem(projectId, item.id, { kind });
+  const operate = (kind: 'resume' | 'stop') => action.run(async () => {
+    await actOnBotItem(projectId, item.id, { kind });
     if (action.isActive()) onChanged();
   });
   if (isTerminalBotItem(item)) return null;
@@ -43,10 +34,7 @@ export function BotItemControls({ projectId, item, questionKey, onChanged }: {
       {item.state === 'needs-you' ? <Button size="sm" disabled={action.busy} onClick={() => void operate('resume')}>{t('bots.resume')}</Button> : null}
       <Button size="sm" variant="destructive" disabled={action.busy} onClick={() => void operate('stop')}>{t('bots.stop')}</Button>
     </div>
-    {item.state === 'needs-you' || item.state === 'waiting-answer' ? <SettingsStackedField label={t('bots.answer')} controlClassName="max-w-none w-full flex-col items-stretch">
-      <Textarea aria-label={t('bots.answer')} value={answer} onChange={(event) => setAnswer(event.target.value)} disabled={action.busy} />
-      <Button className="self-start" size="sm" disabled={action.busy || !answer.trim()} onClick={() => void operate('answer')}>{t('bots.answer')}</Button>
-    </SettingsStackedField> : null}
+    {item.state === 'needs-you' || item.state === 'waiting-answer' ? <p className="typography-meta text-muted-foreground">{t('bots.panel.asksInChat')}</p> : null}
     <div className="min-h-5 typography-meta text-[var(--status-error-text)]" role="alert">{action.error}</div>
   </div>;
 }
@@ -110,7 +98,7 @@ export function BotItemDetail({ projectId, initial, archived = false, onBack, on
     {read.error ? <p role="alert" className="mb-4 typography-meta text-[var(--status-error-text)]">{t('bots.error')}</p> : null}
     <div className="mb-4 space-y-4 empty:hidden">
       <BotItemWait item={item} />
-      {!archived ? <BotItemControls projectId={projectId} item={item} questionKey={read.data?.questionKey} onChanged={read.refresh} /> : null}
+      {!archived ? <BotItemControls projectId={projectId} item={item} onChanged={read.refresh} /> : null}
     </div>
     <BotEvidence item={item} />
     <BotItemRecord item={item} detail={read.data} busy={read.busy} onLeave={onLeave} />

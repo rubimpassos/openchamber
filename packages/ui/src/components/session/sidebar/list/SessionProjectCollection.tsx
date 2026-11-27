@@ -1,7 +1,7 @@
 import { SidebarTerminalActivity } from './SidebarTerminalActivity';
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useBotsAttentionCount } from '@/components/bots/useBotsAttentionCount';
+import { useBotsSidebar } from '@/hooks/useBotsSidebar';
 import { botSessionOwner } from '@/lib/bots/sessionMetadata';
 import type { Session } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -1167,20 +1167,20 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     ...visibleSessionCountByGroup,
     ...visibleActivityCountByKey,
   ]), [visibleActivityCountByKey, visibleSessionCountByGroup]);
-  const botsAttentionCount = useBotsAttentionCount(view.isVisible && !topology.isVSCode, view.searchText);
+  const bots = useBotsSidebar(view.isVisible && !topology.isVSCode);
   const blockDrag = useSidebarBlockDragStore((state) => state.kind);
   const rowCollapsedProjects = React.useMemo(() => (blockDrag
     ? new Set(orderedSectionsForRender.map((section) => section.project.id))
     : projectView.collapsedProjects), [blockDrag, orderedSectionsForRender, projectView.collapsedProjects]);
   const rowCollapsedActivities = React.useMemo(() => (blockDrag === 'section'
-    ? new Set<string>(['priority', 'chats', 'pinned', 'work', 'timeline', PROJECTS_CAPTION_COLLAPSE_KEY, ...visibleSections.flatMap((section) => (
+    ? new Set<string>(['priority', 'chats', 'pinned', 'bots', 'work', 'timeline', PROJECTS_CAPTION_COLLAPSE_KEY, ...visibleSections.flatMap((section) => (
       section.kind === 'custom' ? [sidebarSectionActivityKey(section.section.id)] : []))])
     : projectView.collapsedActivities), [blockDrag, projectView.collapsedActivities, visibleSections]);
   const searchSectionsWithMore = conversationSearch.sectionsWithMore;
   const searchIncomplete = conversationSearch.contentStatus.kind === 'loading' || (conversationSearch.contentStatus.kind === 'ready'
     && (conversationSearch.contentStatus.indexing !== null || !conversationSearch.contentStatus.lifecycleComplete));
   const sidebarRowModel = React.useMemo(() => buildSessionSidebarRowModel({
-    botsAttentionCount,
+    botsSection: bots.present,
     mode: view.hasSessionSearchQuery ? 'search' : 'normal',
     sections: orderedSectionsForRender,
     authoritativeSections: projectSections,
@@ -1226,7 +1226,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     sessionBatchSize,
     runIndex,
     blocks: sidebarBlocks,
-  }), [botsAttentionCount, blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, priorityItems, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, sessionBatchSize, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
+  }), [bots.present, blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, priorityItems, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, sessionBatchSize, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
   React.useEffect(() => {
     onSearchMatchCountChange(searchTotalCount);
   }, [searchTotalCount, onSearchMatchCountChange]);
@@ -1241,7 +1241,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     }
   }, [collapsedFolderIds, projectView.collapsedGroups, sidebarRowModel.rows, toggleGroup]);
   const scrollerModel = React.useMemo(() => ({
-    rowModel: sidebarRowModel,
+    rowModel: sidebarRowModel, bots,
     search: { query: view.searchText, author: searchQuery.author, searchIn: searchQuery.searchIn, loadMore: conversationSearch.loadMore, showMore: showMoreSearchResults },
     sectionsForRender: orderedSectionsForRender,
     projectSections,
@@ -1261,7 +1261,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     },
     groupProps,
   }), [
-    view.searchText, searchQuery, conversationSearch.loadMore, showMoreSearchResults,
+    view.searchText, searchQuery, conversationSearch.loadMore, showMoreSearchResults, bots,
     groupProps,
     editingId,
     openSidebarMenuKey,

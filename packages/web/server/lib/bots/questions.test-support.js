@@ -94,7 +94,7 @@ export async function questionsFixture({ people = questionPeople, area = questio
   let savedConfig = { definitions: [{ id: 'bot', name: 'Bot', mission: 'Fix verified bugs', enabled: true,
     identity: { github: { kind: 'account', accountId: 'account-one' }, discord: { identityId: discord.id }, jira: { identityId: jira.id } },
     discord: { channels: [{ guildId: '11111111', channelId: '22222222' }] } }] };
-  const config = createBotsConfig({ projectConfigRuntime: { readBotsSection: async () => savedConfig,
+  const config = createBotsConfig({ dataDir, projectConfigRuntime: { readBotsSection: async () => savedConfig,
     updateBotsSection: async (_projectId, change) => { savedConfig = await change(savedConfig); return savedConfig; } } });
   const approve = async () => {
     const policy = await readRepositoryPolicy(directory);

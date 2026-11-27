@@ -2,11 +2,11 @@ import fs from 'node:fs/promises';
 import { addDetachedWorktree, removeWorktree } from '../git/service.js';
 import { configureBotWorktreeIdentity } from './services/git.js';
 import { branch as branchSchema, sha } from './services/contracts.js';
-import { advanceBotCheckout, botGit } from './production-git.js';
+import { advanceBotCheckout, botGit, LOCAL_CHECKOUT_IDENTITY, localBotCheckoutBase, localRepositoryId } from './production-git.js';
 import { transferSourceSchema } from '../spaces/transfer-bundle.js';
 import { checkoutOf, fail, ownerSchema } from './production-worktree-contracts.js';
 import type { Checkout, CheckoutIdentityRequest, CheckoutOptions, CheckoutRequest, MigrationRequest } from './production-worktree-contracts.js';
-import { clean, createCheckoutOwner, exists, statId } from './production-worktree-owner.js';
+import { clean, createCheckoutOwner, exists, repositoryIdOf, statId } from './production-worktree-owner.js';
 import { createCheckoutAdoption } from './production-worktree-adoption.js';
 import { createCheckoutPublication, defaultBranch, remoteHead, requireObject } from './production-worktree-publication.js';
 import { createCheckoutSnapshots } from './production-worktree-snapshot.js';
@@ -44,15 +44,20 @@ export function createProductionBotWorktrees({ dataDir, context, readItem, dispo
         if (request.trustedMigrationPath !== undefined) fail('BOT_MIGRATION_PATH_AUTHORITY_MISMATCH');
         const branch = branchSchema.parse(`bot/${request.item.id}`);
         if (request.item.botId !== request.bot.id) fail('BOT_WORKTREE_OWNERSHIP');
-        const { binding, credential } = await context.github(request);
-        const baseBranch = await defaultBranch(credential, binding.target);
-        const baseSha = await remoteHead(credential, binding.target, baseBranch);
-        await requireObject(request, { credential, target: binding.target }, baseSha);
+        const origin = request.bot.identity?.github || request.bot.isolated ? await (async () => {
+          const { binding, credential } = await context.github(request);
+          const baseBranch = await defaultBranch(credential, binding.target);
+          const baseSha = await remoteHead(credential, binding.target, baseBranch);
+          await requireObject(request, { credential, target: binding.target }, baseSha);
+          return { baseBranch, baseSha, binding, repositoryId: binding.target.repositoryId, identityId: binding.identityId, identityRevision: binding.identityRevision };
+        })() : { ...await localBotCheckoutBase(request.project.path), binding: null,
+          repositoryId: await repositoryIdOf(request.project.path) ?? localRepositoryId(request.project.id), identityId: LOCAL_CHECKOUT_IDENTITY, identityRevision: 1 };
+        const { baseBranch, baseSha, binding } = origin;
         const directory = location(request).directory;
         if (await exists(directory) || (await botGit(request.project.path, ['for-each-ref', '--format=%(refname)', `refs/heads/${branch}`])).trim()) fail('BOT_WORKTREE_UNOWNED');
         const record = ownerSchema.parse({ version: 1, projectId: request.project.id, projectPath: await fs.realpath(request.project.path),
-          itemId: request.item.id, botId: request.bot.id, repositoryId: binding.target.repositoryId, key: request.key,
-          identityId: binding.identityId, identityRevision: binding.identityRevision,
+          itemId: request.item.id, botId: request.bot.id, repositoryId: origin.repositoryId, key: request.key,
+          identityId: origin.identityId, identityRevision: origin.identityRevision,
           directory, branch, baseBranch, baseSha, state: 'preparing' });
         await save(request, record);
         await addDetachedWorktree(request.project.path, directory, baseSha);
@@ -62,7 +67,7 @@ export function createProductionBotWorktrees({ dataDir, context, readItem, dispo
         await save(request, record);
         await botGit(directory, ['update-ref', `refs/heads/${branch}`, baseSha, '0'.repeat(40)]);
         await botGit(directory, ['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
-        await configureBotWorktreeIdentity({ directory, ...await context.author({ ...request, binding }) });
+        if (binding) await configureBotWorktreeIdentity({ directory, ...await context.author({ ...request, binding }) });
         record.state = 'ready';
         await verifyCheckout(request, record);
         await save(request, record);

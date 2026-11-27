@@ -1,17 +1,19 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import type { Root } from 'react-dom/client';
-import { botItem, botsConfig } from '@/lib/bots/bots.fixture';
+import { botItem, configuredBot } from '@/lib/bots/bots.fixture';
 import { installSuggestedTasksDom, serveSuggestedTasks } from '@/lib/test-utils/suggestedTasks.fixture';
 
 const dom = installSuggestedTasksDom();
 const project = { id: 'project-1', path: '/repo' };
 let revision = 1;
+const definitions = [{ ...configuredBot(), projects: { [project.id]: 'merge' } }];
 const server = await serveSuggestedTasks((request) => {
   const path = new URL(request.url).pathname;
   if (path.endsWith('/items/item-1')) return Response.json({ item: botItem({ revision }), reports: {}, snapshot: null });
   if (path.endsWith('/identities')) return Response.json({ identities: [] });
-  if (path.endsWith('/bots')) return Response.json({ config: botsConfig(), revision, items: [botItem()], presets: [] });
+  if (path === '/api/bots') return Response.json({ revision: 1, definitions, presets: [] });
+  if (path.endsWith('/bots')) return Response.json({ config: { concurrency: 2, retentionDays: 90, definitions }, revision, items: [botItem()], presets: [] });
   return Response.json({});
 }, { projects: [project], activeProjectId: project.id });
 const { createRoot } = await import('react-dom/client');

@@ -2,6 +2,9 @@ import type { I18nKey } from './en';
 import { settingsDict } from './pl.settings';
 import { botsI18n } from './bots.i18n';
 import { botWorkspaceI18n } from './bot-workspace.i18n';
+import { botSidebarI18n } from './bot-sidebar.i18n';
+import { botPanelI18n } from './bot-panel.i18n';
+import { botConfigI18n } from './bot-config.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -195,6 +198,9 @@ export const dict: Record<I18nKey, string> = {
   ...selectionApprovalI18n.pl,
   ...botsI18n.pl,
   ...botWorkspaceI18n.pl,
+  ...botSidebarI18n.pl,
+  ...botPanelI18n.pl,
+  ...botConfigI18n.pl,
   'gitView.operation.title': 'Operacja Git',
   'gitView.operation.recovery.storage': 'OpenChamber nie może tu zapisać stanu przesyłów Git. Zezwól na pamięć witryny i odśwież; do tego czasu push i pull są wstrzymane.',
   'gitView.operation.recovery.capacity': 'Zapisano zbyt wiele niedokończonych przesyłów Git. Sprawdź te poniżej, zanim zaczniesz kolejny.',

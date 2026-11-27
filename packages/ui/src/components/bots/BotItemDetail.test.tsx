@@ -9,10 +9,12 @@ const originalFetch = globalThis.fetch;
 const item = botItem({ worktree: '/host/item-worktree', sessions: { investigation: 'ses_read', fixing: 'ses_fix', judge: 'ses_judge' } });
 let respond: () => Response | Promise<Response>;
 let detailReads = 0;
+let posts: string[] = [];
 // Only the HTTP boundary is replaced; the component, parser and selection store are real.
 // Install before store imports so their startup reads use the same test transport.
-globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+  if (init?.method === 'POST' && path.includes('/bots/')) { posts.push(path); return Response.json({}); }
   if (path.endsWith(`/items/${item.id}`)) { detailReads += 1; return respond(); }
   if (path === '/api/fs/home') return Response.json({ home: '/home/test', chatsRoot: '/home/test/chats' });
   return Response.json({});
@@ -30,6 +32,7 @@ let left = 0;
 beforeEach(() => {
   respond = () => Response.json({ item, reports: {}, snapshot: null });
   detailReads = 0;
+  posts = [];
   left = 0;
   // Main's selection owner admits known projects/worktrees and valid isolated-space addresses.
   useProjectsStore.setState({ projects: ['/before', '/host/project'].map((path) => ({ id: path, path })) });
@@ -196,12 +199,42 @@ describe('Archived Bot inspection', () => {
       // When the archived detail loads through the real HTTP parser.
       await renderDetail(true);
 
-      // Then archived inspection exposes no resume, answer, stop or refresh action.
+      // Then archived inspection exposes no resume, stop or refresh action.
       expect(document.querySelector('h2')?.textContent).toBe(retained.title);
       const labels = [...document.querySelectorAll('button')].map((entry) => entry.textContent);
-      expect(labels.filter((label) => ['Resume', 'Send answer', 'Stop item', 'Refresh'].includes(label ?? ''))).toEqual([]);
-      expect(document.querySelector('textarea')).toBeNull();
+      expect(labels.filter((label) => ['Resume', 'Stop item', 'Refresh'].includes(label ?? ''))).toEqual([]);
       expect(detailReads).toBe(1);
     });
   }
+});
+
+describe('Bot item controls', () => {
+  for (const state of ['needs-you', 'waiting-answer'] as const) {
+    test(`takes no answer in the record and points to the chat when the item is ${state}`, async () => {
+      // Given an active item that waits on a person.
+      respond = () => Response.json({ item: { ...item, state }, reports: {}, snapshot: null });
+
+      // When its record opens.
+      await renderDetail();
+
+      // Then it offers Stop, no field to answer in, and says where the bot asks.
+      expect(button('Stop item').disabled).toBe(false);
+      expect(document.querySelector('textarea')).toBeNull();
+      expect(document.body.textContent).toContain('The bot asks its questions in its chat. Answer there.');
+    });
+  }
+
+  test('resumes an item that needs a person and reads its record again', async () => {
+    // Given an item that needs a person.
+    const reread = deferred<void>();
+    respond = () => { if (detailReads === 2) reread.resolve(); return Response.json({ item: { ...item, state: 'needs-you' }, reports: {}, snapshot: null }); };
+    await renderDetail();
+
+    // When they resume it.
+    await act(async () => button('Resume').click());
+    await reread.promise;
+
+    // Then the server was asked to resume, with nothing else sent.
+    expect(posts).toEqual([`/api/projects/project-1/bots/items/${item.id}/resume`]);
+  });
 });

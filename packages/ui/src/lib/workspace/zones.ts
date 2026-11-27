@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
+import { clampSurfaceWidth, declaredSurfaceWidth } from '@/lib/surfaces/registry';
 
 export type ContextZone = 'left' | 'right' | 'bottom';
 type MovedContextZone = Exclude<ContextZone, 'right'>;
@@ -83,8 +84,11 @@ export const canZoneExpand = (
     && (view.contextEditorVisible || !view.contextEditorTreeVisible);
 };
 
+export type ContextPanelWidths = Partial<Record<ContextPanelMode, number>>;
+
 type SideZoneSizing = {
   contextZoneSizes: Partial<Record<ContextZone, number>>;
+  contextPanelWidths: ContextPanelWidths;
   contextEditorVisible: boolean;
   contextEditorTreeVisible: boolean;
   contextEditorTreeWidth: number;
@@ -99,6 +103,11 @@ export const showsFileTreeOnly = (panel: ZonedPanel<SizedTab>, tab: SizedTab, si
   return !editorShown;
 };
 
+export const ownPanelWidth = (mode: ContextPanelMode, widths: ContextPanelWidths): number | null => {
+  const declared = declaredSurfaceWidth(mode);
+  return declared ? clampSurfaceWidth(declared, widths[mode] ?? declared.defaultWidth) : null;
+};
+
 export const sideZoneWidth = (
   panel: ZonedPanel<SizedTab>,
   tab: SizedTab,
@@ -107,7 +116,7 @@ export const sideZoneWidth = (
 ): number => (
   showsFileTreeOnly(panel, tab, sizing)
     ? sizing.contextEditorTreeWidth
-    : sizing.contextZoneSizes[side] ?? CONTEXT_ZONE_DEFAULT_WIDTH
+    : ownPanelWidth(tab.mode, sizing.contextPanelWidths) ?? sizing.contextZoneSizes[side] ?? CONTEXT_ZONE_DEFAULT_WIDTH
 );
 
 export const shownContextModes = (panel: ZonedPanel | undefined, placement: ContextZonePlacement): Set<ContextPanelMode> => {

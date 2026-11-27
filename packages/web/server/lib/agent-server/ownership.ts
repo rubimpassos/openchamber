@@ -83,7 +83,7 @@ export function classify(req: OwnershipRequest): RequestOwner {
   const upgrade = String(req.headers?.upgrade ?? '').toLowerCase() === 'websocket';
   const method = String(req.method ?? 'GET').toUpperCase();
   const pathname = url.pathname.toLowerCase();
-  if (!upgrade && /^\/api\/projects\/[^/]+\/bots(?:\/|$)/.test(pathname)) return 'local';
+  if (!upgrade && /^\/api\/(?:projects\/[^/]+\/)?bots(?:\/|$)/.test(pathname)) return 'local';
   for (const rule of OWNERSHIP) {
     if (Boolean(rule.upgrade) !== upgrade) continue;
     if (!rule.methods.includes('*') && !rule.methods.includes(method)) continue;

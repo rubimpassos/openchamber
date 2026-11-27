@@ -16,11 +16,11 @@ it('persists exact space references when a bot configuration is saved and reopen
   const directory = await fs.mkdtemp('/tmp/opencode/bot-space-config-');
   directories.push(directory);
   const runtime = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: directory });
-  const config = createBotsConfig({ projectConfigRuntime: runtime });
+  const config = createBotsConfig({ projectConfigRuntime: runtime, dataDir: directory });
 
   // When the bot is saved and another config owner reads it.
   await config.update('project', { definitions: [definition(space)] });
-  const reopened = await createBotsConfig({ projectConfigRuntime: runtime }).read('project');
+  const reopened = await createBotsConfig({ projectConfigRuntime: runtime, dataDir: directory }).read('project');
 
   // Then all selected references survive without resolving any credential.
   expect(reopened.definitions[0].space).toEqual(space);
@@ -127,7 +127,7 @@ it('retains saved options when a later secret-bearing write fails', async () => 
   const directory = await fs.mkdtemp('/tmp/opencode/bot-space-config-');
   directories.push(directory);
   const runtime = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: directory });
-  const config = createBotsConfig({ projectConfigRuntime: runtime });
+  const config = createBotsConfig({ projectConfigRuntime: runtime, dataDir: directory });
   await config.update('project', { definitions: [definition(space)] });
 
   // When a later write tries to persist a literal secret.

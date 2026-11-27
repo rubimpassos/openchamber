@@ -25,6 +25,7 @@ export const artifactBodySchema = z.discriminatedUnion('format', [
   z.object({ format: z.literal('ui'), content: z.string().min(1).max(BOT_ARTIFACT_SOURCE_LENGTH) }).strict(),
 ]);
 export const artifactKindSchema = z.enum(['evidence', 'decision']);
+export const artifactRequirementSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 export const artifactInteractionSchema = z.enum(['none', 'awaitAnswer', 'answerLater', 'share']);
 const assetSource = z.string().min(1).max(4096);
 export const artifactMissingAssetSchema = z.object({
@@ -36,7 +37,7 @@ export const artifactAssetSchema = z.discriminatedUnion('status', [
   artifactMissingAssetSchema,
 ]);
 export const artifactMetadataSchema = z.object({
-  id: artifactIdSchema, kind: artifactKindSchema, title: z.string().min(1).max(120),
+  id: artifactIdSchema, kind: artifactKindSchema, requirement: artifactRequirementSchema.optional(), title: z.string().min(1).max(120),
   createdAt: z.number().int().nonnegative(),
   source: artifactCallSchema.extend({ producer: roleSchema, messageId: artifactText.optional() }).strict(),
   interaction: artifactInteractionSchema,

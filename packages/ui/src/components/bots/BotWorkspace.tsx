@@ -68,7 +68,7 @@ export function BotWorkspace({ projectId, bot, initial, archived, layout, onBack
               : <ContentState title={t('bots.conversation.none')} description={t('bots.conversation.noneHint')} />}
       </div>
     </section>
-    {shown ? <BotContextPanel projectId={projectId} item={item} detail={read.data} busy={read.busy} failed={read.error} archived={archived}
+    {shown ? <BotContextPanel projectId={projectId} item={item} requirements={bot?.artifacts ?? []} detail={read.data} busy={read.busy} failed={read.error} archived={archived}
       tab={tab} onTabChange={setTab} onRefresh={read.refresh} onLeave={onLeave} onClose={covering ? toggle : undefined}
       className={wide ? 'oc-panel-edge relative my-2 me-2 w-85 shrink-0 overflow-hidden rounded-[10px] bg-background' : 'absolute inset-0 z-10 bg-background'} /> : null}
   </div>;

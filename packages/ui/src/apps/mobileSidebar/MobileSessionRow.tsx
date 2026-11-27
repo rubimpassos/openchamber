@@ -54,7 +54,7 @@ import { renameMobileSession, runMobileSubtreeAction, selectMobileSession, toggl
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileRowMenu } from './MobileRowMenu';
-import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
+import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ONE_LINE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
 
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
 
@@ -269,7 +269,7 @@ export const MobileSessionRow: React.FC<{
       {renaming ? renameForm(geometry.textLeft(depth)) : (
         <button
           type="button"
-          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className={MOBILE_ONE_LINE_ROW_CLASS}
           style={{ paddingInlineStart: geometry.textLeft(depth), touchAction: 'manipulation' }}
           onClick={select}
         >

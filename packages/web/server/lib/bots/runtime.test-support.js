@@ -20,8 +20,9 @@ const TEST_REGRESSION = 'c'.repeat(40);
 export const createBotDriver = async (root, options = {}) => {
   await fs.mkdir(root, { recursive: true });
   const project = { id: 'project', path: root };
-  let storedConfig = { definitions: [{ id: 'bugs', name: 'Bug bot', mission: 'Fix verified bugs', proof: { command: 'node', args: ['--test', '{files}'] }, ...options.bot }], ...options.config };
-  const config = createBotsConfig({ projectConfigRuntime: {
+  const identity = { github: { kind: 'app', identityId: 'github-app' }, jira: { identityId: 'jira-account' }, discord: { identityId: 'discord-app' } };
+  let storedConfig = { definitions: [{ id: 'bugs', name: 'Bug bot', mission: 'Fix verified bugs', proof: { command: 'node', args: ['--test', '{files}'] }, identity, ...options.bot }], ...options.config };
+  const config = createBotsConfig({ dataDir: path.join(root, 'bot-data'), projectConfigRuntime: {
     readBotsSection: async () => storedConfig,
     updateBotsSection: async (_id, change) => { storedConfig = await change(storedConfig); return storedConfig; },
   } });
@@ -37,7 +38,7 @@ export const createBotDriver = async (root, options = {}) => {
   controls.availableModels = [{ providerID: 'test', modelID: 'model' }];
   const outputs = (stage) => stage === 'investigation' ? { summary: 'Verified bug', plan: 'Add test, then fix', evidence: [{ source: 'test', summary: 'Observed wrong result' }], questions: controls.questions, requestedRole: options.requestedRole, publicationBranch: controls.publicationBranch }
     : stage === 'fixing' ? { summary: 'Fixed the cause', evidence: [{ source: 'test', summary: 'Regression now passes' }] }
-      : { decision: controls.decision, reason: 'Reviewed the exact diff and evidence', reviewers: controls.reviewers, questions: controls.decision === 'ask' ? ['Confirm behavior?'] : [], requestedRole: options.requestedRole };
+      : { decision: controls.decision, reason: 'Reviewed the exact diff and evidence', reviewers: controls.reviewers, questions: controls.decision === 'ask' ? ['Confirm behavior?'] : [], requestedRole: options.requestedRole, artifacts: controls.judgeArtifacts ?? [] };
   const complete = (sessionId) => {
     const info = sessions.get(sessionId);
     const stage = info.metadata.openchamber.automation.stage;
@@ -155,6 +156,7 @@ export const createBotDriver = async (root, options = {}) => {
     sources: { async jira() { return options.candidates ?? []; }, async investigate() { return options.candidates ?? []; } },
     attention: { async sync(input) { calls.attention.push(input); } }, notices: { async deliver(input) { calls.notices.push(input); } },
     scheduler: { async sync(...args) { calls.schedules.push(args); }, async remove() {} }, events: createBotEvents(), now: clock,
+    presentedArtifacts: async () => (controls.presentedArtifacts ?? []).map((entry) => ({ createdAt: clock(), ...entry })),
   };
   dependencies.questions = createBotQuestions({ ...dependencies, now: clock, context: {
     serviceContext: (request) => dependencies.serviceContext(request),

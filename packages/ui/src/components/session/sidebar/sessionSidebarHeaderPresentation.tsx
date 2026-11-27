@@ -48,17 +48,18 @@ export const SessionSidebarActivityHeader: React.FC<{
   collapsed: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
-  onNewChat: () => void;
-}> = ({ activityKey, label, preview = false, loading = false, collapsed, alwaysShowActions, onToggle, onNewChat }) => {
+  onAdd?: () => void;
+  addLabel?: string;
+}> = ({ activityKey, label, preview = false, loading = false, collapsed, alwaysShowActions, onToggle, onAdd, addLabel }) => {
   const { t } = useI18n();
-  const chats = activityKey === 'chats';
+  const adds = onAdd !== undefined && (activityKey === 'chats' || activityKey === 'bots');
   const timeline = activityKey === 'timeline';
   return <div className="relative group/chats -ms-2.5 -me-2">
     <button
       type="button"
       onClick={onToggle}
       data-row-drag=""
-      className={cn('group flex w-full items-center gap-1 py-1 ps-4 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', chats || timeline ? 'pe-10' : 'pe-3.5')}
+      className={cn('group flex w-full items-center gap-1 py-1 ps-4 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', adds || timeline ? 'pe-10' : 'pe-3.5')}
       aria-expanded={!collapsed}
     >
       <span className="min-w-0 truncate typography-ui-label font-medium text-muted-foreground" dir="auto">
@@ -74,11 +75,11 @@ export const SessionSidebarActivityHeader: React.FC<{
       />
       {loading ? <Spinner className="size-3 text-muted-foreground" aria-label={t('sessions.sidebar.group.empty.loadingSessions')} /> : null}
     </button>
-    {chats ? <button
+    {adds ? <button
       type="button"
-      onClick={(event) => { event.stopPropagation(); onNewChat(); }}
+      onClick={(event) => { event.stopPropagation(); onAdd(); }}
       className={cn('absolute inset-e-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/chats:opacity-100 group-hover/chats:pointer-events-auto group-has-[:focus-visible]/chats:opacity-100 group-has-[:focus-visible]/chats:pointer-events-auto')}
-      aria-label={t('sessions.sidebar.header.actions.newSession')}
+      aria-label={addLabel ?? t('sessions.sidebar.header.actions.newSession')}
     >
       <Icon name="add" className="h-4 w-4" />
     </button> : null}

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   carrySurfaceToZone,
   CLOSED_ZONE_VIEW,
+  CONTEXT_ZONE_DEFAULT_WIDTH,
   isZoneShown,
   resolveZoneActiveTab,
   keepZoneViewsOnTabs,
@@ -9,11 +10,12 @@ import {
   zoneViewsSchema,
   settleZones,
   shownContextModes,
+  sideZoneWidth,
   type ContextZonePlacement,
   type ZonedPanel,
 } from './zones';
 
-const tab = (id: string, mode: 'file' | 'git' | 'terminal' | 'diff', touchedAt = 1) => ({ id, mode, touchedAt });
+const tab = (id: string, mode: 'file' | 'git' | 'terminal' | 'diff' | 'bot', touchedAt = 1) => ({ id, mode, touchedAt });
 
 const panel = (patch: Partial<ZonedPanel> = {}): ZonedPanel => ({
   isOpen: false,
@@ -68,6 +70,27 @@ describe('workspace zones', () => {
     expect(moved.zones.bottom.isOpen).toBe(false);
     expect(moved.isOpen).toBe(true);
     expect(moved.activeTabId).toBe('git');
+  });
+
+  test('a side zone takes the width its panel declares, within that panel\'s limits, and the zone width for any other panel', () => {
+    const bot = tab('bot', 'bot');
+    const git = tab('git', 'git');
+    const state = panel({ isOpen: true, activeTabId: 'bot', tabs: [git, bot] });
+    const sizing = (contextPanelWidths: { bot?: number }) => ({
+      contextZoneSizes: { right: 700 }, contextPanelWidths,
+      contextEditorVisible: true, contextEditorTreeVisible: true, contextEditorTreeWidth: 260,
+    });
+
+    // The Bot panel opens at its own default and keeps what the user dragged it to.
+    expect(sideZoneWidth(state, bot, 'right', sizing({}))).toBe(340);
+    expect(sideZoneWidth(state, bot, 'right', sizing({ bot: 420 }))).toBe(420);
+    expect(sideZoneWidth(state, bot, 'right', sizing({ bot: 900 }))).toBe(480);
+    expect(sideZoneWidth(state, bot, 'right', sizing({ bot: 10 }))).toBe(300);
+    expect(sideZoneWidth(state, bot, 'right', sizing({ bot: Number.NaN }))).toBe(340);
+
+    // A panel with no declaration is as wide as its zone, stored or default.
+    expect(sideZoneWidth(state, git, 'right', sizing({ bot: 420 }))).toBe(700);
+    expect(sideZoneWidth(state, git, 'left', sizing({ bot: 420 }))).toBe(CONTEXT_ZONE_DEFAULT_WIDTH);
   });
 
   test('placement keeps known surfaces in a moved zone only', () => {

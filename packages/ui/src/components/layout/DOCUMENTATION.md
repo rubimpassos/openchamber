@@ -103,9 +103,30 @@ so it survives the sidebar closing and reopening. A folder change remounts the t
   the animation, so detachment and interactivity settle in the same commit.
 - A toolbar receives a header slot only while its pane is visible. Other hosts
   render it inline, and an empty or loading toolbar leaves the zone label visible.
-- Docked sizes stay fixed across folders and surfaces. Expanded zones preserve
-  the chat's size as the window changes. Both leave a usable chat column or row;
-  side tree-only zones shrink to the tree while the bottom zone keeps its width.
+- A docked zone keeps one size across folders and across every surface that
+  declares no width. A surface that declares one (`width` on its descriptor in
+  `lib/surfaces/registry.ts`; the Bot panel) keeps its own size in a side zone:
+  while it is the zone's active tab the zone is as wide as that surface's stored
+  width, and a drag of the handle stores the new width for that surface, clamped
+  to its declared minimum and maximum. The zone's own width is left as it was,
+  so the next surface opens at it. In the bottom zone and while expanded such a
+  surface sizes like any other. Expanded zones preserve the chat's size as the
+  window changes. Both leave a usable chat column or row; side tree-only zones
+  shrink to the tree while the bottom zone keeps its width.
+- The Bot tab exists only while the session on screen is a bot's main chat or
+  an item conversation. `useBotPanelTab` adds and removes it before paint,
+  mounted once by the right zone's frame whatever zone the surface is placed
+  in, and takes it out of a folder the workspace leaves, so no folder shows a
+  Bot panel beside an ordinary session. Entering a bot session opens the panel
+  when its zone shows nothing. A panel that was on screen in a folder and that
+  the user then closed, or covered with another surface, stays closed there
+  until they open it again; one left open comes back with the next bot
+  session, and one that never appeared because another surface was shown still
+  opens the first time the zone is free. That memory is per folder and is not
+  persisted. A surface hidden on the rail gets no tab.
+- A panel that opens by itself leaves keyboard focus where it is. The zone's
+  opening focus is for an open the user asked for; the Bot panel's own open
+  happens as a session comes on screen, when focus belongs to the composer.
 - Fit calculations use the workspace row, the other zone's stored size and the
   sidebar's pending width. Measuring a departing zone mid-animation otherwise
   clamps a surface moved to the other side and makes it grow a second time.
@@ -292,6 +313,16 @@ Editors, terminals, walkthroughs and extension pages retain undo, sessions,
 reading position and unsent form state in one detached host element. Moving
 that element between zone bodies preserves their React state; moveBefore also
 preserves DOM state where supported, while Electron webviews still reload on moves.
+
+### Why a surface declares its width and not a size per surface for all
+
+The Bot panel is one column of short rows and needs about 340 px; at the zone's
+width it would take room from the chat for nothing. A stored size for every
+surface was the model before zone sizes, and each switch on the rail moved the
+zone's edge. A declaration keeps that exception to surfaces whose content has a
+width of its own, the way the tree-only file panel already takes the tree's
+width, and bounds it with a minimum and maximum so a drag cannot turn the panel
+into a second wide zone.
 
 ### Why conditional measurements and not resize state on every frame
 

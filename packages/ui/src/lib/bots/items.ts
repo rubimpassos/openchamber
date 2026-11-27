@@ -23,13 +23,16 @@ const effectSchema = z.discriminatedUnion('state', [
   z.object({ ...effectFields, state: z.literal('outcome-unknown'), code: text }),
 ]);
 
+export const botWaitSchema = z.object({ reason: text, since: time, channel: z.enum(['ui', 'jira', 'discord', 'github']), people: z.array(text) });
+export const botPullRequestSchema = z.object({ number: z.number().int().positive(), url: text, headSha: text, baseSha: text.optional() });
+
 export const botItemSchema = z.object({
   id: text, botId: text, source: botSourceSchema, title: text, description: z.string(),
   state, revision: time, createdAt: time, updatedAt: time, finishedAt: time.optional(), owner: owner.nullable(),
   worktree: text.optional(), branch: text.optional(), publicationBranch: text.optional(),
   sessions: z.object({ investigation: text.optional(), fixing: text.optional(), judge: text.optional() }),
   conversation: botConversationSchema.optional(),
-  pr: z.object({ number: z.number().int().positive(), url: text, headSha: text, baseSha: text.optional() }).optional(),
+  pr: botPullRequestSchema.optional(),
   evidence: z.array(botEvidenceSchema),
   proof: z.discriminatedUnion('status', [
     z.object({ status: z.literal('absent'), reason: text }),
@@ -40,7 +43,7 @@ export const botItemSchema = z.object({
     decision: z.enum(['auto', 'review', 'ask']), reason: text, headSha: text, baseSha: text, policyFingerprint: text,
     reviewers: z.array(text), questions: z.array(text),
   }).optional(),
-  wait: z.object({ reason: text, since: time, channel: z.enum(['ui', 'jira', 'discord', 'github']), people: z.array(text) }).optional(),
+  wait: botWaitSchema.optional(),
   tokens: z.object({ total: time, conversation: time.optional(), byStage: z.object({ investigation: time, fixing: time, judge: time }), byDay: z.record(z.string(), time) }),
   transitions: z.array(z.object({ from: state.nullable(), to: state, at: time, revision: time, owner, reason: text })),
   effects: z.array(effectSchema),

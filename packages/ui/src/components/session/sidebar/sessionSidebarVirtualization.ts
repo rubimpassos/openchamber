@@ -30,7 +30,6 @@ type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
 
 export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => {
   if (row.kind === 'search-result') return `search:${row.key}:${Boolean(row.result.excerpt)}`;
-  if (row.kind === 'bots-zone') return `${row.kind}:${row.count}`;
   const context = 'renderContext' in row ? row.renderContext : '';
   const detailed = 'detailed' in row && row.detailed;
   const variableHeight = (row.kind === 'session' && (detailed || context === 'timeline-mixed'))
@@ -48,6 +47,7 @@ const rowUserState = (row: SessionSidebarRow): string | undefined => {
     case 'folder-header':
       return row.empty ? undefined : String(row.collapsed);
     case 'activity-header':
+    case 'bots-zone':
     case 'project-header':
     case 'caption':
       return String(row.collapsed);

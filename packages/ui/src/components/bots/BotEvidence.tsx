@@ -12,7 +12,7 @@ export function BotLink({ url, children }: { readonly url: string; readonly chil
 const proofKeys = { absent: 'bots.proofAbsent', passed: 'bots.proofPassed', failed: 'bots.proofFailed', inconclusive: 'bots.proofInconclusive' } satisfies Record<BotItem['proof']['status'], I18nKey>;
 const judgeKeys = { auto: 'bots.judgeAuto', review: 'bots.judgeReview', ask: 'bots.judgeAsk' } satisfies Record<NonNullable<BotItem['judgment']>['decision'], I18nKey>;
 
-export function BotSourceEvidence({ item }: { readonly item: BotItem }) {
+function BotSourceEvidence({ item }: { readonly item: BotItem }) {
   const { t } = useI18n();
   return <SettingsSection title={t('bots.evidence')} divider={false} contentClassName="space-y-3">
     {item.source.url ? <BotLink url={item.source.url} /> : <p className="typography-meta" dir="auto">{item.source.kind} · {item.source.id}</p>}
@@ -23,7 +23,7 @@ export function BotSourceEvidence({ item }: { readonly item: BotItem }) {
   </SettingsSection>;
 }
 
-export function BotProof({ item }: { readonly item: BotItem }) {
+function BotProof({ item }: { readonly item: BotItem }) {
   const { t } = useI18n();
   const proof = item.proof;
   return <SettingsSection title={t('bots.proof')} contentClassName="space-y-2 typography-meta">
@@ -36,7 +36,7 @@ export function BotProof({ item }: { readonly item: BotItem }) {
   </SettingsSection>;
 }
 
-export function BotJudgment({ item }: { readonly item: BotItem }) {
+function BotJudgment({ item }: { readonly item: BotItem }) {
   const { t } = useI18n();
   const judgment = item.judgment;
   return <SettingsSection title={t('bots.judgment')} contentClassName="space-y-2 typography-meta">

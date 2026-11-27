@@ -73,7 +73,7 @@ export function createBotPublication({ worktrees, services, serviceContext, jour
     if (captured) return captured.context?.repositoryRules;
     if (stage === 'fixing' && hasLegacyFixing(item, execution)) return undefined;
     const binding = (await serviceContext({ project, bot, item, service: 'github', operation: 'github.branch-rules' })).github;
-    if (!binding) throw new BotServiceError('BOT_IDENTITY_REQUIRED', 'Select the bot GitHub identity before reading project rules.');
+    if (!binding) return undefined;
     const branch = botPublicationBranch(item);
     const rules = await services.read({ ...binding, scope: { project, bot, item }, operation: 'github.branch-rules', input: { branch } });
     if (stage === 'investigation' && item.source.kind === 'jira' && bot.identity.jira) {

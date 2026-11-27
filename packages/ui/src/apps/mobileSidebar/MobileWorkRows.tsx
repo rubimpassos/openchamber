@@ -31,9 +31,7 @@ import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { MobileRowMenu } from './MobileRowMenu';
 import { TakeOverWorktreeItem } from '@/components/session/sidebar/works/TakeOverWorktreeItem';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
-import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
-
-const ONE_LINE_ROW_CLASS = 'flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
+import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MOBILE_ONE_LINE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
 
 const useMixedRowProject = (projectId: string | null, shown: boolean) => useProjectsStore(React.useCallback(
   (state) => (shown && projectId ? state.projects.find((entry) => entry.id === projectId) ?? null : null),
@@ -171,7 +169,7 @@ export const MobileWorktreeRow: React.FC<{
       {renaming ? renameForm(geometry.textLeft(row.depth)) : (
         <button
           type="button"
-          className={ONE_LINE_ROW_CLASS}
+          className={MOBILE_ONE_LINE_ROW_CLASS}
           style={{ paddingInlineStart: geometry.textLeft(row.depth), touchAction: 'manipulation' }}
           aria-label={t('sessions.sidebar.work.openAria', { label })}
           onClick={select}
@@ -381,7 +379,7 @@ export const MobileRunRow: React.FC<{
       {renaming ? renameForm(geometry.textLeft(row.depth)) : (
         <button
           type="button"
-          className={ONE_LINE_ROW_CLASS}
+          className={MOBILE_ONE_LINE_ROW_CLASS}
           style={{ paddingInlineStart: geometry.textLeft(row.depth), touchAction: 'manipulation' }}
           aria-label={ariaLabel}
           onClick={select}
@@ -491,7 +489,7 @@ export const MobileDraftRow: React.FC<{
         <MobileSlotMark slotLeft={geometry.slotLeft(row.depth)}>{pen}</MobileSlotMark>
         <button
           type="button"
-          className={ONE_LINE_ROW_CLASS}
+          className={MOBILE_ONE_LINE_ROW_CLASS}
           style={{ paddingInlineStart: geometry.textLeft(row.depth), touchAction: 'manipulation' }}
           aria-label={ariaLabel}
           onClick={select}

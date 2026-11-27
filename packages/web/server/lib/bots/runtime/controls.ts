@@ -3,6 +3,7 @@ import { withSourceControlFileLock } from '../../source-control/file-lock.js';
 import { hasSourceControlStringCode as hasSourceControlErrorCode } from '../../source-control/input-guards.js';
 import { TERMINAL_ITEM_STATES } from '../schema.js';
 import { pendingToolSchema, stageInterruptionSchema, text } from './input-contracts.js';
+import { checkoutRequestSchema } from './journal.js';
 import { runtimeError as error } from './errors.js';
 import type { BotEffect, BotItem } from '../schema.js';
 import type { RuntimeBot } from './contracts.js';
@@ -81,6 +82,7 @@ export const createRuntimeControls = (
         try { await external(projectId, await projectFor(projectId), bot, item, request.key, request.operation, request.input); }
         catch (failure) { await needsYou(projectId, itemId, hasSourceControlErrorCode(failure) ? failure.code : 'BOT_OPERATION_FAILED'); return; }
       }
+      if (item.wait?.reason === 'BOT_ARTIFACTS_MISSING') await saveData(projectId, itemId, { artifactsRequested: null });
       await transition(projectId, itemId, state);
     }, { waitMs: 10_000 });
     await pump(projectId);
@@ -110,14 +112,14 @@ export const createRuntimeControls = (
     if (current.effects.some((effect) => ['dispatching', 'outcome-unknown', 'prepared'].includes(effect.state)
       && (effect.key !== `${itemId}:cleanup` || effect.kind !== 'worktree.remove'))) throw error('BOT_STOP_HAS_UNSETTLED_EFFECTS');
     if (execution.data.pendingQuestion) await questions.answered({ projectId, itemId });
-    if (current.worktree) await cleanup(projectId, project, bot, current);
+    if (current.worktree && !execution.data.takenOver) await cleanup(projectId, project, bot, current);
     return { item: await transition(projectId, itemId, 'stopped') };
   };
-  const stopItem = async (projectId: string, itemId: string) => {
+  const stopItem = async (projectId: string, itemId: string, takenOver?: { readonly sessionId: string; readonly at: number }) => {
     await projectFor(projectId);
     const initial = await itemFor(projectId, itemId);
     if (TERMINAL_ITEM_STATES.includes(initial.state)) return { item: initial };
-    await saveData(projectId, itemId, { stopRequested: true });
+    await saveData(projectId, itemId, takenOver ? { stopRequested: true, takenOver } : { stopRequested: true });
     activeProofs.get(JSON.stringify([projectId, itemId]))?.abort();
     return withSourceControlFileLock(`${store.filePathFor(projectId)}.owner.lock`, async () => {
       const project = await projectFor(projectId);
@@ -133,6 +135,29 @@ export const createRuntimeControls = (
       if (admission?.state === 'revoking' && !await settleRevocation(projectId, project, bot, item, admission)) return { item: await itemFor(projectId, itemId) };
       return finishStop(projectId, project, bot, await itemFor(projectId, itemId));
     }, { waitMs: 10_000 });
+  };
+  const takeOverItem = async (projectId: string, itemId: string, release: (session: { readonly sessionId: string; readonly directory: string }) => Promise<void>) => {
+    const item = await itemFor(projectId, itemId);
+    const execution = await journal.read(projectId, itemId);
+    const previous = execution.data.takenOver;
+    const sessionId = previous?.sessionId ?? item.sessions.fixing ?? item.sessions.investigation;
+    if (!sessionId || !item.worktree) throw error('BOT_TAKE_OVER_UNAVAILABLE');
+    const captured = execution.operations[`${itemId}:worktree`];
+    if (!captured || checkoutRequestSchema.parse(captured).bot.isolated) throw error('BOT_TAKE_OVER_ISOLATED');
+    if (TERMINAL_ITEM_STATES.includes(item.state) && !previous) throw error('BOT_ITEM_ENDED');
+    let stopped;
+    try { stopped = await stopItem(projectId, itemId, previous ?? { sessionId, at: now() }); }
+    catch (failure) {
+      if (!previous) await saveData(projectId, itemId, { takenOver: null });
+      throw failure;
+    }
+    if (stopped.item.state !== 'stopped') {
+      if (!previous) await saveData(projectId, itemId, { takenOver: null });
+      return { item: stopped.item, session: null };
+    }
+    const session = { sessionId, directory: item.worktree };
+    await release(session);
+    return { item: stopped.item, session };
   };
   const onSessionEvent = async ({ sessionId, reason }: { readonly sessionId: string; readonly reason: string }) => {
     const target = sessionIndex.get(sessionId);
@@ -181,5 +206,5 @@ export const createRuntimeControls = (
     return updated.tokens;
   };
 
-  return { resume, finishStop, stopItem, onSessionEvent, recordUsage };
+  return { resume, finishStop, stopItem, takeOverItem, onSessionEvent, recordUsage };
 };

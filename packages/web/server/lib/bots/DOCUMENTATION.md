@@ -41,7 +41,16 @@ Bot definitions persist `discord: { channels: [{ guildId, channelId }] }`, with 
 requests. [attention-contract.md](attention-contract.md) defines its required
 constructor, alert owner, UI target and failure behavior.
 
-`createBotsConfig({ projectConfigRuntime })` in `config.ts` exposes `read(projectId)`, `update(projectId, editableConfig)`, and server-only `setApproval(projectId, relativeFile, fingerprint | null)`. The project config runtime owns locking and whole-document writes. `readBotsConfig(raw)` returns `{ ok: true, config }` or `{ ok: false, error }`. `parseConfigEdit` throws on invalid edits and strips server-only approvals. A missing key defaults to `{ concurrency: 2, retentionDays: 90, definitions: [], approvals: {} }`; explicit null or malformed config fails. Definition parsing is exported as `botDefinitionSchema`.
+`createBotsConfig({ projectConfigRuntime, dataDir })` in `config.ts` owns two documents. Bot definitions are global, in `<dataDir>/bots/definitions.json` (`{ version: 1, revision, definitions }`, file lock, atomic rename, mode 0600). Each definition carries `projects: { [projectId]: 'read' | 'pr' | 'merge' }`; an absent project grants nothing. The project config keeps `{ concurrency, retentionDays, approvals }` under its `bots` key.
+
+- `read(projectId)` returns that project's settings and approvals with only the definitions that have access to it. It is the coordinator's single entry, so stages, policy and providers see a project view and never the global list.
+- `update(projectId, edit)` writes `{ concurrency, retentionDays }`. An edit that also lists `definitions` is a project-view edit: listed bots replace their global definition and keep or gain access to this project (full access unless they name one); unlisted bots lose access to this project only.
+- `readDefinitions(projectIds)` and `saveDefinitions(definitions, expectedRevision)` serve the global list. A stale revision fails with `BOT_DEFINITIONS_CHANGED` (409).
+- `setApproval(projectId, relativeFile, fingerprint | null)` is server-only.
+
+Definitions found in a project section (files written before bots became global, or by an older version) are migrated on the next read of that project with full access to it, and removed from the project file. A legacy bot whose ID another project already migrated with different content stays in its own project section and keeps working there, so no project's mission, source, proof or tools replace another's. A project whose config cannot be read is skipped and named in `unreadable`; it never blocks the global list. The project route `PUT .../config` accepts only `{ concurrency, retentionDays }`, so an older client cannot rewrite global definitions without their revision. `readBotsConfig(raw)` parses the project section; `parseConfigEdit` parses a project edit. A missing key defaults to `{ concurrency: 2, retentionDays: 90, approvals: {} }`; explicit null or malformed config fails. Definition parsing is exported as `botDefinitionSchema`.
+
+Access is enforced by state on every coordinator pass, so a question answer, a Resume or a later change of access cannot route around it: under `read` an item past its investigation ends `done` (after the artifact check) and never enters a correction; below `merge` an active admission is revoked, a `merging` item returns to `in-review` and no merge is authorized. A bot without access cannot admit work (`BOT_PROJECT_ACCESS_REQUIRED`).
 
 `createBotScheduler({ projectConfigRuntime, scheduledTasksRuntime })` in
 `scheduler.ts` exposes server-only `sync(projectId, managedRows)` and
@@ -155,6 +164,22 @@ evidence; signals, missing executables and output limits are inconclusive.
 Cleanup releases each Git worktree before deleting its owned directory, and a
 failed release remains visible. Presets return fresh editable definitions with
 independent nested defaults on every call.
+
+### Why global definitions behind a project view and not a global coordinator
+
+A bot works in several projects, but items, policy, approvals, worktrees and budgets remain per project. Keeping `config.read(projectId)` as the only entry lets the coordinator stay project-scoped while the definition lives once; the global file owns identity, mission and access. A separate global coordinator would duplicate every project-owned invariant.
+
+### Why a missing connector does not stop the item
+
+Connectors are capabilities. Branch rules matter only for publication, so a host bot without GitHub investigates and fixes in a checkout made from the local default branch (`identityId: 'local'` in the checkout record) and ends `done` after judgment with the branch left in the project. Writes that need an absent connector are refused to the worker session (`BOT_CONNECTOR_MISSING`, 400) without item attention. An isolated bot still requires GitHub because its Space receives code through the GitHub transfer.
+
+### Why a missing artifact first asks the worker
+
+Only the worker can draw a page. When a required artifact is missing before judgment (only pages drawn since the current producing round count), the coordinator starts one more round with feedback naming the missing artifacts; a second miss in that round waits for the person (`BOT_ARTIFACTS_MISSING`), and Resume grants one more request. The judge must rule on every required artifact; one it does not mark proven turns `auto` into `review`.
+
+### Why the main chat is re-created under a new ID
+
+A user can delete or archive the main chat. OpenCode may keep a deleted ID reserved, so a missing or archived main chat is allocated again with a new identity, persisted before creation like the first.
 
 ### Why scheduled rows carry the bot ID
 

@@ -1,6 +1,9 @@
 import { settingsDict } from './de.settings';
 import { botsI18n } from './bots.i18n';
 import { botWorkspaceI18n } from './bot-workspace.i18n';
+import { botSidebarI18n } from './bot-sidebar.i18n';
+import { botPanelI18n } from './bot-panel.i18n';
+import { botConfigI18n } from './bot-config.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -194,6 +197,9 @@ export const dict = {
   ...selectionApprovalI18n.de,
   ...botsI18n.de,
   ...botWorkspaceI18n.de,
+  ...botSidebarI18n.de,
+  ...botPanelI18n.de,
+  ...botConfigI18n.de,
   'gitView.operation.title': 'Git-Vorgang',
   'gitView.operation.recovery.storage': 'OpenChamber kann den Stand von Git-Übertragungen hier nicht speichern. Erlaube den Websitespeicher und lade neu; bis dahin sind Push und Pull pausiert.',
   'gitView.operation.recovery.capacity': 'Zu viele unfertige Git-Übertragungen sind gespeichert. Prüfe die unten, bevor du eine neue startest.',

@@ -104,30 +104,28 @@ describe('Bot item conversation', () => {
 });
 
 describe('Bot work context', () => {
-  test('lists the pages the bot drew under the tab of their kind from one read', async () => {
+  test('lists every page the bot drew in one Artifacts tab beside the recorded proof and verdict, from one read', async () => {
     // Given an item with one evidence page and one decision page.
     await open();
     await act(async () => button('Work context').click());
 
-    // When the user reads Evidence and then Decisions.
-    await act(async () => button('Evidence').click());
-    const evidence = text();
-    await act(async () => button('Decisions').click());
+    // When the user opens Artifacts.
+    await act(async () => button('Artifacts').click());
 
-    // Then each tab pairs the server's record with its own pages.
-    expect(evidence).toContain(item.proof.reason);
-    expect(evidence).not.toContain('Why the cache was rejected');
+    // Then both pages are listed whatever their kind, with the server's record under them.
+    expect(pageRow('Latency before and after')).toBeTruthy();
+    expect(pageRow('Why the cache was rejected')).toBeTruthy();
+    expect(text()).toContain(item.proof.reason);
     expect(text()).toContain('No judge verdict recorded.');
-    expect(text()).not.toContain('Latency before and after');
     expect(artifactReads).toBe(1);
   });
 
   test('returns focus to the page row when its dialog closes', async () => {
-    // Given a reader in Decisions whose focus rests on another control, as it stays on the composer after a press that moves no focus.
+    // Given a reader in Artifacts whose focus rests on another control, as it stays on the composer after a press that moves no focus.
     await open();
     await act(async () => button('Work context').click());
-    await act(async () => button('Decisions').click());
-    button('Decisions').focus();
+    await act(async () => button('Artifacts').click());
+    button('Artifacts').focus();
     const row = pageRow('Why the cache was rejected');
 
     // When the page opens from its row and Escape closes it.
@@ -144,10 +142,10 @@ describe('Bot work context', () => {
     expect(document.activeElement === row).toBe(true);
   });
 
-  const openDecisions = async () => {
+  const openArtifacts = async () => {
     await open();
     await act(async () => button('Work context').click());
-    await act(async () => button('Decisions').click());
+    await act(async () => button('Artifacts').click());
     return pageRow('Why the cache was rejected');
   };
   const openDialog = () => document.querySelector('[role="dialog"]');
@@ -162,7 +160,7 @@ describe('Bot work context', () => {
   test('prepares a page out of sight beside its row and opens the dialog on what it prepared', async () => {
     // Given a page whose read is still in flight after its row was pressed.
     const answer = heldAnswer();
-    const row = await openDecisions();
+    const row = await openArtifacts();
     const staging = waitFor(() => stagedPopup()?.querySelector('[data-retained-page="pending"]') != null);
     await act(async () => row.click());
     await staging;
@@ -189,7 +187,7 @@ describe('Bot work context', () => {
   test('drops a page cancelled while it was being prepared', async () => {
     // Given a page being prepared from its row.
     const answer = heldAnswer();
-    const row = await openDecisions();
+    const row = await openArtifacts();
     const staging = waitFor(() => stagedPopup()?.querySelector('[data-retained-page="pending"]') != null);
     await act(async () => row.click());
     await staging;
@@ -210,7 +208,7 @@ describe('Bot work context', () => {
   test('asks again for a failed page only after its dialog has closed, and opens it once prepared', async () => {
     // Given a page whose read failed, shown in its dialog.
     pageAnswer = refused;
-    const row = await openDecisions();
+    const row = await openArtifacts();
     const shown = waitFor(() => openDialog() !== null);
     await act(async () => row.click());
     await shown;
@@ -232,7 +230,7 @@ describe('Bot work context', () => {
       artifact: artifact(2, 'decision', 'Why the cache was rejected'),
       payload: { version: 1, body: { format: 'ui', content: 'root = Stack([go])\ngo = Button("Ship it")' }, assets: [] },
     });
-    const row = await openDecisions();
+    const row = await openArtifacts();
     const saysViewFailed = () => [...document.querySelectorAll('[data-bot-context-body] [role="alert"]')]
       .some((entry) => entry.textContent === 'Could not open this page. Try again.');
 
@@ -267,13 +265,13 @@ describe('Bot work context', () => {
     await open();
     await act(async () => button('Work context').click());
 
-    // When Evidence opens.
-    await act(async () => button('Evidence').click());
+    // When Artifacts opens.
+    await act(async () => button('Artifacts').click());
 
     // Then the cause is stated in the app's own words, with no claim that the bot drew nothing.
     const alert = document.querySelector('[data-bot-context-body] [role="alert"]');
     expect(alert?.querySelector('span')?.textContent).toBe(says);
-    expect(text()).not.toContain('The bot has not drawn any evidence yet.');
+    expect(text()).not.toContain('The bot has not produced any artifacts for this item yet.');
     expect(text()).toContain(item.proof.reason);
 
     // When the server recovers and the reader tries again.

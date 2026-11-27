@@ -28,7 +28,7 @@ export const createRuntimeCheckout = (
     const key = `${item.id}:worktree`;
     if (!item.effects.some((effect) => effect.key === key)) {
       const context = contextSchema.parse(await serviceContext({ project, bot, item, service: 'github', operation: 'github.checkout' }));
-      if (!context.github) throw error('BOT_IDENTITY_REQUIRED');
+      if (!context.github && bot.isolated) throw error('BOT_IDENTITY_REQUIRED');
     }
     const captured = (await journal.read(projectId, item.id)).operations[key];
     const request = checkoutRequestSchema.parse(captured ?? { project, bot, item: { id: item.id, botId: item.botId, source: item.source }, key });
@@ -120,5 +120,12 @@ export const createRuntimeCheckout = (
     return transition(projectId, item.id, 'done');
   };
 
-  return { ensureCheckout, publishPullRequest, cleanup, close };
+  const isLocalCheckout = async (projectId: string, item: BotItem) => {
+    const captured = (await journal.read(projectId, item.id)).operations[`${item.id}:worktree`];
+    if (captured === undefined) return false;
+    const { bot } = checkoutRequestSchema.parse(captured);
+    return !bot.identity.github && !bot.isolated;
+  };
+
+  return { ensureCheckout, publishPullRequest, cleanup, close, isLocalCheckout };
 };

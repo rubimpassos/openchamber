@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { providerResult, sha } from './services/contracts.js';
-import { botGit } from './production-git.js';
+import { botGit, isLocalBotCheckout, localBotCheckoutBase } from './production-git.js';
 import { fail } from './production-worktree-contracts.js';
 import type { CheckoutContext, CheckoutRequest, CheckoutSnapshot } from './production-worktree-contracts.js';
 import { clean } from './production-worktree-owner.js';
@@ -38,15 +38,21 @@ export function createCheckoutSnapshots(context: CheckoutContext, owner: Checkou
         await verifyCheckout(request, record);
         if (record.state !== 'ready') fail('BOT_WORKTREE_CREATE_UNSETTLED');
         await clean(record);
-        const { binding, credential } = await context.github(request);
-        if (binding.target.repositoryId !== record.repositoryId) fail('BOT_WORKTREE_OWNERSHIP');
-        if (binding.identityId !== record.identityId || binding.identityRevision !== record.identityRevision) fail('BOT_IDENTITY_CHANGED');
-        const baseBranch = await defaultBranch(credential, binding.target);
-        if (baseBranch !== record.baseBranch) fail('BOT_GIT_BASE_CHANGED');
-        const baseSha = await remoteHead(credential, binding.target, baseBranch);
-        await requireObject(request, { credential, target: binding.target }, baseSha);
+        const remote = async () => {
+          const { binding, credential } = await context.github(request);
+          if (binding.target.repositoryId !== record.repositoryId) fail('BOT_WORKTREE_OWNERSHIP');
+          if (binding.identityId !== record.identityId || binding.identityRevision !== record.identityRevision) fail('BOT_IDENTITY_CHANGED');
+          const baseBranch = await defaultBranch(credential, binding.target);
+          if (baseBranch !== record.baseBranch) fail('BOT_GIT_BASE_CHANGED');
+          const baseSha = await remoteHead(credential, binding.target, baseBranch);
+          await requireObject(request, { credential, target: binding.target }, baseSha);
+          return { baseBranch, baseSha, remoteSha: await remoteHead(credential, binding.target, record.publicationBranch ?? record.branch, true) };
+        };
+        const local = async () => {
+          return { ...await localBotCheckoutBase(record.projectPath, record.baseBranch), remoteSha: null };
+        };
+        const { baseBranch, baseSha, remoteSha } = isLocalBotCheckout(record) ? await local() : await remote();
         const headSha = sha.parse((await botGit(record.directory, ['rev-parse', 'HEAD'])).trim());
-        const remoteSha = await remoteHead(credential, binding.target, record.publicationBranch ?? record.branch, true);
         const ancestor = sha.parse((await botGit(record.directory, ['merge-base', baseSha, headSha])).trim());
         const changes = changesOf(await botGit(record.directory, ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', ancestor, headSha, '--']));
         const diff = await botGit(record.directory, ['diff', '--no-ext-diff', '--no-textconv', '--binary', ancestor, headSha, '--']);

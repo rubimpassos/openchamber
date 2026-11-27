@@ -25,7 +25,7 @@ function BotsRuntimeView({ layout, onLeave }: { readonly layout: 'page' | 'mobil
     <SelectContent>{projects.map((entry) => <SelectItem key={entry.id} value={entry.id}><ProjectLabel project={entry} /></SelectItem>)}</SelectContent>
   </Select>;
   return project
-    ? <BotsProject key={`${project.id}:${project.path}`} project={project} layout={layout} picker={picker} onLeave={onLeave} initialItemId={target?.projectId === project.id ? target.itemId : undefined} initialBotId={target?.projectId === project.id ? target.botId : undefined} />
+    ? <BotsProject key={`${project.id}:${project.path}`} project={project} layout={layout} picker={picker} onLeave={onLeave} initialItemId={target?.projectId === project.id ? target.itemId : undefined} initialBotId={target?.projectId === project.id ? target.botId : undefined} initialNewBot={target?.projectId === project.id && target.newBot === true} />
     : <BotsShell layout={layout} picker={picker}><p className="typography-meta text-muted-foreground">{target ? t('common.unavailable') : t('bots.noProject')}</p></BotsShell>;
 }
 

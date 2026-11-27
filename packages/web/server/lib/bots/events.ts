@@ -5,6 +5,7 @@ import type { BotItem } from './schema.js';
 export type BotEvent =
   | { readonly type: 'bot.item.changed'; readonly projectId: string; readonly item: BotItem }
   | { readonly type: 'bot.wake'; readonly projectId: string }
+  | { readonly type: 'bot.config.changed'; readonly projectId: string }
   | { readonly type: 'bot.runtime.error'; readonly projectId: string; readonly code: string };
 
 type BotTaskSchedule =

@@ -4,16 +4,16 @@ import { BotsApiError, ensureBotConversation, fetchBotItem } from '@/lib/botsApi
 import { botArtifactFailure, fetchBotArtifacts, type BotArtifact, type BotArtifactFailure } from '@/lib/bots/artifacts';
 import type { BotConversation, BotItem } from '@/lib/bots/items';
 import { getBotsRuntime } from '@/lib/botsRuntime';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 
 /** A visible visit refreshes from the shared control stream. No idle polling or project fan-out. */
-export function useBotsRefresh(projectId: string, refresh: () => void, enabled = true) {
+export function useBotsRefresh(projectId: string | null, refresh: () => void, enabled = true) {
   React.useEffect(() => {
     if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const release = subscribeOpenchamberEvents((event) => {
-      if (event.type !== 'event-stream-ready' && !(event.type === 'bots-changed' && event.projectId === projectId)) return;
+      if (event.type !== 'event-stream-ready' && !(event.type === 'bots-changed' && (projectId === null || event.projectId === projectId))) return;
       if (timer !== undefined) return;
       timer = setTimeout(() => { timer = undefined; refresh(); }, 200);
     });
@@ -87,6 +87,19 @@ export function useBotArtifacts(scope: { readonly projectId: string; readonly it
   return { ...read, failure: read.reason };
 }
 
+const REQUEST_ERROR_KEYS = new Map<string, I18nKey>([
+  ['BOT_DEFINITIONS_CHANGED', 'bots.requestError.changed'], ['BOT_INVALID_REQUEST', 'bots.requestError.invalid'],
+  ['BOT_PROJECT_ACCESS_REQUIRED', 'bots.requestError.projectAccess'], ['BOT_NOT_ENABLED', 'bots.requestError.notEnabled'],
+  ['BOT_DEFINITION_REQUIRED', 'bots.requestError.missingBot'], ['BOT_REQUEST_FAILED', 'bots.requestError.server'],
+  ['enterprise_mode', 'bots.enterprise'], ['bots_unsupported', 'bots.unsupported'],
+]);
+const requestErrorKey = (failure: Error): I18nKey => {
+  if (failure instanceof z.ZodError) return 'bots.validation';
+  if (failure instanceof TypeError) return 'bots.requestError.network';
+  if (!(failure instanceof BotsApiError)) return 'bots.error';
+  return REQUEST_ERROR_KEYS.get(failure.code) ?? (failure.status >= 500 ? 'bots.requestError.server' : 'bots.error');
+};
+
 /** Serializes explicit user actions and rejects navigation from a retired runtime or visit. */
 export function useBotAction() {
   const { t } = useI18n();
@@ -105,10 +118,8 @@ export function useBotAction() {
     try { await operation(); }
     catch (failure) {
       if (!active.current || runtime.signal.aborted) return;
-      if (failure instanceof z.ZodError) setError(t('bots.validation'));
-      else if (failure instanceof BotsApiError) setError(failure.code === 'enterprise_mode' ? t('bots.enterprise') : `${t('bots.error')} ${failure.code}`);
-      else if (failure instanceof Error) setError(t('bots.error'));
-      else throw failure;
+      if (!(failure instanceof Error)) throw failure;
+      setError(t(requestErrorKey(failure)));
     } finally {
       running.current = false;
       if (active.current && !runtime.signal.aborted) setBusy(false);

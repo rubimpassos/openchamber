@@ -9,7 +9,7 @@ import type { createRuntimeProjectOwner } from './project-owner.js';
 type JournalValue = BotExecutionEntry['data'][string];
 
 export type RuntimeContext = Readonly<Pick<RuntimeOptions, 'config' | 'store' | 'resolveProject' | 'listProjects' | 'stages' | 'worktrees' | 'services'
-  | 'serviceContext' | 'runProof' | 'pullRequests' | 'sources' | 'attention' | 'notices' | 'questions' | 'events'>
+  | 'serviceContext' | 'runProof' | 'pullRequests' | 'sources' | 'attention' | 'notices' | 'questions' | 'events' | 'presentedArtifacts'>
   & ReturnType<typeof createRuntimeItemState> & {
     readonly readPolicy: NonNullable<RuntimeOptions['readPolicy']>;
     readonly now: () => number;

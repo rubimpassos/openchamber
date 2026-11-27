@@ -12,7 +12,7 @@ const fixture = async (options = {}) => {
   const root = await fs.mkdtemp('/tmp/opencode/bot-runtime-questions-');
   roots.push(root);
   const driver = await createBotDriver(root, { held: ['fixing'], ...options,
-    bot: { identity: { jira: { identityId: 'jira-account' } }, ...options.bot } });
+    bot: { identity: { github: { kind: 'app', identityId: 'github-app' }, jira: { identityId: 'jira-account' } }, ...options.bot } });
   await fs.mkdir(path.join(root, '.openchamber'));
   await fs.writeFile(path.join(root, '.openchamber/people.json'), JSON.stringify([
     { id: 'directory-lead', name: 'Lead', roles: ['tech-lead'], github: 'lead-login', jira: 'jira-lead' },

@@ -12,6 +12,14 @@ export const getProjectLabel = (project: ProjectSection['project'], homeDirector
   project.label?.trim() || formatDirectoryName(project.normalizedPath, homeDirectory) || project.normalizedPath,
 );
 
+const toggleCollapsedKey = (model: SessionProjectListProps['model'], key: string): void => {
+  model.state.setCollapsedActivityKeys((current) => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+};
+
 export const toggleActivityZone = (
   row: Extract<SessionSidebarRow, { kind: 'activity-header' }>,
   { model, actions }: Pick<SessionProjectListProps, 'model' | 'actions'>,
@@ -26,24 +34,15 @@ export const toggleActivityZone = (
       return next;
     });
   }
-  model.state.setCollapsedActivityKeys((current) => {
-    const next = new Set(current);
-    if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
-    return next;
-  });
+  toggleCollapsedKey(model, row.activityKey);
 };
+
+export const toggleBotsZone = ({ model }: Pick<SessionProjectListProps, 'model'>): void => toggleCollapsedKey(model, 'bots');
 
 export const toggleProjectsCaption = (
   row: Extract<SessionSidebarRow, { kind: 'caption' }>,
   { model }: Pick<SessionProjectListProps, 'model'>,
-): void => {
-  const key = row.caption === 'projects' ? PROJECTS_CAPTION_COLLAPSE_KEY : row.caption;
-  model.state.setCollapsedActivityKeys((current) => {
-    const next = new Set(current);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    return next;
-  });
-};
+): void => toggleCollapsedKey(model, row.caption === 'projects' ? PROJECTS_CAPTION_COLLAPSE_KEY : row.caption);
 
 export const applyShowControl = (
   row: Extract<SessionSidebarRow, { kind: 'show-control' }>,

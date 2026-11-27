@@ -15,6 +15,7 @@ const missingAsset = z.object({
 const artifactId = z.string().regex(/^artifact_[a-f0-9]{64}$/);
 const botArtifactSchema = z.object({
   id: artifactId, title: z.string().min(1).max(120), kind: z.enum(['evidence', 'decision']),
+  requirement: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional(),
   createdAt: z.number().int().nonnegative(),
    source: z.object({ sessionId: text, callId: text, producer, messageId: text.optional() }).strict(),
   interaction: z.enum(['none', 'awaitAnswer', 'answerLater', 'share']),

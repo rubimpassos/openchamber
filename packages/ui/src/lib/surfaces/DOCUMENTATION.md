@@ -26,12 +26,21 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
-- A zone has one size whatever surface it shows and whatever project or
-  worktree is open, so neither switching surfaces on the rail nor switching
-  folders moves its edge: 640 px wide for a side zone until the user resizes
-  it (`CONTEXT_ZONE_DEFAULT_WIDTH`), the bottom zone 320 px tall. A resize is
-  remembered in px per zone in `useUIStore.contextZoneSizes` and restored on
-  reload. Sizes used to be kept per folder, so a new worktree opened at the
+- A zone has one size whatever project or worktree is open and whichever
+  surface without a width of its own it shows, so neither switching between
+  those surfaces on the rail nor switching folders moves its edge: 640 px wide
+  for a side zone until the user resizes it (`CONTEXT_ZONE_DEFAULT_WIDTH`), the
+  bottom zone 320 px tall. A resize is remembered in px per zone in
+  `useUIStore.contextZoneSizes` and restored on reload.
+  A descriptor may declare `width: { defaultWidth, minWidth, maxWidth }`. While
+  such a surface is the active tab of a side zone, the zone is as wide as that
+  surface's own width (`sideZoneWidth`, `ownPanelWidth` in
+  `lib/workspace/zones.ts`): its default until the user drags the handle, then
+  the dragged width, kept per mode in `useUIStore.contextPanelWidths`, clamped
+  to the declared limits and restored on reload. The drag leaves
+  `contextZoneSizes` alone. The Bot panel declares 340 px, from 300 to 480. In
+  the bottom zone and while its zone is expanded a declared surface sizes like
+  any other. Sizes used to be kept per folder, so a new worktree opened at the
   default and the user resized it again for every task; state from those
   builds takes the sizes of the folder touched last, and from builds before
   that (a size per surface, `widthByMode`, `heightByMode`) each zone takes
@@ -168,6 +177,8 @@ waits for the release.
 1. Built-in: add a `ContextPanelMode` value in `packages/ui/src/lib/surfaces/modes.ts`
    (the sanitizer uses `isContextPanelMode`). Register a descriptor here.
    Render the mode in `ContextPanel.tsx`. Add label/hint i18n keys.
+   Give the descriptor a `width` only when the content has a width of its own
+   that the zone's would waste; every other surface takes the zone's.
 2. Guest panel: ship a package with `openchamber.contributes.panel`. The host
   lists it from `GET /api/guests` and renders `PluginPane`. Settings →
   Extensions installs a folder path on that OpenChamber instance. A runtime
@@ -280,6 +291,18 @@ for the shortcut). While workflows are not shown (`selectWorkflowsShown`: VS
 Code, or the workflow tool off) it is absent from the rail and from the rail's
 surfaces dialog, and turning the tool off closes open Workflows tabs, as
 memory's tab goes with its tool.
+
+## Bot
+
+The `bot` surface (`components/bots/BotPanel.tsx`) belongs to the session on
+screen. Its tab exists only while that session is a bot's main chat or an item
+conversation, as `botMainAutomation` and `botAutomation` read its metadata
+(`lib/bots/sessionMetadata.ts`); `useBotPanelTab` adds the tab on entering such
+a session and closes it on leaving, so the rail shows the icon only then. The
+panel has two tabs in the panel header, Home and Artifacts, and reads the bot's
+work across every project it may access. When it opens by itself is in
+`components/layout/DOCUMENTATION.md`; what it shows is in
+`components/bots/DOCUMENTATION.md`.
 
 ## Shared pages
 

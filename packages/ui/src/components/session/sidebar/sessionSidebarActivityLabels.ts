@@ -6,6 +6,7 @@ export const ACTIVITY_TITLE_KEY = {
   pinned: 'sessions.sidebar.activity.pinnedTitle',
   work: 'sessions.sidebar.work.title',
   chats: 'sessions.sidebar.activity.chatsTitle',
+  bots: 'bots.sidebar.title',
   timeline: 'sessions.sidebar.activity.projectsTitle',
 } as const;
 

@@ -16,7 +16,7 @@ const getTerminalTab = (directory: string) => getContextPanelTabs(directory).fin
 const originalPersistOptions = useUIStore.persist.getOptions();
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextZoneReturnStack: {}, contextRailOrder: [], contextZoneSizes: {}, browserSessionContext: null });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextZoneReturnStack: {}, contextRailOrder: [], contextZoneSizes: {}, contextPanelWidths: {}, browserSessionContext: null });
   useTerminalStore.getState().clearAll();
 });
 
@@ -1166,6 +1166,45 @@ describe('useUIStore zone sizes', () => {
 
     expect(useUIStore.getState().contextEditorTreeWidth).toBe(300);
     expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 800 });
+  });
+
+  test('a resize of a panel with its own width is kept for that panel within its limits, and the zone width stays', () => {
+    const store = useUIStore.getState();
+    store.setContextZoneSize('right', 700);
+
+    store.setContextPanelWidth('bot', 420.6);
+    expect(useUIStore.getState().contextPanelWidths).toEqual({ bot: 421 });
+    store.setContextPanelWidth('bot', 900);
+    expect(useUIStore.getState().contextPanelWidths).toEqual({ bot: 480 });
+    store.setContextPanelWidth('bot', 100);
+    expect(useUIStore.getState().contextPanelWidths).toEqual({ bot: 300 });
+
+    // Git declares no width of its own, so it has nothing to store.
+    store.setContextPanelWidth('git', 500);
+    expect(useUIStore.getState().contextPanelWidths).toEqual({ bot: 300 });
+    expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 700 });
+  });
+
+  test('a panel width survives a reload, and state saved before panel widths existed loads without one', async () => {
+    useUIStore.getState().setContextPanelWidth('bot', 400);
+    const saved = z.object({ contextPanelWidths: z.record(z.string(), z.number()) })
+      .parse(originalPersistOptions.partialize?.(useUIStore.getState()));
+    expect(saved.contextPanelWidths).toEqual({ bot: 400 });
+
+    const reload = async (state: { contextPanelWidths?: Record<string, number> }) => {
+      useUIStore.persist.setOptions({
+        storage: { getItem: () => ({ version: 30, state }), setItem: () => undefined, removeItem: () => undefined },
+      });
+      try {
+        useUIStore.setState(useUIStore.getInitialState(), true);
+        await useUIStore.persist.rehydrate();
+        return useUIStore.getState().contextPanelWidths;
+      } finally {
+        useUIStore.persist.setOptions(originalPersistOptions);
+      }
+    };
+    expect(await reload(saved)).toEqual({ bot: 400 });
+    expect(await reload({})).toEqual({});
   });
 
   type SavedZoneView = { isOpen: boolean; expanded: boolean; activeTabId: string | null };

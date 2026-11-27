@@ -1052,7 +1052,7 @@ describe('managed agent tool runtime', () => {
     await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: true });
     const shared = await loadTools(dataDir, 'render-share');
     const parameters = shared.openchamber_render.input.properties.parameters.properties;
-    expect(Object.keys(parameters).sort()).toEqual(['answerLater', 'artifactKind', 'awaitAnswer', 'html', 'share', 'title', 'ui']);
+    expect(Object.keys(parameters).sort()).toEqual(['answerLater', 'artifactFor', 'artifactKind', 'awaitAnswer', 'html', 'share', 'title', 'ui']);
     expect(parameters.share.required).toEqual(['recipients']);
     expect(shared.openchamber_render.description).toContain('share sends the page');
     expect(shared.openchamber_render.description.length).toBeLessThanOrEqual(2048);
@@ -1069,7 +1069,7 @@ describe('managed agent tool runtime', () => {
     const tool = await loadTools(dataDir, 'render');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['answerLater', 'artifactKind', 'awaitAnswer', 'html', 'title', 'ui']);
+    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['answerLater', 'artifactFor', 'artifactKind', 'awaitAnswer', 'html', 'title', 'ui']);
     expect(tool.openchamber_render.input.properties.parameters.properties.answerLater.type).toBe('boolean');
     // It names the clients that cannot answer such a page, and where the question must be.
     const later = tool.openchamber_render.input.properties.parameters.properties.answerLater.description;

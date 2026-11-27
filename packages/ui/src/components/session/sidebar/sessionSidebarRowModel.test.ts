@@ -1251,3 +1251,45 @@ describe('the Pages section', () => {
     expect(rows.some((row) => row.kind === 'page' || (row.kind === 'activity-header' && row.activityKey === 'pages'))).toBe(false);
   });
 });
+
+describe('the Bots section', () => {
+  const zones = (rows: ReturnType<typeof buildSessionSidebarRowModel>['rows']): string[] => rows.flatMap((row) => (
+    row.kind === 'activity-header' ? [row.activityKey] : row.kind === 'bots-zone' ? ['bots'] : row.kind === 'project-header' ? [row.section.project.id] : []
+  ));
+
+  test('sits between Chats and In work as one row that holds like a zone header', () => {
+    const input = args([project([group([node('working'), node('other')])])]);
+    input.chatGroup = group([node('chat')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
+    input.workEntries = sessionWorks([timelineItem('working')]);
+    input.botsSection = true;
+    input.collapsedActivities = new Set(['bots']);
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(zones(model.rows)).toEqual(['chats', 'bots', 'work', 'project-a']);
+    const index = model.rows.findIndex((row) => row.kind === 'bots-zone');
+    expect(model.rows[index]).toMatchObject({ collapsed: true });
+    expect(resolveSessionSidebarStickyHeader(model.stickyHeaders, index)).toMatchObject({ kind: 'activity', id: 'bots' });
+  });
+
+  test('opens above the projects while nothing is in work, and is absent without bots', () => {
+    const input = args([project([group([node('s1')])])]);
+    expect(zones(buildSessionSidebarRowModel(input).rows)).toEqual(['project-a']);
+    input.botsSection = true;
+    expect(zones(buildSessionSidebarRowModel(input).rows)).toEqual(['bots', 'project-a']);
+  });
+
+  test('a sidebar with bots and no work still shows its empty state', () => {
+    const input = args([]);
+    input.botsSection = true;
+    expect(buildSessionSidebarRowModel(input).rows.at(-1)).toMatchObject({ kind: 'empty', emptyKind: 'sidebar' });
+  });
+
+  test('a search lists matches only, without the section', () => {
+    const input = args([project([group([node('s1')])])]);
+    input.botsSection = true;
+    input.mode = 'search';
+    input.contentSearchResults = [];
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'bots-zone')).toBe(false);
+  });
+});

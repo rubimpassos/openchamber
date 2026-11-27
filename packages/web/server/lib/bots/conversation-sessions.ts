@@ -61,6 +61,8 @@ export function createBotConversationSessions({ dataDir, clientFor, activity, re
       ...leadPermissions(capture),
       { action: 'openchamber', resource: '*', effect: 'allow' },
       { action: 'openchamber_render', resource: '*', effect: 'allow' },
+      { action: 'question', resource: '*', effect: 'allow' },
+      { action: 'openchamber_bot', resource: '*', effect: 'allow' },
     ] });
     await knowledge.sync(info.id, input.conversation.directory, { includeMemorySaveRule: false });
   };

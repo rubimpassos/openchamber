@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getBotsRuntime } from './botsRuntime';
-import { botDefinitionSchema, botsConfigSchema, type BotsConfig } from './bots/config';
-import { botConversationSchema, botItemSchema, type BotEvidence, type BotSource } from './bots/items';
+import { botDefinitionSchema, botDefinitionsSchema, botsConfigSchema, type BotDefinition, type BotsConfig } from './bots/config';
+import { botConversationSchema, botItemSchema, botPullRequestSchema, botWaitSchema, type BotEvidence, type BotSource } from './bots/items';
 import { botIdentitySchema, botPolicySchema, type BotIdentityInput } from './bots/management';
 
 const snapshotSchema = z.object({
@@ -47,6 +47,32 @@ async function request<T>(path: string, schema: z.ZodType<T>, options?: { readon
   return result;
 }
 const root = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/bots`;
+
+const botWorkItemSchema = botItemSchema.pick({ title: true, state: true, source: true, sessions: true }).extend({
+  projectId: z.string().min(1), itemId: z.string().min(1), wait: botWaitSchema.nullable(),
+  question: z.object({ questionKey: z.string().min(1), questions: z.array(z.string()) }).nullable(),
+  conversation: botConversationSchema.nullable(),
+  worktree: z.string().min(1).nullable(), pr: botPullRequestSchema.nullable(), tokens: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(), finishedAt: z.number().int().nonnegative().nullable(),
+  takenOver: z.object({ sessionId: z.string().min(1), at: z.number().int().nonnegative() }).nullable(),
+});
+const botChatsSchema = z.object({
+  main: botConversationSchema.nullable(),
+  projects: z.array(z.object({ projectId: z.string().min(1), access: z.enum(['read', 'pr', 'merge']) })),
+  items: z.array(botWorkItemSchema),
+  available: z.object({ mainChat: z.boolean(), takeOver: z.boolean() }).default({ mainChat: true, takeOver: true }),
+});
+export type BotWorkItem = z.infer<typeof botWorkItemSchema>;
+export type BotChats = z.infer<typeof botChatsSchema>;
+
+export const fetchBotDefinitions = () => request('/api/bots', botDefinitionsSchema);
+export const saveBotDefinitions = (definitions: readonly BotDefinition[], expectedRevision: number) => request('/api/bots', botDefinitionsSchema, {
+  method: 'PUT', body: JSON.stringify({ definitions: definitions.map((bot) => botDefinitionSchema.parse(bot)), expectedRevision }),
+});
+export const fetchBotChats = (botId: string) => request(`/api/bots/${encodeURIComponent(botId)}/chats`, botChatsSchema);
+export const ensureBotMainChat = (botId: string) => request(`/api/bots/${encodeURIComponent(botId)}/main`, z.object({ session: botConversationSchema }), { method: 'POST' });
+export const takeOverBotItem = (projectId: string, itemId: string) => request(`${root(projectId)}/items/${encodeURIComponent(itemId)}/take-over`,
+  itemDetailSchema.extend({ session: z.object({ sessionId: z.string().min(1), directory: z.string().min(1) }).nullable() }), { method: 'POST' });
 
 export const fetchBots = (projectId: string) => request(root(projectId), snapshotSchema);
 export const saveBotsConfig = (projectId: string, config: BotsConfig) => request(`${root(projectId)}/config`, z.object({ config: botsConfigSchema }), {

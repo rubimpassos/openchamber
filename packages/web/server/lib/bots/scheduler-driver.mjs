@@ -19,7 +19,7 @@ try {
   process.env.HOME = path.join(root, 'home');
   process.env.USERPROFILE = process.env.HOME;
   const projectConfigRuntime = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: path.join(root, 'projects') });
-  const config = createBotsConfig({ projectConfigRuntime });
+  const config = createBotsConfig({ projectConfigRuntime, dataDir: path.join(root, 'data') });
   const dispatches = [];
   let sessionRequests = 0;
   globalThis.fetch = async () => {

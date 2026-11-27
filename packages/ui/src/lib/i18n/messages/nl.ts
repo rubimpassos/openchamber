@@ -1,6 +1,9 @@
 import { settingsDict } from './nl.settings';
 import { botsI18n } from './bots.i18n';
 import { botWorkspaceI18n } from './bot-workspace.i18n';
+import { botSidebarI18n } from './bot-sidebar.i18n';
+import { botPanelI18n } from './bot-panel.i18n';
+import { botConfigI18n } from './bot-config.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { browserServerPanelI18n } from './browser-server-panel.i18n';
 import { browserMobileInputI18n } from './browser-mobile-input.i18n';
@@ -255,6 +258,9 @@ export const dict = {
   ...selectionApprovalI18n.nl,
   ...botsI18n.nl,
   ...botWorkspaceI18n.nl,
+  ...botSidebarI18n.nl,
+  ...botPanelI18n.nl,
+  ...botConfigI18n.nl,
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...prStacksI18n.nl,

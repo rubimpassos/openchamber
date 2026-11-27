@@ -15,6 +15,9 @@ import { createBotEvents } from './events.js';
 import { createBotsRuntime } from './runtime.js';
 import { createBotHostSessions } from './host-sessions.js';
 import { createBotConversationSessions } from './conversation-sessions.js';
+import { createBotMainSessions } from './main-sessions.js';
+import { botInputDigest } from './effects.js';
+import { waitExplanation } from './wait-explanations.js';
 import { createBotConversationHttpGuard } from './conversation-http.js';
 import { createHostArtifacts } from './host-artifacts.js';
 import { assertBotLeadAction } from '../session-lead/bot-guidance.js';
@@ -35,6 +38,7 @@ import { createHostLifecycle } from './host-lifecycle.js';
 import { createHostPayloadProcessor } from './host-events.js';
 import { failureCode, discoveryPending } from './host-failures.js';
 import type { HostOptions, ReportHostAttention } from './host-contracts.js';
+import type { BotItem } from './schema.js';
 import type { RuntimeOptions } from './runtime/contracts.js';
 import type { BotAuthority, Loop } from '../pr-fix-loop/contracts.js';
 import type { Suggestion } from '../suggested-tasks/store.js';
@@ -49,7 +53,7 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
   buildOpenCodeUrl, getOpenCodeAuthHeaders, getSpacesHost, getSpaceArchive, messageQueueRuntime,
   notificationCenter, notify, broadcast, getFixLoopRuntime, disposeInstance,
   reviewApps = [], logger = console, fetchImpl, policyOptions, executionServices = null, withWatchAdmission, updateMetadata, readArtifactPage }: HostOptions<NotifyResult>) {
-  const config = createBotsConfig({ projectConfigRuntime });
+  const config = createBotsConfig({ projectConfigRuntime, dataDir });
   const store = createBotStore({ projectsDirPath: projectsDir });
   executionServices?.bindOwner({ dataDir, resolveProject, listProjects, store, config });
   const sessionKnowledgeRuntime = executionServices?.sessionKnowledgeRuntime ?? localKnowledge;
@@ -66,7 +70,16 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
     return createBotConversationSessions({ dataDir, clientFor, activity, readTokens, knowledge: localKnowledge });
   })();
   if (!conversations) throw new TypeError('Bot conversations require their selected execution owner');
-  const handleTool = async (request: Parameters<ReturnType<typeof createBotsRuntime>['handleTool']>[0]) => z.json().parse(await api.handleTool(request));
+  const mainSessions = executionServices || !localKnowledge ? null : createBotMainSessions({ dataDir, clientFor, knowledge: localKnowledge });
+  const requireMain = () => {
+    if (!mainSessions) throw Object.assign(new BotServiceError('BOT_MAIN_UNAVAILABLE', 'The bot main chat needs a local OpenCode.'), { statusCode: 501 });
+    return mainSessions;
+  };
+  const handleTool = async (request: Parameters<ReturnType<typeof createBotsRuntime>['handleTool']>[0]) => {
+    const mainBot = mainSessions ? await mainSessions.botFor(request.sessionId) : null;
+    if (mainBot) { assertStarted(); return z.json().parse(await runtime.handleMainTool({ botId: mainBot, action: request.action, input: request.input })); }
+    return z.json().parse(await api.handleTool(request));
+  };
   const readToolOutcome = async (request: Parameters<ReturnType<typeof createBotsRuntime>['readToolOutcome']>[0]) => {
     const outcome = await runtime.readToolOutcome(request);
     switch (outcome.state) {
@@ -153,8 +166,22 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
     }
     return proof.run({ ...input, isolated: recorded.isolated }, options);
   };
+  const presentedArtifacts: RuntimeOptions['presentedArtifacts'] = async (projectId, itemId) => {
+    const scope = { projectId, itemId };
+    const presented = [];
+    for (let offset: number | null = 0; offset !== null;) {
+      const page = await artifacts.artifacts.list(scope, { offset, limit: 100 });
+      for (const metadata of page.artifacts) {
+        if (!metadata.requirement) continue;
+        const { payload } = await artifacts.artifacts.read(scope, metadata.id);
+        presented.push({ requirement: metadata.requirement, title: metadata.title, createdAt: metadata.createdAt, content: payload.body.content.slice(0, 20_000) });
+      }
+      offset = page.nextOffset;
+    }
+    return presented;
+  };
   const runtime: ReturnType<typeof createBotsRuntime> = createBotsRuntime({ config, store, resolveProject, listProjects, stages, conversations, worktrees, services,
-    serviceContext: context.serviceContext, runProof, pullRequests, sources, attention, notices, scheduler, events, questions, readPolicy });
+    serviceContext: context.serviceContext, runProof, pullRequests, sources, attention, notices, scheduler, events, questions, readPolicy, presentedArtifacts });
   const admitConversationMessage: typeof runtime.admitConversationMessage = async (input) => {
     if (executionServices && !await runtime.isConversationSession(input.sessionId)) throw new BotServiceError('BOT_CONVERSATION_SCOPE_MISMATCH', 'The owner queue requires a recorded Bot conversation.');
     if (await runtime.isConversationSession(input.sessionId)) assertStarted();
@@ -180,8 +207,27 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
       await sessions.trackItem(projectId, item, bot);
     }
   };
+  const mainNotices = new Map<string, string>();
+  const questionData = z.object({ pendingQuestion: z.string().nullish(),
+    questions: z.record(z.string(), z.object({ input: z.object({ questions: z.array(z.string()) }).passthrough() }).passthrough()).optional() }).passthrough();
+  const noticeMain = async (projectId: string, item: BotItem) => {
+    if (!mainSessions || !await mainSessions.read(item.botId)) return;
+    const data = questionData.parse((await journal.read(projectId, item.id)).data);
+    const pending = data.pendingQuestion ? data.questions?.[data.pendingQuestion] : undefined;
+    const digest = botInputDigest({ state: item.state, wait: item.wait?.reason ?? null, question: data.pendingQuestion ?? null });
+    const key = JSON.stringify([projectId, item.id]);
+    if (mainNotices.get(key) === digest) return;
+    const lines = [`Bot work update: "${item.title}" (project ${projectId}, item ${item.id}) is now ${item.state}.`];
+    if (item.wait) lines.push(`Waiting: ${item.wait.reason}. ${waitExplanation(item.wait.reason)}`);
+    if (pending && data.pendingQuestion) lines.push(`Question ${data.pendingQuestion} for the user: ${pending.input.questions.join(' ')}`);
+    if (item.conversation) lines.push(`Item conversation: ${item.conversation.sessionId}.`);
+    await requireMain().notice(item.botId, { eventId: `main:${item.id}:${digest}`, text: lines.join('\n') });
+    mainNotices.set(key, digest);
+  };
   const release = events.subscribe((event) => {
     if (event.projectId) broadcast({ type: 'openchamber:bots-changed', properties: { projectId: event.projectId } });
+    if (event.type === 'bot.config.changed') lifecycle.observe(refreshIndex(event.projectId));
+    if (event.type === 'bot.item.changed' && mainSessions) lifecycle.observe(noticeMain(event.projectId, event.item));
     if ('item' in event && event.item) lifecycle.observe((async () => {
       await refreshIndex(event.projectId);
       if (event.item.conversation) await runtime.syncConversationProgress(event.projectId, event.item.id);
@@ -190,8 +236,42 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
   });
   const lifecycle = createHostLifecycle({ runtime, isolated, sessions, providers, discovery, hostTools, artifacts, listProjects, refreshIndex, reportAttention, release, logger });
   const processPayload = createHostPayloadProcessor({ lifecycle, runtime, sessions, isolated, discovery, hostTools, artifacts, reportAttention });
-  const api = createBotHostApi({ runtime, placement, sessions, providers, discovery, runScheduled,
+  const hostApi = createBotHostApi({ runtime, placement, sessions, providers, discovery, runScheduled,
     assertStarted, refreshIndex, broadcast, reportAttention, failureCode: (error) => failureCode.parse(error) });
+  const definitionFor = async (botId: string) => {
+    const { definitions } = await runtime.getDefinitions();
+    const bot = definitions.find((entry) => entry.id === botId);
+    if (!bot) throw new BotServiceError('BOT_DEFINITION_REQUIRED', 'The bot does not exist.');
+    return bot;
+  };
+  const api = {
+    ...hostApi,
+    async chats(botId: string) {
+      await definitionFor(botId);
+      return { main: mainSessions ? await mainSessions.read(botId) : null, ...await runtime.botWork(botId),
+        available: { mainChat: mainSessions !== null, takeOver: !executionServices && Boolean(updateMetadata) } };
+    },
+    async ensureMain(botId: string) {
+      assertStarted();
+      const bot = await definitionFor(botId);
+      const session = await requireMain().ensure(botId, async () => {
+        const projectId = Object.keys(bot.projects)[0];
+        if (!projectId) throw Object.assign(new BotServiceError('BOT_PROJECT_ACCESS_REQUIRED', 'Give the bot access to a project first.'), { statusCode: 409 });
+        return { selection: z.object({ providerID: z.string(), modelID: z.string(), variant: z.string().optional(), agent: z.string().optional() })
+          .parse(await stages.select(projectId, bot, 'investigation')), title: bot.name };
+      });
+      return { session };
+    },
+    async takeOver(projectId: string, itemId: string) {
+      assertStarted();
+      if (executionServices || !updateMetadata) throw Object.assign(new BotServiceError('BOT_TAKE_OVER_UNAVAILABLE', 'Take over needs a local OpenCode.'), { statusCode: 501 });
+      const result = await runtime.takeOverItem(projectId, itemId, async ({ sessionId, directory }) => {
+        await clientFor(directory).session.update({ sessionID: sessionId, permissions: [] });
+        await updateMetadata(sessionId, { openchamber: { automation: null } });
+      });
+      return { ...await hostApi.detail(projectId, itemId), session: result.session };
+    },
+  };
   type Identities = ReturnType<typeof createBotIdentityStore>;
   const publicIdentities = { list: identities.list,
     create: async (...args: Parameters<Identities['create']>) => { const result = await identities.create(...args); await providers.reconfigure(); return result; },
@@ -213,7 +293,7 @@ export function createBotsHost<NotifyResult>({ dataDir, projectsDir, projectConf
         await runtime.isConversationSession(session.sessionId) ? session : null));
       return { revision: snapshot.revision, sessions: owned.filter((session) => session !== null) };
     },
-    runtime: api, botWatch, assertDispatch: (input: Parameters<typeof notices.assertDispatch>[0]) => { assertStarted(); return notices.assertDispatch(input); }, handleTool: api.handleTool,
+    runtime: api, botWatch, assertDispatch: (input: Parameters<typeof notices.assertDispatch>[0]) => { assertStarted(); return notices.assertDispatch(input); }, handleTool,
     processPayload: (...args: Parameters<typeof processPayload>) => lifecycle.observe(processPayload(...args)),
     isSessionWorking: (sessionId: string) => sessions.isWorking(sessionId), readTokenSnapshot: sessions.tokenSnapshot, queueForSession: sessions.queueForSession,
     onPullRequestSettled(loop: Pick<Loop, 'status' | 'statusReason' | 'number' | 'sessionId'> & { readonly botAuthority: BotAuthority }) {

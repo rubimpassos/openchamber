@@ -25,6 +25,7 @@ export function BotExecutionFields({ bot, directory, onChange }: { readonly bot:
       <BotSelectField<BotDefinition['notify']> label={t('sessions.scheduledTasks.editor.notify.label')} value={bot.notify} onChange={(notify) => onChange({ notify })} options={[
         { value: 'attention', label: t('sessions.scheduledTasks.editor.notify.attention') }, { value: 'finish', label: t('sessions.scheduledTasks.editor.notify.finish') },
       ]} />
+      <SettingsCheckboxRow label={t('suggestedTasks.lens.editor.web')} checked={bot.web} onChange={(web) => onChange({ web })} />
       <SettingsCheckboxRow label={t('bots.isolated')} checked={bot.isolated} onChange={(isolated) => onChange({ isolated })} />
       <p className="typography-meta text-[var(--status-warning-text)]">{t('bots.ambientWarning')}</p>
     </SettingsSection>

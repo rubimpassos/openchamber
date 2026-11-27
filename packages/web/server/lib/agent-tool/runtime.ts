@@ -57,7 +57,7 @@ import { RENDER_PAGE_UI_DESCRIPTION } from './render-tool.js';
 import { SECRET_PARAMETER_PROPERTIES, SECRET_TOOL_DESCRIPTION } from './secret-tool.js';
 import { createCallbackAddress } from './callback-address.js';
 import { mcpToolAliasName } from './mcp-alias.js';
-import { BOT_TOOL_ACTIONS, BOT_TOOL_PARAMETERS } from '../bots/tool.js';
+import { BOT_TOOL_ACTIONS, BOT_TOOL_PARAMETERS, BOT_RENDER_PARAMETERS } from '../bots/tool.js';
 import { LEAD_COMPACTION_HOOK } from '../session-lead/agent-tool-plugin.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import { RENDER_CAPTURE_MEDIA_TYPE, RENDER_CAPTURE_SETUP } from './render-capture.js';
@@ -380,7 +380,7 @@ const RENDER_PARAMETER_PROPERTIES = {
   ui: { type: 'string', description: RENDER_PAGE_UI_DESCRIPTION },
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
-  artifactKind: { type: 'string', enum: ['evidence', 'decision'], description: "For a recorded bot session, categorize this durable page as evidence or decision. Defaults to evidence. Choose any HTML or OpenUI representation; this category does not prescribe its content. Worker sessions can only show read-only pages; the item's conversation can ask through the normal page controls." },
+  ...BOT_RENDER_PARAMETERS,
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
   answerLater: { type: 'boolean', description: RENDER_PAGE_LATER_DESCRIPTION },
 };
@@ -806,7 +806,7 @@ const createPluginSource = (options: Required<PluginOptions>) => {
   }
   if (includeBot) entries.push(createToolEntry({
     name: 'openchamber_bot',
-    description: 'Act on this bot item through its server-owned identity. Only the current item correction session can use this tool. Never substitute shell or another account for a refused operation.',
+    description: 'Act for a bot through its server-owned identity. The item correction session publishes and reports; the bot chats answer waiting items, and the main bot chat lists and starts work. Never substitute shell or another account for a refused operation.',
     definitions: BOT_TOOL_ACTIONS,
     parameters: BOT_TOOL_PARAMETERS,
     codeMode: false,

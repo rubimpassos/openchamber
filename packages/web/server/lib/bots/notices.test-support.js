@@ -14,8 +14,10 @@ export async function createNoticeDriver(root) {
   const itemId = 'item';
   const sessionId = 'ses_bot_fixing';
   const store = createBotStore({ projectsDirPath: path.join(root, 'projects') });
-  const config = createBotsConfig({ projectConfigRuntime: {
-    readBotsSection: async () => ({ definitions: [{ id: 'bot', name: 'Bot', mission: 'Fix bugs', isolated: false }] }),
+  let section = { definitions: [{ id: 'bot', name: 'Bot', mission: 'Fix bugs', isolated: false }] };
+  const config = createBotsConfig({ dataDir: path.join(root, 'data'), projectConfigRuntime: {
+    readBotsSection: async () => section,
+    updateBotsSection: async (_projectId, change) => { section = await change(section); return section; },
   } });
   await store.update(projectId, (snapshot) => ({ snapshot: { ...snapshot, items: [createBotItem({ id: itemId, botId: 'bot', source: { kind: 'manual', id: 'source' }, title: 'Bug' })] } }));
   await store.update(projectId, (snapshot) => ({ snapshot: { ...snapshot, items: snapshot.items.map((item) => ({ ...item, state: 'investigating', worktree: directory, sessions: { fixing: sessionId } })) } }));

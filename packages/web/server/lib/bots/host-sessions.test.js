@@ -33,6 +33,25 @@ it.each([
   expect(session).toEqual({ id: 'ses_captured', directory: item.worktree, isolated: false, archived: true, metadata });
 });
 
+it('reads conversation usage with the exact recorded project scope when the registry adds fields', async () => {
+  // Given a conversation and a project registry entry with display fields.
+  const bot = botDefinitionSchema.parse({ id: 'bot', name: 'Bot', mission: 'Fix' });
+  const conversation = { sessionId: 'ses_conversation', directory: '/project', createdAt: 1 };
+  const item = { ...createBotItem({ id: 'item', botId: bot.id, title: 'Bug', source: { kind: 'manual', id: 'one' } }), conversation };
+  const targets = [];
+  const sessions = createBotHostSessions({ resolvePlacement: async () => ({ isolated: false }),
+    resolveProject: async (id) => ({ id, path: '/project', label: 'Project', icon: null }),
+    conversations: { tokens: async (target) => { targets.push(target); return 42; } } });
+  await sessions.trackItem('project', item, bot);
+
+  // When the usage owner reads it after an assistant turn.
+  const total = await sessions.tokenSnapshot(conversation.sessionId, conversation.directory);
+
+  // Then the target carries only the captured scope.
+  expect(total).toBe(42);
+  expect(targets).toEqual([{ project: { id: 'project', path: '/project' }, botId: 'bot', itemId: 'item', conversation }]);
+});
+
 it('owns isolated queue transport, persistence, trusted events and cache-inclusive usage without host fallback', async () => {
   const root = await fs.mkdtemp('/tmp/opencode/bot-host-session-');
   const directory = '/spaces/a1b2c3d4e5f6/repo';

@@ -46,9 +46,14 @@ owners deferred until the request is handled.
   session is missing fails; it does not recreate a previously established lead.
 - Opening retained conversation information requires neither the bot definition
   nor its checkout. Sending still requires an active item and enabled bot.
-- User chat does not answer a coordinator question or Resume an interrupted item.
-  The UI answer route is explicit and must name the exact pending coordinator
-  `questionKey`. Provider replies (Jira, Discord) keep their existing answer path.
+- User chat reaches the item as feedback and does not Resume an interrupted item.
+  A pending coordinator question reaches the lead in its progress (`questionKey`,
+  question text and a plain explanation of the wait reason). The lead asks the
+  user with the session's `question` tool or a waiting page, then relays the
+  user's answer with `openchamber_bot` `item.answer` and that exact key; a stale
+  key is refused like the explicit answer route, which remains for API callers.
+  The lead's tool permits only `item.answer`. Provider replies (Jira, Discord)
+  keep their existing answer path.
 - The coordinator pass allocates a lead only for an active item that has none
   (legacy or uncertain allocation) and whose bot is enabled and not stopping.
   An item that already has its lead costs that pass nothing.
@@ -60,6 +65,18 @@ owners deferred until the request is handled.
   to total and daily accounting. Stop and budget interruption stop the lead too.
 - Native payloads retain their messages, files and model configuration. The
   owner admits inference before the existing transport sends it.
+
+## Main chat
+
+Each bot has one main chat (`main-sessions.ts`): a durable root lead with
+`automation: { source: 'bot', role: 'main', botId }`, in its own folder under
+`<dataDir>/bots/home`, because a bot belongs to no project. Its identity is
+persisted before creation and verified like an item conversation. It may only
+ask questions, use lead controls, render pages and `openchamber_bot`, where
+`bot.items` lists the bot's work, `bot.start` admits a manual item in a project
+it may access (idempotent per operation ID) and `item.answer` relays an answer
+to one of its items. The host posts a non-resuming notice to it on each change
+of an item's state, wait or question. Its turns are not admitted by item budgets.
 
 ## Parent integration
 

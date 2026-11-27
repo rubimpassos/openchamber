@@ -40,6 +40,7 @@ describe('front door ownership', () => {
     ['/API/PROJECTS/p/BOTS/config', 'PUT', 'local'],
     ['/api/projects/p/%62ots/identities', 'POST', 'local'],
     ['/api/projects/p/bots-extra', 'GET', 'agent'],
+    ['/api/bots', 'PUT', 'local'], ['/api/bots/bot/main', 'POST', 'local'], ['/api/bots-extra', 'GET', 'agent'],
     ['/api/openchamber/bot-services/identity-list', 'POST', 'refused'],
     ['/api/openchamber/%62ot-services/checkout-create', 'POST', 'refused'],
     ['/api/tracked-items/interest', 'POST', 'local'], ['/api/tracked-items/presence', 'POST', 'local'],
