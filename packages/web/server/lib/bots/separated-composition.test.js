@@ -7,6 +7,7 @@ import { afterEach, expect, it } from 'vitest';
 import { createBotsHost } from './host.js';
 import { createBotExecutionServices } from './agent-execution.js';
 import { createOwnerBotConfig } from './owner-config.js';
+import { createBotsConfig } from './config.js';
 import { createAgentBotServices } from '../agent-server/bot-services.js';
 import { createAgentUpstream } from '../agent-server/agent-upstream.js';
 import { botEffectInputDigest } from '../agent-server/bot-service-contract.js';
@@ -97,8 +98,9 @@ async function fixture(isolated, loseOpen = false, enableIsolationWhileFixing = 
       await options.onSessionCreated({ sessionId: id, directory: input.directory }); return { sessionId: id, directory: input.directory }; },
     send: async (id) => {
       if (enableIsolationWhileFixing && sessions.get(id).metadata.openchamber.automation.stage === 'fixing') {
-        await config.updateBotsSection(project.id, (current) => ({ ...current,
-          definitions: current.definitions.map((bot) => ({ ...bot, isolated: true })) }));
+        const bots = createBotsConfig({ projectConfigRuntime: config, dataDir });
+        const current = await bots.read(project.id);
+        await bots.update(project.id, { ...current, definitions: current.definitions.map((bot) => ({ ...bot, isolated: true })) });
       }
       complete(id); return { promptDispatched: true };
     },

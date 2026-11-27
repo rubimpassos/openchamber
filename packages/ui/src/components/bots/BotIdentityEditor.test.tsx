@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { z } from 'zod';
 import { fetchBotIdentities } from '@/lib/botsApi';
+import { configuredBot } from '@/lib/bots/bots.fixture';
 import type { BotIdentity } from '@/lib/bots/management';
 import { botsI18n } from '@/lib/i18n/messages/bots.i18n';
 import { clickSuggestedTasksControl, deferred, installSuggestedTasksDom, serveSuggestedTasks } from '@/lib/test-utils/suggestedTasks.fixture';
@@ -38,7 +39,7 @@ const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { createWebAPIs } = await import('../../../../web/src/api/index');
 const { BotIdentityEditor } = await import('./BotIdentityEditor');
 const { BotIdentities } = await import('./BotIdentities');
-const { BotIdentityFields } = await import('./BotIdentityFields');
+const { BotConnectorsFields } = await import('./BotConnectorsFields');
 const apis = createWebAPIs();
 
 beforeEach(() => {
@@ -146,11 +147,11 @@ describe('Jira OAuth identity form and HTTP contract', () => {
     await act(async () => { control('button[type="submit"]').click(); });
     await until(() => Boolean(document.querySelector('[role="alert"]')?.textContent));
 
-    // Then the secret is gone, metadata remains, and the upstream error body is never displayed.
+    // Then the secret is gone, metadata remains, and neither the upstream error body nor its code is displayed.
     expect(field('Client secret').value).toBe('');
     expect(field('Client ID').value).toBe(identity.clientId);
     expect(document.body.textContent).not.toContain(responseSecrets.clientSecret);
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('identity_invalid');
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(botsI18n.en['bots.error']);
   });
 
   for (const change of [
@@ -185,11 +186,11 @@ describe('Jira OAuth identity form and HTTP contract', () => {
   test('selects an OAuth identity for Jira without offering Discord identities', async () => {
     // Given the real Jira picker loaded from the identities endpoint.
     let selected: string | undefined;
-    await render(<BotIdentityFields projectId="project-1" value={{}} onChange={(value) => { selected = value.jira?.identityId; }} onManage={() => {}} />);
-    await until(() => document.querySelector('[role="status"]') === null);
+    await render(<BotConnectorsFields projectId="project-1" bot={configuredBot()} added={['jira']} onAdded={() => {}} onChange={(patch) => { selected = patch.identity?.jira?.identityId; }} onManage={() => {}} />);
+    await until(() => document.querySelector('[role="status"]')?.textContent === '');
 
     // When the user chooses the OAuth identity.
-    await clickSuggestedTasksControl(control('[role="combobox"][aria-label="Jira"]'));
+    await clickSuggestedTasksControl(control('[role="combobox"][aria-label="Jira identity"]'));
     expect(option('Legacy Jira')).toBeDefined();
     expect([...document.querySelectorAll('[role="option"]')].map((entry) => entry.textContent)).not.toContain('Discord only');
     await clickSuggestedTasksControl(option(identity.label));

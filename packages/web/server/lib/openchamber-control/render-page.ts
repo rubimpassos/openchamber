@@ -274,7 +274,7 @@ const isOperatorChild = async (readSession: NonNullable<RenderPageDependencies['
   }
 };
 
-export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, readSession = async () => null, laterPages = null, sharePages = null, artifacts = null }: RenderPageDependencies) => async (input: ControlInput & { readonly artifactKind?: unknown }, { sessionId, callId, messageId, directory, signal, onArtifactCaptured }: RenderPageContext = {}) => {
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, readSession = async () => null, laterPages = null, sharePages = null, artifacts = null }: RenderPageDependencies) => async (input: ControlInput & { readonly artifactKind?: unknown; readonly artifactFor?: unknown }, { sessionId, callId, messageId, directory, signal, onArtifactCaptured }: RenderPageContext = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
   }
@@ -313,14 +313,14 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
   if (title.length > RENDER_PAGE_MAX_TITLE_LENGTH) {
     throw new OpenChamberControlError(`title is ${title.length} characters; the limit is ${RENDER_PAGE_MAX_TITLE_LENGTH}`, 400);
   }
-  if (input.artifactKind !== undefined && !artifacts) {
+  if ((input.artifactKind !== undefined || input.artifactFor !== undefined) && !artifacts) {
     throw new OpenChamberControlError('Bot artifact capture is unavailable on this server', 503);
   }
   if (input.answerLater === true && input.awaitAnswer === true) {
     throw new OpenChamberControlError('Send awaitAnswer or answerLater, not both: awaitAnswer waits for the answer, answerLater returns at once and the answer comes later as a message', 400);
   }
   const artifact = await artifacts?.capture({
-    body: { format: field, content }, title, artifactKind: input.artifactKind,
+    body: { format: field, content }, title, artifactKind: input.artifactKind, artifactFor: input.artifactFor,
     awaitAnswer: input.awaitAnswer, answerLater: input.answerLater, share: input.share,
   }, { sessionId, callId, messageId, directory, signal });
   if (artifact) await onArtifactCaptured?.(artifact);

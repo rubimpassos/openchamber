@@ -9,7 +9,7 @@ import type { TerminalShell } from '@/lib/api/types';
 import type { PermissionMode } from '../utils/permissionAutoAccept';
 import type { ContextPanelMode, PluginContextPanelMode } from '@/lib/surfaces/modes';
 import type { MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
-import type { ContextZone, ContextZonePlacement, MovedZoneViews } from '@/lib/workspace/zones';
+import type { ContextPanelWidths, ContextZone, ContextZonePlacement, MovedZoneViews } from '@/lib/workspace/zones';
 import type { WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
 import type { StateCreator } from 'zustand';
 import type { FixLoopConfig } from '@/lib/prFixLoop';
@@ -130,6 +130,7 @@ export interface UIStore {
   contextEditorVisible: boolean;
   contextEditorTreeWidth: number;
   contextZoneSizes: Partial<Record<ContextZone, number>>;
+  contextPanelWidths: ContextPanelWidths;
   contextZoneExpandedChatSizes: Partial<Record<ContextZone, number>>;
   workStatusExpandedSections: Record<string, boolean>;
   messageQueueExpanded: boolean;
@@ -161,7 +162,7 @@ export interface UIStore {
   isScheduledTasksDialogOpen: boolean;
   isSuggestedTasksPageOpen: boolean;
   isBotsPageOpen: boolean;
-  botsPageTarget: { readonly projectId: string; readonly itemId?: string; readonly botId?: string } | null;
+  botsPageTarget: { readonly projectId: string; readonly itemId?: string; readonly botId?: string; readonly newBot?: true } | null;
   isArchivePageOpen: boolean;
   isIntegrationsCatalogOpen: boolean;
   archivePageOpenCount: number;
@@ -398,6 +399,7 @@ export interface UIStore {
   ) => void;
   toggleContextPanelExpanded: (directory: string, zone?: ContextZone) => void;
   setContextZoneSize: (zone: ContextZone, size: number) => void;
+  setContextPanelWidth: (mode: ContextPanelMode, width: number) => void;
   setContextZoneExpandedChatSize: (zone: ContextZone, size: number) => void;
   moveContextSurfaceToZone: (mode: ContextPanelMode, zone: ContextZone) => void;
   setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;

@@ -15,7 +15,7 @@ import { createProductionBotWorktrees } from './production-worktrees.js';
 import { createBotIsolatedStages } from './isolated-stages.js';
 import { botGit } from './production-git.js';
 import { resolveRepositoryIdentity } from '../source-control/repository-identity.js';
-import { botDefinitionSchema } from './config.js';
+import { botDefinitionSchema, createBotsConfig } from './config.js';
 import { readBotSpaceOptions } from './space-options.js';
 
 const definition = { id: 'bugs', name: 'Bug bot', mission: 'Fix verified bugs.' };
@@ -141,8 +141,10 @@ describe('production bot host composition', () => {
     await f.host.runtime.recordUsage({ sessionId: f.sessionId, total: 5 });
     expect((await f.isolated.readBinding(f.run)).state).toBe('stopped');
     await f.host.stop();
-    await f.projectConfigRuntime.updateBotsSection('project', (settings) => ({ ...settings, definitions: settings.definitions.map((bot) => ({ ...bot, isolated: false,
-      models: { ...bot.models, fixing: { useDefaults: false, providerID: 'controlled', modelID: 'model' } }, limits: { ...bot.limits, dailyTokens: 10 } })) }));
+    const config = createBotsConfig({ projectConfigRuntime: f.projectConfigRuntime, dataDir: f.dataDir });
+    const settings = await config.read('project');
+    await config.update('project', { ...settings, definitions: settings.definitions.map((bot) => ({ ...bot, isolated: false,
+      models: { ...bot.models, fixing: { useDefaults: false, providerID: 'controlled', modelID: 'model' } }, limits: { ...bot.limits, dailyTokens: 10 } })) });
     const fresh = f.buildHost();
     try {
       await fresh.start();
@@ -210,18 +212,17 @@ describe('production bot host composition', () => {
     } finally { await fresh.stop(); }
   });
 
-  it('constructs all production owners, gates dispatch until ready, and persists missing identity attention', async () => {
+  it('constructs all production owners, gates dispatch until ready, and starts a bot without GitHub in a local checkout', async () => {
     const f = await fixture();
-    expect((await f.request('/config', 'PUT', { config: { definitions: [definition] } })).status).toBe(503);
+    expect((await f.saveBots([definition])).status).toBe(503);
     await f.host.start();
-    expect((await f.request('/config', 'PUT', { config: { definitions: [definition] } })).status).toBe(200);
+    expect((await f.saveBots([definition])).status).toBe(200);
     const admitted = await f.request('/items', 'POST', { botId: 'bugs', source: { kind: 'manual', id: 'first' }, title: 'A real issue' });
     expect(admitted.status).toBe(200);
-    expect(admitted.body.item).toMatchObject({ state: 'needs-you', wait: { reason: 'BOT_IDENTITY_REQUIRED' } });
-    const notifications = await f.center.list({ allKinds: true });
-    expect(notifications).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'bot', requestId: admitted.body.item.id,
-      action: { type: 'bots', projectId: 'project', itemId: admitted.body.item.id } })]));
-    expect(f.calls.alerts).toHaveLength(1);
+    // A missing connector limits publication only: the investigation starts in a local checkout.
+    expect(admitted.body.item).toMatchObject({ state: 'investigating', sessions: { investigation: expect.any(String) } });
+    expect(admitted.body.item.effects.find((effect) => effect.kind === 'worktree.create')).toMatchObject({ state: 'succeeded' });
+    expect(f.calls.alerts).toHaveLength(0);
     expect(f.calls.events).toContainEqual({ type: 'openchamber:bots-changed', properties: { projectId: 'project' } });
     expect(await f.projectConfigRuntime.listScheduledTasks('project')).toEqual(expect.arrayContaining([expect.objectContaining({ botId: 'bugs', botManaged: true })]));
     expect((await f.request('/identities')).body).toEqual({ identities: [] });
@@ -231,7 +232,7 @@ describe('production bot host composition', () => {
 
   it('returns source discovery as 202, resumes the same occurrence, counts caches once, and skips normal token events', async () => {
     const f = await fixture(); await f.host.start();
-    await f.request('/config', 'PUT', { config: { definitions: [{ ...definition, source: { kind: 'investigation', prompt: 'Inspect the code', maxItems: 2 }, limits: { dailyTokens: 15 } }] } });
+    await f.saveBots([{ ...definition, source: { kind: 'investigation', prompt: 'Inspect the code', maxItems: 2 }, limits: { dailyTokens: 15 } }]);
     const pending = await f.request('/bugs/run', 'POST', { occurrence: 'same-occurrence' });
     expect(pending.status).toBe(202);
     expect(pending.body).toMatchObject({ pending: true, occurrence: 'same-occurrence' });
@@ -252,27 +253,22 @@ describe('production bot host composition', () => {
     expect(rows.some((item) => item.wait?.reason === 'BOT_DAILY_TOKEN_BUDGET')).toBe(true);
   });
 
-  it('lets a missing-identity item resume or stop without admitting an uncertain checkout', async () => {
+  it('stops a bot working without GitHub and removes its local checkout', async () => {
     const f = await fixture();
     await f.host.start();
-    await f.request('/config', 'PUT', { config: { definitions: [definition] } });
-    const admitted = await f.request('/items', 'POST', { botId: 'bugs', source: { kind: 'manual', id: 'missing-identity-stop' }, title: 'Missing identity' });
+    await f.saveBots([definition]);
+    const admitted = await f.request('/items', 'POST', { botId: 'bugs', source: { kind: 'manual', id: 'local-stop' }, title: 'Local work' });
     const itemId = admitted.body.item.id;
-    const resumed = await f.request(`/items/${itemId}/resume`, 'POST', {});
-    expect(resumed.body.item).toMatchObject({ state: 'needs-you', wait: { reason: 'BOT_IDENTITY_REQUIRED' }, effects: [], sessions: {} });
     const stopped = await f.request(`/items/${itemId}/stop`, 'POST', {});
     expect(stopped.status).toBe(200);
-    expect(stopped.body.item).toMatchObject({ state: 'stopped', effects: [], sessions: {} });
-    expect(workerHttp(f)).toHaveLength(0);
-    expect(await fs.readdir(path.join(f.dataDir, 'bot-worktrees')).catch((error) => {
-      if (error.code === 'ENOENT') return [];
-      throw error;
-    })).toEqual([]);
+    expect(stopped.body.item.state).toBe('stopped');
+    expect(stopped.body.item.effects.find((effect) => effect.kind === 'worktree.remove')).toMatchObject({ state: 'succeeded' });
+    await expect(fs.stat(admitted.body.item.worktree)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('keeps a pending scheduler occurrence admitted without creating an ordinary scheduled session', async () => {
     const f = await fixture(); await f.host.start();
-    await f.request('/config', 'PUT', { config: { definitions: [{ ...definition, source: { kind: 'investigation', prompt: 'Inspect', maxItems: 1 } }] } });
+    await f.saveBots([{ ...definition, source: { kind: 'investigation', prompt: 'Inspect', maxItems: 1 } }]);
     const first = await f.host.runScheduled('project', 'bugs', 'scheduled:1');
     expect(first).toMatchObject({ items: [], skipped: false, pending: { occurrence: 'scheduled:1' } });
     const sessionId = first.pending.sessionId;
@@ -285,7 +281,7 @@ describe('production bot host composition', () => {
 
   it('preserves suggestion files and evidence on the stable admitted source', async () => {
     const f = await fixture(); await f.host.start();
-    await f.request('/config', 'PUT', { config: { definitions: [definition] } });
+    await f.saveBots([definition]);
     const input = { projectId: 'project', botId: 'bugs', suggestion: { id: 'suggestion-1', title: 'Fix it', body: 'Observed wrong result',
       files: [{ path: 'src/a.js', startLine: 4, endLine: 9 }], evidence: [{ source: 'BUG-1', summary: 'Reproduced' }] } };
     const first = await f.host.deliverSuggestion(input);
@@ -341,7 +337,7 @@ describe('production bot host composition', () => {
 
   it('persists one source attention item when Jira identity is missing', async () => {
     const f = await fixture(); await f.host.start();
-    await f.request('/config', 'PUT', { config: { definitions: [{ ...definition, source: { kind: 'jira', jql: 'status = Open ORDER BY created DESC', maxItems: 3 } }] } });
+    await f.saveBots([{ ...definition, source: { kind: 'jira', jql: 'status = Open ORDER BY created DESC', maxItems: 3 } }]);
     for (let index = 0; index < 2; index++) {
       const result = await f.request('/bugs/run', 'POST', { occurrence: 'jira:one' });
       expect(result.status).toBe(409); expect(result.body.code).toBe('BOT_IDENTITY_REQUIRED');
@@ -354,7 +350,7 @@ describe('production bot host composition', () => {
 
   it('turns a settled bot PR watch failure into item attention without awaiting the originating loop', async () => {
     const f = await fixture(); await f.host.start();
-    await f.request('/config', 'PUT', { config: { definitions: [definition] } });
+    await f.saveBots([definition]);
     const admitted = (await f.request('/items', 'POST', { botId: 'bugs', title: 'Bug', source: { kind: 'manual', id: 'watch' } })).body.item;
     const store = createBotStore({ projectsDirPath: path.join(f.dataDir, 'projects') });
     await store.update('project', (snapshot) => ({ snapshot: { ...snapshot, items: snapshot.items.map((item) => ({ ...item,
@@ -396,4 +392,32 @@ it('child composition persists call context, wakes through translated metadata a
     expect((await request(app).get('/api/projects/project/bots').set('authorization', 'fixture')).status).toBe(501);
     await expect(fs.stat(path.join(root, 'bot-identities.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+describe('global bots and the main chat', () => {
+  it('edits the global list with its revision and opens one main chat per bot that lists its work', async () => {
+    // Given a started host with no bots.
+    const f = await fixture(); await f.host.start();
+    const empty = await f.requestApi('/bots');
+
+    // When a bot with access to the project is saved, a stale save is tried, and the main chat opens twice.
+    const saved = await f.requestApi('/bots', 'PUT', { definitions: [{ ...definition, projects: { project: 'read' } }], expectedRevision: empty.body.revision });
+    const stale = await f.requestApi('/bots', 'PUT', { definitions: [], expectedRevision: empty.body.revision });
+    const first = await f.requestApi('/bots/bugs/main', 'POST');
+    const second = await f.requestApi('/bots/bugs/main', 'POST');
+    await f.request('/items', 'POST', { botId: 'bugs', source: { kind: 'manual', id: 'main-chat' }, title: 'Read the code' });
+    const work = await f.host.handleTool({ sessionId: first.body.session.sessionId, action: 'bot.items', input: {} });
+    const chats = await f.requestApi('/bots/bugs/chats');
+
+    // Then the list is global and guarded, the main chat is one root lead outside any project, and it sees the work.
+    expect(saved.body.definitions).toEqual([expect.objectContaining({ id: 'bugs', projects: { project: 'read' } })]);
+    expect(stale.status).toBe(409);
+    expect(stale.body.code).toBe('BOT_DEFINITIONS_CHANGED');
+    expect(second.body.session).toEqual(first.body.session);
+    expect(first.body.session.directory.startsWith(path.join(f.dataDir, 'bots', 'home'))).toBe(true);
+    expect(f.records.get(first.body.session.sessionId).metadata.openchamber).toMatchObject({ lead: { at: first.body.session.createdAt },
+      automation: { source: 'bot', role: 'main', botId: 'bugs' } });
+    expect(work).toMatchObject({ projects: [{ projectId: 'project', access: 'read' }], items: [expect.objectContaining({ title: 'Read the code' })] });
+    expect(chats.body.main).toEqual(first.body.session);
+  });
 });

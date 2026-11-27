@@ -14,7 +14,7 @@ it('admits GitHub reviewers when the exact people bytes are approved', () => {
 
   // When the judge requests that person.
   const result = admitBotJudgment({ policy, evaluation, snapshot: { headSha: 'head', baseSha: 'base' },
-    output: { decision: 'auto', reason: 'Safe', reviewers: ['lead'], questions: [] } });
+    output: { decision: 'auto', reason: 'Safe', reviewers: ['lead'], questions: [], artifacts: [] } });
 
   // Then admission uses the approved service identity and preserves its stored contract.
   expect(result).toEqual({ requiresAnswer: false, judgment: { decision: 'auto', reason: 'Safe',
@@ -32,7 +32,7 @@ it('asks when an approved person has no identity for the requested service', () 
 
   // When GitHub judgment admission requests that person.
   const result = admitBotJudgment({ policy, evaluation, snapshot: { headSha: 'head', baseSha: 'base' },
-    output: { decision: 'auto', reason: 'Safe', reviewers: ['lead'], questions: [] } });
+    output: { decision: 'auto', reason: 'Safe', reviewers: ['lead'], questions: [], artifacts: [] } });
 
   // Then no account is guessed, while the available service still resolves.
   expect(result.requiresAnswer).toBe(true);
@@ -70,4 +70,17 @@ it('guarantees only the selected identity when the service type is a union', () 
     case 'ask': return expect.unreachable('Approved GitHub identity must resolve');
     default: result satisfies never;
   }
+});
+
+it('sends work to review when the judge rules on no required artifact', () => {
+  // Given a required benchmark and an auto verdict that ignores it.
+  const policy = parseRepositoryPolicyFiles({ directory: 'missing', files: [] }, {});
+  const evaluation = evaluateRepositoryPolicy(policy, [{ newPath: 'src/main.ts' }]);
+
+  // When the verdict is admitted.
+  const result = admitBotJudgment({ policy, evaluation, snapshot: { headSha: 'head', baseSha: 'base' }, required: [{ id: 'benchmark' }],
+    output: { decision: 'auto', reason: 'Safe', reviewers: [], questions: [], artifacts: [] } });
+
+  // Then the missing ruling becomes a review with its reason.
+  expect(result.judgment).toMatchObject({ decision: 'review', reason: expect.stringContaining('benchmark (the judge gave no verdict for it)') });
 });

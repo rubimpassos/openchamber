@@ -2,6 +2,9 @@ import type { I18nKey } from './en';
 import { settingsDict } from './pt-BR.settings';
 import { botsI18n } from './bots.i18n';
 import { botWorkspaceI18n } from './bot-workspace.i18n';
+import { botSidebarI18n } from './bot-sidebar.i18n';
+import { botPanelI18n } from './bot-panel.i18n';
+import { botConfigI18n } from './bot-config.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -195,6 +198,9 @@ export const dict: Record<I18nKey, string> = {
   ...selectionApprovalI18n['pt-BR'],
   ...botsI18n['pt-BR'],
   ...botWorkspaceI18n['pt-BR'],
+  ...botSidebarI18n['pt-BR'],
+  ...botPanelI18n['pt-BR'],
+  ...botConfigI18n['pt-BR'],
   'gitView.context.configure': 'Configurar repositório',
   'gitView.context.description': 'Remotos que a identidade do repositório não alcança e acesso para submódulos e Git LFS. As identidades ficam nas configurações do Git.',
   'gitView.context.needsAttention': 'Requer atenção',

@@ -1,4 +1,3 @@
-import React from 'react';
 import { SettingsCheckboxRow, SettingsSection, SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -7,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import type { BotDefinition } from '@/lib/bots/config';
 import { BotSelectField } from './BotFields';
+import { BotArtifactsFields } from './BotArtifactsFields';
 import { BotAvatarField } from './BotAvatar';
 
-type Props = { readonly bot: BotDefinition; readonly onChange: (patch: Partial<BotDefinition>) => void };
+type Props = { readonly bot: BotDefinition; readonly fixedArtifactIds: readonly string[]; readonly onChange: (patch: Partial<BotDefinition>) => void };
 
-export function BotSourceFields({ bot, onChange }: Props) {
+export function BotSourceFields({ bot, fixedArtifactIds, onChange }: Props) {
   const { t, locale } = useI18n();
   const schedule = bot.schedule;
   const updateSchedule = (patch: Partial<BotDefinition['schedule']>) => onChange({ schedule: { ...schedule, ...patch } });
@@ -24,6 +24,7 @@ export function BotSourceFields({ bot, onChange }: Props) {
       </SettingsStackedField>
       <SettingsCheckboxRow label={t('sessions.scheduledTasks.editor.enabled.label')} checked={bot.enabled} onChange={(enabled) => onChange({ enabled })} />
     </SettingsSection>
+    <BotArtifactsFields value={bot.artifacts} fixedIds={fixedArtifactIds} onChange={(artifacts) => onChange({ artifacts })} />
     <SettingsSection title={t('bots.source')} contentClassName="space-y-4">
       <BotSelectField<BotDefinition['source']['kind']> label={t('bots.source')} value={bot.source.kind} options={[
         { value: 'manual', label: t('bots.manual') }, { value: 'jira', label: 'Jira' }, { value: 'investigation', label: t('bots.investigation') },

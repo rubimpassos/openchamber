@@ -10,7 +10,7 @@ it('parses a proposed publication branch without granting a malformed Git ref', 
 
 it.each([
   ['investigation', { summary: 'Observed', plan: 'Clarify expected result', evidence: [], questions: ['Which behavior?'] }],
-  ['judge', { decision: 'ask', reason: 'Expected behavior needs clarification', reviewers: [], questions: ['Which behavior?'] }],
+  ['judge', { decision: 'ask', reason: 'Expected behavior needs clarification', reviewers: [], questions: ['Which behavior?'], artifacts: [] }],
 ])('preserves an optional requested role from %s while keeping existing reports valid', (stage, report) => {
   expect(parseBotStageOutput(stage, JSON.stringify(report))).toEqual(report);
   expect(parseBotStageOutput(stage, JSON.stringify({ ...report, requestedRole: 'tech-lead' }))).toEqual({ ...report, requestedRole: 'tech-lead' });
@@ -36,4 +36,9 @@ it('keeps an evidence entry whose url is not a URL or that carries extra keys, w
     evidence: [{ source: 'src/slugify.js', summary: 'Strips accents', url: 'src/slugify.js', line: 5 }] }));
 
   expect(parsed.evidence).toEqual([{ source: 'src/slugify.js', summary: 'Strips accents' }]);
+});
+
+it('reads a judge report without artifact verdicts as having none', () => {
+  // Given a verdict from before artifacts were judged. When parsed, then it has no verdicts.
+  expect(parseBotStageOutput('judge', JSON.stringify({ decision: 'auto', reason: 'Safe' })).artifacts).toEqual([]);
 });

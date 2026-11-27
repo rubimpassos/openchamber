@@ -543,7 +543,7 @@ describe('source admission and judgment', () => {
   });
 
   it('makes unresolved people a question while retaining fixed human review', () => {
-    const result = admitBotJudgment({ output: { decision: 'auto', reason: 'Looks safe', reviewers: [], questions: [] },
+    const result = admitBotJudgment({ output: { decision: 'auto', reason: 'Looks safe', reviewers: [], questions: [], artifacts: [] },
       policy: { people: { status: 'unapproved', people: [] } },
       evaluation: { level: 'human', reason: 'Human area', owners: ['database-owner'], policyFingerprint: 'fingerprint' },
       snapshot: { headSha: 'head', baseSha: 'base' },

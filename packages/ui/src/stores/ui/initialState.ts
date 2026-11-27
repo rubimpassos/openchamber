@@ -29,6 +29,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'contextEditorVisible'
   | 'contextEditorTreeWidth'
   | 'contextZoneSizes'
+  | 'contextPanelWidths'
   | 'contextZoneExpandedChatSizes'
   | 'workStatusExpandedSections'
   | 'messageQueueExpanded'
@@ -266,6 +267,7 @@ export const createInitialUIState = (): Pick<UIStore,
   contextEditorVisible: true,
   contextEditorTreeWidth: DEFAULT_CONTEXT_EDITOR_TREE_WIDTH,
   contextZoneSizes: {},
+  contextPanelWidths: {},
   contextZoneExpandedChatSizes: {},
   workStatusExpandedSections: {},
   messageQueueExpanded: false,

@@ -7,14 +7,17 @@ const automationSchema = z.object({ openchamber: z.object({ automation: z.union(
   z.object({ ...scope, role: z.literal('conversation') }),
 ]) }) });
 
+const mainSchema = z.object({ openchamber: z.object({ automation: z.object({ source: z.literal('bot'), role: z.literal('main'), botId: z.string().min(1) }) }) });
+
 export const botAutomation = (session: Session | undefined) => automationSchema.safeParse(session?.metadata).data?.openchamber.automation ?? null;
+export const botMainAutomation = (session: Session | undefined) => mainSchema.safeParse(session?.metadata).data?.openchamber.automation ?? null;
 
 /** Metadata owns membership. Child sessions inherit visibility even without their own marker. */
 export function botSessionIds(sessions: readonly Session[]): ReadonlySet<string> {
   const children = new Map<string, string[]>();
   const ids = new Set<string>();
   for (const session of sessions) {
-    if (botAutomation(session)) ids.add(session.id);
+    if (botAutomation(session) || botMainAutomation(session)) ids.add(session.id);
     if (session.parentID) {
       const siblings = children.get(session.parentID) ?? [];
       siblings.push(session.id);

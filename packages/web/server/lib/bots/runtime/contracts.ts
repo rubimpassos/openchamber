@@ -66,6 +66,7 @@ export type RuntimeOptions = {
   };
   readonly scheduler: ReturnType<typeof createBotScheduler>;
   readonly events: ReturnType<typeof createBotEvents>;
+  readonly presentedArtifacts: (projectId: string, itemId: string) => Promise<readonly { readonly requirement: string; readonly title: string; readonly content: string; readonly createdAt: number }[]>;
   readonly readPolicy?: typeof readRepositoryPolicy;
   readonly now?: () => number;
 };

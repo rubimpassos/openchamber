@@ -87,17 +87,25 @@ export async function createHostFixture({ fetchImpl, policyOptions, getSpaceArch
   host.registerRoutes(app);
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}/api/projects/project/bots`;
-  const request = async (route = '', method = 'GET', body) => {
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const baseUrl = `${origin}/api/projects/project/bots`;
+  const request = async (route = '', method = 'GET', body, base = baseUrl) => {
     const options = { method };
     if (body) {
       options.headers = { 'content-type': 'application/json' };
       options.body = JSON.stringify(body);
     }
-    const response = await fetch(baseUrl + route, options);
+    const response = await fetch(base + route, options);
     return { status: response.status, body: await response.json() };
   };
-  return { host, buildHost, request, calls, state, records, root, dataDir, project, center, projectConfigRuntime, scheduler,
+  const requestApi = (route, method, body) => request(route, method, body, `${origin}/api`);
+  // Saves the global bot list at its current revision, giving each bot full access to the fixture project.
+  const saveBots = async (definitions) => {
+    const current = await requestApi('/bots');
+    if (current.status !== 200) return current;
+    return requestApi('/bots', 'PUT', { definitions: definitions.map((bot) => ({ projects: { project: 'merge' }, ...bot })), expectedRevision: current.body.revision });
+  };
+  return { host, buildHost, request, requestApi, saveBots, calls, state, records, root, dataDir, project, center, projectConfigRuntime, scheduler,
     async close() {
       await host.stop(); scheduler.stop(); queue.stop(); await queue.flush(); await center.stop();
       for (const entry of [server, upstream]) { entry.closeAllConnections(); await new Promise((resolve) => entry.close(resolve)); }

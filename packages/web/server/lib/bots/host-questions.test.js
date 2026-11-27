@@ -50,7 +50,7 @@ async function fixture() {
   const jiraDefinition = { kind: 'jira-service', label: 'Disposable Jira', site: 'https://fixture.atlassian.net', email: 'bot@fixture.test', apiToken: 'disposable-jira' };
   const jira = await f.request('/identities', 'POST', jiraDefinition);
   expect(jira.status).toBe(200);
-  const config = createBotsConfig({ projectConfigRuntime: f.projectConfigRuntime });
+  const config = createBotsConfig({ projectConfigRuntime: f.projectConfigRuntime, dataDir: f.dataDir });
   await config.update('project', { definitions: [{ id: 'bot', name: 'Bot', mission: 'Fix verified bugs', enabled: false,
     identity: { github: { kind: 'app', identityId: github.body.identity.id }, jira: { identityId: jira.body.identity.id } } }] });
   const peopleFile = path.join(f.project.path, '.openchamber/people.json');

@@ -28,7 +28,7 @@ const putAwayRevealed = (): boolean => {
   return true;
 };
 
-const MobileCaption: React.FC<{
+export const MobileCaption: React.FC<{
   label: string;
   collapsed: boolean;
   onToggle: () => void;
@@ -67,7 +67,7 @@ export const MobileProjectsCaption: React.FC<{
   return <MobileCaption label={row.label ?? t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} onToggle={onToggle} />;
 };
 
-const HeaderIconButton: React.FC<{ icon: 'add' | 'git-branch'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (
+export const HeaderIconButton: React.FC<{ icon: 'add' | 'git-branch'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (
   <button
     type="button"
     className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

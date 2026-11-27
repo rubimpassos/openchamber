@@ -23,6 +23,11 @@ Neighbouring stores still own terminal state and the files view's open paths.
   the store initializer runs.
 - Persistence keeps the `ui-store` key, version 30, migration ordering, and
   the same saved fields.
+- `contextPanelWidths` holds one width per surface that declares its own
+  (`lib/surfaces/registry.ts`), clamped to the declared limits on every write.
+  A surface with no declaration never gets an entry. The field is saved with
+  the zone sizes; state saved before it existed loads with none, and each such
+  surface then opens at its declared default.
 - Context-tab actions retain their terminal and files-view side effects.
 - Browser tab IDs share `browserTabIdentity.ts`'s module-level sequence across
   user tabs, agent tabs and session reveals.

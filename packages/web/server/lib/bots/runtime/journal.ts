@@ -17,7 +17,7 @@ const repositoryContextSchema = z.object({ branch: z.string(), rules: z.array(z.
 const investigationSchema = z.json().transform((value) => parseBotStageOutput('investigation', JSON.stringify(value)));
 const fixingSchema = z.json().transform((value) => parseBotStageOutput('fixing', JSON.stringify(value)));
 const contextSchema = z.object({ repositoryRules: repositoryContextSchema.optional(), investigation: investigationSchema.optional(),
-  snapshot: snapshotSchema.optional(), policy: z.object({ policyFingerprint: z.string() }).passthrough().optional() });
+  snapshot: snapshotSchema.optional(), policy: z.object({ policyFingerprint: z.string() }).passthrough().optional(), artifacts: z.json().optional() });
 const tokensSchema = z.object({ total: z.number(), byStage: z.object({ investigation: z.number(), fixing: z.number(), judge: z.number() }), byDay: z.record(z.string(), z.number()) });
 export const runSchema = z.object({ stage, projectId: z.string(), itemId: z.string(), directory: z.string(), bot: botDefinitionSchema,
   selection: z.json().optional(), prompt: z.string().optional(), dispatchedAt: z.number(), afterIdleId: z.string().nullable().optional(),
@@ -36,7 +36,7 @@ export const dataSchema = z.object({
   admission: admissionSchema.optional(), pendingTool: pendingToolSchema.nullable().optional(), pendingQuestion: z.string().nullable().optional(),
   questionAnswer: questionAnswerSchema.nullable().optional(), questions: z.record(z.string(), questionSchema).optional(),
   interruptedStage: stageInterruptionSchema.nullable().optional(), resumeState: z.enum(['queued', 'investigating', 'waiting-answer', 'fixing', 'proving', 'judging', 'in-review', 'merging', 'closing', 'done', 'needs-you', 'failed', 'stopped']).optional(),
-  stopRequested: z.boolean().optional(), critical: z.boolean().optional(), feedback: z.record(z.string(), feedbackSchema).optional(),
+  stopRequested: z.boolean().optional(), takenOver: z.object({ sessionId: z.string(), at: z.number() }).nullable().optional(), artifactsRequested: z.number().nullable().optional(), critical: z.boolean().optional(), feedback: z.record(z.string(), feedbackSchema).optional(),
   feedbackQuestions: z.record(z.string(), z.string().nullable()).optional(), delivered: z.record(z.string(), z.boolean()).optional(),
   destinations: z.object({ github: bindingSchema.optional(), jira: bindingSchema.optional(), discord: bindingSchema.optional() }).optional(),
   serviceResults: jsonRecord.optional(), mergedObservation: z.json().optional(),
@@ -68,6 +68,7 @@ export const cloneRun = (run: Omit<z.output<typeof runSchema>, 'context' | 'sele
   readonly investigation?: BotStageReport['investigation'] | undefined;
   readonly snapshot?: z.output<typeof snapshotSchema> | undefined;
   readonly policy?: (ReturnType<typeof evaluateRepositoryPolicy> & Pick<Awaited<ReturnType<typeof readRepositoryPolicy>>, 'people'>) | undefined;
+  readonly artifacts?: readonly { readonly requirement: string; readonly title: string; readonly content: string; readonly createdAt: number }[] | undefined;
 } }) => runSchema.parse(JSON.parse(JSON.stringify(run)));
 export const createRuntimeJournal = (journal: ReturnType<typeof createBotExecutionStore>) => ({
   async read(projectId: string, itemId: string) {

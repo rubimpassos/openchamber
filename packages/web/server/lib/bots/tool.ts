@@ -7,6 +7,9 @@ export const BOT_TOOL_ACTIONS = [
   { action: 'jira.comment', title: 'Comment on the bot Jira issue', description: 'Comment on this item Jira issue using the bot identity.' },
   { action: 'jira.transition', title: 'Transition the bot Jira issue', description: 'Apply the configured done transition after the item pull request merged.' },
   { action: 'discord.send', title: 'Send a bot Discord message', description: 'Send a message to this item configured Discord destination using the bot app.' },
+  { action: 'item.answer', title: 'Answer a waiting bot item', description: 'Pass the user\'s own answer to the question an item waits on. Input is {operationId, questionKey, text}; the main bot chat also names projectId and itemId. Never answer for the user.' },
+  { action: 'bot.items', title: 'List the bot work', description: 'Main bot chat only. Lists every item of this bot with its project, state, wait and pending question, plus the projects it may access.' },
+  { action: 'bot.start', title: 'Start bot work', description: 'Main bot chat only. Starts a new item in a project the bot may access. Input is {operationId, projectId, title, description?}.' },
 ];
 
 export const BOT_TOOL_PARAMETERS = {
@@ -16,5 +19,16 @@ export const BOT_TOOL_PARAMETERS = {
   people: { type: 'array', items: { type: 'string' }, description: 'Approved person IDs for item.ask.' },
   requestedRole: { type: 'string', minLength: 1, maxLength: 200, description: 'Project people-directory role for item.ask when area owners are unavailable.' },
   critical: { type: 'boolean', description: 'Whether reported evidence needs an immediate incident alert.' },
+  questionKey: { type: 'string', description: 'For item.answer: the questionKey from the coordinator progress.' },
+  text: { type: 'string', description: 'For item.answer: the user\'s answer.' },
+  projectId: { type: 'string', description: 'For the main bot chat: the project of the item or of new work.' },
+  itemId: { type: 'string', description: 'For item.answer from the main bot chat: the waiting item.' },
+  title: { type: 'string', description: 'For bot.start: the title of the new work.' },
+  description: { type: 'string', description: 'For bot.start: what the work should achieve.' },
   evidence: { type: 'array', items: { type: 'object', properties: { source: { type: 'string' }, summary: { type: 'string' }, url: { type: 'string' } }, required: ['source', 'summary'], additionalProperties: false } },
+};
+
+export const BOT_RENDER_PARAMETERS = {
+  artifactKind: { type: 'string', enum: ['evidence', 'decision'], description: "For a recorded bot session, categorize this durable page as evidence or decision. Defaults to evidence. Choose any HTML or OpenUI representation; this category does not prescribe its content. Worker sessions can only show read-only pages; the item's conversation can ask through the normal page controls." },
+  artifactFor: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$', description: "For a recorded bot session: the ID of the required artifact this page presents, from the bot's artifact list. The work counts as done only when every required artifact has a page." },
 };

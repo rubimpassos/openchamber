@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {
   BOT_ARTIFACT_PAYLOAD_BYTES, BotArtifactError, artifactBindingSchema, artifactBodySchema, artifactHash,
-  artifactIdFor, artifactKindSchema, artifactManifestSchema, artifactCallSchema, artifactInteractionSchema,
+  artifactIdFor, artifactKindSchema, artifactManifestSchema, artifactRequirementSchema, artifactCallSchema, artifactInteractionSchema,
   assertArtifactManifest, artifactText,
 } from './artifacts-contract.js';
 import type { BotArtifactBinding, BotArtifactBody, BotArtifactCall, BotArtifactManifest, BotArtifactMetadata, BotArtifactPage, BotArtifactReference } from './artifacts-contract.js';
@@ -9,7 +9,7 @@ import { captureArtifactImages } from './artifacts-images.js';
 import { createBotArtifactStore } from './artifacts-store.js';
 
 export type BotRenderCaptureInput = {
-  readonly body: BotArtifactBody; readonly title: string; readonly artifactKind?: unknown;
+  readonly body: BotArtifactBody; readonly title: string; readonly artifactKind?: unknown; readonly artifactFor?: unknown;
   readonly awaitAnswer?: unknown; readonly answerLater?: unknown; readonly share?: unknown;
 };
 export type BotRenderCaptureContext = {
@@ -33,13 +33,17 @@ export function createBotArtifactCapture({ dataDir, resolveSession, onCaptured, 
     if (input.artifactKind !== undefined && !artifactKindSchema.safeParse(input.artifactKind).success) {
       throw new BotArtifactError('BOT_ARTIFACT_KIND_INVALID', 400);
     }
+    if (input.artifactFor !== undefined && !artifactRequirementSchema.safeParse(input.artifactFor).success) {
+      throw new BotArtifactError('BOT_ARTIFACT_REQUIREMENT_INVALID', 400);
+    }
+    const categorized = input.artifactKind !== undefined || input.artifactFor !== undefined;
     if (!context.sessionId) {
-      if (input.artifactKind !== undefined) throw new BotArtifactError('BOT_ARTIFACT_SESSION_REQUIRED', 400);
+      if (categorized) throw new BotArtifactError('BOT_ARTIFACT_SESSION_REQUIRED', 400);
       return null;
     }
     const resolved = await resolveSession(context.sessionId);
     if (!resolved) {
-      if (input.artifactKind !== undefined) throw new BotArtifactError('BOT_ARTIFACT_BOT_SESSION_REQUIRED', 403);
+      if (categorized) throw new BotArtifactError('BOT_ARTIFACT_BOT_SESSION_REQUIRED', 403);
       return null;
     }
     const binding = artifactBindingSchema.parse(resolved);
@@ -55,7 +59,8 @@ export function createBotArtifactCapture({ dataDir, resolveSession, onCaptured, 
     context.signal?.throwIfAborted();
     const body = artifactBodySchema.parse(input.body);
     const kind = artifactKindSchema.parse(input.artifactKind ?? 'evidence');
-    const inputDigest = artifactHash(JSON.stringify({ binding, body, kind, title: input.title, interaction }));
+    const requirement = input.artifactFor === undefined ? undefined : artifactRequirementSchema.parse(input.artifactFor);
+    const inputDigest = artifactHash(JSON.stringify({ binding, body, kind, title: input.title, interaction, requirement }));
     const manifest = await store.capture(artifactSessionScope(call.sessionId), { id: artifactIdFor(call), inputDigest }, async () => {
       const assets = await captureArtifactImages(body, {
         directory: binding.directory, temporaryRoot: path.join(dataDir, 'bots', 'artifact-capture-temporary'),
@@ -64,9 +69,10 @@ export function createBotArtifactCapture({ dataDir, resolveSession, onCaptured, 
       if (bytes.length > BOT_ARTIFACT_PAYLOAD_BYTES) throw new BotArtifactError('BOT_ARTIFACT_PAYLOAD_TOO_LARGE', 413);
       const source: BotArtifactMetadata['source'] = { ...call, producer: binding.producer };
       if (context.messageId) source.messageId = artifactText.parse(context.messageId);
-      const metadata = { id: artifactIdFor(call), kind, title: input.title, createdAt: now(),
+      const metadata: BotArtifactMetadata = { id: artifactIdFor(call), kind, title: input.title, createdAt: now(),
         source,
         interaction, incompleteAssets: assets.filter((asset) => asset.status !== 'ready') };
+      if (requirement) metadata.requirement = requirement;
       return { bytes, manifest: artifactManifestSchema.parse({
         version: 1, binding, metadata, inputDigest, payloadDigest: artifactHash(bytes), payloadBytes: bytes.length,
       }) };

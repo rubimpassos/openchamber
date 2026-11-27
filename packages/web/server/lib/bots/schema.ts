@@ -71,9 +71,9 @@ export const createBotItem = ({ id = randomUUID(), botId, source: origin, title,
 });
 
 const nextStates: Readonly<Record<BotItemState, readonly BotItemState[]>> = {
-  queued: ['investigating'], investigating: ['fixing', 'waiting-answer'], 'waiting-answer': ['investigating', 'fixing', 'judging'],
-  fixing: ['proving', 'judging', 'in-review', 'waiting-answer'], proving: ['fixing', 'judging', 'in-review'],
-  judging: ['fixing', 'in-review', 'merging', 'waiting-answer'], 'in-review': ['fixing', 'judging', 'merging'],
+  queued: ['investigating'], investigating: ['fixing', 'waiting-answer', 'done'], 'waiting-answer': ['investigating', 'fixing', 'judging'],
+  fixing: ['proving', 'judging', 'in-review', 'waiting-answer', 'done'], proving: ['fixing', 'judging', 'in-review', 'done'],
+  judging: ['fixing', 'in-review', 'merging', 'waiting-answer', 'done'], 'in-review': ['fixing', 'judging', 'merging'],
   merging: ['judging', 'in-review', 'closing'], closing: ['done'], 'needs-you': ['queued', 'investigating', 'waiting-answer', 'fixing', 'proving', 'judging', 'in-review', 'merging', 'closing'],
   failed: [], stopped: [], done: [],
 };

@@ -10,15 +10,15 @@ const setup = async () => {
   const directory = await fs.mkdtemp('/tmp/opencode/bots-config-');
   directories.push(directory);
   const runtime = createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: directory });
-  return { directory, runtime, config: createBotsConfig({ projectConfigRuntime: runtime }) };
+  return { directory, runtime, config: createBotsConfig({ projectConfigRuntime: runtime, dataDir: directory }) };
 };
 const definition = () => ({ id: 'bugs', name: 'Bugs', mission: 'Fix verified bugs' });
 const photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxioAAAAASUVORK5CYII=';
 
 it.each([['photo', photo], ['removed photo', null], ['legacy definition', undefined]])('preserves the %s when the bot configuration is reopened', async (_label, avatar) => {
-  const { config, runtime } = await setup();
+  const { config, runtime, directory } = await setup();
   await config.update('p', { definitions: [{ ...definition(), avatar }] });
-  const reopened = createBotsConfig({ projectConfigRuntime: runtime });
+  const reopened = createBotsConfig({ projectConfigRuntime: runtime, dataDir: directory });
   expect((await reopened.read('p')).definitions[0].avatar).toBe(avatar);
 });
 
@@ -35,7 +35,7 @@ it.each([
 });
 
 it('defaults old projects and roundtrips all definition fields without accepting user approvals', async () => {
-  const { config, runtime } = await setup();
+  const { config, runtime, directory } = await setup();
   expect(await config.read('p')).toEqual({ concurrency: 2, retentionDays: 90, definitions: [], approvals: {} });
   await runtime.updateSuggestedTasksSection('p', () => ({ enabled: true, future: 'preserved' }));
   const bot = {
@@ -52,8 +52,10 @@ it('defaults old projects and roundtrips all definition fields without accepting
   await config.update('p', input);
   await config.setApproval('p', '.agents/areas/db.md', 'a'.repeat(64));
   await config.update('p', input);
-  const restarted = createBotsConfig({ projectConfigRuntime: runtime });
-  expect(await restarted.read('p')).toEqual({ ...parseConfigEdit(input), approvals: { '.agents/areas/db.md': 'a'.repeat(64) } });
+  const restarted = createBotsConfig({ projectConfigRuntime: runtime, dataDir: directory });
+  const edit = parseConfigEdit(input);
+  expect(await restarted.read('p')).toEqual({ ...edit, definitions: edit.definitions.map((entry) => ({ ...entry, projects: { p: 'merge' } })),
+    approvals: { '.agents/areas/db.md': 'a'.repeat(64) } });
   expect(await runtime.readSuggestedTasksSection('p')).toEqual({ enabled: true, future: 'preserved' });
   await config.setApproval('p', '.agents/areas/db.md', null);
   expect((await config.read('p')).approvals).toEqual({});
@@ -61,7 +63,7 @@ it('defaults old projects and roundtrips all definition fields without accepting
 
 it('isolates approval and bots writes under the shared project lock', async () => {
   const { directory, config, runtime } = await setup();
-  const second = createBotsConfig({ projectConfigRuntime: createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: directory }) });
+  const second = createBotsConfig({ dataDir: directory, projectConfigRuntime: createProjectConfigRuntime({ fsPromises: fs, path, projectsDirPath: directory }) });
   await Promise.all([
     config.update('p', { definitions: [definition()] }),
     second.setApproval('p', '.openchamber/people.json', 'b'.repeat(64)),
@@ -106,4 +108,69 @@ it('rejects malformed and duplicate Discord channels without discarding persiste
     await expect(config.update('p', { definitions: [{ ...definition(), discord: { channels } }] })).rejects.toThrow();
   }
   expect((await config.read('p')).definitions[0].discord).toEqual(discord);
+});
+
+it('migrates a project\'s legacy bots into the global list with full access to that project', async () => {
+  // Given a project file written before bots became global, and another project's access to the same bot.
+  const { config, runtime } = await setup();
+  await config.saveDefinitions([{ ...definition(), projects: { q: 'read' } }], 0);
+  await runtime.updateBotsSection('p', () => ({ concurrency: 3, definitions: [definition()] }));
+
+  // When the project is read.
+  const read = await config.read('p');
+
+  // Then the same bot gained full access here and left the project file.
+  expect(read.definitions).toEqual([expect.objectContaining({ id: 'bugs', projects: { q: 'read', p: 'merge' } })]);
+  expect(read).toMatchObject({ concurrency: 3, retentionDays: 90, approvals: {} });
+  expect(await runtime.readBotsSection('p')).toEqual({ concurrency: 3, retentionDays: 90, approvals: {}, definitions: [] });
+});
+
+it('shows each project only the bots with access to it and refuses a stale global write', async () => {
+  // Given one bot that reads project a and another with full access to b.
+  const { config } = await setup();
+  const saved = await config.saveDefinitions([{ ...definition(), projects: { a: 'read' } }, { ...definition(), id: 'perf', projects: { b: 'merge' } }], 0);
+
+  // When each project is read and an older revision is written.
+  const a = await config.read('a');
+  const b = await config.read('b');
+  const stale = config.saveDefinitions([], 0);
+
+  // Then the views differ by access, and the newer list survives.
+  expect(a.definitions.map((bot) => [bot.id, bot.projects.a])).toEqual([['bugs', 'read']]);
+  expect(b.definitions.map((bot) => bot.id)).toEqual(['perf']);
+  await expect(stale).rejects.toMatchObject({ code: 'BOT_DEFINITIONS_CHANGED' });
+  expect((await config.readDefinitions([])).definitions).toEqual(saved.definitions);
+});
+
+it('edits one project\'s bots without touching their access to other projects', async () => {
+  // Given a bot that only reads project a and has full access to b.
+  const { config } = await setup();
+  await config.saveDefinitions([{ ...definition(), projects: { a: 'read', b: 'merge' } }], 0);
+
+  // When project a renames it, and project b's list drops it.
+  await config.update('a', { definitions: [{ ...definition(), name: 'Renamed' }] });
+  await config.update('b', { definitions: [] });
+
+  // Then the rename is global, a keeps read access, and only b lost access.
+  expect((await config.readDefinitions([])).definitions).toEqual([expect.objectContaining({ name: 'Renamed', projects: { a: 'read' } })]);
+});
+
+it('keeps a project\'s differing legacy bot in that project when another project already migrated the same ID', async () => {
+  // Given two projects whose legacy files define different bots under one ID.
+  const { config, runtime } = await setup();
+  await runtime.updateBotsSection('a', () => ({ definitions: [{ ...definition(), mission: 'Fix project A bugs' }] }));
+  await runtime.updateBotsSection('b', () => ({ definitions: [{ ...definition(), mission: 'Fix project B bugs' }] }));
+
+  // When both are read, b twice.
+  const a = await config.read('a');
+  const b = await config.read('b');
+  const { revision } = await config.readDefinitions([]);
+  const again = await config.read('b');
+
+  // Then each project keeps its own mission, b's copy stays local, and repeated reads write nothing.
+  expect(a.definitions.map((bot) => bot.mission)).toEqual(['Fix project A bugs']);
+  expect(b.definitions.map((bot) => [bot.mission, bot.projects])).toEqual([['Fix project B bugs', { b: 'merge' }]]);
+  expect(again).toEqual(b);
+  expect((await config.readDefinitions([])).revision).toBe(revision);
+  expect((await config.readDefinitions([])).definitions.map((bot) => [bot.mission, bot.projects])).toEqual([['Fix project A bugs', { a: 'merge' }]]);
 });

@@ -33,7 +33,7 @@ export type SessionSidebarWorkEntry =
   | { kind: 'group'; groupKey: string; projectId: string; group: SessionGroup }
   | { kind: 'draft'; draft: SessionDraft; projectId: string };
 
-export type SessionSidebarActivityKey = 'priority' | 'pages' | 'pinned' | 'work' | 'chats' | 'timeline' | `section:${string}`;
+export type SessionSidebarActivityKey = 'priority' | 'pages' | 'pinned' | 'work' | 'chats' | 'bots' | 'timeline' | `section:${string}`;
 
 export const sidebarSectionActivityKey = (id: string): `section:${string}` => `section:${id}`;
 
@@ -48,7 +48,7 @@ export type SessionSidebarBlock =
 
 const DEFAULT_BLOCKS: readonly SessionSidebarBlock[] = [{ kind: 'chats' }, { kind: 'pinned' }, { kind: 'work' }, { kind: 'projects' }];
 
-export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['priority', 'pages', 'chats', 'pinned', 'work', 'timeline'];
+export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['priority', 'pages', 'chats', 'pinned', 'bots', 'work', 'timeline'];
 const PINNED_ZONE_KEY = 'activity:pinned';
 export const isPinnedZoneRowKey = (rowKey: string): boolean => rowKey.startsWith(`${PINNED_ZONE_KEY}:`);
 export const PROJECTS_CAPTION_COLLAPSE_KEY = 'projects';
@@ -71,7 +71,7 @@ export type SessionSidebarOwnerAuthority = {
 type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[] };
 
 export type SessionSidebarRow =
-  | (RowBase & { kind: 'bots-zone'; count: number })
+  | (RowBase & { kind: 'bots-zone'; collapsed: boolean })
   | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; label?: string; preview?: boolean; loading?: boolean })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean })
   | (RowBase & { kind: 'caption'; caption: 'projects' | `section:${string}`; collapsed: boolean; label?: string; preview?: boolean })
@@ -125,7 +125,7 @@ export type SessionSidebarRowModelArgs = {
   chatGroup: SessionGroup | null;
   archivedChatGroup?: SessionGroup | null;
   pinnedItems?: readonly SessionSidebarActivityItem[];
-  botsAttentionCount?: number;
+  botsSection?: boolean;
   /** Priority sessions, listed above every configurable section. */
   priorityItems?: readonly SessionSidebarActivityItem[];
   pinnedWorktrees?: readonly SessionSidebarWorkEntry[];
@@ -1166,12 +1166,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     appendSection('archived', archived, archived.length);
   };
 
+  const botsRowCount = !search && args.botsSection ? 1 : 0;
   const appendBots = (): void => {
-    const count = args.botsAttentionCount ?? 0;
-    if (count > 0) push({ kind: 'bots-zone', key: `bots:${count}`, count, estimateSize: HEADER_ESTIMATE + count * 32 });
-  };
+    if (!botsRowCount) return;
+    stickyHeaders.push(Object.freeze({ rowIndex: rows.length, kind: 'activity', id: 'bots' }));
+    push({ kind: 'bots-zone', key: 'activity:bots', estimateSize: SECTION_HEADER_ESTIMATE, collapsed: args.collapsedActivities.has('bots') }); };
   if (search) {
-    appendBots();
     appendFlatSearch();
   } else {
     const priorityItems = args.priorityItems ?? [];
@@ -1196,7 +1196,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   }
 
-  if ((!search || !args.searchIncomplete) && rows.length === pageRowCount) {
+  if ((!search || !args.searchIncomplete) && rows.length === pageRowCount + botsRowCount) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });
   }
   const guides = computeSessionTreeGuides(rows.map(treeLevelOf));

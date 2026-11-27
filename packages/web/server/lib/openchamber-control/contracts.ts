@@ -107,6 +107,7 @@ export interface ControlInput {
   last?: unknown;
   html?: unknown;
   readonly artifactKind?: unknown;
+  readonly artifactFor?: unknown;
   ui?: unknown;
   awaitAnswer?: unknown;
   answerLater?: unknown;

@@ -75,6 +75,9 @@ export const createRuntimeTools = (
       if (!operation) throw error('BOT_ACTION_UNSUPPORTED', 400);
       const request = parseToolInput(z.object({ operationId: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
         body: ['pr.comment', 'jira.comment', 'discord.send'].includes(action) ? text : text.optional() }).strict(), input);
+      const service = operation.startsWith('jira.') ? 'jira' : operation.startsWith('discord.') ? 'discord' : 'github';
+      if (!bot.identity[service]) throw Object.assign(error('BOT_CONNECTOR_MISSING', 400), { state: 'refused',
+        message: `This bot has no ${service === 'github' ? 'GitHub' : service === 'jira' ? 'Jira' : 'Discord'} connector, so it cannot ${action}. Continue without it; the coordinator delivers the result.` });
       const key = action === 'pr.open' ? `${itemId}:pr` : `${itemId}:tool:${request.operationId}`;
       const execution = await journal.read(projectId, itemId);
       const rawPrevious = execution.operations[key];

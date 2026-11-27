@@ -19,7 +19,7 @@ import { hasMessage, isNonEmptyString, isOpenChamberMetadata, isSessionMetadata,
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 import { LEAD_GUIDANCE, leadBriefEntry } from '../session-lead/guidance.js';
 import { readLead } from '../session-lead/metadata.js';
-import { BOT_LEAD_GUIDANCE, isBotConversationMetadata } from '../session-lead/bot-guidance.js';
+import { BOT_LEAD_GUIDANCE, BOT_MAIN_GUIDANCE, isBotConversationMetadata, isBotMainMetadata } from '../session-lead/bot-guidance.js';
 
 const PINS_METADATA_KEY = 'project_context_pins';
 
@@ -444,8 +444,10 @@ export const createSessionKnowledgeRuntime = (dependencies: SessionKnowledgeDepe
         extensions: await readExtensionInstructions(directory).catch(() => null) ?? undefined,
         lead: await readLeadContext(sessionId, session),
       }, options);
-      if (isBotConversationMetadata(session?.metadata)) {
-        entries[KNOWLEDGE_ENTRY_KEYS.lead] = BOT_LEAD_GUIDANCE;
+      const botGuidance = isBotMainMetadata(session?.metadata) ? BOT_MAIN_GUIDANCE
+        : isBotConversationMetadata(session?.metadata) ? BOT_LEAD_GUIDANCE : null;
+      if (botGuidance) {
+        entries[KNOWLEDGE_ENTRY_KEYS.lead] = botGuidance;
         entries[KNOWLEDGE_ENTRY_KEYS.guidance] = buildGuidance({ ...collected, linking: false, naming: false, secrets: false, workflows: false });
       }
       try {

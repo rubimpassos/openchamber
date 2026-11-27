@@ -11,6 +11,8 @@ export const MOBILE_ACTIVE_ROW_CLASS = 'shadow-[inset_0_0_0_100vmax_var(--intera
 
 export const MOBILE_ACTIVE_TITLE_CLASS = 'text-interactive-selection-foreground';
 
+export const MOBILE_ONE_LINE_ROW_CLASS = 'flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
+
 const NO_TOUCH_FLOOR: React.CSSProperties = { touchAction: 'manipulation', minHeight: 0, minWidth: 0 };
 
 export const MobileRowChevron: React.FC<{

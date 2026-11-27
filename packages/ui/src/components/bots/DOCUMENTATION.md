@@ -4,8 +4,8 @@
 
 This module owns the project Bots page: bot identity and navigation, editable
 definitions, demand admission, an item's conversation workspace and work context,
-archive, repository-policy review, identities, and the attention-only sidebar
-section. The chat column (`components/chat`) owns the transcript, composer and
+archive, repository-policy review, identities, the sidebar's Bots section and
+the Bot panel of the context zone. The chat column (`components/chat`) owns the transcript, composer and
 lead digest shown inside the workspace. `BotRenderArtifactView` draws a retained
 page in the work record with the chat's own page renderers and the read the
 transcript uses (`components/chat/message/parts/DOCUMENTATION.md`, `ShownPage.tsx`);
@@ -31,9 +31,10 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
 - An ended or archived item without a conversation opens as its record
   (`BotItemDetail`), with stage links bound to validated addresses. With a
   conversation it opens read-only.
-- Chat messages are ordinary input to the conversation. Only the answer field in
-  Work answers the coordinator, naming `questionKey` when the detail reported one.
-  Resume and Stop stay explicit controls there.
+- Chat messages are ordinary input to the conversation. The page has no answer
+  field: the bot asks its questions in its chat with the session's own question
+  tools and passes the answer to the coordinator (`item.answer`). Resume and Stop
+  stay explicit controls in Work and in the Bot panel.
 - The workspace uses the native pinned chat column with `leadDigest`. It adds no
   transcript, composer, model, attachment, permission or render code of its own.
 - A retained page in the record is the document the conversation draws for the
@@ -64,13 +65,14 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
   the dialog closes, and the read is asked again only after the close has
   completed, back in preparation, so neither the loading row nor the new answer
   resizes a dialog on screen.
-- Evidence and Decisions show recorded proof and verdict above the bot's pages of
-  that kind. The page list depends on `id`, `kind`, `title` and `createdAt` only.
-  It is read while one of those tabs is open, and a failed read never reads as
-  an empty list. The failed list and a failed page say which of three causes it
-  was (the server could not be reached, the server is not ready, anything else)
-  in translated text; a status code, an error code or a message from the
-  response or the transport is never shown.
+- Artifacts shows the bot's required artifacts (`definition.artifacts`), each
+  presented or pending by the `requirement` of a page, then every page the bot
+  drew, of either kind, in one list shared by Work's record and the Bot panel.
+  It is read while shown, and a failed read never reads as an empty list. The
+  failed list and a failed page say which of three causes it was (the server
+  could not be reached, the server is not ready, anything else) in translated
+  text; a status code, an error code or a message from the response or the
+  transport is never shown.
 - A retained page remains readable when its canonical answer projection fails.
   `pageError` disables its answer controls, including while the live index still
   reports a waiting call.
@@ -126,7 +128,44 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
   the exact definition for managed scheduled rows. Runtime switches retire the
   target, and main-page transitions close Bots atomically.
 
+- Definitions are global (`fetchBotDefinitions`/`saveBotDefinitions`, written
+  whole at their revision; `BOT_DEFINITIONS_CHANGED` keeps the draft and reloads).
+  The project page keeps items, audit, rules and archive for its project and
+  writes only `{ concurrency, retentionDays }` to the project config. The editor
+  edits project access (Projects), connectors in one tab (own identity, which
+  acts as the bot, and MCP rules, which act as whoever configured the MCP, each
+  saying what the bot does without it) and the required-artifacts list (slug IDs
+  kept stable once created). Request errors are translated sentences per code.
+- The sidebar's Bots section (`BotsSidebarSection`, on the phone
+  `apps/mobileSidebar/MobileBotsSection`) lists the runtime's bots with each
+  bot's main chat and item conversations; `useBotsSidebar` owns its reads, the
+  session sidebar owns its place and fold state (`bots`, `bots:<botId>`). It reads
+  on showing, on `bots-changed` and `event-stream-ready`, and when the Bots page
+  closes; nothing polls. 501, `bots_unsupported` and 404 hide it; a failed read
+  shows an error row with retry. Its + opens a new bot in the editor
+  (`botsPageTarget.newBot`). A chat row opens the session like a sidebar session
+  row and never opens the Bots page; a taken-over item opens its released
+  session in the item's worktree.
+- The Bot panel (`BotPanel`, context mode `bot`) is offered for a bot session
+  (main chat or item conversation) and opens once by itself per directory. It
+  declares its width (340px, 300 to 480) and keeps it per panel. Home groups
+  needs-you work (reason as a sentence, the pending question, Open chat, Resume,
+  Stop) and working items (Open chat, Take over) and the schedule; Artifacts is
+  the shared list above.
+
 ## Decisions
+
+### Why the sidebar reads per bot and not per project
+
+The section is global, and `fetchBotChats` already returns one bot's work across
+every project it may access, so no per-project fan-out is needed.
+
+### Why questions go through the bot's chat and not a page field
+
+The session already has question, form and page tools with their own answer
+lifecycle. A second answer field duplicated that and could answer for a person
+the chat never asked; the coordinator now accepts the answer the chat relays
+with the exact question key.
 
 ### Why the project picker moved into the bot navigation
 
@@ -205,9 +244,10 @@ navigation requires the server-projected address for each session.
 
 ### Why visit-local resources and not a Bots store
 
-Only the shown project needs a full read. Sidebar attention already has durable
-server notifications and a live blocking-request index, so another global cache
-would duplicate authority and require another reset/reconciliation protocol.
+Only the shown project needs a full read, and the sidebar and the Bot panel each
+read one bot's work while shown. Durable notifications and the control stream
+already say when to read again, so another global cache would duplicate authority
+and require another reset/reconciliation protocol.
 
 ### Why explicit content review and not fingerprint-only approval
 
@@ -249,6 +289,6 @@ the workspace: a ready conversation with its digest, sending, and an opened page
 need the running app. Combined runtime QA still needs the coordinator's server:
 create/edit a bot and source item, review and approve policy content, create and
 replace redacted identities, answer/stop/resume an item, navigate stage sessions,
-and observe sidebar attention appear and clear. Verify desktop, narrow mobile,
+and observe the sidebar's Bots section and the Bot panel follow item changes. Verify desktop, narrow mobile,
 RTL, both themes, and a runtime switch with a mounted secret form. Unit tests
 and per-file diagnostics do not establish that runtime or visual evidence.

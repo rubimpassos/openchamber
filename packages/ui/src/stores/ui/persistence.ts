@@ -279,6 +279,7 @@ export const uiStorePersistOptions = {
     contextEditorVisible: state.contextEditorVisible,
     contextEditorTreeWidth: state.contextEditorTreeWidth,
     contextZoneSizes: state.contextZoneSizes,
+    contextPanelWidths: state.contextPanelWidths,
     contextZoneExpandedChatSizes: state.contextZoneExpandedChatSizes,
     workStatusExpandedSections: state.workStatusExpandedSections,
     messageQueueExpanded: state.messageQueueExpanded,

@@ -32,7 +32,7 @@ workflow's agent: any session with a `parentID`) is left out, by title and by
 message: it is part of its parent, and such sessions outnumber the user's own.
 Project and folder names are not searched: every row already shows its
 project, and a project's name would list every conversation in it. No zone, project, worktree or folder row is drawn while a
-search is active, except matching Bots attention above the flat results. The browsing tree is not recomputed per query: clearing
+search is active, the Bots section included. The browsing tree is not recomputed per query: clearing
 the field shows the tree exactly as it was. Each row leads with the mark of
 where the conversation lives (its project's icon, a folder for a directory
 outside every project, a chat bubble for a chat), ends with how long ago it
@@ -234,13 +234,21 @@ archive bucket containing top-level sessions only. Restoring a root restores
 its archived descendants through the shared action. Web, Electron, hosted mobile
 and Capacitor keep their existing Chats and Archive views.
 
-An attention-only Bots zone sits immediately before the arranged In work
-section, before Projects when In work is hidden, or above the configured
-sections when neither exists. Its count and rows apply the same search query
-to live blocking bot sessions and unresolved server bot notifications; with
-neither matching it disappears. Bot sessions and their descendants stay out of
-ordinary project, chat, pinned, In work and custom-section lists on desktop and
-mobile. Membership and attention contracts are in
+The Bots section sits immediately before the arranged In work section, before
+Projects when In work is hidden, or above the configured sections when neither
+exists. It lists the runtime's bots, each with what its work needs ("1 needs
+you · 2 working"), and an opened bot lists its main chat and the conversations
+of its items; a click opens the conversation as a session. The row model gives
+it one row (`bots-zone`) while there are bots or a failed read of them to show:
+`SessionProjectCollection` reads the bots (`useBotsSidebar`) and the row draws
+them, on the desktop with `BotsSidebarSection` and on the phone with
+`MobileBotsSection`. The section folds like a zone (`collapsedActivities`,
+key `bots`, so Collapse all and Expand all cover it) and its header holds at
+the top of the list like a zone's; a bot's open state is in `expandedParents`
+(`bots:<botId>`). It does not count as content: a sidebar with bots and nothing
+else still shows its empty state. Bot sessions and their descendants stay out
+of ordinary project, chat, pinned, In work and custom-section lists on desktop
+and mobile. Membership contracts are in
 `packages/ui/src/components/bots/DOCUMENTATION.md`.
 
 A project lists its worktree works among the works of its root, not in a
@@ -749,7 +757,7 @@ the same Mark all as read.
 - Zone collapse state lives in `useSessionProjectViewState` next to project
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
   display menu's Collapse all / Expand all set every project and the zones
-  (`SIDEBAR_ACTIVITY_KEYS`: Pages, Chats, Pinned, In work and the list by time)
+  (`SIDEBAR_ACTIVITY_KEYS`: Pages, Chats, Pinned, Bots, In work and the list by time)
   together. Session folders keep their own collapse state. Project collapse is
   the instance's (`projects[].sidebarCollapsed`), mirrored into one local key
   (`oc.sessions.projectCollapse`) per browser origin. After an instance switch
@@ -1643,12 +1651,24 @@ hover, keyboard focus, and always-visible action buttons move them left without 
 
 ## Decisions
 
-### Why Bots attention follows In work outside saved section order
+### Why Bots follows In work outside saved section order
 
-Anchoring transient attention before In work preserves Bots placement and every
-saved section's order. The fallback keeps attention reachable when that section
-is hidden. Search keeps matching attention above the flat conversation results;
-bot sessions and their descendants remain excluded from those ordinary results.
+Bots is not one of the saved sections: it shows only on an instance that has
+bots, and a saved order that named it would have to be migrated and synced to
+clients that do not know it. Anchoring it before In work keeps its place and
+every saved section's order; the fallback keeps it reachable when In work is
+hidden. A search draws no zone, so the section steps aside too, and bot
+sessions and their descendants stay out of the flat results.
+
+### Why the Bots section is one row and not rows of the row model
+
+A bot's chats come from the bots server, not from the session collection the
+row model projects: they have no session record, lineage, folder or selection
+scope. Rows of their own would have needed a second kind of session row in the
+model, both renderers, the virtualizer's size keys and the selection order.
+One measured row keeps the model unaware of bots. The cost is that opening a
+bot grows the row in place without the disclosure animation the other rows
+have.
 
 ### Why merged cleanup asks the host whether a worktree is busy
 

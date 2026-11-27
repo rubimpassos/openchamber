@@ -4,6 +4,7 @@ import { botInputDigest } from '../effects.js';
 import { conversationCaptureSchema, conversationSelectionSchema, conversationNativeSchema } from '../conversation-contract.js';
 import type { BotConversationExecution, ConversationTarget } from '../conversation-contract.js';
 import { TERMINAL_ITEM_STATES } from '../schema.js';
+import { waitExplanation } from '../wait-explanations.js';
 import { runtimeError as error } from './errors.js';
 import type { RuntimeContext } from './context.js';
 import type { createRuntimeShared } from './shared.js';
@@ -109,8 +110,11 @@ export function createRuntimeConversations(context: RuntimeContext, execution: B
     const item = await itemFor(projectId, itemId);
     if (!item.conversation) return;
     const saved = await journal.read(projectId, itemId);
+    const pending = saved.data.pendingQuestion ? saved.data.questions?.[saved.data.pendingQuestion] : undefined;
     const snapshot = { item: { id: item.id, botId: item.botId, source: item.source, title: item.title, description: item.description },
-      mission: saved.data.conversationCapture?.bot.mission, state: item.state, wait: item.wait, questionKey: saved.data.pendingQuestion ?? null,
+      mission: saved.data.conversationCapture?.bot.mission, state: item.state, wait: item.wait,
+      waitExplanation: item.wait ? waitExplanation(item.wait.reason) : null,
+      questionKey: saved.data.pendingQuestion ?? null, question: pending?.input.questions ?? null,
       evidence: item.evidence, proof: item.proof, judgment: item.judgment, pr: item.pr,
       sessions: item.sessions, reports: saved.data.outcomes ?? {} };
     const serialized = JSON.stringify(snapshot);

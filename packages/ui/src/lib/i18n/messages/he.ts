@@ -2,6 +2,9 @@ import type { I18nDictionary } from '../store';
 import { settingsDict } from './he.settings';
 import { botsI18n } from './bots.i18n';
 import { botWorkspaceI18n } from './bot-workspace.i18n';
+import { botSidebarI18n } from './bot-sidebar.i18n';
+import { botPanelI18n } from './bot-panel.i18n';
+import { botConfigI18n } from './bot-config.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -4065,6 +4068,9 @@ export const dict: I18nDictionary = {
   ...selectionApprovalI18n.he,
   ...botsI18n.he,
   ...botWorkspaceI18n.he,
+  ...botSidebarI18n.he,
+  ...botPanelI18n.he,
+  ...botConfigI18n.he,
   ...linearIssuePickerI18n.he,
   ...referencePickerI18n.he,
   ...prStacksI18n.he,

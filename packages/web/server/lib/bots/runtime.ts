@@ -15,9 +15,9 @@ import { createRuntimeProjectOwner } from './runtime/project-owner.js';
 import { createRuntimeJournal } from './runtime/journal.js';
 import { hasSourceControlStringCode as hasSourceControlErrorCode } from '../source-control/input-guards.js';
 import type { BotItem, BotItemState } from './schema.js';
+import type { BotDefinitionInput } from './config.js';
 import type { RuntimeOptions, RuntimeBot } from './runtime/contracts.js';
 import type { RuntimeContext } from './runtime/context.js';
-import { readBotsConfig } from './config.js';
 import { createRuntimePublication } from './runtime/publication.js';
 import { createRuntimeShared } from './runtime/shared.js';
 import { createRuntimeServiceEffects } from './runtime/service-effects.js';
@@ -31,10 +31,12 @@ import { createRuntimeTools } from './runtime/tools.js';
 import { createRuntimeConversations } from './runtime/conversations.js';
 import type { ConversationMessage } from './runtime/conversations.js';
 import { createRuntimeItemDetail } from './runtime/item-detail.js';
+import { createRuntimeBotWork } from './runtime/bot-work.js';
+import type { RuntimeToolCall } from './runtime/contracts.js';
 
 const activeStates: ReadonlySet<BotItemState> = new Set(['investigating', 'fixing', 'proving', 'judging', 'merging', 'closing']);
 
-export const createBotsRuntime = ({ config, store, resolveProject, listProjects, stages, conversations: conversationExecution, worktrees, services, serviceContext, runProof, pullRequests, sources, attention, notices, questions, scheduler, events, readPolicy = readRepositoryPolicy, now = Date.now }: RuntimeOptions) => {
+export const createBotsRuntime = ({ config, store, resolveProject, listProjects, stages, conversations: conversationExecution, worktrees, services, serviceContext, runProof, pullRequests, sources, attention, notices, questions, scheduler, events, presentedArtifacts, readPolicy = readRepositoryPolicy, now = Date.now }: RuntimeOptions) => {
   const required = {
     'config.read': config?.read, 'config.update': config?.update,
     'store.read': store?.read, 'store.update': store?.update, 'store.archive': store?.archive, 'store.readArchive': store?.readArchive, 'store.filePathFor': store?.filePathFor,
@@ -52,7 +54,7 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
     'attention.sync': attention?.sync, 'notices.deliver': notices?.deliver,
     'questions.ask': questions?.ask, 'questions.retry': questions?.retry, 'questions.answered': questions?.answered,
     'scheduler.sync': scheduler?.sync, 'scheduler.remove': scheduler?.remove,
-    'events.publish': events?.publish, 'events.subscribe': events?.subscribe,
+    'events.publish': events?.publish, 'events.subscribe': events?.subscribe, presentedArtifacts,
   };
   for (const [name, value] of Object.entries(required)) if (!(value instanceof Function)) throw new TypeError(`${name} is required by the bot runtime`);
   const rawJournal = createBotExecutionStore({ store });
@@ -64,7 +66,7 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
   let stopped = false;
   let releaseEvents: (() => void) | null = null;
   const context: RuntimeContext = Object.freeze({
-    config, store, resolveProject, listProjects, stages, worktrees, services, serviceContext, runProof, pullRequests, sources, attention, notices, questions, events,
+    config, store, resolveProject, listProjects, stages, worktrees, services, serviceContext, runProof, pullRequests, sources, attention, notices, questions, events, presentedArtifacts,
     readPolicy, now, journal, effects, ownProject: createRuntimeProjectOwner(store), ...createRuntimeItemState({ store, attention, events }),
     dirty, activeProofs, isStopped: () => stopped,
   });
@@ -85,7 +87,7 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
   const advance = createRuntimeProgression(context, { shared, runStage, publication, mergeAdmission, checkout, feedback, controls });
   const { handleTool, readToolOutcome } = createRuntimeTools(context, { shared, external, publication, mergeAdmission, checkout, pump });
   const { receiveFeedback, answer } = feedback;
-  const { resume, stopItem, onSessionEvent, recordUsage } = controls;
+  const { resume, stopItem, takeOverItem, onSessionEvent, recordUsage } = controls;
 
   function pump(projectId: string): Promise<void> {
     if (stopped) return Promise.resolve();
@@ -156,7 +158,8 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
     await projectFor(projectId);
     const settings = await config.read(projectId);
     const bot = settings.definitions.find((entry) => entry.id === botId);
-    if (!bot?.enabled) throw error('BOT_NOT_ENABLED');
+    if (!bot) throw error('BOT_PROJECT_ACCESS_REQUIRED', 403);
+    if (!bot.enabled) throw error('BOT_NOT_ENABLED');
     const candidate = sourceCandidateSchema.parse(raw);
     const archived = await store.readArchive(projectId);
     const existingArchive = archived.find((entry) => entry.botId === botId && entry.source.kind === candidate.source.kind && entry.source.id === candidate.source.id);
@@ -170,11 +173,18 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
     });
     const item = snapshot?.items.find((entry) => entry.id === id) ?? snapshot?.items.find((entry) => entry.botId === botId && entry.source.kind === candidate.source.kind && entry.source.id === candidate.source.id);
     if (!item) throw error('BOT_ITEM_NOT_FOUND', 404);
-    await conversations.ensureOwned(projectId, item.id);
+    await conversations.ensureOwned(projectId, item.id).catch(() => undefined);
     const admitted = await itemFor(projectId, item.id);
     events.publish({ type: 'bot.item.changed', projectId, item: admitted });
     return admitted;
   }, { waitMs: 10_000 });
+  const botWork = createRuntimeBotWork(context, { answer, admit, pump });
+  const handleLeadOrWorkerTool = async (call: RuntimeToolCall) => {
+    const target = sessionIndex.get(call.sessionId);
+    if (target?.role !== 'conversation') return handleTool(call);
+    if (call.action !== 'item.answer') throw error('BOT_ACTION_UNSUPPORTED', 400);
+    return botWork.answerFromConversation(target.projectId, target.itemId, call.input);
+  };
   const runScheduled = async (projectId: string, botId: string, occurrence: string) => {
     const project = await projectFor(projectId);
     const bot = (await config.read(projectId)).definitions.find((entry) => entry.id === botId);
@@ -194,17 +204,42 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
   const saveConfig = async (projectId: string, input: Parameters<RuntimeOptions['config']['update']>[1]) => {
     await projectFor(projectId);
     const previous = await config.read(projectId);
-    const updated = readBotsConfig(await config.update(projectId, input));
-    if (!updated.ok) throw error('BOT_CONFIG_INVALID');
-    const settings = updated.config;
+    await config.update(projectId, input);
+    const settings = await config.read(projectId);
     await scheduler.sync(projectId, settings.definitions.map(botTaskFor));
     for (const bot of previous.definitions) if (!settings.definitions.some((entry) => entry.id === bot.id)) await scheduler.remove(projectId, bot.id);
     await pump(projectId);
     return { config: settings };
   };
+  const projectIds = async () => (await listProjects()).map((project) => project.id);
+  const getDefinitions = async () => {
+    const { revision, definitions } = await config.readDefinitions(await projectIds());
+    return { revision, definitions, presets: botPresets() };
+  };
+  const saveDefinitions = async (input: BotDefinitionInput[], expectedRevision: number) => {
+    const ids = await projectIds();
+    await config.readDefinitions(ids);
+    const saved = await config.saveDefinitions(input, expectedRevision);
+    for (const projectId of ids) {
+      const scoped = saved.definitions.filter((bot) => bot.projects[projectId] !== undefined);
+      const before = saved.previous.filter((bot) => bot.projects[projectId] !== undefined);
+      if (!scoped.length && !before.length) continue;
+      try {
+        await scheduler.sync(projectId, scoped.map(botTaskFor));
+        for (const bot of before) if (!scoped.some((entry) => entry.id === bot.id)) await scheduler.remove(projectId, bot.id);
+        await pump(projectId);
+      } catch (failure) {
+        events.publish({ type: 'bot.runtime.error', projectId, code: hasSourceControlErrorCode(failure) ? failure.code : 'BOT_SCHEDULE_SYNC_FAILED' });
+      }
+      events.publish({ type: 'bot.config.changed', projectId });
+    }
+    return { revision: saved.revision, definitions: saved.definitions, presets: botPresets() };
+  };
 
   return {
-    admit, pump, runScheduled, detail, saveConfig, answer, resume, stopItem, receiveFeedback, onSessionEvent, handleTool, readToolOutcome, recordUsage,
+    admit, pump, runScheduled, detail, saveConfig, getDefinitions, saveDefinitions, answer, resume, stopItem, takeOverItem, receiveFeedback, onSessionEvent,
+    handleTool: handleLeadOrWorkerTool, readToolOutcome, recordUsage,
+    botWork: botWork.work, handleMainTool: botWork.handleMainTool,
     ensureConversation: conversations.ensure,
     syncConversationProgress: conversations.progress,
     assertConversationAdmission: conversations.assertAdmission,

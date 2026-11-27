@@ -18,9 +18,16 @@ type BuiltInContextSurfaceId =
   | 'workflows'
   | 'subagents'
   | 'chat'
-  | 'pages';
+  | 'pages'
+  | 'bot';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
+
+export type ContextSurfaceWidth = {
+  defaultWidth: number;
+  minWidth: number;
+  maxWidth: number;
+};
 
 export type ContextSurfaceDescriptor = {
   id: ContextSurfaceId;
@@ -31,6 +38,7 @@ export type ContextSurfaceDescriptor = {
   labelKey: I18nKey;
   availability: 'always' | 'has-content';
   descriptionKey: I18nKey;
+  width?: ContextSurfaceWidth;
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
@@ -138,7 +146,24 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     labelKey: 'contextPanel.mode.pages',
     availability: 'has-content',
   },
+  {
+    id: 'bot',
+    descriptionKey: 'bots.panel.description',
+    mode: 'bot',
+    icon: 'robot-2',
+    labelKey: 'bots.panel.title',
+    availability: 'has-content',
+    width: { defaultWidth: 340, minWidth: 300, maxWidth: 480 },
+  },
 ];
+
+const DECLARED_WIDTHS = new Map(CONTEXT_SURFACES.flatMap((surface) => (surface.width ? [[surface.mode, surface.width] as const] : [])));
+
+export const declaredSurfaceWidth = (mode: ContextPanelMode): ContextSurfaceWidth | null => DECLARED_WIDTHS.get(mode) ?? null;
+
+export const clampSurfaceWidth = (limits: ContextSurfaceWidth, width: number): number => (
+  Number.isFinite(width) ? Math.min(limits.maxWidth, Math.max(limits.minWidth, Math.round(width))) : limits.defaultWidth
+);
 
 export const WALKTHROUGH_MIN_WIDTH = 768;
 
@@ -158,6 +183,7 @@ const BUILT_IN_SURFACE_GROUPS = {
   subagents: 'workspace',
   chat: 'workspace',
   pages: 'workspace',
+  bot: 'workspace',
 } satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;
 
 const isBuiltInSurfaceId = (id: ContextSurfaceId): id is BuiltInContextSurfaceId => Object.hasOwn(BUILT_IN_SURFACE_GROUPS, id);

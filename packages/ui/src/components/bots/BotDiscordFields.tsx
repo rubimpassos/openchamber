@@ -1,4 +1,4 @@
-import { SettingsControlGroup, SettingsSection, SettingsStackedField, SettingsTwoColumn } from '@/components/sections/shared/SettingsSection';
+import { SettingsControlGroup, SettingsStackedField, SettingsTwoColumn } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { BotDefinition } from '@/lib/bots/config';
@@ -9,7 +9,7 @@ export function BotDiscordFields({ value, onChange }: {
   readonly onChange: (discord: BotDefinition['discord']) => void;
 }) {
   const { t } = useI18n();
-  return <SettingsSection title={t('bots.discordChannels')} info={t('bots.discordChannelsHint')} contentClassName="space-y-4">
+  return <SettingsControlGroup title={t('bots.discordChannels')} info={t('bots.discordChannelsHint')} contentClassName="space-y-4">
     {value.channels.map((channel, index) => <SettingsControlGroup key={index} title={t('bots.discordChannel', { number: index + 1 })} contentClassName="space-y-3">
       <SettingsTwoColumn>
         <SettingsStackedField label={t('bots.discordGuildId')}>
@@ -24,5 +24,5 @@ export function BotDiscordFields({ value, onChange }: {
       <Button variant="ghost" onClick={() => onChange({ channels: value.channels.filter((_, row) => row !== index) })}>{t('bots.discordRemoveChannel')}</Button>
     </SettingsControlGroup>)}
     <Button variant="outline" disabled={value.channels.length >= 100} onClick={() => onChange({ channels: [...value.channels, { guildId: '', channelId: '' }] })}>{t('bots.discordAddChannel')}</Button>
-  </SettingsSection>;
+  </SettingsControlGroup>;
 }

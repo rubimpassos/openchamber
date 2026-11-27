@@ -64,6 +64,9 @@ export const botDefinitionSchema = z.object({
   proof: z.object({ command: text, args: z.array(z.string().max(20_000)) }).optional(),
   jira: z.object({ doneTransition: text.optional() }).optional(),
   discord: discordSchema.prefault({}),
+  projects: z.record(z.string().min(1), z.enum(['read', 'pr', 'merge'])).default({}),
+  artifacts: z.array(z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/), label: z.string().trim().min(1).max(500) }).strict())
+    .max(20).default([]).refine((value) => new Set(value.map((entry) => entry.id)).size === value.length),
 });
 
 /** Only editable fields cross back to the server. Machine approvals stay server-owned. */
@@ -72,7 +75,13 @@ export const botsConfigSchema = z.object({
   definitions: z.array(botDefinitionSchema),
 }).refine((config) => new Set(config.definitions.map((bot) => bot.id)).size === config.definitions.length);
 
+export const botDefinitionsSchema = z.object({
+  revision: z.number().int().nonnegative(), definitions: z.array(botDefinitionSchema),
+  presets: z.array(botDefinitionSchema),
+}).refine((value) => new Set(value.definitions.map((bot) => bot.id)).size === value.definitions.length);
+
 export type BotDefinition = z.infer<typeof botDefinitionSchema>;
+export type BotAccess = BotDefinition['projects'][string];
 export type BotsConfig = z.infer<typeof botsConfigSchema>;
 export type BotModel = BotDefinition['models']['investigation'];
 
@@ -85,5 +94,5 @@ export const newBotDraft = (): BotDefinition => ({
   mcp: [], correctionMcp: [], web: false, permissionMode: 'default',
   goalTokenBudget: null, notify: 'attention', isolated: false, identity: {},
   limits: { dailyTokens: null, maxPendingHuman: null },
-  discord: { channels: [] },
+  discord: { channels: [] }, projects: {}, artifacts: [],
 });

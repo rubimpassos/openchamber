@@ -24,10 +24,13 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toast } from '@/components/ui';
 
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
+const BotPanel = lazyWithChunkRecovery(() => import('@/components/bots/BotPanel').then((m) => ({ default: m.BotPanel })));
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
 import { SubagentsPanel } from '@/components/chat/subagents/SubagentsPanel';
+import { takeBotPanelQuietOpen, useBotPanelTab } from '@/hooks/useBotPanelSession';
+import { CONTEXT_CHAT_MIN_WIDTH, CONTEXT_PANEL_MIN_WIDTH, clampWidth, useContextPanelWidth } from './contextPanelWidth';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { useGuestSurfaces, useGuestTabsInScope } from '@/hooks/useGuestSurfaces';
@@ -77,8 +80,6 @@ import { isZoneExposed } from './zoneInteractiveContext';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { REPOSITORY_KIND_ICONS } from '@/components/references/referencePickerItems';
 
-const CONTEXT_PANEL_MIN_WIDTH = 320;
-const CONTEXT_CHAT_MIN_WIDTH = 320;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 
@@ -99,19 +100,6 @@ const normalizeDirectoryKey = (value: string): string => {
   }
 
   return normalized;
-};
-
-const clampWidth = (width: number, maxWidth: number): number => {
-  if (!Number.isFinite(width)) {
-    return CONTEXT_ZONE_DEFAULT_WIDTH;
-  }
-
-  return Math.min(maxWidth, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
-};
-
-const maxPanelWidth = (availableWidth: number | null): number => {
-  if (availableWidth === null) return Number.POSITIVE_INFINITY;
-  return Math.max(CONTEXT_PANEL_MIN_WIDTH, availableWidth - CONTEXT_CHAT_MIN_WIDTH);
 };
 
 const getModeLabel = (
@@ -336,6 +324,8 @@ const isRemountedSurface = (mode: ContextPanelMode): boolean => (
   mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'workflows'
 );
 
+const BotPanelTabSync: React.FC<{ directory: string }> = ({ directory }) => { useBotPanelTab(directory); return null; };
+
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
 const CONTEXT_PANEL_MIN_HEIGHT = 160;
 const CONTEXT_CHAT_MIN_HEIGHT = 200;
@@ -409,6 +399,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextZoneSize = useUIStore((state) => state.setContextZoneSize);
+  const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setContextZoneExpandedChatSize = useUIStore((state) => state.setContextZoneExpandedChatSize);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
@@ -447,14 +438,14 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const isTreeOnly = !isVertical && activeTab?.mode === 'file' && !showsEditor;
   const isExpanded = Boolean(isOpen && zoneView.expanded && !isTreeOnly);
   const manualSize = useUIStore((state) => state.contextZoneSizes[zone]);
+  const { ownWidthMode, ownWidth, clampSideWidth } = useContextPanelWidth(isVertical ? null : activeTab?.mode ?? null, isExpanded);
   const desiredSize = isTreeOnly
     ? contextEditorTreeWidth
-    : isVertical
+    : ownWidth ?? (isVertical
       ? clampHeight(manualSize ?? CONTEXT_PANEL_DEFAULT_HEIGHT, Number.POSITIVE_INFINITY)
-      : clampWidth(manualSize ?? CONTEXT_ZONE_DEFAULT_WIDTH, Number.POSITIVE_INFINITY);
-  const clampSize = React.useCallback((next: number, available: number | null) => (
-    isVertical ? clampHeight(next, maxPanelHeight(available)) : clampWidth(next, maxPanelWidth(available))
-  ), [isVertical]);
+      : clampWidth(manualSize ?? CONTEXT_ZONE_DEFAULT_WIDTH, Number.POSITIVE_INFINITY));
+  const clampSize = React.useCallback((next: number, available: number | null) => (isVertical
+    ? clampHeight(next, maxPanelHeight(available)) : clampSideWidth(next, available)), [clampSideWidth, isVertical]);
   const chatMinimum = isVertical ? CONTEXT_CHAT_MIN_HEIGHT : CONTEXT_CHAT_MIN_WIDTH;
   const sidebarWidth = useUIStore((state) => (isVertical ? 0 : state.sidebarWidth));
   const expandedChatManual = useUIStore((state) => state.contextZoneExpandedChatSizes[zone]);
@@ -548,11 +539,14 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     applyAreaSize();
   }, [applyAreaSize, desiredSize, isExpanded, isOpen, otherSideReserved, sidebarOpen]);
 
+  const opensQuietlyRef = React.useRef<() => boolean>(() => false);
+  opensQuietlyRef.current = () => activeTab?.mode === 'bot' && takeBotPanelQuietOpen(directoryKey);
   React.useEffect(() => {
     if (!isOpen || wasOpenRef.current) {
       wasOpenRef.current = isOpen;
       return;
     }
+    if (opensQuietlyRef.current()) { wasOpenRef.current = true; return; }
 
     const frame = window.requestAnimationFrame(() => {
       focusSinkRef.current?.focus({ preventScroll: true });
@@ -650,6 +644,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       setContextEditorTreeWidth(finalSize);
     } else if (isExpanded) {
       if (available !== null) setContextZoneExpandedChatSize(zone, available - finalSize);
+    } else if (ownWidthMode) {
+      setContextPanelWidth(ownWidthMode, finalSize);
     } else {
       setContextZoneSize(zone, finalSize);
     }
@@ -657,7 +653,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     activeResizePointerIDRef.current = null;
     releaseResizeHoldRef.current?.();
     releaseResizeHoldRef.current = null;
-  }, [clampSizeForDrag, geometry.sizeVariable, isExpanded, isTreeOnly, isVertical, setContextEditorTreeWidth, setContextZoneExpandedChatSize, setContextZoneSize, size, zone]);
+  }, [clampSizeForDrag, geometry.sizeVariable, isExpanded, isTreeOnly, isVertical, ownWidthMode, setContextEditorTreeWidth, setContextPanelWidth, setContextZoneExpandedChatSize, setContextZoneSize, size, zone]);
 
   React.useEffect(() => {
     if (!isResizing) {
@@ -1129,6 +1125,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       style={panelStyle}
     >
       <div ref={focusSinkRef} tabIndex={-1} className="absolute size-0 overflow-hidden outline-none" />
+      {zone === 'right' ? <BotPanelTabSync directory={directoryKey} /> : null}
       {zone === 'right' ? (
         <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 z-0 flex', cardBesidePanel ? 'inset-s-0' : 'inset-e-0', chatCovered && 'invisible')} />
       ) : null}
@@ -1170,6 +1167,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {header}
       <div ref={registerBody} className="relative min-h-0 flex-1 overflow-hidden">
         {activeTab?.mode === 'subagents' ? (contentShown ? <SubagentsPanel directory={effectiveDirectory || null} /> : null)
+          : activeTab?.mode === 'bot' ? (contentShown ? <React.Suspense fallback={null}><ContextPanelHeaderSlotProvider value={headerSlotEl}><BotPanel /></ContextPanelHeaderSlotProvider></React.Suspense> : null)
           : activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>

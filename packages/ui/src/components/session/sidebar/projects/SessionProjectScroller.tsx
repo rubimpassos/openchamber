@@ -1,5 +1,6 @@
 import React from 'react';
-import { BotsSidebarZone } from '@/components/bots/BotsSidebarZone';
+import { BotsSidebarSection } from '@/components/bots/BotsSidebarSection';
+import type { BotsSidebarModel } from '@/hooks/useBotsSidebar';
 import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivityIndicator';
 import {
   DndContext,
@@ -55,7 +56,7 @@ import type { ProjectSection } from './sessionProjectRender';
 import { CrossfadeZoneHeader, CrossfadeZoneHeaders } from './CrossfadeZoneHeaders';
 import { getPinnedZoneHeaderHeight } from './pinnedZoneHeader';
 import { prepareSessionProjectAction } from './sessionProjectActionContext';
-import { applyShowControl, getProjectLabel, grantGroupAccess, retryGroupStatus, toggleActivityZone, toggleProjectsCaption } from './sessionProjectListActions';
+import { applyShowControl, getProjectLabel, grantGroupAccess, retryGroupStatus, toggleActivityZone, toggleBotsZone, toggleProjectsCaption } from './sessionProjectListActions';
 import { countArchiveAllOutcome, selectArchiveAllSessionIds, withArchiveAllSubtrees } from './archiveAllSessions';
 import { collectSessionSubtreeIds } from '../sessions/sessionSubtreeActions';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -99,6 +100,7 @@ type GroupActions = Pick<SessionGroupSectionProps,
 
 export type SessionProjectScrollerModel = {
   search?: SidebarSearchPresentation;
+  bots: BotsSidebarModel;
   rowModel: SessionSidebarRowModel;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
@@ -343,7 +345,21 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       const page = pageById.get(row.pageId);
       return page ? <SidebarPageRow page={page} visible={view.isVisible} /> : null;
     }
-    if (row.kind === 'bots-zone') return <BotsSidebarZone query={model.search?.query} onLeave={view.mobileVariant ? () => actions.setSessionSwitcherOpen(false) : undefined} />;
+    if (row.kind === 'bots-zone') {
+      return <BotsSidebarSection
+        model={model.bots}
+        collapsed={row.collapsed}
+        onToggle={() => toggleBotsZone({ model })}
+        expandedKeys={model.groupProps.expandedParents}
+        onToggleExpanded={model.groupProps.toggleParent}
+        alwaysShowActions={view.alwaysShowActions}
+        onNavigate={view.mobileVariant ? () => actions.setSessionSwitcherOpen(false) : undefined}
+        renderHeader={(header) => <CrossfadeZoneHeader
+          className={cn('sticky top-0 z-20', view.mobileVariant ? 'bg-background' : 'bg-sidebar')}
+          data-sidebar-sticky-header="true"
+        >{header}</CrossfadeZoneHeader>}
+      />;
+    }
     if (row.kind === 'activity-header') {
       return sortableSection(row, <CrossfadeZoneHeader
         className={cn('sticky top-0 z-20', view.mobileVariant ? 'bg-background' : 'bg-sidebar')}
@@ -357,7 +373,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           collapsed={row.collapsed}
           alwaysShowActions={view.alwaysShowActions}
           onToggle={() => toggleActivityZone(row, { model, actions })}
-          onNewChat={() => {
+          onAdd={() => {
             useUIStore.getState().closeMainSurfaces();
             if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
             actions.openNewSessionDraft({ selectedProjectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });

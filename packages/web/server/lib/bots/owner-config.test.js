@@ -27,7 +27,7 @@ async function fixture() {
 it('keeps canonical stems, config compatibility, state and unknown fields in owner-local files', async () => {
   const f = await fixture();
   const id = createProjectIdFromPath(`/inaccessible/${'nested/'.repeat(80)}`);
-  const config = createBotsConfig({ projectConfigRuntime: f.config });
+  const config = createBotsConfig({ projectConfigRuntime: f.config, dataDir: path.join(f.root, 'data') });
   expect(await f.config.readBotsSection(id)).toBeUndefined();
   await config.update(id, { definitions: [{ id: 'b', name: 'Bot', mission: 'Fix' }] });
   await config.setApproval(id, '.agents/areas/a.md', 'a'.repeat(64));
@@ -41,7 +41,7 @@ it('keeps canonical stems, config compatibility, state and unknown fields in own
   expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
   const restarted = createOwnerBotConfig({ projectsDirPath: f.projectsDirPath });
   expect(await restarted.listScheduledTasks(id)).toEqual(await f.config.listScheduledTasks(id));
-  expect(await fs.readdir(f.root)).toEqual(['projects']);
+  expect(await fs.readdir(f.root)).toEqual(['data', 'projects']);
 });
 
 it('serializes occurrence claims across adapters and preserves storage on write failure', async () => {

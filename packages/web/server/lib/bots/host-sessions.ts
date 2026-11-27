@@ -181,7 +181,8 @@ export function createBotHostSessions({ dataDir, isolated, clientFor, hostQueue,
       const entry = sessions.get(sessionId);
       if (entry?.role === 'conversation') {
         if (!conversations || !resolveProject || entry.directory !== directory) refuse();
-        return conversations.tokens({ project: await resolveProject(entry.projectId), botId: entry.botId,
+        const { id, path } = await resolveProject(entry.projectId);
+        return conversations.tokens({ project: { id, path }, botId: entry.botId,
           itemId: entry.itemId, conversation: entry.conversation });
       }
       if (!entry?.isolated) {

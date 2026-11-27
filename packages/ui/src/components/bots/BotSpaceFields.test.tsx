@@ -3,8 +3,8 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { z } from 'zod';
 import { configuredBot } from '@/lib/bots/bots.fixture';
-import { botsConfigSchema, type BotDefinition, type BotsConfig } from '@/lib/bots/config';
-import { saveBotsConfig } from '@/lib/botsApi';
+import { botDefinitionSchema, type BotDefinition } from '@/lib/bots/config';
+import { saveBotDefinitions } from '@/lib/botsApi';
 import { botSpaceI18n } from '@/lib/i18n/messages/bot-space.i18n';
 import { clickSuggestedTasksControl, deferred, installSuggestedTasksDom, serveSuggestedTasks } from '@/lib/test-utils/suggestedTasks.fixture';
 
@@ -20,15 +20,16 @@ let failLogins = false;
 let emptyLogins = false;
 let openaiLogin = false;
 let requests: string[] = [];
-let config: BotsConfig = { concurrency: 2, retentionDays: 90, definitions: [] };
+let written: BotDefinition[] = [];
+const globalEdit = z.object({ definitions: z.array(botDefinitionSchema), expectedRevision: z.literal(1) }).strict();
 let saved = deferred<void>();
 
 function handle(request: Request): Response | Promise<Response> {
   const url = new URL(request.url);
   requests.push(url.pathname + url.search);
-  if (url.pathname.endsWith('/bots/config')) return request.json().then((body) => {
-    config = z.object({ config: botsConfigSchema }).parse(body).config;
-    return Response.json({ config });
+  if (url.pathname === '/api/bots') return request.json().then((body) => {
+    written = globalEdit.parse(body).definitions;
+    return Response.json({ revision: 2, definitions: written, presets: [] });
   });
   if (url.pathname.endsWith('/switch')) return Response.json({ enabled, spaces: [] });
   if (url.pathname.endsWith('/places')) return Response.json({ places: [{ id: 'docker', machine: null, available: true, hostIsolation: true }] });
@@ -44,12 +45,12 @@ function handle(request: Request): Response | Promise<Response> {
 function Harness({ initial }: { readonly initial: BotDefinition }) {
   const [bot, setBot] = React.useState(initial);
   return <><BotExecutionFields bot={bot} directory="/selected/project" onChange={(patch) => setBot((current) => ({ ...current, ...patch }))} />
-    <button type="button" data-testid="save" onClick={() => void saveBotsConfig('project', { ...config, definitions: [bot] }).then(() => saved.resolve())}>Save</button></>;
+    <button type="button" data-testid="save" onClick={() => void saveBotDefinitions([bot], 1).then(() => saved.resolve())}>Save</button></>;
 }
 
 beforeEach(() => {
   enabled = true; failLogins = false; emptyLogins = false; openaiLogin = false; requests = []; saved = deferred<void>();
-  config = { concurrency: 2, retentionDays: 90, definitions: [] };
+  written = [];
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); });
@@ -96,7 +97,7 @@ describe('isolated bot fields', () => {
     // Then the saved source is still named as ChatGPT, with no misleading key-source picker.
     expect(document.body.textContent).toContain('ChatGPT');
     expect(document.querySelector('[role="combobox"][aria-label="Where the openai key comes from"]')).toBeNull();
-    expect(config.definitions[0]?.space).toEqual(space);
+    expect(written[0]?.space).toEqual(space);
   });
 
   test('keeps offered host logins and providers unselected until the user grants access', async () => {
@@ -108,7 +109,7 @@ describe('isolated bot fields', () => {
     await save();
 
     // Then inventory availability has granted nothing implicitly.
-    expect(config.definitions[0]?.space).toBeUndefined();
+    expect(written[0]?.space).toBeUndefined();
   });
 
   test('does not query Spaces when isolation is off', async () => {
@@ -134,7 +135,7 @@ describe('isolated bot fields', () => {
     await save();
 
     // Then the selected mode persists and the domain field stays reserved but disabled.
-    expect(config.definitions[0]?.space?.network).toEqual({ mode: 'open', domains: ['registry.npmjs.org'] });
+    expect(written[0]?.space?.network).toEqual({ mode: 'open', domains: ['registry.npmjs.org'] });
     expect(control(`[aria-label="${copy['bots.space.domains']}"]`).hasAttribute('disabled')).toBe(true);
   });
 
@@ -151,7 +152,7 @@ describe('isolated bot fields', () => {
     await save();
 
     // Then only those explicit references cross the actual config request.
-    expect(config.definitions[0]?.space).toEqual({ network: { mode: 'allowlist', domains: ['registry.npmjs.org', 'packages.example.com'] }, grants: [
+    expect(written[0]?.space).toEqual({ network: { mode: 'allowlist', domains: ['registry.npmjs.org', 'packages.example.com'] }, grants: [
       { kind: 'model', provider: 'openai', upstream: 'https://gateway.example.com/v1', secret: { kind: 'env', name: 'BOT_OPENAI_KEY' } },
       { kind: 'login', provider: 'github-copilot' }, { kind: 'custom', provider: 'local' },
     ] });
@@ -171,7 +172,7 @@ describe('isolated bot fields', () => {
 
     // Then the fields are hidden but every reference remains in the saved definition.
     expect(document.querySelector(`[aria-label="${copy['bots.space.domains']}"]`)).toBeNull();
-    expect(config.definitions[0]?.space).toEqual(space);
+    expect(written[0]?.space).toEqual(space);
   });
 
   test('shows the global off reason without querying inventories when Spaces is disabled', async () => {
@@ -198,7 +199,7 @@ describe('isolated bot fields', () => {
     // Then the read failure is explicit, custom choices still show, and the login is not erased.
     expect(document.body.textContent).toContain(copy['bots.space.inventoryFailed']);
     expect(document.body.textContent).toContain('Local Gateway');
-    expect(config.definitions[0]?.space).toEqual(space);
+    expect(written[0]?.space).toEqual(space);
   });
 
   test('keeps environment identifiers left to right under an RTL ancestor', async () => {
@@ -226,7 +227,7 @@ describe('isolated bot fields', () => {
     await save();
 
     // Then the grant contains the provider's known endpoint and variable name.
-    expect(config.definitions[0]?.space?.grants).toEqual([{ kind: 'model', provider: 'openai', upstream: 'https://api.openai.com/v1', secret: { kind: 'env', name: 'OPENAI_API_KEY' } }]);
+    expect(written[0]?.space?.grants).toEqual([{ kind: 'model', provider: 'openai', upstream: 'https://api.openai.com/v1', secret: { kind: 'env', name: 'OPENAI_API_KEY' } }]);
   });
 
   test('preserves a saved model endpoint when its provider is absent from host inventories', async () => {
@@ -239,7 +240,7 @@ describe('isolated bot fields', () => {
     await save();
 
     // Then the existing endpoint remains authoritative without an inferred default.
-    expect(config.definitions[0]?.space?.grants).toEqual([{ ...grant, secret: { kind: 'env', name: 'REPLACEMENT_KEY' } }]);
+    expect(written[0]?.space?.grants).toEqual([{ ...grant, secret: { kind: 'env', name: 'REPLACEMENT_KEY' } }]);
   });
 
   test('offers neither typed nor stored keys when selecting a model access source', async () => {

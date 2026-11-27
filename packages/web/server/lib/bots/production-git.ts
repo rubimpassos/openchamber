@@ -5,7 +5,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createGitCredentialBroker } from '../git/credential-broker.js';
 import { firstRedirectedFolder, nameNotAllowedHere } from '../spaces/code-out.js';
-import { BotServiceError, sha } from './services/contracts.js';
+import { BotServiceError, branch as branchSchema, sha } from './services/contracts.js';
 import { withBundleDirectory } from '../spaces/transfer-bundle.js';
 
 export const botGit = async (directory: string, args: readonly string[], input?: string | Buffer): Promise<string> => {
@@ -18,6 +18,34 @@ export const botGit = async (directory: string, args: readonly string[], input?:
     throw new BotServiceError('BOT_GIT_LOCAL_FAILED', 'The bot Git operation failed; retained work requires inspection.');
   }
 };
+
+export const LOCAL_CHECKOUT_IDENTITY = 'local';
+export const isLocalBotCheckout = (record: { readonly identityId: string }) => record.identityId === LOCAL_CHECKOUT_IDENTITY;
+export const localRepositoryId = (projectId: string) => `local:${projectId}`;
+
+export async function localBotCheckoutBase(projectPath: string, recordedBranch?: string) {
+  const resolve = async (ref: string) => {
+    try { return sha.parse((await botGit(projectPath, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim()); }
+    catch { return null; }
+  };
+  if (recordedBranch) {
+    const baseBranch = branchSchema.parse(recordedBranch);
+    const baseSha = await resolve(`refs/remotes/origin/${baseBranch}`) ?? await resolve(`refs/heads/${baseBranch}`);
+    if (!baseSha) throw new BotServiceError('BOT_GIT_BASE_CHANGED', 'The recorded base branch of the bot checkout no longer exists.');
+    return { baseBranch, baseSha };
+  }
+  const symbolic = async (ref: string) => {
+    try { return (await botGit(projectPath, ['symbolic-ref', '--quiet', ref])).trim(); }
+    catch { return ''; }
+  };
+  const remote = await symbolic('refs/remotes/origin/HEAD');
+  const ref = remote || await symbolic('HEAD');
+  const prefix = remote ? 'refs/remotes/origin/' : 'refs/heads/';
+  if (!ref.startsWith(prefix)) throw new BotServiceError('BOT_GIT_BASE_UNAVAILABLE', 'The project has no default branch to start the bot checkout from.');
+  const baseSha = await resolve(ref);
+  if (!baseSha) throw new BotServiceError('BOT_GIT_BASE_UNAVAILABLE', 'The project has no default branch to start the bot checkout from.');
+  return { baseBranch: branchSchema.parse(ref.slice(prefix.length)), baseSha };
+}
 
 export async function createBotCheckoutGit(directory: string) {
   const config = new Map((await botGit(directory, ['config', '--includes', '--null', '--list'])).split('\0').filter(Boolean).map((entry): [string, string] => {

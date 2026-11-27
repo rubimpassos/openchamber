@@ -10,7 +10,7 @@ contract is in [conversation-contract.md](conversation-contract.md).
 
 ## Runtime dependencies
 
-`createBotsRuntime({ config, store, resolveProject, listProjects, stages, worktrees, services, serviceContext, runProof, pullRequests, sources, attention, notices, questions, scheduler, events, now? })` requires every dependency. There are no ambient-account, host-isolation or successful-empty fallbacks.
+`createBotsRuntime({ config, store, resolveProject, listProjects, stages, worktrees, services, serviceContext, runProof, pullRequests, sources, attention, notices, questions, scheduler, events, presentedArtifacts, now? })` requires every dependency. There are no ambient-account, host-isolation or successful-empty fallbacks.
 
 - `config` and `store` are the exports of `config.js` and `store.js`.
 - `resolveProject(projectId)` returns `{ id, path }`; `listProjects()` returns those project records.
@@ -31,14 +31,21 @@ contract is in [conversation-contract.md](conversation-contract.md).
 - `notices.deliver({ projectId, item, eventId, text })` uses the existing `openchamber-notice` queue with stable deduplication IDs.
 - `questions` is the real `createBotQuestions` owner described in [questions-contract.md](questions-contract.md). Required methods are `ask`, `retry` and `answered`. Investigation uses `investigation:<round>` with resume state `fixing`; judge questions use `judge:<round>` with resume state `judging`, passing original model-output directory IDs rather than mapped GitHub logins. `item.ask` requires a stable `operationId`, accepts only approved directory IDs and an optional requested role, and uses `tool:<operationId>`. Replays reuse the original resume state and cannot replace an unanswered intent.
 - `scheduler.sync(projectId, managedRows)` reconciles bot-owned rows and enforces managed-row edit/delete restrictions. `scheduler.remove(projectId, botId)` removes only that bot's row. `runtime.runScheduled(projectId, botId, occurrence)` is the dispatch hook.
+- `presentedArtifacts(projectId, itemId)` returns the item's published artifacts that name a required artifact, as `{ requirement, title, content }` with page source bounded for the judge. Before judgment (and before a read-only bot finishes) every `bot.artifacts` entry must have one, otherwise the item waits with `BOT_ARTIFACTS_MISSING`. The judge reports `artifacts: [{ id, proven, reason }]`; an unproven artifact turns `auto` into `review`.
 - `events.subscribe(listener)` returns an unsubscribe function; `events.publish(event)` broadcasts item changes. `createBotEvents` provides a local implementation. The host forwards upstream idle/permission/authorization through `onSessionEvent({ sessionId, reason })`, completed-step cumulative usage through `recordUsage({ sessionId, total })`, and PR/provider notices through `receiveFeedback(projectId, itemId, { eventId, text })`. A `bot.wake` event refreshes one project. `handleTool({ sessionId, action, input })` accepts only the authenticated current fixing session; the host must take the session ID from its authenticated tool context. `start()` returns per-project recovery failures without blocking unrelated projects.
 
 ## HTTP
 
 `registerBotRoutes(app, { botsRuntime, identities })` registers authenticated OpenChamber routes before the generic OpenCode proxy. Identity responses use the identity store's public methods only.
 
+- `GET /api/bots` returns `{ revision, definitions, presets }`; `PUT /api/bots`, body `{ definitions, expectedRevision }`, answers 409 `BOT_DEFINITIONS_CHANGED` when stale.
+- `GET /api/bots/:botId/chats` returns `{ main, projects: [{ projectId, access }], items }`: the main chat address and every active-store item of the bot across the projects it may access, with wait, pending question, conversation, sessions and take-over record.
+- `POST /api/bots/:botId/main` returns `{ session }`, allocating the main chat once (`main-sessions.ts`). The host answers 501 `BOT_MAIN_UNAVAILABLE` behind a separated owner.
+- `GET /api/bots/:botId/chats` also returns `available: { mainChat, takeOver }`; behind a separated owner both are false and the UI hides them.
+- `POST .../items/:itemId/take-over` stops the item like Stop but keeps its checkout (a stop that does not finish drops the take-over record, so a later Stop cleans up normally), then releases the worker session to the person: its automation marker and bot permissions are removed. It returns the item detail with `session`. Isolated items refuse (`BOT_TAKE_OVER_ISOLATED`).
+
 - `GET /api/projects/:projectId/bots` returns `{ config, revision, items, presets }`.
-- `GET|PUT .../config`, PUT body `{ config }`.
+- `GET|PUT .../config`, PUT body `{ config }` with `{ concurrency, retentionDays }`, optionally `definitions` as a project-view edit (`DOCUMENTATION.md`).
 - `POST .../:botId/run`, body `{ occurrence? }`.
 - `GET|POST .../items`, POST body `{ botId, source, title, description?, evidence? }`.
 - `GET .../items/:itemId` includes the complete proof, absence reason, judgment, evidence and retained stage reports/diff for active or archived items. Archived inspection never starts a stage or reads a provider; mutations remain restricted to active items.

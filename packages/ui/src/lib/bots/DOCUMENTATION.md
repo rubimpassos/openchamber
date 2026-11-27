@@ -59,6 +59,12 @@ the existing page and later-page owners retain that authority.
   omit it. `ensureBotConversation` POSTs `items/:itemId/conversation` and parses
   `{ conversation }`; the server answers idempotently, and a failure throws. The
   client never derives a conversation from a stage session or a worktree path.
+- `definition.projects` maps project IDs to `read | pr | merge`; `definition.artifacts`
+  lists `{ id, label }` the bot must present. Artifact metadata carries the optional
+  `requirement` it presents. `fetchBotChats` returns one bot's main chat, project
+  access and work items across projects; `takeOverBotItem` returns the released
+  worker session. Membership also covers the main chat
+  (`automation.role: 'main'`, `botMainAutomation`).
 - `tokens.conversation` is optional so records written before conversations parse.
 - Item detail may carry `questionKey`, the coordinator question the item waits on.
   The answer action sends it back only when the detail reported one.

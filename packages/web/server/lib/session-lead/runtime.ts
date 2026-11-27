@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { readLead } from './metadata.js';
-import { isBotConversationMetadata } from './bot-guidance.js';
+import { isBotConversationMetadata, isBotMainMetadata } from './bot-guidance.js';
 import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
 import type { LeadBriefStore } from './brief-store.js';
 import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
@@ -152,7 +152,7 @@ export const createSessionLeadRuntime = ({
 
   const sleep = async (sessionId: string, directory: string, cacheLifetimeMs: number, generation: number) => {
     const metadata = await readSessionMetadata(sessionId, { directory });
-    if (isBotConversationMetadata(metadata)) return;
+    if (isBotConversationMetadata(metadata) || isBotMainMetadata(metadata)) return;
     if (await contextTokens(sessionId, directory) < SLEEP_COMPACTION_MIN_TOKENS) return;
     if (!isCurrent(sessionId, generation) || isSessionWarm?.(sessionId, cacheLifetimeMs)) return;
     const lead = readLead(metadata);
@@ -176,7 +176,7 @@ export const createSessionLeadRuntime = ({
     cancel(sessionId);
     const generation = generations.get(sessionId) ?? 0;
     const metadata = await readSessionMetadata(sessionId, { directory }).catch(() => undefined);
-    if (isBotConversationMetadata(metadata)) return;
+    if (isBotConversationMetadata(metadata) || isBotMainMetadata(metadata)) return;
     const lead = readLead(metadata);
     if (!lead) return;
     const lifetime = await readCacheLifetime(sessionId, directory).catch(() => null) ?? DEFAULT_CACHE_LIFETIME_MS;

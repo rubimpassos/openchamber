@@ -10,6 +10,9 @@ item through render input.
 
 The body is opaque HTML or an OpenUI program. `evidence` and `decision` are
 categories only. There is no graph, benchmark, measurement or template contract.
+Optional `requirement` (render input `artifactFor`) names the bot definition's
+required artifact the page presents; the coordinator counts presented
+requirements before judgment. An absent requirement keeps earlier input digests.
 `packages/ui/src/lib/bots/artifacts.ts` parses metadata, references and payloads
 and reads them through `runtimeFetch` with the existing Bot runtime lifetime.
 

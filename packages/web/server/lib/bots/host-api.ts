@@ -49,6 +49,13 @@ export function createBotHostApi({ runtime, placement, sessions, providers, disc
       broadcast({ type: 'openchamber:bots-changed', properties: { projectId: args[0] } });
       return result;
     },
+    async saveDefinitions(...args: Parameters<Runtime['saveDefinitions']>) {
+      assertStarted();
+      const result = await runtime.saveDefinitions(...args);
+      await providers.reconfigure();
+      await discovery.reconfigure();
+      return result;
+    },
     async approvePolicy(...args: Parameters<Runtime['approvePolicy']>) {
       const result = await runtime.approvePolicy(...args);
       await providers.reconfigure();
@@ -63,8 +70,8 @@ export function createBotHostApi({ runtime, placement, sessions, providers, disc
     async resume(...args: Parameters<Runtime['resume']>) {
       assertStarted(); await runtime.resume(...args); return detail(...args);
     },
-    async stopItem(...args: Parameters<Runtime['stopItem']>) {
-      assertStarted(); await runtime.stopItem(...args); return detail(...args);
+    async stopItem(projectId: string, itemId: string) {
+      assertStarted(); await runtime.stopItem(projectId, itemId); return detail(projectId, itemId);
     },
     async handleTool(request: Parameters<Runtime['handleTool']>[0]) {
       assertStarted();
@@ -73,7 +80,7 @@ export function createBotHostApi({ runtime, placement, sessions, providers, disc
         const entry = sessions.get(request.sessionId);
         const parsed = failureSchema.safeParse(error);
         const failure = parsed.success ? parsed.data : {};
-        if (entry && failure.status !== 400) await reportAttention({ ...entry, reason: failureCode(failure) });
+        if (entry && entry.role !== 'conversation' && failure.status !== 400) await reportAttention({ ...entry, reason: failureCode(failure) });
         throw error;
       }
     },
