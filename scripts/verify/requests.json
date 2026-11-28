@@ -2,6 +2,7 @@
   "*": [
     "GET /api/agent",
     "GET /api/auto-review",
+    "GET /api/bots",
     "GET /api/config",
     "GET /api/config/mcp",
     "GET /api/config/settings",
@@ -13,16 +14,20 @@
     "GET /api/fs/home",
     "GET /api/git/status",
     "GET /api/guests",
+    "GET /api/guests/:id/service/status",
     "GET /api/integration",
     "GET /api/location",
     "GET /api/message-queue",
     "GET /api/model",
+    "GET /api/model/default",
+    "GET /api/notification-center",
     "GET /api/openchamber/enterprise-policy",
     "GET /api/openchamber/events",
     "GET /api/openchamber/models-metadata",
     "GET /api/openchamber/received-pages",
     "GET /api/openchamber/render/later",
     "GET /api/openchamber/spaces",
+    "GET /api/openchamber/suggested-tasks/summary",
     "GET /api/openchamber/update-check",
     "GET /api/opencode/compatibility",
     "GET /api/opencode/health",
@@ -42,14 +47,15 @@
     "GET /api/session-knowledge/summary",
     "GET /api/session-todos/:sessionId",
     "GET /api/session-warming",
-    "GET /api/session/:sessionID",
-    "GET /api/session/:sessionID/message",
+    "GET /api/session/:id",
+    "GET /api/session/:id/message",
     "GET /api/session/active",
     "GET /api/sessions/status",
     "GET /api/shell",
     "GET /api/small-model",
     "GET /api/source-control",
     "GET /api/source-control/binding",
+    "GET /api/source-control/github/pr/fix-loops",
     "GET /api/source-control/instances",
     "GET /api/source-control/providers",
     "GET /api/terminal/sessions",
@@ -61,6 +67,7 @@
     "POST /api/fs/mkdir",
     "POST /api/git/project-worktrees",
     "POST /api/git/projects",
+    "POST /api/guests/:id/service/request",
     "POST /api/push/visibility",
     "POST /api/sessions/:id/view",
     "POST /api/tracked-items/interest",
@@ -73,6 +80,7 @@
     "GET /api/config/agents/:name/config",
     "GET /api/config/command-configs",
     "GET /api/config/disabled-agents",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -87,6 +95,7 @@
     "GET /api/config/agents/:name/permissions",
     "GET /api/config/command-configs",
     "GET /api/config/disabled-agents",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -102,9 +111,11 @@
     "GET /api/config/agents/:name/permissions",
     "GET /api/config/command-configs",
     "GET /api/config/disabled-agents",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
     "PATCH /api/config/agents/:name",
     "POST /api/config/agents/:name"
@@ -116,9 +127,11 @@
     "GET /api/config/agents/:name/permissions",
     "GET /api/config/command-configs",
     "GET /api/config/disabled-agents",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
     "PATCH /api/config/agents/:name"
   ],
@@ -129,6 +142,7 @@
     "GET /api/config/agents/:name/permissions",
     "GET /api/config/command-configs",
     "GET /api/config/disabled-agents",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -137,24 +151,36 @@
     "PATCH /api/config/agents/:name"
   ],
   "agents.search": [
-    "GET /api/command",
     "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
     "GET /api/config/disabled-agents",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/terminal/shells"
   ],
+  "bots.conversation": [
+    "GET /api/command",
+    "GET /api/config/agents/:name",
+    "GET /api/config/command-configs",
+    "GET /api/config/plugins",
+    "GET /api/config/skills/catalog",
+    "GET /api/opencode/upgrade-status",
+    "GET /api/projects/:projectId/bots",
+    "POST /api/guests/updates/check",
+    "PUT /api/bots"
+  ],
   "chat.actions": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.activity": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -164,9 +190,12 @@
     "GET /api/openchamber/message-search/status",
     "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
-    "POST /api/session/:sessionID"
+    "POST /api/guests/updates/check",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.changed-files": [
+    "GET /api/config/external-opencode-plugin",
     "GET /api/environment",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
@@ -174,29 +203,30 @@
     "GET /api/git/branches",
     "GET /api/openchamber/message-search/status",
     "GET /api/terminal/shells",
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "PUT@step /api/config/settings"
   ],
   "chat.draft": [
     "DELETE /api/session-drafts/:id",
-    "GET /api/command",
     "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/magic-prompts",
+    "POST /api/notification-center/read",
     "POST /api/session",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
+    "POST /api/session/:id",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "chat.expand": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.failure": [],
   "chat.footer": [
@@ -206,130 +236,152 @@
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/git/branches",
-    "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/openchamber/sessions/:sessionId/metadata/compare-and-set",
+    "POST /api/session/:id",
     "POST /api/session/:sessionID/fork"
   ],
   "chat.history": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.live": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/opencode/upgrade-status",
     "POST /api/guests/updates/check",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.load": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.long-prompt": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.markdown": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.navigate": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "chat.notices": [
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt",
+    "POST /api/session/:id",
+    "POST /api/session/:id/interrupt",
     "POST /api/sessions/:id/message-sent"
   ],
   "chat.prompt": [
     "GET /api/config/snippets",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/openchamber/sessions/:sessionId/metadata/compare-and-set",
+    "POST /api/session/:id",
     "POST /api/session/:sessionID/fork"
   ],
   "chat.questions": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/openchamber/message-search/status",
     "GET /api/terminal/shells",
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "POST /api/session/:sessionId/form/:formId/reply"
   ],
   "chat.reasoning": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "PUT@step /api/config/settings"
   ],
   "chat.return": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/opencode/upgrade-status",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.scroll": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "GET /api/opencode/upgrade-status",
+    "POST /api/session/:id"
   ],
   "chat.search": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/openchamber/message-search",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.selection": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "GET /api/opencode/upgrade-status",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
+    "PUT@step /api/config/settings"
   ],
   "chat.side-panel": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
+    "POST /api/session/:id/interrupt"
   ],
   "chat.step-actions": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "PUT@step /api/config/settings"
   ],
   "chat.sticky": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/openchamber/message-search/status",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "chat.subagent": [
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
+    "POST /api/session/:id/interrupt",
     "POST /api/session/:sessionID/permission"
   ],
   "chat.tool-conversation": [
     "DELETE /api/session/:sessionID/form",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "POST /api/session/:sessionId/form/:formId/reply",
     "POST /api/sessions/:id/message-sent"
   ],
@@ -342,29 +394,35 @@
     "GET /api/git/branches",
     "GET /api/git/diff",
     "GET /api/git/file-diff",
-    "POST /api/session/:sessionID"
+    "GET /api/opencode/upgrade-status",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.tool-rows": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/session/:sessionID/message/:messageID",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "chat.tool-running": [
     "DELETE /api/shell",
     "GET /api/session/:sessionID/message/:messageID",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
+    "POST /api/session/:id/interrupt"
   ],
   "chat.work-status": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "commands.browse": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -376,17 +434,22 @@
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
     "GET /api/config/commands/:name/config",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/opencode/upgrade-status",
+    "GET /api/session/:sessionID",
+    "GET /api/session/:sessionID/message",
     "GET /api/terminal/shells",
-    "POST /api/config/commands/:name"
+    "POST /api/config/commands/:name",
+    "POST /api/guests/updates/check"
   ],
   "commands.edit": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -397,6 +460,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -408,6 +472,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -416,18 +481,25 @@
     "POST /api/config/commands/:name"
   ],
   "composer.agent": [
+    "POST /api/notification-center/read",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "composer.attach": [
+    "GET /api/fs/stat",
+    "GET /api/info",
+    "POST /api/notification-center/read",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
-    "POST /api/sessions/:id/message-sent"
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
+    "POST /api/sessions/:id/message-sent",
+    "PUT@step /api/config/settings"
   ],
   "composer.autocomplete": [
     "GET /api/command",
@@ -440,9 +512,10 @@
     "GET /api/fs/search",
     "GET /api/fs/stat",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "composer.draft": [
@@ -458,8 +531,17 @@
     "GET /api/fs/list",
     "GET /api/fs/stat",
     "GET /api/git/branches",
+    "GET /api/opencode/upgrade-status",
+    "GET /api/session/:sessionID",
+    "GET /api/session/:sessionID/message",
+    "POST /api/guests/updates/check",
+    "POST /api/notification-center/read",
     "POST /api/session",
     "POST /api/session-knowledge/sync",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/session/:sessionID",
     "POST /api/session/:sessionID/prompt",
     "POST /api/session/:sessionId/model",
@@ -467,30 +549,20 @@
     "PUT /api/session-drafts/:id"
   ],
   "composer.draft-start": [
-    "DELETE /api/session-drafts/:id",
-    "GET /api/command",
-    "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
-    "GET /api/config/commands/:name/config",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/git/branches",
     "GET /api/magic-prompts",
-    "POST /api/session",
-    "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/sessions/:id/message-sent"
+    "POST /api/session"
   ],
   "composer.history": [
-    "GET /api/command",
     "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "composer.markdown": [],
   "composer.modes": [
@@ -498,12 +570,14 @@
     "GET /api/config/command-configs",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
+    "POST /api/notification-center/read",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent",
-    "PUT /api/permission-auto-accept/sessions/:sessionId"
+    "PUT /api/permission-auto-accept/sessions/:id"
   ],
   "composer.queue": [
     "GET /api/opencode/upgrade-status",
@@ -511,37 +585,40 @@
     "POST /api/message-queue/sessions/:sessionId/items",
     "POST /api/message-queue/sessions/:sessionId/items/:itemId/take",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/interrupt",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "composer.recover": [
-    "GET /api/fs/stat",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/interrupt",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "composer.send": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
+    "POST /api/notification-center/read",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "composer.shell": [],
   "composer.stop": [
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/interrupt",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "config.defaults": [
@@ -549,34 +626,45 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/terminal/shells",
+    "POST /api/notification-center/read",
     "POST /api/session",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
+    "POST /api/session/:id",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent",
     "PUT@step /api/config/settings"
   ],
   "config.pick": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
+    "POST /api/notification-center/read",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/agent",
+    "POST /api/session/:id/model",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "config.voice": [
+    "GET /api/config/external-opencode-plugin",
     "GET /api/dictation/status",
     "GET /api/environment",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
+    "GET /api/opencode/upgrade-status",
+    "GET /api/session/:sessionID",
+    "GET /api/session/:sessionID/message",
     "GET /api/terminal/shells",
     "GET /api/tts/say/status",
     "GET /api/voice/keys",
+    "POST /api/guests/updates/check",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "POST /api/session/:sessionID"
   ],
   "diff.changes": [
@@ -590,7 +678,8 @@
     "GET /api/git/file-diff",
     "GET /api/opencode/upgrade-status",
     "POST /api/fs/write",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.comment": [
     "GET /api/fs/find-by-name",
@@ -598,7 +687,8 @@
     "GET /api/git/branch-base",
     "GET /api/git/branches",
     "GET /api/git/diff",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.context": [
     "GET /api/fs/find-by-name",
@@ -606,7 +696,8 @@
     "GET /api/git/branch-base",
     "GET /api/git/branches",
     "GET /api/git/diff",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.find": [
     "GET /api/fs/find-by-name",
@@ -615,7 +706,8 @@
     "GET /api/git/branches",
     "GET /api/git/diff",
     "POST /api/git/diffs",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.hunk": [
     "GET /api/fs/find-by-name",
@@ -623,8 +715,10 @@
     "GET /api/git/branch-base",
     "GET /api/git/branches",
     "GET /api/git/diff",
+    "GET /api/opencode/upgrade-status",
     "POST /api/git/apply-hunk",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.layout": [
     "GET /api/fs/find-by-name",
@@ -632,15 +726,22 @@
     "GET /api/git/branch-base",
     "GET /api/git/branches",
     "GET /api/git/diff",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.reveal": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/git/branch-base",
     "GET /api/git/branches",
+    "GET /api/git/current-identity",
     "GET /api/git/diff",
-    "POST /api/session/:sessionID",
+    "GET /api/git/global-identity",
+    "GET /api/git/identities",
+    "GET /api/git/log",
+    "GET /api/git/remotes",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "PUT@step /api/config/settings"
   ],
   "diff.scope": [
@@ -651,7 +752,8 @@
     "GET /api/git/commit-diff",
     "GET /api/git/commit-files",
     "GET /api/git/log",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.toolbar": [
     "GET /api/config/agents/:name",
@@ -659,7 +761,8 @@
     "GET /api/fs/stat",
     "GET /api/git/branch-base",
     "GET /api/git/branches",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "diff.view": [
     "GET /api/fs/find-by-name",
@@ -667,7 +770,8 @@
     "GET /api/git/branch-base",
     "GET /api/git/branches",
     "GET /api/git/diff",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "files.contents": [
     "GET /api/fs",
@@ -712,7 +816,9 @@
     "GET /api/fs/read",
     "GET /api/fs/stat",
     "GET /api/git/file-diff",
-    "POST /api/session/:sessionID"
+    "GET /api/opencode/upgrade-status",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "files.toolbar": [
     "GET /api/fs/list",
@@ -730,6 +836,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -745,7 +852,8 @@
     "GET /api/git/file-diff",
     "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "files.upload": [
     "GET /api/fs/list",
@@ -817,8 +925,7 @@
     "GET /api/git/log",
     "GET /api/git/remotes",
     "GET /api/git/toplevel",
-    "GET /api/git/worktrees/bootstrap-status",
-    "GET /api/opencode/upgrade-status"
+    "GET /api/git/worktrees/bootstrap-status"
   ],
   "git.publish": [
     "GET /api/git/branch-base",
@@ -849,15 +956,15 @@
     "GET /api/git/stashes",
     "GET /api/git/toplevel",
     "GET /api/git/worktrees/bootstrap-status",
+    "GET /api/opencode/upgrade-status",
     "POST /api/git/stash",
     "POST /api/git/stash/apply",
     "POST /api/git/stash/pop",
     "POST /api/git/stashes/file-counts"
   ],
   "integrations.cards": [
-    "GET /api/command",
     "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -865,9 +972,8 @@
     "GET /api/terminal/shells"
   ],
   "integrations.catalog": [
-    "GET /api/command",
     "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -877,7 +983,7 @@
   "integrations.channels": [
     "GET /api/command",
     "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -888,6 +994,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -899,16 +1006,19 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/notifications/channels",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells"
   ],
   "integrations.source-auth": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -919,6 +1029,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -930,9 +1041,12 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
+    "GET /api/config/mcp-capabilities",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/protected-mcp/status",
     "GET /api/terminal/shells"
   ],
   "mcp.delete": [
@@ -940,28 +1054,42 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
+    "GET /api/config/mcp-capabilities",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
+    "GET /api/protected-mcp/status",
     "GET /api/terminal/shells"
   ],
   "mcp.draft": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
+    "GET /api/config/mcp-capabilities",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
+    "GET /api/protected-mcp/status",
+    "GET /api/session/:sessionID",
+    "GET /api/session/:sessionID/message",
     "GET /api/terminal/shells",
-    "POST /api/config/mcp/:name"
+    "POST /api/config/mcp/:name",
+    "POST /api/guests/updates/check"
   ],
   "mcp.edit": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
+    "GET /api/config/mcp-capabilities",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/protected-mcp/status",
     "GET /api/terminal/shells",
     "PATCH /api/config/mcp/:name"
   ],
@@ -969,9 +1097,12 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
+    "GET /api/config/mcp-capabilities",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/protected-mcp/status",
     "GET /api/terminal/shells",
     "PATCH /api/config/mcp/:name"
   ],
@@ -979,33 +1110,41 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
+    "GET /api/config/mcp-capabilities",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
+    "GET /api/protected-mcp/status",
     "GET /api/terminal/shells"
   ],
   "mcp.runtime": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
+    "GET /api/config/mcp-capabilities",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/opencode/upgrade-status",
+    "GET /api/protected-mcp/status",
     "GET /api/terminal/shells",
     "PATCH /api/config/mcp/:name"
   ],
   "model-picker.actions": [
     "GET /api/command",
-    "GET /api/config/command-configs",
     "GET /api/git/branches",
     "GET /api/provider/disabled"
   ],
-  "model-picker.favorites": [
-    "GET /api/opencode/upgrade-status"
-  ],
+  "model-picker.favorites": [],
   "model-picker.keyboard": [],
-  "model-picker.phone": [],
+  "model-picker.phone": [
+    "GET /api/opencode/upgrade-status",
+    "GET /api/session/:sessionID",
+    "GET /api/session/:sessionID/message"
+  ],
   "model-picker.search": [],
   "model-picker.sections": [],
   "openchamber.chat": [
@@ -1013,6 +1152,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1020,10 +1160,11 @@
     "GET /api/fs/stat",
     "GET /api/openchamber/message-search/status",
     "GET /api/terminal/shells",
+    "POST /api/notification-center/read",
     "POST /api/session",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
+    "POST /api/session/:id",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent",
     "PUT@step /api/config/settings"
   ],
@@ -1031,6 +1172,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1040,19 +1182,23 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/terminal/shells"
   ],
   "openchamber.shortcuts": [
+    "GET /api/config/external-opencode-plugin",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells"
   ],
   "openchamber.theme-import": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1063,6 +1209,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1075,30 +1222,31 @@
     "GET /api/opencode/upgrade-status",
     "POST /api/guests/updates/check",
     "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt"
+    "POST /api/session/:id",
+    "POST /api/session/:id/interrupt"
   ],
   "operator.nest": [
     "GET /api/opencode/upgrade-status",
-    "POST /api/guests/updates/check",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "operator.phone": [
-    "PATCH /api/session/:sessionID",
+    "PATCH /api/session/:id",
     "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/interrupt"
+    "POST /api/session/:id",
+    "POST /api/session/:id/interrupt"
   ],
   "operator.take-over": [
-    "PATCH /api/session/:sessionID",
+    "PATCH /api/session/:id",
     "POST /api/git/status/batch",
     "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "projects.actions": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1111,33 +1259,39 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
-    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells"
   ],
   "projects.environment": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/environment/projects/:projectId",
     "GET /api/opencode/upgrade-status",
+    "GET /api/session/:sessionID",
+    "GET /api/session/:sessionID/message",
     "GET /api/terminal/shells",
     "POST /api/environment/projects/:projectId/reload",
+    "POST /api/guests/updates/check",
     "PUT /api/environment/projects/:projectId"
   ],
   "projects.general": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/git/branches",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
     "PUT /api/projects/:projectId/config",
     "PUT /api/projects/:projectId/config/shared"
@@ -1146,6 +1300,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1156,6 +1311,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1168,9 +1324,11 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/openchamber/limit-failover",
     "GET /api/opencode/upgrade-status",
     "GET /api/provider/:providerId/source",
     "GET /api/provider/disabled",
@@ -1180,10 +1338,11 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
-    "GET /api/opencode/upgrade-status",
+    "GET /api/openchamber/limit-failover",
     "GET /api/provider/:providerId/source",
     "GET /api/provider/disabled",
     "GET /api/terminal/shells",
@@ -1193,6 +1352,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1206,9 +1366,11 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/openchamber/limit-failover",
     "GET /api/provider/:providerId/source",
     "GET /api/provider/disabled",
     "GET /api/terminal/shells",
@@ -1218,6 +1380,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1229,9 +1392,12 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/openchamber/limit-failover",
+    "GET /api/opencode/upgrade-status",
     "GET /api/provider/:providerId/source",
     "GET /api/provider/disabled",
     "GET /api/terminal/shells"
@@ -1240,6 +1406,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/:name",
     "GET /api/config/skills/catalog",
@@ -1250,10 +1417,12 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/git/identities",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
     "POST /api/config/skills/scan"
   ],
@@ -1261,10 +1430,12 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/:name",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
     "POST /api/config/skills/:name"
   ],
@@ -1272,6 +1443,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/:name",
     "GET /api/config/skills/catalog",
@@ -1284,6 +1456,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/:name",
     "GET /api/config/skills/:name/files/*filePath",
@@ -1298,6 +1471,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/:name",
     "GET /api/config/skills/catalog",
@@ -1310,6 +1484,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/:name",
     "GET /api/config/skills/catalog",
@@ -1327,39 +1502,34 @@
     "GET /api/config/skills/catalog",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "GET /api/opencode/upgrade-status",
-    "POST /api/guests/updates/check",
+    "POST /api/notification-center/read",
     "POST /api/session",
     "POST /api/session-knowledge/sync",
-    "POST /api/session/:sessionID",
-    "POST /api/session/:sessionID/prompt",
-    "POST /api/session/:sessionId/model",
+    "POST /api/session/:id",
+    "POST /api/session/:id/prompt",
     "POST /api/sessions/:id/message-sent"
   ],
   "sync.live": [
-    "GET /api/command",
-    "GET /api/config/agents/:name",
-    "GET /api/config/command-configs",
-    "GET /api/config/plugins",
-    "GET /api/config/skills/catalog",
     "GET /api/event",
     "GET /api/fs/list",
     "GET /api/opencode/upgrade-status",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "sync.manage": [
-    "DELETE /api/session/:sessionID",
+    "DELETE /api/session/:id",
     "PATCH /api/session-folders",
-    "PATCH /api/session/:sessionID",
+    "PATCH /api/session/:id",
     "POST /api/openchamber/sessions/:sessionId/metadata",
     "POST /api/openchamber/sessions/archive"
   ],
   "sync.notify": [
-    "POST /api/session/:sessionID",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
     "POST /api/session/:sessionID/permission"
   ],
   "sync.row-actions": [
-    "DELETE /api/session/:sessionID",
+    "DELETE /api/session/:id",
     "GET /api/git/worktrees/archives",
     "PATCH /api/session-folders",
     "POST /api/openchamber/sessions/:sessionId/metadata",
@@ -1369,21 +1539,27 @@
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "PATCH /api/session-folders",
+    "POST /api/notification-center/read",
     "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "sync.row-open": [
+    "GET /api/config/agents/:name",
+    "GET /api/config/plugins",
+    "GET /api/config/skills/catalog",
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
+    "POST /api/notification-center/read",
     "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "sync.row-rename": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "PATCH /api/session/:sessionID",
+    "PATCH /api/session/:id",
+    "POST /api/notification-center/read",
     "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "sync.row-select": [
     "POST /api/openchamber/sessions/:sessionId/metadata"
@@ -1392,16 +1568,27 @@
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
     "GET /api/opencode/upgrade-status",
+    "POST /api/notification-center/read",
     "POST /api/openchamber/sessions/:sessionId/metadata",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "sync.row-tree": [
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
+  ],
+  "sync.search": [],
+  "sync.sections": [
+    "GET /api/fs/find-by-name",
+    "GET /api/fs/stat",
+    "GET /api/opencode/upgrade-status",
+    "POST /api/notification-center/read",
+    "POST /api/openchamber/sessions/:sessionId/metadata",
+    "POST /api/session/:id"
   ],
   "sync.seen": [
     "GET /api/fs/find-by-name",
     "GET /api/fs/stat",
-    "POST /api/session/:sessionID"
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
   ],
   "terminal.clipboard": [
     "POST /api/terminal/:sessionId/appearance",
@@ -1415,6 +1602,7 @@
   ],
   "terminal.history": [
     "GET /api/fs/list",
+    "GET /api/opencode/upgrade-status",
     "POST /api/terminal/:sessionId/appearance",
     "POST /api/terminal/:sessionId/resize",
     "POST /api/terminal/create",
@@ -1430,10 +1618,15 @@
     "POST /api/terminal/create",
     "WS /api/terminal/ws"
   ],
+  "ui-blocks.decisions": [
+    "POST /api/notification-center/read",
+    "POST /api/session/:id"
+  ],
   "usage.browse": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1443,6 +1636,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1452,6 +1646,7 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1465,15 +1660,18 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells"
   ],
   "usage.refresh": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
@@ -1484,15 +1682,16 @@
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
-    "GET /api/config/commands/:name/config",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
     "GET /api/openchamber/workflows",
     "GET /api/openchamber/workflows/saved",
+    "GET /api/opencode/upgrade-status",
     "GET /api/terminal/shells",
     "POST /api/openchamber/workflows/:runId/:action",
-    "POST /api/session/:sessionID"
+    "POST /api/session/:id"
   ],
   "workspace.favorites": [],
   "workspace.font-size": [
@@ -1510,10 +1709,18 @@
     "GET /api/git/file-diff",
     "GET /api/opencode/upgrade-status"
   ],
+  "workspace.reasoning-toggle": [
+    "GET /api/fs/find-by-name",
+    "GET /api/fs/stat",
+    "POST /api/notification-center/read",
+    "POST /api/session/:id",
+    "PUT@step /api/config/settings"
+  ],
   "workspace.settings": [
     "GET /api/command",
     "GET /api/config/agents/:name",
     "GET /api/config/command-configs",
+    "GET /api/config/external-opencode-plugin",
     "GET /api/config/plugins",
     "GET /api/config/skills/catalog",
     "GET /api/environment",
